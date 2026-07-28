@@ -22,6 +22,10 @@ jobs:
       - uses: hacs/action@main
         with:
           category: integration
+          # `brands` cannot pass until an icon and logo for this domain are
+          # merged into home-assistant/brands, which is a separate submission
+          # to a repository we do not control. Everything else is enforced.
+          ignore: brands
 
   ruff:
     name: ruff

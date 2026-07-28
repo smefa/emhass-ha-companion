@@ -45,6 +45,50 @@ def test_manifest_has_the_keys_hacs_and_hassfest_require():
     assert manifest["domain"] == COMPONENT.name
 
 
+def test_manifest_keys_are_sorted():
+    """hassfest requires domain, name, then strict alphabetical order.
+
+    A hard error in CI, and invisible locally, so it is asserted here.
+    """
+    manifest = _json(COMPONENT / "manifest.json")
+    keys = list(manifest)
+    assert keys[:2] == ["domain", "name"], "domain and name must come first"
+    assert keys[2:] == sorted(keys[2:]), f"remaining keys are not alphabetical: {keys[2:]}"
+
+
+def test_subentry_translations_have_no_removed_title_key():
+    """`title` was moved out of flow blocks; hassfest flags it as removed."""
+    strings = _json(COMPONENT / "strings.json")
+    for name, subentry in strings["config_subentries"].items():
+        assert "title" not in subentry, f"config_subentries.{name} still has a title"
+    assert "title" not in strings["config"]
+
+
+def test_subentry_translations_have_the_required_keys():
+    """hassfest requires entry_type and initiate_flow.user for subentry flows."""
+    strings = _json(COMPONENT / "strings.json")
+    for name, subentry in strings["config_subentries"].items():
+        assert subentry.get("entry_type"), f"config_subentries.{name} has no entry_type"
+        assert subentry.get("initiate_flow", {}).get("user"), (
+            f"config_subentries.{name} has no initiate_flow.user"
+        )
+
+
+def test_data_descriptions_only_describe_existing_fields():
+    """hassfest rejects a data_description key with no matching data key."""
+    strings = _json(COMPONENT / "strings.json")
+    blocks = [strings.get("config", {}), strings.get("options", {})]
+    blocks += list(strings.get("config_subentries", {}).values())
+
+    for block in blocks:
+        for step_name, step in block.get("step", {}).items():
+            described = set(step.get("data_description", {}))
+            labelled = set(step.get("data", {}))
+            assert described <= labelled, (
+                f"step '{step_name}' describes fields it does not label: {described - labelled}"
+            )
+
+
 def test_hacs_manifest_is_valid():
     hacs = _json(REPO / "hacs.json")
     assert hacs["name"]
@@ -115,7 +159,7 @@ def test_deferrable_subentry_is_translated(strings):
     from custom_components.emhass_companion.const import SUBENTRY_TYPE_DEFERRABLE
 
     subentry = strings["config_subentries"][SUBENTRY_TYPE_DEFERRABLE]
-    assert subentry["title"]
+    assert subentry["entry_type"]
 
     fields = {str(marker.schema) for marker in deferrable_schema({})}
     for step in ("user", "reconfigure"):

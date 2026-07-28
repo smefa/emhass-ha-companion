@@ -336,7 +336,6 @@
   },
   "config_subentries": {
     "deferrable_load": {
-      "title": "Deferrable load",
       "step": {
         "user": {
           "title": "Add a deferrable load",
