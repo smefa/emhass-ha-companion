@@ -23,6 +23,7 @@ from .const import (
     DEFAULT_SOC_MIN,
     DEFAULT_SOC_TARGET,
 )
+from .thermal import ThermalConfig
 
 
 class SeriesError(ValueError):
@@ -254,6 +255,10 @@ class DeferrableLoad:
     current_state: bool = False
     current_power_w: float = 0.0
     completed_timesteps: int = 0
+
+    thermal: ThermalConfig | None = None
+    """Set only for a thermal load, whose temperature is optimised instead of
+    its run time."""
 
 
 # --- Plan models -------------------------------------------------------------

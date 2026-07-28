@@ -27,6 +27,7 @@ from ..const import (
     SOURCE_TYPE_SERVICE,
     SOURCE_TYPE_TEMPLATE,
     SOURCE_TYPES,
+    UNIT_CELSIUS,
     UNIT_CURRENCY_PER_KWH,
     UNIT_WATTS,
 )
@@ -167,7 +168,7 @@ PROFILE_SCHEMA = vol.All(
             # source profiles
             vol.Optional("source"): SOURCE_SCHEMA,
             vol.Optional("series"): SERIES_SCHEMA,
-            vol.Optional("unit"): vol.In([UNIT_WATTS, UNIT_CURRENCY_PER_KWH]),
+            vol.Optional("unit"): vol.In([UNIT_WATTS, UNIT_CURRENCY_PER_KWH, UNIT_CELSIUS]),
             vol.Optional("emhass", default={}): dict,
             # inverter profiles
             vol.Optional("sensors", default={}): vol.Schema({cv.string: cv.string}),

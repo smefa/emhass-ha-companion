@@ -1,0 +1,46 @@
+name: Temperature forecast from an entity attribute
+kind: temperature
+version: 1
+description: >-
+  Reads an outdoor temperature forecast from a list-valued attribute on any
+  entity.
+notes: >-
+  For weather integrations that expose their forecast as an attribute rather
+  than through an action, or for a template sensor you build yourself. Values
+  must be in degrees Celsius, which is what EMHASS's thermal model assumes.
+
+detect:
+  always: true
+
+options:
+  entity:
+    name: Forecast entity
+    selector:
+      entity: {}
+  attribute:
+    name: Attribute name
+    default: forecast
+    selector:
+      text: {}
+  time_field:
+    name: Timestamp field
+    default: datetime
+    selector:
+      text: {}
+  value_field:
+    name: Temperature field
+    default: temperature
+    selector:
+      text: {}
+
+source:
+  type: attributes
+  entity: "{{ options.entity }}"
+  attributes:
+    - "{{ options.attribute }}"
+
+series:
+  time: "{{ options.time_field }}"
+  value: "{{ options.value_field }}"
+
+unit: celsius

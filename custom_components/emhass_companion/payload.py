@@ -19,6 +19,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import ACTION_MPC
 from .models import BatteryConfig, DeferrableLoad, GridConfig, Series
+from .thermal import build_def_load_config
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -143,6 +144,7 @@ class PayloadInputs:
     load: Series | None = None
     buy_price: Series | None = None
     sell_price: Series | None = None
+    outdoor_temperature: Series | None = None
     soc_init: float | None = None
     extra_settings: dict[str, Any] = field(default_factory=dict)
 
@@ -183,6 +185,11 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
         ("load_power_forecast", inputs.load, "Load forecast"),
         ("load_cost_forecast", inputs.buy_price, "Buy price"),
         ("prod_price_forecast", inputs.sell_price, "Sell price"),
+        (
+            "outdoor_temperature_forecast",
+            inputs.outdoor_temperature,
+            "Outdoor temperature",
+        ),
     ):
         if series is None or not series:
             continue
@@ -211,6 +218,9 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
     deferrable, load_order = _deferrable_settings(inputs, step)
     payload.update(deferrable)
 
+    thermal = _thermal_settings(inputs, step, len(load_order))
+    payload.update(thermal)
+
     # Profile-contributed settings last, so a profile can override a default
     # (a "no solar" profile turning PV modelling off, for instance).
     payload.update(inputs.extra_settings)
@@ -219,6 +229,25 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
         _LOGGER.warning("%s", message)
 
     return PayloadResult(payload=payload, warnings=warnings, load_order=load_order)
+
+
+def _thermal_settings(inputs: PayloadInputs, step: timedelta, load_count: int) -> dict[str, Any]:
+    """Describe any thermal loads to EMHASS.
+
+    Sending ``def_load_config`` overwrites ``number_of_deferrable_loads`` with
+    its own length, so it is built from the active load count with an empty
+    entry for every ordinary load. A list containing only the thermal ones
+    would silently drop the rest off the end of the optimisation.
+    """
+    active = [load for load in inputs.loads if load.enabled]
+    thermal_by_index = {
+        index: load.thermal for index, load in enumerate(active) if load.thermal is not None
+    }
+
+    config = build_def_load_config(
+        thermal_by_index, load_count, inputs.now, step, inputs.horizon_steps
+    )
+    return {} if config is None else {"def_load_config": config}
 
 
 def _battery_settings(battery: BatteryConfig) -> dict[str, Any]:

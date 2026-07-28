@@ -49,6 +49,7 @@ CONF_PRICE: Final = "price"
 CONF_PV: Final = "pv"
 CONF_LOAD: Final = "load"
 CONF_INVERTER: Final = "inverter"
+CONF_TEMPERATURE: Final = "temperature"
 
 CONF_TARIFF: Final = "tariff"
 CONF_BUY: Final = "buy"
@@ -93,6 +94,22 @@ CONF_USE_TIME_WINDOW: Final = "use_time_window"
 # Optional: what the executor switches to actually run the load. Without it the
 # load is advisory only and the user automates on should_run themselves.
 CONF_CONTROL_ENTITY: Final = "control_entity"
+
+# Thermal deferrable loads
+CONF_LOAD_TYPE: Final = "load_type"
+LOAD_TYPE_STANDARD: Final = "standard"
+LOAD_TYPE_THERMAL: Final = "thermal"
+LOAD_TYPES: Final = (LOAD_TYPE_STANDARD, LOAD_TYPE_THERMAL)
+CONF_TEMPERATURE_SENSOR: Final = "temperature_sensor"
+CONF_SENSE: Final = "sense"
+CONF_HEATING_RATE: Final = "heating_rate"
+CONF_COOLING_CONSTANT: Final = "cooling_constant"
+CONF_THERMAL_INERTIA: Final = "thermal_inertia"
+CONF_COMFORT_TEMPERATURE: Final = "comfort_temperature"
+CONF_SETBACK_TEMPERATURE: Final = "setback_temperature"
+CONF_MAX_TEMPERATURE: Final = "max_temperature"
+CONF_COMFORT_START: Final = "comfort_start"
+CONF_COMFORT_END: Final = "comfort_end"
 
 SUBENTRY_TYPE_DEFERRABLE: Final = "deferrable_load"
 
@@ -144,10 +161,13 @@ PROFILE_KIND_PRICE: Final = "price"
 PROFILE_KIND_PV: Final = "pv"
 PROFILE_KIND_LOAD: Final = "load"
 PROFILE_KIND_INVERTER: Final = "inverter"
+# Outdoor temperature, needed only once a thermal deferrable load exists.
+PROFILE_KIND_TEMPERATURE: Final = "temperature"
 PROFILE_KINDS: Final = (
     PROFILE_KIND_PRICE,
     PROFILE_KIND_PV,
     PROFILE_KIND_LOAD,
+    PROFILE_KIND_TEMPERATURE,
     PROFILE_KIND_INVERTER,
 )
 
@@ -169,6 +189,7 @@ SOURCE_TYPES: Final = (
 
 UNIT_WATTS: Final = "watts"
 UNIT_CURRENCY_PER_KWH: Final = "currency_per_kwh"
+UNIT_CELSIUS: Final = "celsius"
 
 # User-supplied profiles live outside the integration directory so that HACS
 # updates cannot delete them.

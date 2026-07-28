@@ -1,0 +1,36 @@
+name: Home Assistant weather entity
+kind: temperature
+version: 1
+description: >-
+  Reads the outdoor temperature forecast from any Home Assistant weather
+  entity, through the weather.get_forecasts action.
+notes: >-
+  Pick a weather entity that provides an hourly forecast. Daily forecasts have
+  too coarse a resolution to schedule heating against, and twice-daily ones are
+  worse than useless for it.
+
+detect:
+  integration: weather
+
+options:
+  entity:
+    name: Weather entity
+    selector:
+      entity:
+        domain: weather
+
+source:
+  type: service
+  service: weather.get_forecasts
+  data:
+    type: hourly
+    entity_id: "{{ options.entity }}"
+  # The action returns one entry per requested entity, each with a forecast
+  # list, so the path digs through the entity id to that list.
+  response_path: "{{ options.entity }}.forecast"
+
+series:
+  time: datetime
+  value: temperature
+
+unit: celsius
