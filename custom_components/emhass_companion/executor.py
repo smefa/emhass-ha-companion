@@ -25,6 +25,8 @@ from .configuration import EmhassConfig
 from .const import (
     DEFAULT_POWER_DEADBAND_W,
     MODE_AUTO,
+    MODE_FORCE_CHARGE,
+    MODE_FORCE_DISCHARGE,
     MODE_IDLE,
     MODE_SELF_CONSUME,
 )
@@ -168,9 +170,9 @@ class Executor:
         )
 
     def _manual_power(self, mode: str, config: EmhassConfig) -> float:
-        if mode == "force_charge":
+        if mode == MODE_FORCE_CHARGE:
             return config.battery.charge_power_max_w
-        if mode == "force_discharge":
+        if mode == MODE_FORCE_DISCHARGE:
             return config.battery.discharge_power_max_w
         return 0.0
 
@@ -286,9 +288,9 @@ def _battery_action(p_batt: float, config: EmhassConfig) -> tuple[str, float]:
     here rather than assumed at the call site.
     """
     if p_batt > DEFAULT_POWER_DEADBAND_W:
-        return "force_discharge", min(p_batt, config.battery.discharge_power_max_w)
+        return MODE_FORCE_DISCHARGE, min(p_batt, config.battery.discharge_power_max_w)
     if p_batt < -DEFAULT_POWER_DEADBAND_W:
-        return "force_charge", min(-p_batt, config.battery.charge_power_max_w)
+        return MODE_FORCE_CHARGE, min(-p_batt, config.battery.charge_power_max_w)
     return MODE_IDLE, 0.0
 
 

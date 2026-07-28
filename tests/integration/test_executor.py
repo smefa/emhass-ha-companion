@@ -431,3 +431,56 @@ async def test_a_failed_command_is_retried_next_cycle(
     await hass.async_block_till_done()
 
     assert len(calls) > before
+
+
+# --- plan schema compatibility ------------------------------------------------
+
+
+def _plan_with_schema(version: str) -> Plan:
+    now = dt_util.utcnow()
+    return Plan.from_response(
+        {
+            "status": "ok",
+            "generated_at": now.isoformat(),
+            "emhass_schema_version": version,
+            "plan": [{"timestamp": now.isoformat(), "P_batt": -3000}],
+        }
+    )
+
+
+@pytest.mark.parametrize("version", ["1.0", "1.4.2", "1"])
+async def test_a_supported_schema_is_accepted(hass: HomeAssistant, version) -> None:
+    _, coordinator = await _build(hass)
+    assert coordinator._schema_supported(_plan_with_schema(version)) is True
+
+
+@pytest.mark.parametrize("version", ["2.0", "3.1"])
+async def test_an_unknown_schema_major_is_refused(hass: HomeAssistant, version) -> None:
+    """A renamed column or flipped sign would be misread, not raise.
+
+    Discarding the plan makes it stale, which the watchdog already handles.
+    """
+    _, coordinator = await _build(hass)
+    assert coordinator._schema_supported(_plan_with_schema(version)) is False
+
+
+async def test_refusing_a_schema_raises_a_repair(hass: HomeAssistant) -> None:
+    from homeassistant.helpers import issue_registry as ir
+
+    from custom_components.emhass_companion.const import ISSUE_PLAN_SCHEMA
+
+    _, coordinator = await _build(hass)
+    coordinator._schema_supported(_plan_with_schema("2.0"))
+
+    registry = ir.async_get(hass)
+    assert registry.async_get_issue(DOMAIN, ISSUE_PLAN_SCHEMA) is not None
+
+    # And clears once EMHASS returns something understandable again.
+    coordinator._schema_supported(_plan_with_schema("1.0"))
+    assert registry.async_get_issue(DOMAIN, ISSUE_PLAN_SCHEMA) is None
+
+
+async def test_a_missing_schema_version_is_tolerated(hass: HomeAssistant) -> None:
+    """Older EMHASS builds may not report one; refusing everything is worse."""
+    _, coordinator = await _build(hass)
+    assert coordinator._schema_supported(_plan_with_schema("")) is True

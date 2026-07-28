@@ -304,6 +304,10 @@
     "invalid_profile": {
       "title": "{count} data source profile(s) could not be loaded",
       "description": "These profiles were skipped. Every other profile loaded normally.\n\n{details}\n\nFix the file and reload the integration. The `emhass_companion.test_profile` action shows exactly what a profile produces."
+    },
+    "plan_schema_unsupported": {
+      "title": "EMHASS plan format not understood",
+      "description": "EMHASS returned an optimisation plan using schema version {found}, but this integration understands major version {supported}. A new major version means columns were renamed or removed, or a unit or sign convention changed, so the plan is being ignored rather than misread. Update EMHASS Companion, or report this if no update is available."
     }
   },
   "services": {

@@ -17,7 +17,7 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 import logging
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import (
     async_track_time_change,
     async_track_time_interval,
@@ -49,6 +49,12 @@ class Scheduler:
     def async_start(self) -> None:
         config = self.coordinator.config
 
+        # The horizon check runs on each coordinator *update*, not after
+        # requesting one: async_request_refresh is debounced and returns before
+        # the refresh happens, so checking there reads the previous run's data
+        # and notices new prices a whole cycle late.
+        self._unsubscribes.append(self.coordinator.async_add_listener(self._check_price_horizon))
+
         self._unsubscribes.append(
             async_track_time_interval(self.hass, self._async_mpc_tick, config.mpc_interval)
         )
@@ -77,7 +83,6 @@ class Scheduler:
 
     async def _async_mpc_tick(self, _now: datetime) -> None:
         await self.coordinator.async_request_refresh()
-        self._check_price_horizon()
 
     async def _async_dayahead_fallback(self, _now: datetime) -> None:
         if self._recently_ran_dayahead():
@@ -88,6 +93,7 @@ class Scheduler:
             return
         await self._async_run_dayahead("scheduled fallback time")
 
+    @callback
     def _check_price_horizon(self) -> None:
         """Fire a day-ahead run when the price series gains a new day."""
         data = self.coordinator.data

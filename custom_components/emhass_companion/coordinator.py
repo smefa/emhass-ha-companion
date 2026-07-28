@@ -10,6 +10,7 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
@@ -19,10 +20,12 @@ from .const import (
     ACTION_DAYAHEAD,
     ACTION_MPC,
     DOMAIN,
+    ISSUE_PLAN_SCHEMA,
     MODE_AUTO,
     PROFILE_KIND_LOAD,
     PROFILE_KIND_PRICE,
     PROFILE_KIND_PV,
+    SUPPORTED_PLAN_SCHEMA_MAJOR,
 )
 from .deferrable import DeferrableRegistry
 from .models import DeferrableLoad, LastRun, Plan, Series
@@ -34,6 +37,7 @@ from .profiles import (
     async_resolve_series,
     resolve_settings,
 )
+from .util import schema_major
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -156,6 +160,9 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
                 action,
             )
 
+        if plan is not None and not self._schema_supported(plan):
+            plan = None
+
         return EmhassData(
             plan=plan,
             last_run=last_run,
@@ -172,6 +179,40 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             # executor from acting on a plan that was never actually produced.
             last_success=dt_util.utcnow() if last_run.ok else None,
         )
+
+    def _schema_supported(self, plan: Plan) -> bool:
+        """Refuse a plan written to a schema major we do not understand.
+
+        A major bump means a column was renamed or removed, or a unit or sign
+        convention changed. Parsing it anyway would not raise -- it would
+        quietly produce a plan with, say, an inverted battery sign, and the
+        executor would act on it. Discarding the plan makes it stale instead,
+        which the watchdog already handles safely.
+        """
+        major = schema_major(plan.schema_version)
+        if major is None or major == SUPPORTED_PLAN_SCHEMA_MAJOR:
+            ir.async_delete_issue(self.hass, DOMAIN, ISSUE_PLAN_SCHEMA)
+            return True
+
+        _LOGGER.error(
+            "EMHASS returned plan schema %s; this integration understands major "
+            "%s. Ignoring the plan rather than risking a misread of it.",
+            plan.schema_version,
+            SUPPORTED_PLAN_SCHEMA_MAJOR,
+        )
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            ISSUE_PLAN_SCHEMA,
+            is_fixable=False,
+            severity=ir.IssueSeverity.ERROR,
+            translation_key=ISSUE_PLAN_SCHEMA,
+            translation_placeholders={
+                "found": str(plan.schema_version),
+                "supported": str(SUPPORTED_PLAN_SCHEMA_MAJOR),
+            },
+        )
+        return False
 
     async def _build(self, action: str) -> tuple[PayloadInputs, PayloadResult]:
         config = self.config
