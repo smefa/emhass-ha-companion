@@ -3,6 +3,9 @@ name: Validate
 on:
   push:
   pull_request:
+  # Some checks depend on GitHub repository settings rather than on the
+  # code, so they need re-running without a commit to change.
+  workflow_dispatch:
   schedule:
     - cron: "0 4 * * 1"
 
