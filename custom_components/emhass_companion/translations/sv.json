@@ -304,6 +304,10 @@
     "invalid_profile": {
       "title": "{count} datakällsprofil(er) kunde inte läsas in",
       "description": "Dessa profiler hoppades över. Alla andra profiler lästes in som vanligt.\n\n{details}\n\nRätta filen och läs om integrationen. Åtgärden `emhass_companion.test_profile` visar exakt vad en profil ger."
+    },
+    "plan_schema_unsupported": {
+      "title": "EMHASS planformat kan inte tolkas",
+      "description": "EMHASS returnerade en optimeringsplan med schemaversion {found}, men den här integrationen förstår huvudversion {supported}. En ny huvudversion innebär att kolumner bytt namn eller tagits bort, eller att en enhet eller teckenkonvention ändrats, så planen ignoreras i stället för att tolkas fel. Uppdatera EMHASS Companion, eller rapportera detta om ingen uppdatering finns."
     }
   },
   "services": {
