@@ -1,0 +1,13 @@
+{
+  "_comment": "Shape of the tibber.get_prices action response. Constructed from homeassistant/components/tibber/services.py, which returns {'prices': {<home name>: [{'start_time', 'price'}]}}; not captured from a live install. Prices are totals including VAT and fees.",
+  "prices": {
+    "Hemma": [
+      { "start_time": "2026-07-28T10:00:00+02:00", "price": 1.4321 },
+      { "start_time": "2026-07-28T11:00:00+02:00", "price": 1.2109 },
+      { "start_time": "2026-07-28T12:00:00+02:00", "price": 0.9876 }
+    ],
+    "Sommarstuga": [
+      { "start_time": "2026-07-28T10:00:00+02:00", "price": 1.1111 }
+    ]
+  }
+}

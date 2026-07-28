@@ -1,0 +1,9 @@
+{
+  "_comment": "Shape of the `prices` attribute on JaccoR/hass-entso-e's average-price sensor. Constructed from the integration's coordinator.get_timestamped_prices(), which builds {'time': str(hour), 'price': price} records; not captured from a live install.",
+  "prices": [
+    { "time": "2026-07-28 10:00:00+02:00", "price": 0.1234 },
+    { "time": "2026-07-28 11:00:00+02:00", "price": 0.0987 },
+    { "time": "2026-07-28 12:00:00+02:00", "price": 0.0456 },
+    { "time": "2026-07-28 13:00:00+02:00", "price": 0.0312 }
+  ]
+}

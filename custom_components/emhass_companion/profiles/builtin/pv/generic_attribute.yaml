@@ -1,0 +1,58 @@
+name: Solar forecast from an entity attribute
+kind: pv
+version: 1
+description: >-
+  Reads a PV production forecast from a list-valued attribute on any entity,
+  for forecast integrations without a profile of their own.
+notes: >-
+  Check the entity in Developer Tools to find the attribute holding the
+  forecast and the field names inside it. Values must end up in watts, so set
+  the scale factor to 1000 if the source reports kilowatts.
+
+detect:
+  always: true
+
+options:
+  entities:
+    name: Forecast entities
+    description: Select every entity needed to cover your planning horizon.
+    selector:
+      entity:
+        multiple: true
+  attribute:
+    name: Attribute name
+    selector:
+      text: {}
+  time_field:
+    name: Timestamp field
+    default: period_start
+    selector:
+      text: {}
+  value_field:
+    name: Power field
+    default: pv_estimate
+    selector:
+      text: {}
+  scale:
+    name: Scale factor
+    description: Multiplier to reach watts. Use 1000 for kilowatts.
+    default: 1000
+    selector:
+      number:
+        min: 0.000001
+        max: 1000000
+        step: any
+        mode: box
+
+source:
+  type: attributes
+  entity: "{{ options.entities }}"
+  attributes:
+    - "{{ options.attribute }}"
+
+series:
+  time: "{{ options.time_field }}"
+  value: "{{ options.value_field }}"
+  scale: "{{ options.scale }}"
+
+unit: watts

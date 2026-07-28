@@ -1,0 +1,38 @@
+name: Tibber
+kind: price
+version: 1
+description: >-
+  Fetches prices through the Tibber integration's get_prices action.
+notes: >-
+  Tibber returns the *total* price, with VAT, taxes and grid fees already
+  included. Set the import tariff mode to "already includes costs" rather than
+  adding them a second time.
+
+  The action returns one list per home, keyed by the home's name in the Tibber
+  app. If the name below is wrong the error lists the names that do exist.
+
+detect:
+  integration: tibber
+
+options:
+  home:
+    name: Home name
+    description: Exactly as it appears in the Tibber app, for example "Hemma".
+    selector:
+      text: {}
+
+source:
+  type: service
+  service: tibber.get_prices
+  data:
+    # The action defaults to today only; asking explicitly for two days is what
+    # gets tomorrow's prices once they publish.
+    start: "{{ today_at().isoformat() }}"
+    end: "{{ (today_at() + timedelta(days=2)).isoformat() }}"
+  response_path: "prices.{{ options.home }}"
+
+series:
+  time: start_time
+  value: price
+
+unit: currency_per_kwh

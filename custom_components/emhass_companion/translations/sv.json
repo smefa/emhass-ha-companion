@@ -1,0 +1,401 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Anslut till EMHASS",
+        "description": "EMHASS Companion styr en befintlig EMHASS-installation. Version {min_version} eller senare krävs.\n\nOm du kör EMHASS-tillägget fylls adressen nedan i automatiskt.",
+        "data": {
+          "url": "EMHASS-adress"
+        },
+        "data_description": {
+          "url": "Till exempel http://localhost:5000, eller tilläggets interna adress."
+        }
+      },
+      "price": {
+        "title": "Elpriser",
+        "description": "Endast källor som du har installerade visas.\n\n{profiles}",
+        "data": {
+          "profile": "Priskälla"
+        }
+      },
+      "price_options": {
+        "title": "Konfigurera {profile}",
+        "description": "{notes}"
+      },
+      "tariff": {
+        "title": "Köp- och säljpriser",
+        "description": "Din priskälla ger rena spotpriser. Lägg till det som elhandlare och nätägare tar ut ovanpå, samt vad du får betalt för det du säljer.\n\nAnvänd **Linjär** för moms plus ett fast påslag per kWh, **Innehåller redan kostnader** om priskällan redan lägger på dem, eller **Mall** för tidsberoende eller stegvis prissättning.",
+        "data": {
+          "buy_mode": "Metod för inköpspris",
+          "buy_multiplier": "Multiplikator för inköp",
+          "buy_adder": "Tillägg per kWh vid inköp",
+          "buy_template": "Mall för inköpspris",
+          "sell_mode": "Metod för säljpris",
+          "sell_multiplier": "Multiplikator för försäljning",
+          "sell_adder": "Tillägg per kWh vid försäljning",
+          "sell_template": "Mall för säljpris"
+        },
+        "data_description": {
+          "buy_multiplier": "Multipliceras med spotpriset. Använd 1,25 för 25 % moms.",
+          "buy_adder": "Läggs på efter multiplikatorn. Nätavgift, energiskatt och påslag.",
+          "buy_template": "Används bara i Mall-läget. `spot` och `time` är tillgängliga.",
+          "sell_adder": "Läggs på efter multiplikatorn. Eventuell ersättning per kWh för såld el.",
+          "sell_template": "Används bara i Mall-läget. `spot` och `time` är tillgängliga."
+        }
+      },
+      "pv": {
+        "title": "Solprognos",
+        "description": "Välj varifrån prognosen för solproduktion kommer. Välj **Ingen sol** om du saknar paneler.\n\n{profiles}",
+        "data": {
+          "profile": "Källa för solprognos"
+        }
+      },
+      "pv_options": {
+        "title": "Konfigurera {profile}",
+        "description": "{notes}"
+      },
+      "load": {
+        "title": "Husets förbrukning",
+        "description": "Hur EMHASS ska förutsäga hushållets grundförbrukning.\n\n{profiles}",
+        "data": {
+          "profile": "Källa för förbrukningsprognos"
+        }
+      },
+      "load_options": {
+        "title": "Konfigurera {profile}",
+        "description": "{notes}"
+      },
+      "battery": {
+        "title": "Batteri",
+        "description": "Lämna detta avstängt om du saknar hembatteri. Resten av sidan ignoreras då.",
+        "data": {
+          "use_battery": "Jag har ett batteri",
+          "capacity_wh": "Användbar kapacitet",
+          "charge_power_max_w": "Maximal laddeffekt",
+          "discharge_power_max_w": "Maximal urladdningseffekt",
+          "soc_min": "Lägsta laddningsnivå",
+          "soc_max": "Högsta laddningsnivå",
+          "soc_target": "Önskad laddningsnivå",
+          "soc_entity": "Sensor för batteriets laddningsnivå"
+        },
+        "data_description": {
+          "soc_min": "Som andel. 0,10 betyder att optimeringen inte planerar under 10 %.",
+          "soc_target": "Där optimeringen siktar på att lämna batteriet vid horisontens slut.",
+          "soc_entity": "Läses vid varje körning så att planen utgår från verkligheten."
+        }
+      },
+      "grid": {
+        "title": "Nätanslutning och schema",
+        "description": "Dina anslutningsgränser och hur ofta planen räknas om.",
+        "data": {
+          "grid_import_max_w": "Maximal effekt från nätet",
+          "grid_export_max_w": "Maximal effekt till nätet",
+          "optimization_time_step": "Tidsupplösning (minuter)",
+          "mpc_interval_minutes": "Räkna om var",
+          "horizon_hours": "Planeringshorisont",
+          "dayahead_fallback_time": "Reservtid för dygnsplanering"
+        },
+        "data_description": {
+          "optimization_time_step": "Finare upplösning fångar fler prisdetaljer men gör optimeringen långsammare. 30 minuter passar de flesta hem.",
+          "dayahead_fallback_time": "En fullständig dygnsplan byggs normalt om automatiskt så snart nya priser kommer. Den här tiden används bara som reserv om det aldrig sker."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Kunde inte nå EMHASS på den adressen. Kontrollera att det körs och att adress och port stämmer.",
+      "unknown_version": "Ansluten, men EMHASS rapporterade ingen version. Det är förmodligen för gammalt.",
+      "version_too_old": "Denna EMHASS är för gammal. Version {min_version} eller senare krävs, eftersom integrationen läser planen via det JSON-API som infördes i den versionen."
+    },
+    "abort": {
+      "single_instance_allowed": "EMHASS Companion är redan konfigurerad.",
+      "no_profiles": "Inga användbara datakällor hittades. Det är oväntat – rapportera gärna felet."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "EMHASS Companion",
+        "menu_options": {
+          "battery": "Batteri",
+          "grid": "Nät och schema",
+          "tariff": "Köp- och säljpriser",
+          "inverter": "Batteristyrning"
+        }
+      },
+      "battery": {
+        "title": "Batteri",
+        "data": {
+          "use_battery": "Jag har ett batteri",
+          "capacity_wh": "Användbar kapacitet",
+          "charge_power_max_w": "Maximal laddeffekt",
+          "discharge_power_max_w": "Maximal urladdningseffekt",
+          "soc_min": "Lägsta laddningsnivå",
+          "soc_max": "Högsta laddningsnivå",
+          "soc_target": "Önskad laddningsnivå",
+          "soc_entity": "Sensor för batteriets laddningsnivå"
+        }
+      },
+      "grid": {
+        "title": "Nätanslutning och schema",
+        "data": {
+          "grid_import_max_w": "Maximal effekt från nätet",
+          "grid_export_max_w": "Maximal effekt till nätet",
+          "optimization_time_step": "Tidsupplösning (minuter)",
+          "mpc_interval_minutes": "Räkna om var",
+          "horizon_hours": "Planeringshorisont",
+          "dayahead_fallback_time": "Reservtid för dygnsplanering"
+        }
+      },
+      "tariff": {
+        "title": "Köp- och säljpriser",
+        "data": {
+          "buy_mode": "Metod för inköpspris",
+          "buy_multiplier": "Multiplikator för inköp",
+          "buy_adder": "Tillägg per kWh vid inköp",
+          "buy_template": "Mall för inköpspris",
+          "sell_mode": "Metod för säljpris",
+          "sell_multiplier": "Multiplikator för försäljning",
+          "sell_adder": "Tillägg per kWh vid försäljning",
+          "sell_template": "Mall för säljpris"
+        }
+      },
+      "inverter": {
+        "title": "Batteristyrning",
+        "description": "Hur batteriet faktiskt styrs. Lämnar du detta tomt läser integrationen bara — planen är din att agera på hur du vill.\n\nInget skrivs till din utrustning förrän du dessutom slår på reglaget Styrning aktiverad.",
+        "data": {
+          "profile": "Växelriktarprofil"
+        }
+      },
+      "inverter_options": {
+        "title": "Konfigurera {profile}",
+        "description": "{notes}"
+      }
+    }
+  },
+  "selector": {
+    "tariff_mode": {
+      "options": {
+        "linear": "Linjär (multiplikator och tillägg)",
+        "passthrough": "Innehåller redan kostnader",
+        "template": "Mall"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "pv_forecast": {
+        "name": "Planerad solproduktion"
+      },
+      "load_forecast": {
+        "name": "Planerad förbrukning"
+      },
+      "grid_forecast": {
+        "name": "Planerad näteffekt"
+      },
+      "battery_power": {
+        "name": "Planerad batterieffekt"
+      },
+      "battery_soc": {
+        "name": "Planerad laddningsnivå"
+      },
+      "buy_price": {
+        "name": "Inköpspris"
+      },
+      "sell_price": {
+        "name": "Säljpris"
+      },
+      "optimization_status": {
+        "name": "Optimeringsstatus"
+      },
+      "plan_cost": {
+        "name": "Planerad kostnad"
+      },
+      "last_payload": {
+        "name": "Senaste anropet till EMHASS"
+      },
+      "scheduled_power": {
+        "name": "Schemalagd effekt"
+      },
+      "next_start": {
+        "name": "Nästa start"
+      },
+      "runtime_today": {
+        "name": "Drifttid idag"
+      },
+      "battery_action": {
+        "name": "Batteriåtgärd",
+        "state": {
+          "self_consume": "Egenförbrukning",
+          "force_charge": "Laddar",
+          "force_discharge": "Laddar ur",
+          "idle": "Vila"
+        }
+      }
+    },
+    "binary_sensor": {
+      "plan_stale": {
+        "name": "Planen är inaktuell"
+      },
+      "should_run": {
+        "name": "Bör vara igång"
+      }
+    },
+    "switch": {
+      "control_enabled": {
+        "name": "Styrning aktiverad"
+      },
+      "load_enabled": {
+        "name": "Aktiverad"
+      },
+      "use_time_window": {
+        "name": "Begränsa till ett tidsfönster"
+      }
+    },
+    "select": {
+      "system_mode": {
+        "name": "Läge",
+        "state": {
+          "auto": "Automatiskt",
+          "self_consume": "Egenförbrukning",
+          "force_charge": "Tvinga laddning",
+          "force_discharge": "Tvinga urladdning",
+          "idle": "Vila"
+        }
+      },
+      "load_mode": {
+        "name": "Läge",
+        "state": {
+          "auto": "Följ planen",
+          "force_on": "Tvinga på",
+          "force_off": "Tvinga av"
+        }
+      }
+    },
+    "button": {
+      "run_dayahead": {
+        "name": "Bygg om dygnsplanen"
+      },
+      "run_mpc": {
+        "name": "Räkna om nu"
+      }
+    },
+    "number": {
+      "nominal_power": {
+        "name": "Effekt när den är igång"
+      },
+      "operating_hours": {
+        "name": "Timmar som behövs per dygn"
+      }
+    },
+    "time": {
+      "earliest_start": {
+        "name": "Tidigast start"
+      },
+      "latest_end": {
+        "name": "Senast klar"
+      }
+    }
+  },
+  "issues": {
+    "emhass_version_unsupported": {
+      "title": "EMHASS är för gammalt",
+      "description": "EMHASS Companion kräver version {required} eller senare, men version {installed} är installerad. Planen läses via det JSON-API som infördes i {required}. Uppdatera EMHASS-tillägget eller containern och läs sedan om den här integrationen."
+    },
+    "invalid_profile": {
+      "title": "{count} datakällsprofil(er) kunde inte läsas in",
+      "description": "Dessa profiler hoppades över. Alla andra profiler lästes in som vanligt.\n\n{details}\n\nRätta filen och läs om integrationen. Åtgärden `emhass_companion.test_profile` visar exakt vad en profil ger."
+    }
+  },
+  "services": {
+    "run_dayahead": {
+      "name": "Bygg om dygnsplanen",
+      "description": "Kör en fullständig dygnsoptimering över hela planeringshorisonten."
+    },
+    "run_mpc": {
+      "name": "Räkna om nu",
+      "description": "Kör en prediktiv optimering utifrån nuvarande läge."
+    },
+    "test_profile": {
+      "name": "Testa en datakällsprofil",
+      "description": "Kör en profil och returnerar vad den gav, för att felsöka en källa som inte ger något eller ger fel värden.",
+      "fields": {
+        "profile": {
+          "name": "Profil",
+          "description": "Profilens identifierare, till exempel price/nordpool_custom."
+        },
+        "options": {
+          "name": "Alternativ",
+          "description": "Alternativ att köra profilen med. Standard är de konfigurerade."
+        },
+        "limit": {
+          "name": "Gräns",
+          "description": "Hur många poster ur serien som ska ingå i svaret."
+        }
+      }
+    }
+  },
+  "config_subentries": {
+    "deferrable_load": {
+      "step": {
+        "user": {
+          "title": "Lägg till en flyttbar last",
+          "description": "En last vars tidpunkt optimeringen får välja: en diskmaskin, en billaddare, en poolpump. Det du ändrar från dag till dag blir reglage på lastens egen sida när den lagts till.",
+          "data": {
+            "name": "Namn",
+            "nominal_power_w": "Effekt när den är igång",
+            "operating_hours": "Timmar som behövs per dygn",
+            "earliest_start": "Tidigast start",
+            "latest_end": "Senast klar",
+            "semi_continuous": "Kör bara på full effekt",
+            "single_constant": "Måste köra i ett sammanhängande block",
+            "startup_penalty": "Kostnad för att starta",
+            "power_sensor": "Effektsensor",
+            "control_entity": "Styrenhet"
+          },
+          "data_description": {
+            "nominal_power_w": "Ungefär vad lasten drar när den är igång.",
+            "operating_hours": "Hur länge den behöver köra totalt. Optimeringen väljer när.",
+            "earliest_start": "Används bara om du sedan slår på lastens reglage för tidsfönster.",
+            "latest_end": "Får vara tidigare än starttiden, för ett fönster över natten.",
+            "semi_continuous": "På för en diskmaskin eller pump, som antingen är på eller av. Av för något vars effekt kan varieras, till exempel en billaddare.",
+            "single_constant": "På om det vore ett problem att avbryta den, till exempel ett tvättprogram.",
+            "startup_penalty": "Motverkar att den slås på och av gång på gång. Lämna på noll om det inte är ett problem.",
+            "power_sensor": "Valfritt men rekommenderas. Låter optimeringen veta att lasten redan kör, så att den inte debiteras startkostnad två gånger eller ombeds göra om arbete den redan gjort idag.",
+            "control_entity": "Valfritt. Om den anges slår integrationen på och av denna för att följa planen, när du aktiverat styrning. Lämna tom för att behålla styrningen i dina egna automationer."
+          }
+        },
+        "reconfigure": {
+          "title": "Redigera flyttbar last",
+          "data": {
+            "name": "Namn",
+            "nominal_power_w": "Effekt när den är igång",
+            "operating_hours": "Timmar som behövs per dygn",
+            "earliest_start": "Tidigast start",
+            "latest_end": "Senast klar",
+            "semi_continuous": "Kör bara på full effekt",
+            "single_constant": "Måste köra i ett sammanhängande block",
+            "startup_penalty": "Kostnad för att starta",
+            "power_sensor": "Effektsensor",
+            "control_entity": "Styrenhet"
+          },
+          "data_description": {
+            "nominal_power_w": "Ungefär vad lasten drar när den är igång.",
+            "operating_hours": "Hur länge den behöver köra totalt. Optimeringen väljer när.",
+            "earliest_start": "Används bara om du sedan slår på lastens reglage för tidsfönster.",
+            "latest_end": "Får vara tidigare än starttiden, för ett fönster över natten.",
+            "semi_continuous": "På för en diskmaskin eller pump, som antingen är på eller av. Av för något vars effekt kan varieras, till exempel en billaddare.",
+            "single_constant": "På om det vore ett problem att avbryta den, till exempel ett tvättprogram.",
+            "startup_penalty": "Motverkar att den slås på och av gång på gång. Lämna på noll om det inte är ett problem.",
+            "power_sensor": "Valfritt men rekommenderas. Låter optimeringen veta att lasten redan kör, så att den inte debiteras startkostnad två gånger eller ombeds göra om arbete den redan gjort idag.",
+            "control_entity": "Valfritt. Om den anges slår integrationen på och av denna för att följa planen, när du aktiverat styrning. Lämna tom för att behålla styrningen i dina egna automationer."
+          }
+        }
+      },
+      "entry_type": "Flyttbar last",
+      "initiate_flow": {
+        "user": "Lägg till flyttbar last",
+        "reconfigure": "Redigera flyttbar last"
+      }
+    }
+  }
+}

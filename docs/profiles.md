@@ -92,6 +92,10 @@ series:
 
 A missing attribute is skipped with a debug log, not an error — `raw_tomorrow` is legitimately absent until the market publishes. A missing *entity* is an error.
 
+That behaviour is also what lets one profile cover both the one-attribute and
+two-attribute cases: list an optional second attribute whose name comes from an
+option, and a blank value simply finds nothing and is skipped.
+
 ### `service` — call an action that returns data
 
 ```yaml
@@ -223,6 +227,22 @@ It returns the resolved series, the point count, the detected step, the settings
 3. Add a test asserting the series it resolves to.
 
 The fixture is required. It is what lets maintainers verify a profile for an integration none of them has installed, and it makes reviewing your PR mechanical rather than a matter of trust.
+
+## Before writing a source profile: check there is a series to read
+
+Not every integration exposes one. Home Assistant's core `forecast_solar`, for
+example, has only single-value sensors — production now, next hour, today's
+total — with no list attribute and no action returning a series. A profile
+reading from it could not work, so the shipped Forecast.Solar profile has
+EMHASS query the service directly instead, via an `emhass:` block.
+
+Look for one of these before starting:
+
+- a list-valued attribute on some entity (most common), or
+- an action returning response data containing a list
+
+If neither exists, the source cannot be a `source` profile. It may still be
+worth an `emhass:` profile if EMHASS itself can fetch it.
 
 ## Versioning
 

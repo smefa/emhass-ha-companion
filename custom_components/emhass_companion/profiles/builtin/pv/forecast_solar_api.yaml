@@ -1,0 +1,34 @@
+name: Forecast.Solar (fetched by EMHASS)
+kind: pv
+version: 1
+description: >-
+  Lets EMHASS fetch a forecast from Forecast.Solar itself, given your array's
+  peak power. Needs no API key on the free tier.
+notes: >-
+  This does not read Home Assistant's Forecast.Solar integration. That
+  integration exposes only single-value sensors -- production now, next hour,
+  today's total -- and no forecast series, so there is nothing for us to read
+  from it. EMHASS therefore queries the same service directly instead.
+
+  The free tier is rate limited and produces hourly resolution. Solcast is
+  more accurate if you have it; Open-Meteo needs no account at all.
+
+detect:
+  always: true
+
+options:
+  peak_power_kw:
+    name: Array peak power
+    description: Total DC peak power of your panels, in kilowatts.
+    selector:
+      number:
+        min: 0.1
+        max: 100
+        step: any
+        unit_of_measurement: kW
+        mode: box
+
+emhass:
+  set_use_pv: true
+  weather_forecast_method: solar.forecast
+  solar_forecast_kwp: "{{ options.peak_power_kw }}"

@@ -1,0 +1,35 @@
+name: ENTSO-E
+kind: price
+version: 1
+description: >-
+  Reads the prices attribute of a sensor from the ENTSO-E Transparency
+  Platform integration, which covers most of Europe.
+notes: >-
+  Point this at the average-price sensor; that is the one carrying the full
+  prices attribute. It holds today and, once published, tomorrow. Whether the
+  values already include VAT depends on the VAT setting in the ENTSO-E
+  integration itself, so check there before adding VAT again here.
+
+detect:
+  integration: entsoe
+
+options:
+  entity:
+    name: ENTSO-E sensor
+    description: The sensor exposing the prices attribute, usually "Average price".
+    selector:
+      entity:
+        integration: entsoe
+        domain: sensor
+
+source:
+  type: attributes
+  entity: "{{ options.entity }}"
+  attributes:
+    - prices
+
+series:
+  time: time
+  value: price
+
+unit: currency_per_kwh

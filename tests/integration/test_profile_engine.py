@@ -240,3 +240,132 @@ def test_render_keeps_non_string_leaves_typed(hass: HomeAssistant) -> None:
         {"options": {"n": 42}},
     )
     assert rendered == {"a": 42, "b": 5, "c": "plain", "d": [42]}
+
+
+# --- profiles added in phase 5 -----------------------------------------------
+
+
+async def test_entsoe_profile_resolves(hass: HomeAssistant) -> None:
+    data = _fixture("entsoe.json")
+    hass.states.async_set("sensor.entsoe_average", "0.09", {"prices": data["prices"]})
+
+    series = await async_resolve_series(
+        hass, _builtin("price/entsoe"), {"entity": "sensor.entsoe_average"}
+    )
+
+    assert len(series) == len(data["prices"])
+    assert series.values[0] == pytest.approx(0.1234)
+
+
+async def test_tibber_profile_digs_the_named_home(hass: HomeAssistant) -> None:
+    data = _fixture("tibber.json")
+
+    async def _handler(call):
+        return data
+
+    hass.services.async_register(
+        "tibber", "get_prices", _handler, supports_response=SupportsResponse.ONLY
+    )
+
+    series = await async_resolve_series(hass, _builtin("price/tibber"), {"home": "Hemma"})
+
+    assert len(series) == 3
+    assert series.values[0] == pytest.approx(1.4321)
+
+
+async def test_tibber_unknown_home_lists_the_real_ones(hass: HomeAssistant) -> None:
+    """The home name comes from the Tibber app and is easy to get wrong."""
+
+    async def _handler(call):
+        return _fixture("tibber.json")
+
+    hass.services.async_register(
+        "tibber", "get_prices", _handler, supports_response=SupportsResponse.ONLY
+    )
+
+    with pytest.raises(ProfileError) as err:
+        await async_resolve_series(hass, _builtin("price/tibber"), {"home": "Huset"})
+
+    assert "Hemma" in str(err.value)
+    assert "Sommarstuga" in str(err.value)
+
+
+async def test_generic_price_profile_reads_two_attributes(hass: HomeAssistant) -> None:
+    """Today and tomorrow commonly live on separate attributes."""
+    data = _fixture("nordpool_custom.json")
+    hass.states.async_set(
+        "sensor.custom",
+        "0.5",
+        {"raw_today": data["raw_today"], "raw_later": data["raw_today"][:2]},
+    )
+
+    series = await async_resolve_series(
+        hass,
+        _builtin("price/generic_attribute"),
+        {
+            "entity": "sensor.custom",
+            "attribute": "raw_today",
+            "second_attribute": "raw_later",
+            "time_field": "start",
+            "value_field": "value",
+            "scale": 1,
+        },
+    )
+
+    # The two attributes overlap entirely, so duplicates collapse by timestamp.
+    assert len(series) == len(data["raw_today"])
+
+
+async def test_generic_price_profile_without_a_second_attribute(
+    hass: HomeAssistant,
+) -> None:
+    """A blank second attribute must be skipped, not looked up as ""."""
+    data = _fixture("nordpool_custom.json")
+    hass.states.async_set("sensor.custom", "0.5", {"raw_today": data["raw_today"]})
+
+    series = await async_resolve_series(
+        hass,
+        _builtin("price/generic_attribute"),
+        {
+            "entity": "sensor.custom",
+            "attribute": "raw_today",
+            "second_attribute": "",
+            "time_field": "start",
+            "value_field": "value",
+            "scale": 1,
+        },
+    )
+
+    assert len(series) == len(data["raw_today"])
+
+
+async def test_generic_pv_profile_scales_to_watts(hass: HomeAssistant) -> None:
+    records = _fixture("solcast.json")["detailedForecast"]
+    hass.states.async_set("sensor.any_forecast", "5", {"forecast": records})
+
+    series = await async_resolve_series(
+        hass,
+        _builtin("pv/generic_attribute"),
+        {
+            "entities": ["sensor.any_forecast"],
+            "attribute": "forecast",
+            "time_field": "period_start",
+            "value_field": "pv_estimate",
+            "scale": 1000,
+        },
+    )
+
+    assert series.values[0] == pytest.approx(7374.9)
+
+
+async def test_settings_only_profiles_contribute_no_series(hass: HomeAssistant) -> None:
+    """Profiles that delegate to EMHASS must not pretend to fetch anything."""
+    from custom_components.emhass_companion.profiles import resolve_settings
+
+    profile = _builtin("pv/forecast_solar_api")
+    assert profile.produces_series is False
+
+    settings = resolve_settings(hass, profile, {"peak_power_kw": 9.5})
+    assert settings["weather_forecast_method"] == "solar.forecast"
+    # Rendered as a number, not the string "9.5".
+    assert settings["solar_forecast_kwp"] == 9.5

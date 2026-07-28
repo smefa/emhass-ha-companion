@@ -207,10 +207,21 @@ Built in today:
 
 | Kind | Profiles |
 |---|---|
-| Price | Nord Pool (core), Nord Pool (HACS), Fixed tariff |
-| Solar | Solcast, EMHASS built-in (Open-Meteo), No solar |
-| Load | House load sensor, Forecast from an entity attribute |
+| Price | Nord Pool (core), Nord Pool (HACS), ENTSO-E, Tibber, Fixed tariff, Any entity attribute |
+| Solar | Solcast, EMHASS built-in (Open-Meteo), Forecast.Solar, Any entity attribute, No solar |
+| Load | House load sensor, Any entity attribute |
 | Inverter | Mode select plus power number, Scripts |
+
+The **Any entity attribute** profiles are the escape hatch: point them at any
+entity exposing a forecast as a list attribute, name the fields, and they work.
+If you get one working for an integration others use, it is worth contributing
+as a named profile.
+
+> **Note on Forecast.Solar.** The Forecast.Solar profile has EMHASS query the
+> service directly rather than reading Home Assistant's `forecast_solar`
+> integration. That integration exposes only single-value sensors — production
+> now, next hour, today's total — and no forecast series, so there is nothing
+> to read from it.
 
 See **[docs/profiles.md](docs/profiles.md)** to write your own or contribute one.
 
@@ -237,7 +248,7 @@ response_variable: result
 | 2 — Deferrable loads as config subentries | **done** |
 | 3 — Inverter profiles, executor, dry-run gate, watchdog | **done** |
 | 4 — Custom dashboard cards | **done** |
-| 5 — More source profiles, translations, docs | partial |
+| 5 — More source profiles, translations, docs | **done** |
 
 Control is implemented but ships off; see [Handing over control](#handing-over-control).
 
@@ -254,6 +265,15 @@ Tests are split in two. `tests/` needs no running Home Assistant and runs on any
 Run the bare `pytest` before pushing, not the two directories separately: collection problems only appear when both are collected together.
 
 Every built-in profile must ship a fixture in `tests/fixtures/`: a recorded blob from a real installation plus the series it should resolve to. That is what lets a profile for an integration none of us has installed still be verified, and what makes reviewing a contributed profile mechanical.
+
+## Translations
+
+English and Swedish. `translations/sv.json` is generated from `strings.json`
+so the two cannot drift apart structurally; a test asserts they have identical
+keys and that every `{placeholder}` survives translation.
+
+Other languages are welcome — copy `strings.json`, translate the leaf values
+only, and leave the keys and placeholders alone.
 
 ## Licence
 

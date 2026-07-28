@@ -1,0 +1,76 @@
+name: Prices from an entity attribute
+kind: price
+version: 1
+description: >-
+  Reads a price forecast from a list-valued attribute on any entity. Use this
+  for a price integration that has no profile of its own yet, or for a
+  template sensor you build yourself.
+notes: >-
+  Most price integrations expose their forecast as a list of records on some
+  attribute. Look at the entity in Developer Tools to find the attribute name
+  and the field names inside it, then fill them in below. The
+  emhass_companion.test_profile action shows exactly what came back.
+
+  If this works for an integration other people use, it is worth contributing
+  as a named profile so nobody else has to work it out.
+
+detect:
+  always: true
+
+options:
+  entity:
+    name: Price entity
+    selector:
+      entity: {}
+  attribute:
+    name: Attribute name
+    description: The attribute holding the list of prices, for example raw_today.
+    selector:
+      text: {}
+  second_attribute:
+    name: Second attribute
+    description: >-
+      Optional. Many integrations split today and tomorrow across two
+      attributes; name the second one here and both are used.
+    required: false
+    default: ""
+    selector:
+      text: {}
+  time_field:
+    name: Timestamp field
+    default: start
+    selector:
+      text: {}
+  value_field:
+    name: Price field
+    default: value
+    selector:
+      text: {}
+  scale:
+    name: Scale factor
+    description: >-
+      Multiplier to reach a price per kWh. Use 0.001 if the source is priced
+      per MWh.
+    default: 1
+    selector:
+      number:
+        min: 0.000001
+        max: 1000000
+        step: any
+        mode: box
+
+source:
+  type: attributes
+  entity: "{{ options.entity }}"
+  # A blank second attribute simply finds nothing and is skipped, so one entry
+  # covers both the one-attribute and two-attribute cases.
+  attributes:
+    - "{{ options.attribute }}"
+    - "{{ options.second_attribute }}"
+
+series:
+  time: "{{ options.time_field }}"
+  value: "{{ options.value_field }}"
+  scale: "{{ options.scale }}"
+
+unit: currency_per_kwh

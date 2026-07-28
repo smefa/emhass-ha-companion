@@ -331,3 +331,58 @@ def test_cards_are_registered_with_the_picker():
     assert "window.customCards" in source
     for card in ("emhass-plan-card", "emhass-deferrable-card"):
         assert f'customElements.define("{card}"' in source
+
+
+# --- additional translations -------------------------------------------------
+
+
+def _leaf_paths(node, prefix=""):
+    if isinstance(node, dict):
+        for key, value in node.items():
+            yield from _leaf_paths(value, f"{prefix}.{key}")
+    elif isinstance(node, str):
+        yield prefix
+
+
+@pytest.mark.parametrize(
+    "language",
+    [path.stem for path in sorted((COMPONENT / "translations").glob("*.json"))],
+)
+def test_translation_has_the_same_keys_as_strings(language):
+    """A translation with extra or missing keys is rejected by hassfest.
+
+    Missing keys also fall back to English silently, so a partial translation
+    is easy to ship without noticing.
+    """
+    strings = _json(COMPONENT / "strings.json")
+    translated = _json(COMPONENT / "translations" / f"{language}.json")
+
+    expected = set(_leaf_paths(strings))
+    actual = set(_leaf_paths(translated))
+
+    assert not expected - actual, f"{language}.json is missing: {expected - actual}"
+    assert not actual - expected, f"{language}.json has extra keys: {actual - expected}"
+
+
+def test_translations_keep_their_placeholders():
+    """A dropped placeholder renders as a literal brace to the user."""
+    import re
+
+    strings = _json(COMPONENT / "strings.json")
+
+    def leaves(node, prefix=""):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                yield from leaves(value, f"{prefix}.{key}")
+        elif isinstance(node, str):
+            yield prefix, node
+
+    english = dict(leaves(strings))
+    pattern = re.compile(r"\{(\w+)\}")
+
+    for path in sorted((COMPONENT / "translations").glob("*.json")):
+        translated = dict(leaves(_json(path)))
+        for key, value in english.items():
+            expected = set(pattern.findall(value))
+            actual = set(pattern.findall(translated.get(key, "")))
+            assert expected == actual, f"{path.name}{key}: placeholders {expected} became {actual}"
