@@ -4,23 +4,25 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.components.sensor import (
+    RestoreSensor,
     SensorDeviceClass,
     SensorEntity,
     SensorEntityDescription,
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityCategory, UnitOfPower
+from homeassistant.const import EntityCategory, UnitOfPower, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
 from .coordinator import EmhassCoordinator, EmhassData
-from .entity import EmhassEntity
+from .deferrable import DeferrableRuntime
+from .entity import EmhassEntity, EmhassLoadEntity
 from .models import Series
 
 PARALLEL_UPDATES = 0
@@ -220,3 +222,106 @@ class EmhassSensor(EmhassEntity, SensorEntity):
             attributes.update(self.entity_description.attrs_fn(data))
 
         return attributes or None
+
+
+class LoadScheduledPowerSensor(EmhassLoadEntity, SensorEntity):
+    """The power EMHASS has scheduled for this load right now."""
+
+    _attr_translation_key = "scheduled_power"
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator: EmhassCoordinator, load: DeferrableRuntime) -> None:
+        super().__init__(coordinator, load, "scheduled_power")
+
+    def _series(self) -> Series:
+        data = self.coordinator.data
+        if not data or data.plan is None or (index := self.plan_index) is None:
+            return Series.empty()
+        return data.plan.deferrable_series(index)
+
+    @property
+    def native_value(self) -> float | None:
+        return self._series().value_at(dt_util.utcnow())
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {"schedule": self._series().to_attribute()}
+
+
+class LoadNextStartSensor(EmhassLoadEntity, SensorEntity):
+    """When this load is next scheduled to start."""
+
+    _attr_translation_key = "next_start"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+
+    def __init__(self, coordinator: EmhassCoordinator, load: DeferrableRuntime) -> None:
+        super().__init__(coordinator, load, "next_start")
+
+    @property
+    def native_value(self) -> datetime | None:
+        data = self.coordinator.data
+        if not data or data.plan is None or (index := self.plan_index) is None:
+            return None
+
+        threshold = self.load.running_threshold_w
+        now = dt_util.utcnow()
+        previous_on = True  # suppress a "start" for a run already in progress
+        for row in data.plan.rows:
+            if index >= len(row.deferrables):
+                continue
+            running = row.deferrables[index] > threshold
+            if row.timestamp >= now and running and not previous_on:
+                return row.timestamp
+            if row.timestamp >= now:
+                previous_on = running
+        return None
+
+
+class LoadRuntimeTodaySensor(EmhassLoadEntity, RestoreSensor):
+    """How long this load has run today.
+
+    Fed back to EMHASS as ``def_current_operating_timesteps`` so it does not
+    re-schedule work already done. EMHASS has no concept of a day boundary for
+    that value, so the counter is reset locally at midnight.
+    """
+
+    _attr_translation_key = "runtime_today"
+    _attr_device_class = SensorDeviceClass.DURATION
+    _attr_native_unit_of_measurement = UnitOfTime.HOURS
+    _attr_state_class = SensorStateClass.TOTAL
+    _attr_suggested_display_precision = 2
+
+    def __init__(self, coordinator: EmhassCoordinator, load: DeferrableRuntime) -> None:
+        super().__init__(coordinator, load, "runtime_today")
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_sensor_data()
+        if last is None or last.native_value is None:
+            return
+        # Only restore within the same local day; a restart tomorrow morning
+        # must not carry yesterday's hours into today's schedule.
+        restored_at = self.coordinator.hass.states.get(self.entity_id)
+        today = dt_util.as_local(dt_util.utcnow()).date()
+        if restored_at is not None and dt_util.as_local(restored_at.last_updated).date() != today:
+            return
+        try:
+            self.load.runtime_today = timedelta(hours=float(last.native_value))
+            self.load.runtime_day = today
+        except (TypeError, ValueError):
+            pass
+
+    @property
+    def native_value(self) -> float:
+        return round(self.load.elapsed_today(dt_util.utcnow()).total_seconds() / 3600, 4)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        step = self.coordinator.config.time_step_minutes
+        return {
+            "completed_timesteps": self.load.completed_timesteps(dt_util.utcnow(), step),
+            "currently_running": self.load.is_running,
+            "power_sensor": self.load.power_sensor,
+        }

@@ -13,9 +13,12 @@ import logging
 from typing import Any
 
 from homeassistant.config_entries import (
+    ConfigEntry,
     ConfigFlow,
     ConfigFlowResult,
+    ConfigSubentryFlow,
     OptionsFlowWithReload,
+    SubentryFlowResult,
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import selector
@@ -26,16 +29,25 @@ from .api import EmhassClient, EmhassError
 from .const import (
     CONF_ADDER,
     CONF_DAYAHEAD_FALLBACK_TIME,
+    CONF_EARLIEST_START,
     CONF_HORIZON_HOURS,
+    CONF_LATEST_END,
     CONF_LOAD,
     CONF_MODE,
     CONF_MPC_INTERVAL,
     CONF_MULTIPLIER,
+    CONF_NAME,
+    CONF_NOMINAL_POWER,
+    CONF_OPERATING_HOURS,
+    CONF_POWER_SENSOR,
     CONF_PRICE,
     CONF_PROFILE,
     CONF_PROFILE_OPTIONS,
     CONF_PV,
+    CONF_SEMI_CONTINUOUS,
+    CONF_SINGLE_CONSTANT,
     CONF_SOC_ENTITY,
+    CONF_STARTUP_PENALTY,
     CONF_TEMPLATE,
     CONF_TIME_STEP,
     CONF_URL,
@@ -54,6 +66,7 @@ from .const import (
     PROFILE_KIND_LOAD,
     PROFILE_KIND_PRICE,
     PROFILE_KIND_PV,
+    SUBENTRY_TYPE_DEFERRABLE,
 )
 from .profiles import Profile, async_load_profiles, available_profiles
 from .tariff import MODE_LINEAR, MODE_PASSTHROUGH, MODE_TEMPLATE
@@ -333,12 +346,105 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
             },
         )
 
-    # -- options --------------------------------------------------------------
+    # -- options and subentries -----------------------------------------------
 
     @staticmethod
     @callback
     def async_get_options_flow(config_entry) -> EmhassCompanionOptionsFlow:
         return EmhassCompanionOptionsFlow()
+
+    @classmethod
+    @callback
+    def async_get_supported_subentry_types(
+        cls, config_entry: ConfigEntry
+    ) -> dict[str, type[ConfigSubentryFlow]]:
+        """Deferrable loads are subentries, not a count.
+
+        Each load then gets its own device page, its own entities and
+        independent removal -- none of which a "number of deferrable loads"
+        setting can offer.
+        """
+        return {SUBENTRY_TYPE_DEFERRABLE: DeferrableLoadSubentryFlow}
+
+
+def deferrable_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
+    """Fields for adding or reconfiguring a deferrable load.
+
+    Only set-once values live here. Everything a user might change from day to
+    day -- power, hours, the time window, the override mode -- is an entity, so
+    that changing it does not reload the config entry.
+    """
+    return {
+        vol.Required(CONF_NAME, default=defaults.get(CONF_NAME, "")): selector.TextSelector(),
+        vol.Required(
+            CONF_NOMINAL_POWER, default=defaults.get(CONF_NOMINAL_POWER, 2000)
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=1, max=100000, step=10, unit_of_measurement="W", mode="box"
+            )
+        ),
+        vol.Required(
+            CONF_OPERATING_HOURS, default=defaults.get(CONF_OPERATING_HOURS, 2)
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0, max=24, step=0.25, unit_of_measurement="h", mode="box"
+            )
+        ),
+        vol.Optional(
+            CONF_EARLIEST_START, default=defaults.get(CONF_EARLIEST_START, "")
+        ): selector.TimeSelector(),
+        vol.Optional(
+            CONF_LATEST_END, default=defaults.get(CONF_LATEST_END, "")
+        ): selector.TimeSelector(),
+        vol.Required(
+            CONF_SEMI_CONTINUOUS, default=defaults.get(CONF_SEMI_CONTINUOUS, True)
+        ): selector.BooleanSelector(),
+        vol.Required(
+            CONF_SINGLE_CONSTANT, default=defaults.get(CONF_SINGLE_CONSTANT, False)
+        ): selector.BooleanSelector(),
+        vol.Optional(
+            CONF_STARTUP_PENALTY, default=defaults.get(CONF_STARTUP_PENALTY, 0)
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(min=0, max=100, step="any", mode="box")
+        ),
+        vol.Optional(
+            CONF_POWER_SENSOR, default=defaults.get(CONF_POWER_SENSOR, "")
+        ): selector.EntitySelector(
+            selector.EntitySelectorConfig(domain="sensor", device_class="power")
+        ),
+    }
+
+
+def _clean_deferrable(user_input: dict[str, Any]) -> dict[str, Any]:
+    """Drop empty optional fields so absent means "unset", not "midnight"."""
+    return {key: value for key, value in user_input.items() if value not in (None, "")}
+
+
+class DeferrableLoadSubentryFlow(ConfigSubentryFlow):
+    """Add or reconfigure one deferrable load."""
+
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
+        if user_input is not None:
+            data = _clean_deferrable(user_input)
+            return self.async_create_entry(title=data[CONF_NAME], data=data)
+
+        return self.async_show_form(step_id="user", data_schema=vol.Schema(deferrable_schema({})))
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        subentry = self._get_reconfigure_subentry()
+
+        if user_input is not None:
+            data = _clean_deferrable(user_input)
+            return self.async_update_and_abort(
+                self._get_entry(), subentry, title=data[CONF_NAME], data=data
+            )
+
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=vol.Schema(deferrable_schema(dict(subentry.data))),
+        )
 
 
 def battery_schema(defaults: dict[str, Any]) -> dict[Any, Any]:

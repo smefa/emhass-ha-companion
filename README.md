@@ -6,7 +6,7 @@ EMHASS is an excellent energy optimiser with a difficult front door. Using it to
 
 This integration answers that. Install the EMHASS add-on, install this, answer a short config flow, and get a working optimised home.
 
-> **Status: early.** Phase 1 (plan retrieval and scheduling) is implemented. Deferrable-load control, inverter control and the dashboard cards are not yet. See [Roadmap](#roadmap).
+> **Status: early.** Plan retrieval, scheduling and deferrable loads are implemented. Inverter control and the dashboard cards are not. Nothing writes to your hardware yet. See [Roadmap](#roadmap).
 
 ---
 
@@ -83,6 +83,45 @@ Two cadences:
 
 The day-ahead run is **event-driven, not a fixed clock time**. It fires when the price series actually gains a new day. Markets publish at different hours and publication slips; a fixed time means quietly optimising against yesterday's prices whenever it does. A configurable fallback time exists as a backstop.
 
+## Deferrable loads
+
+A deferrable load is anything whose *timing* the optimiser may choose: a dishwasher, a car charger, a pool pump. Tell it the load needs three hours before morning and it decides which three.
+
+Add them under **Settings → Devices & Services → EMHASS Companion → Add deferrable load**. Each becomes its own device, with its own entities, added and removed independently.
+
+Setup asks only for things that rarely change — power, hours, whether it runs at full power or can be modulated, whether it may be interrupted. Everything you might change day to day becomes a control on the load's own page:
+
+| Entity | |
+|---|---|
+| `binary_sensor.<load>_should_run` | **The one to automate against.** Unknown rather than off when there is no usable plan |
+| `sensor.<load>_scheduled_power` | Planned power now, with the full schedule in its `schedule` attribute |
+| `sensor.<load>_next_start` | When it is next due to start |
+| `sensor.<load>_runtime_today` | How long it has run today |
+| `switch.<load>_enabled` | Include this load in the optimisation at all |
+| `switch.<load>_restrict_to_a_time_window` | Whether the window below applies |
+| `time.<load>_earliest_start` / `_latest_finish` | The window. May cross midnight |
+| `number.<load>_power_when_running` / `_hours_needed_per_day` | |
+| `select.<load>_mode` | Follow the plan / Force on / Force off |
+
+Two distinctions worth knowing, because conflating either causes confusion:
+
+**Mode overrides the signal, not the plan.** Force off makes `should_run` off, but EMHASS is still asked to schedule the load. To leave a load out of planning entirely, turn off its **Enabled** switch. Keeping these separate means pausing a load never silently changes the problem being solved.
+
+**A power sensor is optional but worth adding.** With one, the integration can tell EMHASS the load is already running — so it is not charged a start-up cost twice, and is not asked to repeat work it has already done today. Runtime is counted from that sensor and reset at local midnight, because EMHASS has no notion of a day boundary for it.
+
+Automating against a load looks like:
+
+```yaml
+triggers:
+  - trigger: state
+    entity_id: binary_sensor.dishwasher_should_run
+    to: "on"
+actions:
+  - action: switch.turn_on
+    target:
+      entity_id: switch.dishwasher
+```
+
 ## Entities
 
 | Entity | |
@@ -136,10 +175,12 @@ response_variable: result
 | Phase | Status |
 |---|---|
 | 1 — Plan retrieval, profiles, scheduling, sensors | **done** |
-| 2 — Deferrable loads as config subentries | not started |
+| 2 — Deferrable loads as config subentries | **done** |
 | 3 — Inverter profiles, executor, dry-run gate, watchdog | not started |
 | 4 — Custom dashboard cards | not started |
 | 5 — More source profiles, translations, docs | partial |
+
+`switch.emhass_control_enabled` and `select.emhass_mode` exist and are wired into the plan's staleness logic, but nothing acts on them yet — the executor is phase 3. Until then this integration only ever *reads*, and acting on `binary_sensor.<load>_should_run` is up to your own automations.
 
 ## Development
 

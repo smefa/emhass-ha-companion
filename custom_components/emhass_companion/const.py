@@ -85,6 +85,11 @@ CONF_LATEST_END: Final = "latest_end"
 CONF_SEMI_CONTINUOUS: Final = "semi_continuous"
 CONF_SINGLE_CONSTANT: Final = "single_constant"
 CONF_STARTUP_PENALTY: Final = "startup_penalty"
+# Optional: the load's own power sensor. Without it EMHASS is never told that a
+# load is already running, so it can re-charge a startup penalty or re-schedule
+# work already done today.
+CONF_POWER_SENSOR: Final = "power_sensor"
+CONF_USE_TIME_WINDOW: Final = "use_time_window"
 
 SUBENTRY_TYPE_DEFERRABLE: Final = "deferrable_load"
 

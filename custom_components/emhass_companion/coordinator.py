@@ -22,8 +22,8 @@ from .const import (
     PROFILE_KIND_LOAD,
     PROFILE_KIND_PRICE,
     PROFILE_KIND_PV,
-    SUBENTRY_TYPE_DEFERRABLE,
 )
+from .deferrable import DeferrableRegistry
 from .models import DeferrableLoad, LastRun, Plan, Series
 from .payload import PayloadInputs, PayloadResult, build_payload
 from .profiles import (
@@ -75,6 +75,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         hass: HomeAssistant,
         entry: ConfigEntry,
         client: EmhassClient,
+        loads: DeferrableRegistry,
     ) -> None:
         super().__init__(
             hass,
@@ -84,6 +85,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             update_interval=None,
         )
         self.client = client
+        self.loads = loads
         self.config = EmhassConfig.from_entry(entry)
         self.profiles: dict[str, Profile] = {}
         self.profile_errors: dict[str, str] = {}
@@ -101,19 +103,13 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
 
     # -- deferrable loads -----------------------------------------------------
 
-    @property
-    def deferrable_loads(self) -> list[DeferrableLoad]:
-        """Configured deferrable loads, in a stable order.
+    def deferrable_loads(self, now: datetime) -> list[DeferrableLoad]:
+        """Live deferrable loads, projected for a request at ``now``.
 
-        Order defines the mapping onto EMHASS's ``P_deferrable{k}`` columns, so
-        it must not depend on dictionary iteration luck.
+        Read from the registry rather than the subentries, because the values a
+        user adjusts day to day live in entities; the subentry only seeds them.
         """
-        loads = [
-            DeferrableLoad.from_subentry(subentry_id, dict(subentry.data))
-            for subentry_id, subentry in self.config_entry.subentries.items()
-            if subentry.subentry_type == SUBENTRY_TYPE_DEFERRABLE
-        ]
-        return sorted(loads, key=lambda load: (load.name.lower(), load.subentry_id))
+        return self.loads.to_loads(now, self.config.time_step_minutes)
 
     # -- running --------------------------------------------------------------
 
@@ -186,14 +182,15 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         for selection in (config.price, config.pv, config.load):
             settings.update(self._settings(selection))
 
+        now = dt_util.utcnow()
         inputs = PayloadInputs(
             action=action,
-            now=dt_util.utcnow(),
+            now=now,
             time_step_minutes=config.time_step_minutes,
             horizon_steps=config.horizon_steps,
             battery=config.battery,
             grid=config.grid,
-            loads=self.deferrable_loads,
+            loads=self.deferrable_loads(now),
             pv=pv or None,
             load=load or None,
             buy_price=buy,

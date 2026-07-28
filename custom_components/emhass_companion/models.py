@@ -225,7 +225,11 @@ class GridConfig:
 
 @dataclass(slots=True)
 class DeferrableLoad:
-    """One deferrable load, backed by a config subentry.
+    """One deferrable load, as sent in a single optimisation request.
+
+    A snapshot, produced by :meth:`deferrable.DeferrableRuntime.to_load`. The
+    live, user-adjustable state lives in that registry; this type only ever
+    describes what one request was asked to solve.
 
     ``earliest_start`` / ``latest_end`` are wall-clock times. EMHASS wants
     *timestep indices relative to the moment the optimisation is launched*, so
@@ -250,28 +254,6 @@ class DeferrableLoad:
     current_state: bool = False
     current_power_w: float = 0.0
     completed_timesteps: int = 0
-
-    @classmethod
-    def from_subentry(cls, subentry_id: str, data: dict[str, Any]) -> DeferrableLoad:
-        return cls(
-            subentry_id=subentry_id,
-            name=data["name"],
-            nominal_power_w=float(data.get("nominal_power_w", 0) or 0),
-            operating_hours=float(data.get("operating_hours", 0) or 0),
-            earliest_start=_parse_time(data.get("earliest_start")),
-            latest_end=_parse_time(data.get("latest_end")),
-            semi_continuous=bool(data.get("semi_continuous", True)),
-            single_constant=bool(data.get("single_constant", False)),
-            startup_penalty=float(data.get("startup_penalty", 0) or 0),
-        )
-
-
-def _parse_time(value: Any) -> time | None:
-    if value in (None, ""):
-        return None
-    if isinstance(value, time):
-        return value
-    return time.fromisoformat(str(value))
 
 
 # --- Plan models -------------------------------------------------------------

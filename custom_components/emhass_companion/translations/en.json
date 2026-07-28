@@ -4,7 +4,9 @@
       "user": {
         "title": "Connect to EMHASS",
         "description": "EMHASS Companion drives an existing EMHASS installation. Version {min_version} or newer is required.\n\nIf you run the EMHASS add-on, the address below is filled in for you.",
-        "data": { "url": "EMHASS address" },
+        "data": {
+          "url": "EMHASS address"
+        },
         "data_description": {
           "url": "For example http://localhost:5000, or the add-on's internal address."
         }
@@ -12,7 +14,9 @@
       "price": {
         "title": "Electricity prices",
         "description": "Only sources you have installed are listed.\n\n{profiles}",
-        "data": { "profile": "Price source" }
+        "data": {
+          "profile": "Price source"
+        }
       },
       "price_options": {
         "title": "Configure {profile}",
@@ -42,7 +46,9 @@
       "pv": {
         "title": "Solar forecast",
         "description": "Choose where the PV production forecast comes from. Pick **No solar** if you have no panels.\n\n{profiles}",
-        "data": { "profile": "Solar forecast source" }
+        "data": {
+          "profile": "Solar forecast source"
+        }
       },
       "pv_options": {
         "title": "Configure {profile}",
@@ -51,7 +57,9 @@
       "load": {
         "title": "House consumption",
         "description": "How EMHASS should predict your household's baseline consumption.\n\n{profiles}",
-        "data": { "profile": "Load forecast source" }
+        "data": {
+          "profile": "Load forecast source"
+        }
       },
       "load_options": {
         "title": "Configure {profile}",
@@ -163,22 +171,64 @@
   },
   "entity": {
     "sensor": {
-      "pv_forecast": { "name": "Planned solar production" },
-      "load_forecast": { "name": "Planned house consumption" },
-      "grid_forecast": { "name": "Planned grid power" },
-      "battery_power": { "name": "Planned battery power" },
-      "battery_soc": { "name": "Planned battery level" },
-      "buy_price": { "name": "Import price" },
-      "sell_price": { "name": "Export price" },
-      "optimization_status": { "name": "Optimisation status" },
-      "plan_cost": { "name": "Planned cost" },
-      "last_payload": { "name": "Last request to EMHASS" }
+      "pv_forecast": {
+        "name": "Planned solar production"
+      },
+      "load_forecast": {
+        "name": "Planned house consumption"
+      },
+      "grid_forecast": {
+        "name": "Planned grid power"
+      },
+      "battery_power": {
+        "name": "Planned battery power"
+      },
+      "battery_soc": {
+        "name": "Planned battery level"
+      },
+      "buy_price": {
+        "name": "Import price"
+      },
+      "sell_price": {
+        "name": "Export price"
+      },
+      "optimization_status": {
+        "name": "Optimisation status"
+      },
+      "plan_cost": {
+        "name": "Planned cost"
+      },
+      "last_payload": {
+        "name": "Last request to EMHASS"
+      },
+      "scheduled_power": {
+        "name": "Scheduled power"
+      },
+      "next_start": {
+        "name": "Next start"
+      },
+      "runtime_today": {
+        "name": "Runtime today"
+      }
     },
     "binary_sensor": {
-      "plan_stale": { "name": "Plan out of date" }
+      "plan_stale": {
+        "name": "Plan out of date"
+      },
+      "should_run": {
+        "name": "Should run"
+      }
     },
     "switch": {
-      "control_enabled": { "name": "Control enabled" }
+      "control_enabled": {
+        "name": "Control enabled"
+      },
+      "load_enabled": {
+        "name": "Enabled"
+      },
+      "use_time_window": {
+        "name": "Restrict to a time window"
+      }
     },
     "select": {
       "system_mode": {
@@ -190,11 +240,39 @@
           "force_discharge": "Force discharge",
           "idle": "Idle"
         }
+      },
+      "load_mode": {
+        "name": "Mode",
+        "state": {
+          "auto": "Follow the plan",
+          "force_on": "Force on",
+          "force_off": "Force off"
+        }
       }
     },
     "button": {
-      "run_dayahead": { "name": "Rebuild day-ahead plan" },
-      "run_mpc": { "name": "Recalculate now" }
+      "run_dayahead": {
+        "name": "Rebuild day-ahead plan"
+      },
+      "run_mpc": {
+        "name": "Recalculate now"
+      }
+    },
+    "number": {
+      "nominal_power": {
+        "name": "Power when running"
+      },
+      "operating_hours": {
+        "name": "Hours needed per day"
+      }
+    },
+    "time": {
+      "earliest_start": {
+        "name": "Earliest start"
+      },
+      "latest_end": {
+        "name": "Latest finish"
+      }
     }
   },
   "issues": {
@@ -232,6 +310,67 @@
           "name": "Limit",
           "description": "How many series entries to include in the response."
         }
+      }
+    }
+  },
+  "config_subentries": {
+    "deferrable_load": {
+      "title": "Deferrable load",
+      "step": {
+        "user": {
+          "title": "Add a deferrable load",
+          "description": "A load whose timing the optimiser may choose: a dishwasher, a car charger, a pool pump. Things you change day to day become controls on the load's own page once it is added.",
+          "data": {
+            "name": "Name",
+            "nominal_power_w": "Power when running",
+            "operating_hours": "Hours needed per day",
+            "earliest_start": "Earliest start",
+            "latest_end": "Latest finish",
+            "semi_continuous": "Runs at full power only",
+            "single_constant": "Must run in one unbroken block",
+            "startup_penalty": "Cost of starting",
+            "power_sensor": "Power sensor"
+          },
+          "data_description": {
+            "nominal_power_w": "Roughly what this load draws while it is on.",
+            "operating_hours": "How long it needs to run in total. The optimiser chooses when.",
+            "earliest_start": "Only used if you turn on the load's time window switch afterwards.",
+            "latest_end": "May be earlier than the start time, for an overnight window.",
+            "semi_continuous": "On for a dishwasher or pump, which are either on or off. Off for something whose power can be varied, such as a car charger.",
+            "single_constant": "On if interrupting it would be a problem, such as a wash cycle.",
+            "startup_penalty": "Discourages switching on and off repeatedly. Leave at zero unless that is a problem.",
+            "power_sensor": "Optional but recommended. Lets the optimiser know the load is already running, so it is not charged a start-up cost twice or asked to repeat work it has already done today."
+          }
+        },
+        "reconfigure": {
+          "title": "Edit deferrable load",
+          "data": {
+            "name": "Name",
+            "nominal_power_w": "Power when running",
+            "operating_hours": "Hours needed per day",
+            "earliest_start": "Earliest start",
+            "latest_end": "Latest finish",
+            "semi_continuous": "Runs at full power only",
+            "single_constant": "Must run in one unbroken block",
+            "startup_penalty": "Cost of starting",
+            "power_sensor": "Power sensor"
+          },
+          "data_description": {
+            "nominal_power_w": "Roughly what this load draws while it is on.",
+            "operating_hours": "How long it needs to run in total. The optimiser chooses when.",
+            "earliest_start": "Only used if you turn on the load's time window switch afterwards.",
+            "latest_end": "May be earlier than the start time, for an overnight window.",
+            "semi_continuous": "On for a dishwasher or pump, which are either on or off. Off for something whose power can be varied, such as a car charger.",
+            "single_constant": "On if interrupting it would be a problem, such as a wash cycle.",
+            "startup_penalty": "Discourages switching on and off repeatedly. Leave at zero unless that is a problem.",
+            "power_sensor": "Optional but recommended. Lets the optimiser know the load is already running, so it is not charged a start-up cost twice or asked to repeat work it has already done today."
+          }
+        }
+      },
+      "entry_type": "Deferrable load",
+      "initiate_flow": {
+        "user": "Add deferrable load",
+        "reconfigure": "Edit deferrable load"
       }
     }
   }

@@ -20,6 +20,7 @@ from .const import (
     MIN_EMHASS_VERSION,
 )
 from .coordinator import EmhassCoordinator
+from .deferrable import DeferrableRegistry
 from .schedule import Scheduler
 from .services import async_register_services, async_unregister_services
 from .util import version_at_least
@@ -29,9 +30,11 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
     Platform.BUTTON,
+    Platform.NUMBER,
     Platform.SELECT,
     Platform.SENSOR,
     Platform.SWITCH,
+    Platform.TIME,
 ]
 
 type EmhassConfigEntry = ConfigEntry[EmhassRuntimeData]
@@ -40,9 +43,15 @@ type EmhassConfigEntry = ConfigEntry[EmhassRuntimeData]
 class EmhassRuntimeData:
     """Objects that live for the lifetime of a config entry."""
 
-    def __init__(self, coordinator: EmhassCoordinator, scheduler: Scheduler) -> None:
+    def __init__(
+        self,
+        coordinator: EmhassCoordinator,
+        scheduler: Scheduler,
+        loads: DeferrableRegistry,
+    ) -> None:
         self.coordinator = coordinator
         self.scheduler = scheduler
+        self.loads = loads
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bool:
@@ -56,12 +65,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
 
     _check_version(hass, version)
 
-    coordinator = EmhassCoordinator(hass, entry, client)
+    loads = DeferrableRegistry(hass, entry)
+    loads.sync()
+
+    coordinator = EmhassCoordinator(hass, entry, client, loads)
     await coordinator.async_load_profiles()
     _report_profile_errors(hass, coordinator)
 
     scheduler = Scheduler(hass, coordinator)
-    entry.runtime_data = EmhassRuntimeData(coordinator, scheduler)
+    entry.runtime_data = EmhassRuntimeData(coordinator, scheduler, loads)
 
     # Entities are created before the first optimisation so that a failed or
     # slow first run leaves a diagnosable integration rather than none at all.
@@ -70,7 +82,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     entry.async_on_unload(scheduler.async_stop)
+    entry.async_on_unload(loads.async_stop)
 
+    loads.async_start()
     scheduler.async_start()
     entry.async_create_background_task(hass, scheduler.async_run_initial(), "emhass_initial_run")
 

@@ -75,11 +75,17 @@ EXPECTED_ENTITY_KEYS = {
         "optimization_status",
         "plan_cost",
         "last_payload",
+        # per deferrable load
+        "scheduled_power",
+        "next_start",
+        "runtime_today",
     },
-    "binary_sensor": {"plan_stale"},
-    "switch": {"control_enabled"},
-    "select": {"system_mode"},
+    "binary_sensor": {"plan_stale", "should_run"},
+    "switch": {"control_enabled", "load_enabled", "use_time_window"},
+    "select": {"system_mode", "load_mode"},
     "button": {"run_dayahead", "run_mpc"},
+    "number": {"nominal_power", "operating_hours"},
+    "time": {"earliest_start", "latest_end"},
 }
 
 
@@ -94,11 +100,36 @@ def test_every_entity_has_a_translated_name(strings, platform, keys):
 
 
 def test_select_options_are_translated(strings):
-    from custom_components.emhass_companion.const import SYSTEM_MODES
+    from custom_components.emhass_companion.const import LOAD_MODES, SYSTEM_MODES
 
-    states = strings["entity"]["select"]["system_mode"]["state"]
-    for mode in SYSTEM_MODES:
-        assert mode in states, f"mode '{mode}' has no translation"
+    for key, modes in (("system_mode", SYSTEM_MODES), ("load_mode", LOAD_MODES)):
+        states = strings["entity"]["select"][key]["state"]
+        for mode in modes:
+            assert mode in states, f"{key} option '{mode}' has no translation"
+
+
+def test_deferrable_subentry_is_translated(strings):
+    """A subentry with no translations shows raw field names when adding a load."""
+    from custom_components.emhass_companion.config_flow import deferrable_schema
+    from custom_components.emhass_companion.const import SUBENTRY_TYPE_DEFERRABLE
+
+    subentry = strings["config_subentries"][SUBENTRY_TYPE_DEFERRABLE]
+    assert subentry["title"]
+
+    fields = {str(marker.schema) for marker in deferrable_schema({})}
+    for step in ("user", "reconfigure"):
+        labelled = set(subentry["step"][step]["data"])
+        assert fields <= labelled, f"{step} is missing labels for {fields - labelled}"
+
+
+def test_every_platform_is_forwarded(strings):
+    """A platform module that is never forwarded creates no entities at all."""
+    from custom_components.emhass_companion import PLATFORMS
+
+    forwarded = {platform.value for platform in PLATFORMS}
+    assert set(EXPECTED_ENTITY_KEYS) <= forwarded, (
+        f"not forwarded: {set(EXPECTED_ENTITY_KEYS) - forwarded}"
+    )
 
 
 # --- services ----------------------------------------------------------------
