@@ -4,3 +4,7 @@
 # so this file deliberately lists just the two direct tools.
 pytest-homeassistant-custom-component
 ruff
+
+# Pure-Python JavaScript parser, used to syntax-check the card bundle so
+# the frontend gets automated checking without adding a Node toolchain.
+esprima

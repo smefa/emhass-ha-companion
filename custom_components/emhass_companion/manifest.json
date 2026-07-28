@@ -2,7 +2,8 @@
   "domain": "emhass_companion",
   "name": "EMHASS Companion",
   "after_dependencies": [
-    "hassio"
+    "hassio",
+    "lovelace"
   ],
   "codeowners": [
     "@smefa"

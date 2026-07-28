@@ -89,6 +89,37 @@ def test_data_descriptions_only_describe_existing_fields():
             )
 
 
+def test_imported_home_assistant_components_are_declared():
+    """hassfest fails if a component is imported but not declared.
+
+    Only visible in CI otherwise, and the failure names the component rather
+    than the file, so it is worth catching here with the import in view.
+    """
+    import re
+
+    manifest = _json(COMPONENT / "manifest.json")
+    declared = set(manifest.get("dependencies", [])) | set(manifest.get("after_dependencies", []))
+    # `hassio` is imported lazily inside a try/except, which the regex below
+    # would otherwise miss.
+    pattern = re.compile(r"from homeassistant\.components\.(\w+)")
+    used: set[str] = set()
+    for path in COMPONENT.rglob("*.py"):
+        used |= set(pattern.findall(path.read_text(encoding="utf-8")))
+
+    # Entity platforms are provided by the integration itself, not depended on.
+    platforms = {
+        "sensor",
+        "binary_sensor",
+        "switch",
+        "select",
+        "button",
+        "number",
+        "time",
+    }
+    missing = used - declared - platforms
+    assert not missing, f"imported but not declared in manifest.json: {missing}"
+
+
 def test_hacs_manifest_is_valid():
     hacs = _json(REPO / "hacs.json")
     assert hacs["name"]
@@ -267,3 +298,36 @@ def test_every_inverter_profile_defines_the_fallback_action(strings):
     for path in profiles:
         actions = load_yaml(str(path))["actions"]
         assert MODE_SELF_CONSUME in actions, f"{path.name} has no self_consume action"
+
+
+# --- dashboard cards ---------------------------------------------------------
+
+
+def test_card_bundle_parses_as_a_javascript_module():
+    """Syntax-check the card bundle without needing Node.
+
+    The bundle is plain ES2017-compatible JavaScript on purpose: it can then be
+    parsed by a pure-Python parser, which is the only way this file gets any
+    automated checking at all. Optional chaining and nullish coalescing are
+    deliberately avoided for the same reason.
+    """
+    esprima = pytest.importorskip("esprima")
+
+    bundle = COMPONENT / "frontend" / "emhass-cards.js"
+    assert bundle.is_file(), f"card bundle missing at {bundle}"
+    esprima.parseModule(bundle.read_text(encoding="utf-8"))
+
+
+def test_card_bundle_avoids_syntax_the_parser_cannot_check():
+    """Guard the constraint above, since a lapse silently disables the check."""
+    source = (COMPONENT / "frontend" / "emhass-cards.js").read_text(encoding="utf-8")
+    assert "?." not in source, "optional chaining defeats the syntax check"
+    assert "??" not in source, "nullish coalescing defeats the syntax check"
+
+
+def test_cards_are_registered_with_the_picker():
+    """Without window.customCards the cards never appear in the UI picker."""
+    source = (COMPONENT / "frontend" / "emhass-cards.js").read_text(encoding="utf-8")
+    assert "window.customCards" in source
+    for card in ("emhass-plan-card", "emhass-deferrable-card"):
+        assert f'customElements.define("{card}"' in source

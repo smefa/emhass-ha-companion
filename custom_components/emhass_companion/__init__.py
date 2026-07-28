@@ -22,6 +22,7 @@ from .const import (
 from .coordinator import EmhassCoordinator
 from .deferrable import DeferrableRegistry
 from .executor import Executor
+from .frontend import async_setup_frontend
 from .schedule import Scheduler
 from .services import async_register_services, async_unregister_services
 from .util import version_at_least
@@ -67,6 +68,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
         raise ConfigEntryNotReady(f"Cannot reach EMHASS: {err}") from err
 
     _check_version(hass, version)
+    await _async_setup_cards(hass, entry)
 
     loads = DeferrableRegistry(hass, entry)
     loads.sync()
@@ -115,6 +117,28 @@ async def async_unload_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> b
     if unloaded and len(hass.config_entries.async_entries(DOMAIN)) == 1:
         async_unregister_services(hass)
     return unloaded
+
+
+async def _async_setup_cards(hass: HomeAssistant, entry: EmhassConfigEntry) -> None:
+    """Serve and register the dashboard cards.
+
+    A failure here costs the user the cards, never the integration -- the
+    entities and the optimisation are what actually matter.
+    """
+    try:
+        await async_setup_frontend(hass, _integration_version(hass))
+    except Exception as err:  # noqa: BLE001 - cards are cosmetic; setup is not
+        _LOGGER.warning("Could not register the dashboard cards: %s", err)
+
+
+def _integration_version(hass: HomeAssistant) -> str:
+    """Version string used to cache-bust the card bundle."""
+    from homeassistant.loader import async_get_loaded_integration
+
+    try:
+        return async_get_loaded_integration(hass, DOMAIN).version or "0"
+    except Exception:  # noqa: BLE001 - only affects cache busting
+        return "0"
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: EmhassConfigEntry) -> None:
