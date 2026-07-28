@@ -271,3 +271,61 @@ def test_unparseable_yaml_is_reported_not_raised(tmp_path):
 
     assert len(result.errors) == 1
     assert "price/fixed" in result.profiles
+
+
+# --- the degradation matrix --------------------------------------------------
+
+# "Assume nothing is installed" is the integration's first design principle, so
+# it is enforced structurally rather than case by case: for every kind of data
+# source there must be a path through setup that needs no other integration and
+# no entity to point at.
+
+ENTITY_SELECTORS = {"entity", "device", "config_entry", "target"}
+
+
+def _needs_another_integration(document) -> bool:
+    detect = document.get("detect") or {}
+    if not detect or detect.get("always"):
+        return False
+    return bool(detect.get("integration") or detect.get("any_integration"))
+
+
+def _needs_an_entity(document) -> bool:
+    for option in (document.get("options") or {}).values():
+        if not option.get("required", True):
+            continue
+        if ENTITY_SELECTORS & set(option["selector"]):
+            return True
+    return False
+
+
+@pytest.mark.parametrize("kind", ["price", "pv", "load"])
+def test_every_source_kind_has_a_path_needing_nothing(kind: str):
+    """A user with no price, solar or load integration must still get set up.
+
+    Without this, a house with none of the usual integrations reaches a step in
+    the config flow where every option is unusable.
+    """
+    usable = []
+    for path in sorted((BUILTIN_ROOT / kind).glob("*.yaml")):
+        document = validate_document(load_yaml(str(path)))
+        if not _needs_another_integration(document) and not _needs_an_entity(document):
+            usable.append(path.stem)
+
+    assert usable, (
+        f"no '{kind}' profile works without another integration or an entity; "
+        "a house without one cannot complete setup"
+    )
+
+
+def test_inverter_control_is_optional():
+    """Battery control must be skippable; the plan is still worth having."""
+    from custom_components.emhass_companion.configuration import EmhassConfig
+
+    config = EmhassConfig(url="http://x")
+    assert not config.inverter, "an unset inverter profile must be falsy"
+
+
+@pytest.mark.parametrize("kind", ["price", "pv", "load", "inverter"])
+def test_every_kind_ships_at_least_one_profile(kind: str):
+    assert list((BUILTIN_ROOT / kind).glob("*.yaml")), f"no {kind} profiles shipped"

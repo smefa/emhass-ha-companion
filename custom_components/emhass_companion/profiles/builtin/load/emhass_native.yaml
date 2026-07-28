@@ -1,0 +1,18 @@
+name: Typical household profile (no sensor needed)
+kind: load
+version: 1
+description: >-
+  Lets EMHASS assume a generic daily consumption profile. Needs no power
+  sensor at all.
+notes: >-
+  Choose this if you have no sensor measuring house consumption, or none that
+  excludes your deferrable loads. It is the least accurate option -- the
+  optimiser is working from a generic household shape rather than yours -- but
+  it makes prices, solar and battery scheduling usable immediately, and you
+  can switch to a real sensor later.
+
+detect:
+  always: true
+
+emhass:
+  load_forecast_method: typical
