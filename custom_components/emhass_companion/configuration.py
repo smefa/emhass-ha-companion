@@ -16,6 +16,7 @@ from homeassistant.config_entries import ConfigEntry
 from .const import (
     CONF_DAYAHEAD_FALLBACK_TIME,
     CONF_HORIZON_HOURS,
+    CONF_INVERTER,
     CONF_LOAD,
     CONF_MPC_INTERVAL,
     CONF_PRICE,
@@ -68,6 +69,7 @@ class EmhassConfig:
     price: ProfileSelection = field(default_factory=ProfileSelection)
     pv: ProfileSelection = field(default_factory=ProfileSelection)
     load: ProfileSelection = field(default_factory=ProfileSelection)
+    inverter: ProfileSelection = field(default_factory=ProfileSelection)
     tariff: Tariff = field(default_factory=lambda: Tariff.from_dict({}))
     battery: BatteryConfig = field(default_factory=BatteryConfig)
     grid: GridConfig = field(default_factory=GridConfig)
@@ -86,6 +88,7 @@ class EmhassConfig:
             price=ProfileSelection.from_dict(options.get(CONF_PRICE)),
             pv=ProfileSelection.from_dict(options.get(CONF_PV)),
             load=ProfileSelection.from_dict(options.get(CONF_LOAD)),
+            inverter=ProfileSelection.from_dict(options.get(CONF_INVERTER)),
             tariff=Tariff.from_dict(options.get("tariff")),
             battery=BatteryConfig.from_dict(options.get("battery")),
             grid=GridConfig.from_dict(options.get("grid")),

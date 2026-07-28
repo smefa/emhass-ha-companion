@@ -28,9 +28,11 @@ import voluptuous as vol
 from .api import EmhassClient, EmhassError
 from .const import (
     CONF_ADDER,
+    CONF_CONTROL_ENTITY,
     CONF_DAYAHEAD_FALLBACK_TIME,
     CONF_EARLIEST_START,
     CONF_HORIZON_HOURS,
+    CONF_INVERTER,
     CONF_LATEST_END,
     CONF_LOAD,
     CONF_MODE,
@@ -63,6 +65,7 @@ from .const import (
     DEFAULT_URL,
     DOMAIN,
     MIN_EMHASS_VERSION,
+    PROFILE_KIND_INVERTER,
     PROFILE_KIND_LOAD,
     PROFILE_KIND_PRICE,
     PROFILE_KIND_PV,
@@ -412,6 +415,11 @@ def deferrable_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
         ): selector.EntitySelector(
             selector.EntitySelectorConfig(domain="sensor", device_class="power")
         ),
+        vol.Optional(
+            CONF_CONTROL_ENTITY, default=defaults.get(CONF_CONTROL_ENTITY, "")
+        ): selector.EntitySelector(
+            selector.EntitySelectorConfig(domain=["switch", "input_boolean", "script"])
+        ),
     }
 
 
@@ -552,10 +560,72 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
     limit should not mean re-answering every question about price sources.
     """
 
+    def __init__(self) -> None:
+        self._inverter_key: str = ""
+        self._inverter_profiles: dict[str, Profile] = {}
+
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         return self.async_show_menu(
             step_id="init",
-            menu_options=["battery", "grid", "tariff"],
+            menu_options=["battery", "grid", "tariff", "inverter"],
+        )
+
+    async def async_step_inverter(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Choose how the battery is actually commanded.
+
+        Optional. Without a profile the integration only ever reads, and the
+        plan is yours to act on however you like.
+        """
+        options = dict(self.config_entry.options)
+        profiles = (await async_load_profiles(self.hass)).profiles
+        choices = available_profiles(self.hass, profiles, PROFILE_KIND_INVERTER)
+
+        if user_input is not None:
+            key = user_input.get(CONF_PROFILE)
+            if not key:
+                options[CONF_INVERTER] = {}
+                return self.async_create_entry(data=options)
+            self._inverter_key = key
+            self._inverter_profiles = profiles
+            return await self.async_step_inverter_options()
+
+        current = (options.get(CONF_INVERTER) or {}).get(CONF_PROFILE)
+        return self.async_show_form(
+            step_id="inverter",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(
+                        CONF_PROFILE, description={"suggested_value": current}
+                    ): _profile_selector(choices)
+                }
+            ),
+        )
+
+    async def async_step_inverter_options(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        options = dict(self.config_entry.options)
+        profile = self._inverter_profiles[self._inverter_key]
+
+        if user_input is not None or not profile.options:
+            options[CONF_INVERTER] = {
+                CONF_PROFILE: self._inverter_key,
+                CONF_PROFILE_OPTIONS: user_input or {},
+            }
+            return self.async_create_entry(data=options)
+
+        stored = (options.get(CONF_INVERTER) or {}).get(CONF_PROFILE_OPTIONS) or {}
+        return self.async_show_form(
+            step_id="inverter_options",
+            data_schema=self.add_suggested_values_to_schema(
+                vol.Schema(profile.selector_schema()), stored
+            ),
+            description_placeholders={
+                "profile": profile.name,
+                "notes": profile.notes or "",
+            },
         )
 
     async def async_step_battery(

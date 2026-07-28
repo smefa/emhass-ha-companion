@@ -79,6 +79,7 @@ EXPECTED_ENTITY_KEYS = {
         "scheduled_power",
         "next_start",
         "runtime_today",
+        "battery_action",
     },
     "binary_sensor": {"plan_stale", "should_run"},
     "switch": {"control_enabled", "load_enabled", "use_time_window"},
@@ -194,6 +195,31 @@ def test_config_flow_steps_are_translated(strings):
 
 def test_options_flow_menu_is_translated(strings):
     menu = strings["options"]["step"]["init"]["menu_options"]
-    for option in ("battery", "grid", "tariff"):
+    for option in ("battery", "grid", "tariff", "inverter"):
         assert option in menu
         assert option in strings["options"]["step"]
+
+
+def test_battery_action_states_are_translated(strings):
+    from custom_components.emhass_companion.const import BATTERY_ACTIONS
+
+    states = strings["entity"]["sensor"]["battery_action"]["state"]
+    for action in BATTERY_ACTIONS:
+        assert action in states, f"battery action '{action}' has no translation"
+
+
+def test_every_inverter_profile_defines_the_fallback_action(strings):
+    """The executor falls back to self-consumption whenever a plan goes stale.
+
+    A profile missing that action leaves the watchdog with nothing to do.
+    """
+    from homeassistant.util.yaml import load_yaml
+
+    from custom_components.emhass_companion.const import MODE_SELF_CONSUME
+    from custom_components.emhass_companion.profiles import BUILTIN_ROOT
+
+    profiles = sorted((BUILTIN_ROOT / "inverter").glob("*.yaml"))
+    assert profiles, "no built-in inverter profiles found"
+    for path in profiles:
+        actions = load_yaml(str(path))["actions"]
+        assert MODE_SELF_CONSUME in actions, f"{path.name} has no self_consume action"

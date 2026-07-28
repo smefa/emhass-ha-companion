@@ -26,6 +26,7 @@ from homeassistant.helpers.event import async_track_state_change_event, async_tr
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_CONTROL_ENTITY,
     CONF_EARLIEST_START,
     CONF_LATEST_END,
     CONF_NOMINAL_POWER,
@@ -61,6 +62,7 @@ class DeferrableRuntime:
     single_constant: bool = False
     startup_penalty: float = 0.0
     power_sensor: str | None = None
+    control_entity: str | None = None
 
     # Owned by entities from here down.
     enabled: bool = True
@@ -280,6 +282,7 @@ def _apply_subentry_fields(load: DeferrableRuntime, title: str, data: dict) -> N
     load.single_constant = bool(data.get(CONF_SINGLE_CONSTANT, False))
     load.startup_penalty = float(data.get(CONF_STARTUP_PENALTY, 0) or 0)
     load.power_sensor = data.get(CONF_POWER_SENSOR) or None
+    load.control_entity = data.get(CONF_CONTROL_ENTITY) or None
 
 
 def _parse_time(value) -> time | None:

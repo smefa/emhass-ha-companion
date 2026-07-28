@@ -16,6 +16,7 @@ select = [
     "I",    # isort
     "UP",   # pyupgrade
     "B",    # bugbear
+    "BLE",  # blind except - allowed only with an explicit noqa and a reason
     "SIM",  # simplify
     "RUF",
     "ASYNC",

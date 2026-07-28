@@ -6,7 +6,7 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -21,6 +21,7 @@ from .const import (
 )
 from .coordinator import EmhassCoordinator
 from .deferrable import DeferrableRegistry
+from .executor import Executor
 from .schedule import Scheduler
 from .services import async_register_services, async_unregister_services
 from .util import version_at_least
@@ -48,10 +49,12 @@ class EmhassRuntimeData:
         coordinator: EmhassCoordinator,
         scheduler: Scheduler,
         loads: DeferrableRegistry,
+        executor: Executor,
     ) -> None:
         self.coordinator = coordinator
         self.scheduler = scheduler
         self.loads = loads
+        self.executor = executor
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bool:
@@ -73,7 +76,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
     _report_profile_errors(hass, coordinator)
 
     scheduler = Scheduler(hass, coordinator)
-    entry.runtime_data = EmhassRuntimeData(coordinator, scheduler, loads)
+    executor = Executor(hass, coordinator)
+    entry.runtime_data = EmhassRuntimeData(coordinator, scheduler, loads, executor)
 
     # Entities are created before the first optimisation so that a failed or
     # slow first run leaves a diagnosable integration rather than none at all.
@@ -83,6 +87,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     entry.async_on_unload(scheduler.async_stop)
     entry.async_on_unload(loads.async_stop)
+
+    @callback
+    def _async_plan_updated() -> None:
+        """Act on every new plan.
+
+        Registered after the platforms are set up, so the control switch has
+        already restored its value and a restart cannot briefly act while the
+        gate still reads as off-by-default.
+        """
+        entry.async_create_background_task(
+            hass, executor.async_apply(), "emhass_apply", eager_start=False
+        )
+
+    entry.async_on_unload(coordinator.async_add_listener(_async_plan_updated))
 
     loads.async_start()
     scheduler.async_start()

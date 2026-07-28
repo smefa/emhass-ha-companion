@@ -19,6 +19,7 @@ from .const import (
     ACTION_DAYAHEAD,
     ACTION_MPC,
     DOMAIN,
+    MODE_AUTO,
     PROFILE_KIND_LOAD,
     PROFILE_KIND_PRICE,
     PROFILE_KIND_PV,
@@ -90,6 +91,12 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         self.profiles: dict[str, Profile] = {}
         self.profile_errors: dict[str, str] = {}
         self.data = EmhassData()
+
+        # Owned by the control switch and the mode select. Held here rather than
+        # read back out of the state machine so the executor never has to parse
+        # entity states to find out whether it is allowed to act.
+        self.control_enabled = False
+        self.system_mode = MODE_AUTO
 
     # -- lifecycle ------------------------------------------------------------
 
@@ -223,6 +230,12 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
                 "available. Reconfigure the integration to choose another."
             )
         return profile
+
+    @property
+    def soc_percent(self) -> float | None:
+        """Battery state of charge as a percentage, for inverter templates."""
+        fraction = self._read_soc()
+        return None if fraction is None else fraction * 100
 
     def _read_soc(self) -> float | None:
         """Current battery state of charge, as a fraction.

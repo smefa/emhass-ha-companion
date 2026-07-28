@@ -6,7 +6,7 @@ EMHASS is an excellent energy optimiser with a difficult front door. Using it to
 
 This integration answers that. Install the EMHASS add-on, install this, answer a short config flow, and get a working optimised home.
 
-> **Status: early.** Plan retrieval, scheduling and deferrable loads are implemented. Inverter control and the dashboard cards are not. Nothing writes to your hardware yet. See [Roadmap](#roadmap).
+> **Status: early.** Plan retrieval, scheduling, deferrable loads and battery control are implemented. The dashboard cards are not. Control ships **off** — see [Handing over control](#handing-over-control). See [Roadmap](#roadmap).
 
 ---
 
@@ -141,6 +141,28 @@ actions:
 
 Battery entities only exist if you configured a battery.
 
+## Handing over control
+
+The integration can command your battery and switch your deferrable loads. It ships unable to do either, and that is deliberate: you almost certainly arrive with working automations, and handing control to a newly configured optimiser before watching it make sensible decisions is how a battery ends up charging at the day's peak price.
+
+While `switch.emhass_control_enabled` is off, the executor still runs on every cycle and records exactly what it *would* have done — the action, the power, the reasoning, and the precise service calls — on `sensor.emhass_battery_action`. That is the migration path:
+
+1. Configure everything, leave control **off**.
+2. Watch `sensor.emhass_battery_action` alongside your existing automations for a few days. Its `steps` attribute is the literal list of calls it would have made.
+3. When you agree with its judgement, turn the switch on and retire the automations.
+
+**Battery control** is configured under **Configure → Battery control**, by choosing an inverter profile. Two ship: one driving a *mode select plus a power number* entity (common for Modbus integrations), and one calling *a script of yours per action*, for anything needing a sequence of writes. This integration never talks to hardware directly — it only ever calls entities and services your own inverter integration already provides. Leave the profile unset and the battery is never touched.
+
+**Deferrable loads** are switched only if you set a control entity on the load. Leave it empty and the load stays advisory: `binary_sensor.<load>_should_run` still tracks the plan, and acting on it remains your automation's job.
+
+Three safety behaviours, each covered by a test:
+
+- **Staleness watchdog.** If a plan stops being refreshed for more than twice the recalculation interval, the executor stops following it and falls back to self-consumption. A stale plan describes a world that no longer exists.
+- **Deadband.** An unchanged command is not reissued, so a slow bus is not hammered every cycle. The deadband never suppresses a *change of action* — a switch from charging to discharging is always sent.
+- **Manual override.** `select.emhass_mode` set to anything but *Automatic* suspends the optimiser entirely rather than competing with it.
+
+A failed service call is recorded and retried on the next cycle rather than being marked as applied — otherwise the deadband would suppress the retry.
+
 ## Data sources
 
 Every source is a **YAML profile** — data, not code. Adding support for another integration means writing one file, and you can drop it in yourself without waiting for a release.
@@ -152,6 +174,7 @@ Built in today:
 | Price | Nord Pool (core), Nord Pool (HACS), Fixed tariff |
 | Solar | Solcast, EMHASS built-in (Open-Meteo), No solar |
 | Load | House load sensor, Forecast from an entity attribute |
+| Inverter | Mode select plus power number, Scripts |
 
 See **[docs/profiles.md](docs/profiles.md)** to write your own or contribute one.
 
@@ -176,11 +199,11 @@ response_variable: result
 |---|---|
 | 1 — Plan retrieval, profiles, scheduling, sensors | **done** |
 | 2 — Deferrable loads as config subentries | **done** |
-| 3 — Inverter profiles, executor, dry-run gate, watchdog | not started |
+| 3 — Inverter profiles, executor, dry-run gate, watchdog | **done** |
 | 4 — Custom dashboard cards | not started |
 | 5 — More source profiles, translations, docs | partial |
 
-`switch.emhass_control_enabled` and `select.emhass_mode` exist and are wired into the plan's staleness logic, but nothing acts on them yet — the executor is phase 3. Until then this integration only ever *reads*, and acting on `binary_sensor.<load>_should_run` is up to your own automations.
+Control is implemented but ships off; see [Handing over control](#handing-over-control).
 
 ## Development
 

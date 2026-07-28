@@ -118,7 +118,8 @@
         "menu_options": {
           "battery": "Battery",
           "grid": "Grid and schedule",
-          "tariff": "Buy and sell prices"
+          "tariff": "Buy and sell prices",
+          "inverter": "Battery control"
         }
       },
       "battery": {
@@ -157,6 +158,17 @@
           "sell_adder": "Export addition per kWh",
           "sell_template": "Export template"
         }
+      },
+      "inverter": {
+        "title": "Battery control",
+        "description": "How the battery is actually commanded. Leave this unset and the integration only ever reads — the plan is yours to act on however you like.\n\nNothing is written to your hardware until you also turn on the Control enabled switch.",
+        "data": {
+          "profile": "Inverter profile"
+        }
+      },
+      "inverter_options": {
+        "title": "Configure {profile}",
+        "description": "{notes}"
       }
     }
   },
@@ -209,6 +221,15 @@
       },
       "runtime_today": {
         "name": "Runtime today"
+      },
+      "battery_action": {
+        "name": "Battery action",
+        "state": {
+          "self_consume": "Self-consumption",
+          "force_charge": "Charging",
+          "force_discharge": "Discharging",
+          "idle": "Idle"
+        }
       }
     },
     "binary_sensor": {
@@ -329,7 +350,8 @@
             "semi_continuous": "Runs at full power only",
             "single_constant": "Must run in one unbroken block",
             "startup_penalty": "Cost of starting",
-            "power_sensor": "Power sensor"
+            "power_sensor": "Power sensor",
+            "control_entity": "Control entity"
           },
           "data_description": {
             "nominal_power_w": "Roughly what this load draws while it is on.",
@@ -339,7 +361,8 @@
             "semi_continuous": "On for a dishwasher or pump, which are either on or off. Off for something whose power can be varied, such as a car charger.",
             "single_constant": "On if interrupting it would be a problem, such as a wash cycle.",
             "startup_penalty": "Discourages switching on and off repeatedly. Leave at zero unless that is a problem.",
-            "power_sensor": "Optional but recommended. Lets the optimiser know the load is already running, so it is not charged a start-up cost twice or asked to repeat work it has already done today."
+            "power_sensor": "Optional but recommended. Lets the optimiser know the load is already running, so it is not charged a start-up cost twice or asked to repeat work it has already done today.",
+            "control_entity": "Optional. If set, the integration switches this on and off to follow the plan, once you enable control. Leave empty to keep control in your own automations."
           }
         },
         "reconfigure": {
@@ -353,7 +376,8 @@
             "semi_continuous": "Runs at full power only",
             "single_constant": "Must run in one unbroken block",
             "startup_penalty": "Cost of starting",
-            "power_sensor": "Power sensor"
+            "power_sensor": "Power sensor",
+            "control_entity": "Control entity"
           },
           "data_description": {
             "nominal_power_w": "Roughly what this load draws while it is on.",
@@ -363,7 +387,8 @@
             "semi_continuous": "On for a dishwasher or pump, which are either on or off. Off for something whose power can be varied, such as a car charger.",
             "single_constant": "On if interrupting it would be a problem, such as a wash cycle.",
             "startup_penalty": "Discourages switching on and off repeatedly. Leave at zero unless that is a problem.",
-            "power_sensor": "Optional but recommended. Lets the optimiser know the load is already running, so it is not charged a start-up cost twice or asked to repeat work it has already done today."
+            "power_sensor": "Optional but recommended. Lets the optimiser know the load is already running, so it is not charged a start-up cost twice or asked to repeat work it has already done today.",
+            "control_entity": "Optional. If set, the integration switches this on and off to follow the plan, once you enable control. Leave empty to keep control in your own automations."
           }
         }
       },

@@ -1,0 +1,72 @@
+name: Mode select plus a power number
+kind: inverter
+version: 1
+description: >-
+  For inverters exposed as a mode select entity and a charge/discharge power
+  number entity. Common for Modbus-based integrations.
+notes: >-
+  The mode option names must match your inverter integration exactly, including
+  capitalisation. Check the select entity's own list of options first. If your
+  inverter needs a sequence of writes rather than one, use the script profile
+  instead.
+
+detect:
+  always: true
+
+options:
+  mode_select:
+    name: Inverter mode entity
+    selector:
+      entity:
+        domain: select
+  power_number:
+    name: Charge/discharge power entity
+    selector:
+      entity:
+        domain: number
+  self_consume_option:
+    name: Self-consumption mode name
+    default: Self Consumption
+    selector:
+      text: {}
+  force_charge_option:
+    name: Forced charge mode name
+    default: Forced Charge
+    selector:
+      text: {}
+  force_discharge_option:
+    name: Forced discharge mode name
+    default: Forced Discharge
+    selector:
+      text: {}
+  idle_option:
+    name: Idle mode name
+    default: Stop
+    selector:
+      text: {}
+
+actions:
+  self_consume:
+    - service: select.select_option
+      target: {entity_id: "{{ options.mode_select }}"}
+      data: {option: "{{ options.self_consume_option }}"}
+  force_charge:
+    # Power first, then mode: setting the mode before the power can make the
+    # inverter act briefly on whatever value was left over from last time.
+    - service: number.set_value
+      target: {entity_id: "{{ options.power_number }}"}
+      data: {value: "{{ power_w }}"}
+    - service: select.select_option
+      target: {entity_id: "{{ options.mode_select }}"}
+      data: {option: "{{ options.force_charge_option }}"}
+  force_discharge:
+    - service: number.set_value
+      target: {entity_id: "{{ options.power_number }}"}
+      data: {value: "{{ power_w }}"}
+    - service: select.select_option
+      target: {entity_id: "{{ options.mode_select }}"}
+      data: {option: "{{ options.force_discharge_option }}"}
+  idle:
+    - service: select.select_option
+      target: {entity_id: "{{ options.mode_select }}"}
+      data: {option: "{{ options.idle_option }}"}

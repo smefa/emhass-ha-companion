@@ -20,6 +20,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
+from .const import BATTERY_ACTIONS
 from .coordinator import EmhassCoordinator, EmhassData
 from .deferrable import DeferrableRuntime
 from .entity import EmhassEntity, EmhassLoadEntity
@@ -190,6 +191,7 @@ async def async_setup_entry(
         descriptions.extend(BATTERY_SENSORS)
 
     async_add_entities(EmhassSensor(coordinator, description) for description in descriptions)
+    async_add_entities([EmhassDecisionSensor(coordinator)])
 
 
 class EmhassSensor(EmhassEntity, SensorEntity):
@@ -325,3 +327,34 @@ class LoadRuntimeTodaySensor(EmhassLoadEntity, RestoreSensor):
             "currently_running": self.load.is_running,
             "power_sensor": self.load.power_sensor,
         }
+
+
+class EmhassDecisionSensor(EmhassEntity, SensorEntity):
+    """What the executor last decided to do.
+
+    This is what makes the dry-run gate useful rather than merely safe: while
+    control is disabled the decision is still computed and shown here, along
+    with the exact service calls it resolved to, so it can be compared against
+    whatever automations are currently in charge before handing over.
+    """
+
+    _attr_translation_key = "battery_action"
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = list(BATTERY_ACTIONS)
+
+    def __init__(self, coordinator: EmhassCoordinator) -> None:
+        super().__init__(coordinator, "battery_action")
+
+    @property
+    def native_value(self) -> str | None:
+        decision = self.coordinator.config_entry.runtime_data.executor.last_decision
+        return decision.action if decision else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        executor = self.coordinator.config_entry.runtime_data.executor
+        decision = executor.last_decision
+        attributes: dict[str, Any] = {"control_enabled": executor.control_enabled}
+        if decision is not None:
+            attributes.update(decision.as_attributes())
+        return attributes

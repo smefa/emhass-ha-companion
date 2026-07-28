@@ -1,0 +1,70 @@
+name: Scripts (works with any inverter)
+kind: inverter
+version: 1
+description: >-
+  Calls a script of yours for each battery action. Use this for any inverter
+  that needs more than a single service call, or that has no built-in profile
+  yet.
+notes: >-
+  Each script receives a `power_w` variable holding the watts requested, plus
+  `soc` and `soc_target` as percentages. Leave a script unset only if your
+  inverter genuinely has no such mode -- the executor falls back to
+  self-consumption whenever a plan goes stale, so that one in particular is
+  worth providing.
+
+detect:
+  always: true
+
+options:
+  self_consume_script:
+    name: Self-consumption script
+    description: Also used as the safe fallback when a plan goes stale.
+    selector:
+      entity:
+        domain: script
+  force_charge_script:
+    name: Charge script
+    description: Receives power_w, the charge power in watts.
+    selector:
+      entity:
+        domain: script
+  force_discharge_script:
+    name: Discharge script
+    description: Receives power_w, the discharge power in watts.
+    selector:
+      entity:
+        domain: script
+  idle_script:
+    name: Idle script
+    description: Neither charging nor discharging.
+    selector:
+      entity:
+        domain: script
+
+actions:
+  self_consume:
+    - service: script.turn_on
+      target: {entity_id: "{{ options.self_consume_script }}"}
+      data:
+        variables: {power_w: 0, soc: "{{ soc }}", soc_target: "{{ soc_target }}"}
+  force_charge:
+    - service: script.turn_on
+      target: {entity_id: "{{ options.force_charge_script }}"}
+      data:
+        variables:
+          power_w: "{{ power_w }}"
+          soc: "{{ soc }}"
+          soc_target: "{{ soc_target }}"
+  force_discharge:
+    - service: script.turn_on
+      target: {entity_id: "{{ options.force_discharge_script }}"}
+      data:
+        variables:
+          power_w: "{{ power_w }}"
+          soc: "{{ soc }}"
+          soc_target: "{{ soc_target }}"
+  idle:
+    - service: script.turn_on
+      target: {entity_id: "{{ options.idle_script }}"}
+      data:
+        variables: {power_w: 0, soc: "{{ soc }}", soc_target: "{{ soc_target }}"}

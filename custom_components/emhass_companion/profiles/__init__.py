@@ -24,17 +24,29 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util.yaml import load_yaml
 
 from ..const import PROFILE_KINDS, USER_PROFILE_DIR
-from .engine import async_resolve_series, render, resolve_settings
+from .engine import (
+    async_execute_steps,
+    async_resolve_series,
+    render,
+    render_action,
+    resolve_limits,
+    resolve_sensors,
+    resolve_settings,
+)
 from .schema import Profile, ProfileError, ProfileLoadResult, validate_document
 
 __all__ = [
     "Profile",
     "ProfileError",
     "ProfileLoadResult",
+    "async_execute_steps",
     "async_load_profiles",
     "async_resolve_series",
     "available_profiles",
     "render",
+    "render_action",
+    "resolve_limits",
+    "resolve_sensors",
     "resolve_settings",
 ]
 

@@ -97,18 +97,28 @@ class EmhassControlSwitch(EmhassEntity, SwitchEntity, RestoreEntity):
         # because those restore a formatted string rather than a native value.
         if (last_state := await self.async_get_last_state()) is not None:
             self._is_on = last_state.state == STATE_ON
+        self._publish()
 
     @property
     def is_on(self) -> bool:
         return self._is_on
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        self._is_on = True
-        self.async_write_ha_state()
+        self._set(True)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        self._is_on = False
+        self._set(False)
+
+    def _set(self, value: bool) -> None:
+        self._is_on = value
+        self._publish()
         self.async_write_ha_state()
+
+    def _publish(self) -> None:
+        # The executor reads this from the coordinator rather than parsing the
+        # entity state, so the gate is never ambiguous while the entity is
+        # still restoring.
+        self.coordinator.control_enabled = self._is_on
 
 
 class LoadSwitch(EmhassLoadEntity, SwitchEntity, RestoreEntity):

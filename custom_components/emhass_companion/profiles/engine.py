@@ -241,3 +241,57 @@ def resolve_settings(
 ) -> dict[str, Any]:
     """Render the EMHASS settings a profile contributes to the payload."""
     return render(hass, profile.emhass_settings, _variables(profile, options))
+
+
+# --- inverter actions --------------------------------------------------------
+
+
+def render_action(
+    hass: HomeAssistant,
+    profile: Profile,
+    options: dict[str, Any],
+    action: str,
+    **variables: Any,
+) -> list[dict[str, Any]]:
+    """Render one inverter action into concrete service calls.
+
+    Rendering is deliberately separate from executing. The dry-run mode needs
+    to know exactly what *would* be called without calling it, and the only way
+    to be sure of that is for both paths to produce the calls the same way.
+    """
+    steps = profile.actions.get(action)
+    if steps is None:
+        raise ProfileError(
+            f"Profile '{profile.key}' has no '{action}' action; it defines: "
+            f"{', '.join(sorted(profile.actions)) or '(none)'}"
+        )
+    scope = _variables(profile, options, **variables)
+    return [render(hass, step, scope) for step in steps]
+
+
+async def async_execute_steps(hass: HomeAssistant, steps: list[dict[str, Any]]) -> None:
+    """Execute rendered service calls in order."""
+    for step in steps:
+        domain, _, service = str(step["service"]).partition(".")
+        if not domain or not service:
+            raise ProfileError(f"Invalid service name: {step['service']!r}")
+        await hass.services.async_call(
+            domain,
+            service,
+            step.get("data") or {},
+            blocking=True,
+            target=step.get("target") or {},
+        )
+
+
+def resolve_sensors(
+    hass: HomeAssistant, profile: Profile, options: dict[str, Any]
+) -> dict[str, str]:
+    """Render the profile's role-to-entity mapping."""
+    return render(hass, profile.sensors, _variables(profile, options))
+
+
+def resolve_limits(
+    hass: HomeAssistant, profile: Profile, options: dict[str, Any]
+) -> dict[str, Any]:
+    return render(hass, profile.limits, _variables(profile, options))

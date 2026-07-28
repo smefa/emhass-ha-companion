@@ -50,6 +50,7 @@ class EmhassModeSelect(EmhassEntity, SelectEntity, RestoreEntity):
         last_state = await self.async_get_last_state()
         if last_state is not None and last_state.state in SYSTEM_MODES:
             self._current = last_state.state
+        self.coordinator.system_mode = self._current
 
     @property
     def current_option(self) -> str:
@@ -57,6 +58,7 @@ class EmhassModeSelect(EmhassEntity, SelectEntity, RestoreEntity):
 
     async def async_select_option(self, option: str) -> None:
         self._current = option
+        self.coordinator.system_mode = option
         self.async_write_ha_state()
 
 

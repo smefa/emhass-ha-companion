@@ -88,7 +88,9 @@ def async_register_services(hass: HomeAssistant) -> None:
 
         try:
             settings = resolve_settings(hass, profile, options)
-        except Exception as err:
+        except Exception as err:  # noqa: BLE001 - a template can raise anything;
+            # this action exists to diagnose broken profiles, so the failure is
+            # returned in the response rather than raised out of the service.
             result["settings_error"] = str(err)
         else:
             result["emhass_settings"] = settings

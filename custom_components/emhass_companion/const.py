@@ -90,6 +90,9 @@ CONF_STARTUP_PENALTY: Final = "startup_penalty"
 # work already done today.
 CONF_POWER_SENSOR: Final = "power_sensor"
 CONF_USE_TIME_WINDOW: Final = "use_time_window"
+# Optional: what the executor switches to actually run the load. Without it the
+# load is advisory only and the user automates on should_run themselves.
+CONF_CONTROL_ENTITY: Final = "control_entity"
 
 SUBENTRY_TYPE_DEFERRABLE: Final = "deferrable_load"
 
