@@ -16,6 +16,7 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import template as template_helper
+from homeassistant.util import dt as dt_util
 
 from .const import CONF_ADDER, CONF_MODE, CONF_MULTIPLIER, CONF_TEMPLATE
 from .models import Point, Series
@@ -77,8 +78,14 @@ class TariffSide:
         for point in spot:
             # `time` is exposed so a template can express time-of-day bands
             # against the timestamp being priced rather than against now().
+            # It must be local wall-clock time: `Series` normalises every
+            # timestamp to UTC internally (see models.py), and "peak
+            # 17:00-20:00" written against `time.hour` means the user's own
+            # clock, not UTC -- passing the raw UTC value here would silently
+            # shift every band by the local UTC offset.
             rendered = compiled.async_render(
-                {"spot": point.value, "time": point.time}, parse_result=True
+                {"spot": point.value, "time": dt_util.as_local(point.time)},
+                parse_result=True,
             )
             try:
                 points.append(Point(point.time, float(rendered)))

@@ -38,9 +38,9 @@
         "data_description": {
           "buy_multiplier": "Multiplied with the spot price. Use 1.25 for 25% VAT.",
           "buy_adder": "Added after the multiplier. Grid fees, energy tax, supplier markup.",
-          "buy_template": "Only used in Template mode. `spot` and `time` are available.",
+          "buy_template": "Only used in Template mode. `spot` and `time` (your local time) are available.",
           "sell_adder": "Added after the multiplier. Any per-kWh export compensation.",
-          "sell_template": "Only used in Template mode. `spot` and `time` are available."
+          "sell_template": "Only used in Template mode. `spot` and `time` (your local time) are available."
         }
       },
       "pv": {

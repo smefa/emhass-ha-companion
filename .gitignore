@@ -18,3 +18,7 @@ frontend-src/dist/
 .DS_Store
 .vscode/
 .idea/
+
+# Claude Code local session state (agent worktrees, local settings) -- never
+# project content, must never be committed.
+.claude/

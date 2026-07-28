@@ -1,7 +1,10 @@
 """Tests for spot-to-buy/sell composition.
 
-Template mode needs a running Home Assistant to render, so it is covered under
-tests/integration/. Linear and passthrough are pure.
+Template mode needs a running Home Assistant to render, so its rendering path
+is covered in tests/integration/test_tariff_template.py -- notably that `time`
+is local, not UTC, which is what makes a time-of-day band mean what it says.
+Only the template mode's pure error path (no template given) is tested here.
+Linear and passthrough are pure and fully covered in this file.
 """
 
 from __future__ import annotations

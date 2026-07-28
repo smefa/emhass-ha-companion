@@ -38,9 +38,9 @@
         "data_description": {
           "buy_multiplier": "Multipliceras med spotpriset. Använd 1,25 för 25 % moms.",
           "buy_adder": "Läggs på efter multiplikatorn. Nätavgift, energiskatt och påslag.",
-          "buy_template": "Används bara i Mall-läget. `spot` och `time` är tillgängliga.",
+          "buy_template": "Används bara i Mall-läget. `spot` och `time` (din lokala tid) är tillgängliga.",
           "sell_adder": "Läggs på efter multiplikatorn. Eventuell ersättning per kWh för såld el.",
-          "sell_template": "Används bara i Mall-läget. `spot` och `time` är tillgängliga."
+          "sell_template": "Används bara i Mall-läget. `spot` och `time` (din lokala tid) är tillgängliga."
         }
       },
       "pv": {

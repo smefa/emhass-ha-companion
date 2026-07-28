@@ -70,7 +70,7 @@ Price sources return **raw spot prices**. Composing your real prices happens sep
 
 - **Linear** — `spot × multiplier + adder`. Use the multiplier for VAT and the adder for grid fees, energy tax and supplier markup.
 - **Already includes costs** — some price integrations can bake fees in themselves. If yours does, use this and do not add them twice.
-- **Template** — a Jinja template with `spot` and `time` available, for tiered or time-of-day structures.
+- **Template** — a Jinja template with `spot` and `time` (a local-time `datetime`) available, for tiered or time-of-day structures.
 
 > Tax and subsidy schemes change. Nothing here is kept current for you — check your own numbers each year.
 

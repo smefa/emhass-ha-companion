@@ -13,6 +13,7 @@ import logging
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import TemplateError
 from homeassistant.helpers import template as template_helper
 from homeassistant.util import dt as dt_util
 
@@ -36,7 +37,17 @@ def render(hass: HomeAssistant, value: Any, variables: dict[str, Any]) -> Any:
     if isinstance(value, str):
         if "{{" not in value and "{%" not in value:
             return value
-        return template_helper.Template(value, hass).async_render(variables, parse_result=True)
+        try:
+            return template_helper.Template(value, hass).async_render(variables, parse_result=True)
+        except TemplateError as err:
+            # HA wraps both a syntax error and a render-time error (an
+            # undefined variable, a bad filter) in this one exception type, so
+            # catching it here is enough to cover every render() call site.
+            # Left uncaught, a malformed profile -- most likely one the user
+            # wrote themselves -- would blow up test_profile, the diagnostic
+            # service that exists specifically to surface a broken profile
+            # cleanly, with an unrelated traceback instead of an answer.
+            raise ProfileError(f"Template error in {value!r}: {err}") from err
     if isinstance(value, dict):
         return {key: render(hass, item, variables) for key, item in value.items()}
     if isinstance(value, list):

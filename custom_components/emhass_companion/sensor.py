@@ -269,15 +269,25 @@ class LoadNextStartSensor(EmhassLoadEntity, SensorEntity):
 
         threshold = self.load.running_threshold_w
         now = dt_util.utcnow()
-        previous_on = True  # suppress a "start" for a run already in progress
+
+        def _is_running(row) -> bool:
+            return index < len(row.deferrables) and row.deferrables[index] > threshold
+
+        # Seed from the plan's own answer to "is it running right now"
+        # (row_at's hold-last semantics), not an assumption of True. Assuming
+        # already-running silently swallowed the very next start whenever the
+        # load was actually off and the immediately following timestep turns
+        # it on -- exactly the case this sensor exists to report.
+        current_row = data.plan.row_at(now)
+        previous_on = _is_running(current_row) if current_row is not None else False
+
         for row in data.plan.rows:
-            if index >= len(row.deferrables):
+            if row.timestamp <= now:
                 continue
-            running = row.deferrables[index] > threshold
-            if row.timestamp >= now and running and not previous_on:
+            running = _is_running(row)
+            if running and not previous_on:
                 return row.timestamp
-            if row.timestamp >= now:
-                previous_on = running
+            previous_on = running
         return None
 
 

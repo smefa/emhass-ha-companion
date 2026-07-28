@@ -369,3 +369,59 @@ async def test_settings_only_profiles_contribute_no_series(hass: HomeAssistant) 
     assert settings["weather_forecast_method"] == "solar.forecast"
     # Rendered as a number, not the string "9.5".
     assert settings["solar_forecast_kwp"] == 9.5
+
+
+# --- template errors are normalised, not raw exceptions ----------------------
+
+
+async def test_a_malformed_template_raises_profileerror(hass: HomeAssistant) -> None:
+    """Otherwise a typo in a user's own profile crashes as a raw exception.
+
+    render() is the single function every source type funnels through
+    (attributes, service, template, and settings/action rendering), so this
+    one call site protects all of them.
+    """
+    with pytest.raises(ProfileError, match="Template error"):
+        render(hass, "{{ this is not valid jinja %}", {})
+
+
+async def test_an_undefined_reference_at_render_time_raises_profileerror(
+    hass: HomeAssistant,
+) -> None:
+    """Valid syntax, but a variable the profile author typo'd.
+
+    HA's Jinja environment renders a bare undefined reference as an empty
+    string rather than raising (only a *warning* is logged), so the case that
+    actually raises -- and the one worth guarding -- is calling a method on
+    that undefined value, exactly as `options.typo.upper()` would if a profile
+    author mistyped an option name and then used it.
+    """
+    with pytest.raises(ProfileError):
+        render(hass, "{{ options.typo_ed_field.upper() }}", {"options": {}})
+
+
+async def test_test_profile_service_reports_a_bad_template_instead_of_raising(
+    hass: HomeAssistant,
+) -> None:
+    """The diagnostic service's whole purpose is a clean answer, not a crash."""
+    from custom_components.emhass_companion.profiles.schema import Profile
+
+    profile = Profile(
+        key="price/broken",
+        path="broken.yaml",
+        kind="price",
+        name="Broken",
+        document=validate_document(
+            {
+                "name": "Broken",
+                "kind": "price",
+                "version": 1,
+                "emhass": {"load_peak_hours_cost": "{{ 1 / 0 }}"},
+            }
+        ),
+    )
+
+    from custom_components.emhass_companion.profiles import resolve_settings
+
+    with pytest.raises(ProfileError):
+        resolve_settings(hass, profile, {})

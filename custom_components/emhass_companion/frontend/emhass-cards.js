@@ -128,7 +128,11 @@ function findLoads(hass) {
     if (!device) continue;
     const name = device.name_by_user || device.name || "";
     // The hub device holds the plan sensors; only per-load devices carry a
-    // should_run entity, which is what distinguishes them.
+    // should_run entity, which is what distinguishes them. The hub also has
+    // its own binary_sensor (plan_stale), so matching on the domain alone
+    // would wrongly count it as a load too -- and then surface its
+    // control_enabled switch and system_mode select (entity ids containing
+    // "enabled"/"mode") inside a per-load card.
     if (!loads.has(entry.device_id)) {
       loads.set(entry.device_id, { id: entry.device_id, name, entities: [] });
     }
@@ -136,7 +140,7 @@ function findLoads(hass) {
   }
 
   return [...loads.values()].filter((load) =>
-    load.entities.some((id) => id.startsWith("binary_sensor.")),
+    load.entities.some((id) => id.includes("should_run")),
   );
 }
 
@@ -585,17 +589,20 @@ class EmhassDeferrableCard extends HTMLElement {
 
     if (!config.length) {
       container.textContent = "";
+      this._entitiesCard = null;
       return;
     }
-    if (this._controlsKey === ids.join()) return;
-    this._controlsKey = ids.join();
-
-    container.textContent = "";
-    const card = document.createElement("hui-entities-card");
-    card.setConfig({ type: "entities", entities: config });
-    card.hass = this._hass;
-    this._entitiesCard = card;
-    container.appendChild(card);
+    if (this._controlsKey !== ids.join()) {
+      this._controlsKey = ids.join();
+      container.textContent = "";
+      const card = document.createElement("hui-entities-card");
+      card.setConfig({ type: "entities", entities: config });
+      this._entitiesCard = card;
+      container.appendChild(card);
+    }
+    // Re-set on every render, recreated or not: hass is a new object on every
+    // update, and this embedded card only reflects its states when it is.
+    this._entitiesCard.hass = this._hass;
   }
 }
 
