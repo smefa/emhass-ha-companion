@@ -1,0 +1,38 @@
+name: Nord Pool (custom-components/nordpool)
+kind: price
+version: 1
+description: >-
+  Reads the raw_today / raw_tomorrow attributes of a sensor from the
+  custom-components/nordpool HACS integration.
+notes: >-
+  This integration applies VAT and its own `additional_costs` template before
+  exposing prices. If you configured those, the series already includes your
+  costs -- set the tariff mode to "already includes costs" rather than adding
+  them a second time.
+
+detect:
+  integration: nordpool
+
+options:
+  entity:
+    name: Nord Pool sensor
+    description: The sensor exposing raw_today / raw_tomorrow.
+    selector:
+      entity:
+        integration: nordpool
+        domain: sensor
+
+source:
+  type: attributes
+  entity: "{{ options.entity }}"
+  # raw_tomorrow is empty until the market publishes (typically early
+  # afternoon); a missing attribute is skipped rather than treated as an error.
+  attributes:
+    - raw_today
+    - raw_tomorrow
+
+series:
+  time: start
+  value: value
+
+unit: currency_per_kwh

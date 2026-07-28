@@ -1,0 +1,59 @@
+name: Solcast PV Forecast
+kind: pv
+version: 1
+description: >-
+  Reads the detailedForecast attribute of the Solcast PV Forecast integration's
+  daily sensors.
+notes: >-
+  This reads the integration's local cache and costs zero Solcast API calls, so
+  it can be re-read every few minutes without touching your daily quota. The
+  detailedForecast attribute is half-hourly and already aggregates all
+  configured rooftop sites.
+
+detect:
+  integration: solcast_solar
+
+options:
+  entities:
+    name: Forecast sensors
+    description: >-
+      Select enough days to cover your optimisation horizon. Today and tomorrow
+      is normally right.
+    default:
+      - sensor.solcast_pv_forecast_forecast_today
+      - sensor.solcast_pv_forecast_forecast_tomorrow
+    selector:
+      entity:
+        integration: solcast_solar
+        domain: sensor
+        multiple: true
+  estimate:
+    name: Confidence level
+    description: >-
+      P50 is the central estimate. P10 is pessimistic, which biases the plan
+      towards importing rather than assuming sun that may not arrive.
+    default: pv_estimate
+    selector:
+      select:
+        mode: dropdown
+        options:
+          - label: P50 (central estimate)
+            value: pv_estimate
+          - label: P10 (pessimistic)
+            value: pv_estimate10
+          - label: P90 (optimistic)
+            value: pv_estimate90
+
+source:
+  type: attributes
+  entity: "{{ options.entities }}"
+  attributes:
+    - detailedForecast
+
+series:
+  time: period_start
+  value: "{{ options.estimate }}"
+  # Solcast reports kW; EMHASS wants W.
+  scale: 1000
+
+unit: watts

@@ -1,0 +1,47 @@
+{
+  "_comment": "Recorded from BJReplay/ha-solcast-solar detailedForecast (half-hourly, kW, two rooftop sites aggregated).",
+  "detailedForecast": [
+    {
+      "period_start": "2026-07-28T12:00:00+02:00",
+      "pv_estimate": 7.3749,
+      "pv_estimate10": 6.3336,
+      "pv_estimate90": 8.3294,
+      "dampening_factor": 1.0
+    },
+    {
+      "period_start": "2026-07-28T12:30:00+02:00",
+      "pv_estimate": 7.2737,
+      "pv_estimate10": 5.7398,
+      "pv_estimate90": 8.1672,
+      "dampening_factor": 1.0
+    },
+    {
+      "period_start": "2026-07-28T13:00:00+02:00",
+      "pv_estimate": 6.6654,
+      "pv_estimate10": 4.2387,
+      "pv_estimate90": 7.9483,
+      "dampening_factor": 1.0
+    },
+    {
+      "period_start": "2026-07-28T13:30:00+02:00",
+      "pv_estimate": 6.6141,
+      "pv_estimate10": 3.7401,
+      "pv_estimate90": 8.1773,
+      "dampening_factor": 1.0
+    },
+    {
+      "period_start": "2026-07-28T14:00:00+02:00",
+      "pv_estimate": 6.2203,
+      "pv_estimate10": 3.4161,
+      "pv_estimate90": 8.0916,
+      "dampening_factor": 1.0
+    },
+    {
+      "period_start": "2026-07-28T14:30:00+02:00",
+      "pv_estimate": 6.144,
+      "pv_estimate10": 3.3161,
+      "pv_estimate90": 7.9181,
+      "dampening_factor": 1.0
+    }
+  ]
+}

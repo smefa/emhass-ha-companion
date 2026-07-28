@@ -1,0 +1,21 @@
+{
+  "domain": "emhass_companion",
+  "name": "EMHASS Companion",
+  "codeowners": [
+    "@smefa"
+  ],
+  "config_flow": true,
+  "documentation": "https://github.com/smefa/emhass-ha-companion",
+  "integration_type": "hub",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/smefa/emhass-ha-companion/issues",
+  "after_dependencies": [
+    "hassio"
+  ],
+  "dependencies": [
+    "http"
+  ],
+  "requirements": [],
+  "single_config_entry": true,
+  "version": "0.1.0"
+}

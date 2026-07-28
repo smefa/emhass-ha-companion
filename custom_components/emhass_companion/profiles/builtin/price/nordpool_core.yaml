@@ -1,0 +1,43 @@
+name: Nord Pool (Home Assistant core)
+kind: price
+version: 1
+description: >-
+  Uses the core Nord Pool integration's get_prices_for_date action to fetch
+  today's and tomorrow's day-ahead prices.
+notes: >-
+  Core Nord Pool returns prices per MWh; they are scaled to per-kWh here. The
+  returned prices are raw spot, exclusive of VAT, grid fees and taxes -- use
+  the tariff settings to compose your real buy and sell prices.
+
+detect:
+  integration: nordpool
+
+options:
+  config_entry:
+    name: Nord Pool configuration
+    selector:
+      config_entry:
+        integration: nordpool
+  area:
+    name: Price area
+    description: The bidding zone to read, for example SE3 or NO1.
+    selector:
+      text: {}
+
+source:
+  type: service
+  service: nordpool.get_prices_for_date
+  # Tomorrow's prices do not exist until publication; that request is allowed
+  # to come back empty without failing the run.
+  for_days: [0, 1]
+  data:
+    config_entry: "{{ options.config_entry }}"
+    date: "{{ day }}"
+  response_path: "{{ options.area }}"
+
+series:
+  time: start
+  value: price
+  scale: 0.001
+
+unit: currency_per_kwh

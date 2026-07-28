@@ -1,0 +1,7 @@
+# Home Assistant runs on Linux; keep everything LF in the repository regardless
+# of the platform a contributor works on.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary

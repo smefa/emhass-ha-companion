@@ -1,0 +1,238 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to EMHASS",
+        "description": "EMHASS Companion drives an existing EMHASS installation. Version {min_version} or newer is required.\n\nIf you run the EMHASS add-on, the address below is filled in for you.",
+        "data": { "url": "EMHASS address" },
+        "data_description": {
+          "url": "For example http://localhost:5000, or the add-on's internal address."
+        }
+      },
+      "price": {
+        "title": "Electricity prices",
+        "description": "Only sources you have installed are listed.\n\n{profiles}",
+        "data": { "profile": "Price source" }
+      },
+      "price_options": {
+        "title": "Configure {profile}",
+        "description": "{notes}"
+      },
+      "tariff": {
+        "title": "Buy and sell prices",
+        "description": "Your price source provides raw spot prices. Add whatever your supplier and grid operator charge on top, and what you are paid for exports.\n\nUse **Linear** for VAT plus a fixed markup per kWh, **Already includes costs** if your price source already adds them, or **Template** for tiered or time-of-day pricing.",
+        "data": {
+          "buy_mode": "Import price method",
+          "buy_multiplier": "Import multiplier",
+          "buy_adder": "Import addition per kWh",
+          "buy_template": "Import template",
+          "sell_mode": "Export price method",
+          "sell_multiplier": "Export multiplier",
+          "sell_adder": "Export addition per kWh",
+          "sell_template": "Export template"
+        },
+        "data_description": {
+          "buy_multiplier": "Multiplied with the spot price. Use 1.25 for 25% VAT.",
+          "buy_adder": "Added after the multiplier. Grid fees, energy tax, supplier markup.",
+          "buy_template": "Only used in Template mode. `spot` and `time` are available.",
+          "sell_adder": "Added after the multiplier. Any per-kWh export compensation.",
+          "sell_template": "Only used in Template mode. `spot` and `time` are available."
+        }
+      },
+      "pv": {
+        "title": "Solar forecast",
+        "description": "Choose where the PV production forecast comes from. Pick **No solar** if you have no panels.\n\n{profiles}",
+        "data": { "profile": "Solar forecast source" }
+      },
+      "pv_options": {
+        "title": "Configure {profile}",
+        "description": "{notes}"
+      },
+      "load": {
+        "title": "House consumption",
+        "description": "How EMHASS should predict your household's baseline consumption.\n\n{profiles}",
+        "data": { "profile": "Load forecast source" }
+      },
+      "load_options": {
+        "title": "Configure {profile}",
+        "description": "{notes}"
+      },
+      "battery": {
+        "title": "Battery",
+        "description": "Leave this off if you have no home battery. Everything else on this page is then ignored.",
+        "data": {
+          "use_battery": "I have a battery",
+          "capacity_wh": "Usable capacity",
+          "charge_power_max_w": "Maximum charge power",
+          "discharge_power_max_w": "Maximum discharge power",
+          "soc_min": "Minimum charge level",
+          "soc_max": "Maximum charge level",
+          "soc_target": "Target charge level",
+          "soc_entity": "Battery charge level sensor"
+        },
+        "data_description": {
+          "soc_min": "As a fraction. 0.10 means the optimiser will not plan below 10%.",
+          "soc_target": "Where the optimiser aims to leave the battery at the end of the horizon.",
+          "soc_entity": "Read at the start of every run so the plan starts from reality."
+        }
+      },
+      "grid": {
+        "title": "Grid connection and schedule",
+        "description": "Your connection limits, and how often the plan is recalculated.",
+        "data": {
+          "grid_import_max_w": "Maximum import power",
+          "grid_export_max_w": "Maximum export power",
+          "optimization_time_step": "Time resolution (minutes)",
+          "mpc_interval_minutes": "Recalculate every",
+          "horizon_hours": "Planning horizon",
+          "dayahead_fallback_time": "Day-ahead fallback time"
+        },
+        "data_description": {
+          "optimization_time_step": "Finer resolution captures more price detail but makes the optimisation slower. 30 minutes suits most homes.",
+          "dayahead_fallback_time": "A full day-ahead plan is normally rebuilt automatically as soon as new prices arrive. This time is only used as a backstop if that never happens."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not reach EMHASS at that address. Check that it is running and that the address and port are correct.",
+      "unknown_version": "Connected, but EMHASS did not report its version. It is probably too old.",
+      "version_too_old": "This EMHASS is too old. Version {min_version} or newer is required, because this integration reads the plan through the JSON API introduced in that release."
+    },
+    "abort": {
+      "single_instance_allowed": "EMHASS Companion is already configured.",
+      "no_profiles": "No usable data sources were found. This is unexpected; please report it."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "EMHASS Companion",
+        "menu_options": {
+          "battery": "Battery",
+          "grid": "Grid and schedule",
+          "tariff": "Buy and sell prices"
+        }
+      },
+      "battery": {
+        "title": "Battery",
+        "data": {
+          "use_battery": "I have a battery",
+          "capacity_wh": "Usable capacity",
+          "charge_power_max_w": "Maximum charge power",
+          "discharge_power_max_w": "Maximum discharge power",
+          "soc_min": "Minimum charge level",
+          "soc_max": "Maximum charge level",
+          "soc_target": "Target charge level",
+          "soc_entity": "Battery charge level sensor"
+        }
+      },
+      "grid": {
+        "title": "Grid connection and schedule",
+        "data": {
+          "grid_import_max_w": "Maximum import power",
+          "grid_export_max_w": "Maximum export power",
+          "optimization_time_step": "Time resolution (minutes)",
+          "mpc_interval_minutes": "Recalculate every",
+          "horizon_hours": "Planning horizon",
+          "dayahead_fallback_time": "Day-ahead fallback time"
+        }
+      },
+      "tariff": {
+        "title": "Buy and sell prices",
+        "data": {
+          "buy_mode": "Import price method",
+          "buy_multiplier": "Import multiplier",
+          "buy_adder": "Import addition per kWh",
+          "buy_template": "Import template",
+          "sell_mode": "Export price method",
+          "sell_multiplier": "Export multiplier",
+          "sell_adder": "Export addition per kWh",
+          "sell_template": "Export template"
+        }
+      }
+    }
+  },
+  "selector": {
+    "tariff_mode": {
+      "options": {
+        "linear": "Linear (multiplier and addition)",
+        "passthrough": "Already includes costs",
+        "template": "Template"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "pv_forecast": { "name": "Planned solar production" },
+      "load_forecast": { "name": "Planned house consumption" },
+      "grid_forecast": { "name": "Planned grid power" },
+      "battery_power": { "name": "Planned battery power" },
+      "battery_soc": { "name": "Planned battery level" },
+      "buy_price": { "name": "Import price" },
+      "sell_price": { "name": "Export price" },
+      "optimization_status": { "name": "Optimisation status" },
+      "plan_cost": { "name": "Planned cost" },
+      "last_payload": { "name": "Last request to EMHASS" }
+    },
+    "binary_sensor": {
+      "plan_stale": { "name": "Plan out of date" }
+    },
+    "switch": {
+      "control_enabled": { "name": "Control enabled" }
+    },
+    "select": {
+      "system_mode": {
+        "name": "Mode",
+        "state": {
+          "auto": "Automatic",
+          "self_consume": "Self-consumption",
+          "force_charge": "Force charge",
+          "force_discharge": "Force discharge",
+          "idle": "Idle"
+        }
+      }
+    },
+    "button": {
+      "run_dayahead": { "name": "Rebuild day-ahead plan" },
+      "run_mpc": { "name": "Recalculate now" }
+    }
+  },
+  "issues": {
+    "emhass_version_unsupported": {
+      "title": "EMHASS is too old",
+      "description": "EMHASS Companion needs version {required} or newer, but version {installed} is installed. It reads the optimisation plan through the JSON API added in {required}. Update the EMHASS add-on or container, then reload this integration."
+    },
+    "invalid_profile": {
+      "title": "{count} data source profile(s) could not be loaded",
+      "description": "These profiles were skipped. Every other profile loaded normally.\n\n{details}\n\nFix the file and reload the integration. The `emhass_companion.test_profile` action shows exactly what a profile produces."
+    }
+  },
+  "services": {
+    "run_dayahead": {
+      "name": "Rebuild day-ahead plan",
+      "description": "Runs a full day-ahead optimisation over the whole planning horizon."
+    },
+    "run_mpc": {
+      "name": "Recalculate now",
+      "description": "Runs a model-predictive optimisation from the current state."
+    },
+    "test_profile": {
+      "name": "Test a data source profile",
+      "description": "Resolves a profile and returns what it produced, for diagnosing a source that returns nothing or the wrong values.",
+      "fields": {
+        "profile": {
+          "name": "Profile",
+          "description": "Profile identifier, for example price/nordpool_custom."
+        },
+        "options": {
+          "name": "Options",
+          "description": "Options to resolve the profile with. Defaults to the configured ones."
+        },
+        "limit": {
+          "name": "Limit",
+          "description": "How many series entries to include in the response."
+        }
+      }
+    }
+  }
+}

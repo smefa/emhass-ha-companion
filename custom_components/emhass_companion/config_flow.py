@@ -1,0 +1,510 @@
+"""Config and options flow.
+
+The flow is split into short, single-topic steps. The complaint this
+integration exists to answer is that EMHASS presents every option at once with
+no indication of which apply to a given house; asking a handful of questions at
+a time, and only ever offering data sources that are actually installed, is the
+substance of that answer.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from homeassistant.config_entries import (
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlowWithReload,
+)
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import selector
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+import voluptuous as vol
+
+from .api import EmhassClient, EmhassError
+from .const import (
+    CONF_ADDER,
+    CONF_DAYAHEAD_FALLBACK_TIME,
+    CONF_HORIZON_HOURS,
+    CONF_LOAD,
+    CONF_MODE,
+    CONF_MPC_INTERVAL,
+    CONF_MULTIPLIER,
+    CONF_PRICE,
+    CONF_PROFILE,
+    CONF_PROFILE_OPTIONS,
+    CONF_PV,
+    CONF_SOC_ENTITY,
+    CONF_TEMPLATE,
+    CONF_TIME_STEP,
+    CONF_URL,
+    DEFAULT_DAYAHEAD_FALLBACK_TIME,
+    DEFAULT_GRID_EXPORT_MAX,
+    DEFAULT_GRID_IMPORT_MAX,
+    DEFAULT_HORIZON_HOURS,
+    DEFAULT_MPC_INTERVAL,
+    DEFAULT_SOC_MAX,
+    DEFAULT_SOC_MIN,
+    DEFAULT_SOC_TARGET,
+    DEFAULT_TIME_STEP,
+    DEFAULT_URL,
+    DOMAIN,
+    MIN_EMHASS_VERSION,
+    PROFILE_KIND_LOAD,
+    PROFILE_KIND_PRICE,
+    PROFILE_KIND_PV,
+)
+from .profiles import Profile, async_load_profiles, available_profiles
+from .tariff import MODE_LINEAR, MODE_PASSTHROUGH, MODE_TEMPLATE
+from .util import version_at_least
+
+_LOGGER = logging.getLogger(__name__)
+
+
+async def _async_validate_connection(hass: HomeAssistant, url: str) -> tuple[str, str]:
+    """Check EMHASS is reachable and new enough. Returns (version, error_key)."""
+    client = EmhassClient(async_get_clientsession(hass), url)
+    try:
+        version = await client.async_get_version()
+    except EmhassError as err:
+        _LOGGER.debug("Cannot connect to EMHASS at %s: %s", url, err)
+        return "", "cannot_connect"
+
+    if not version:
+        return "", "unknown_version"
+    if not version_at_least(version, MIN_EMHASS_VERSION):
+        return version, "version_too_old"
+    return version, ""
+
+
+async def _async_addon_url(hass: HomeAssistant) -> str | None:
+    """Best-effort discovery of a locally installed EMHASS add-on."""
+    try:
+        from homeassistant.components.hassio import (
+            AddonError,
+            AddonManager,
+            AddonState,
+            is_hassio,
+        )
+    except ImportError:  # pragma: no cover - not a supervised install
+        return None
+
+    if not is_hassio(hass):
+        return None
+
+    from .const import ADDON_SLUG, DEFAULT_PORT
+
+    manager = AddonManager(hass, _LOGGER, "EMHASS", ADDON_SLUG)
+    try:
+        info = await manager.async_get_addon_info()
+    except AddonError as err:
+        _LOGGER.debug("EMHASS add-on not available: %s", err)
+        return None
+
+    if info.state != AddonState.RUNNING or not info.hostname:
+        return None
+    return f"http://{info.hostname}:{DEFAULT_PORT}"
+
+
+def _profile_selector(profiles: list[Profile]) -> selector.SelectSelector:
+    return selector.SelectSelector(
+        selector.SelectSelectorConfig(
+            mode=selector.SelectSelectorMode.LIST,
+            options=[
+                selector.SelectOptionDict(value=profile.key, label=profile.name)
+                for profile in profiles
+            ],
+        )
+    )
+
+
+def _tariff_side_schema(prefix: str, defaults: dict[str, Any]) -> dict[Any, Any]:
+    return {
+        vol.Required(
+            f"{prefix}_{CONF_MODE}", default=defaults.get(CONF_MODE, MODE_LINEAR)
+        ): selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                mode=selector.SelectSelectorMode.DROPDOWN,
+                translation_key="tariff_mode",
+                options=[MODE_LINEAR, MODE_PASSTHROUGH, MODE_TEMPLATE],
+            )
+        ),
+        # "any" rather than a fixed step: NumberSelector rejects steps below
+        # 0.001, and per-kWh prices routinely need more precision than that.
+        vol.Optional(
+            f"{prefix}_{CONF_MULTIPLIER}", default=defaults.get(CONF_MULTIPLIER, 1.0)
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(min=0, max=10, step="any", mode="box")
+        ),
+        vol.Optional(
+            f"{prefix}_{CONF_ADDER}", default=defaults.get(CONF_ADDER, 0.0)
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(min=-100, max=100, step="any", mode="box")
+        ),
+        vol.Optional(
+            f"{prefix}_{CONF_TEMPLATE}", default=defaults.get(CONF_TEMPLATE, "")
+        ): selector.TemplateSelector(),
+    }
+
+
+def _collect_tariff(user_input: dict[str, Any]) -> dict[str, Any]:
+    tariff: dict[str, Any] = {}
+    for side in ("buy", "sell"):
+        tariff[side] = {
+            CONF_MODE: user_input[f"{side}_{CONF_MODE}"],
+            CONF_MULTIPLIER: user_input.get(f"{side}_{CONF_MULTIPLIER}", 1.0),
+            CONF_ADDER: user_input.get(f"{side}_{CONF_ADDER}", 0.0),
+            CONF_TEMPLATE: user_input.get(f"{side}_{CONF_TEMPLATE}") or None,
+        }
+    return tariff
+
+
+class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
+    """Guided setup."""
+
+    VERSION = 1
+
+    def __init__(self) -> None:
+        self._data: dict[str, Any] = {}
+        self._options: dict[str, Any] = {}
+        self._profiles: dict[str, Profile] = {}
+
+    # -- connection -----------------------------------------------------------
+
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        errors: dict[str, str] = {}
+        suggested = await _async_addon_url(self.hass) or DEFAULT_URL
+
+        if user_input is not None:
+            url = user_input[CONF_URL].rstrip("/")
+            version, error = await _async_validate_connection(self.hass, url)
+            if error:
+                errors["base"] = error
+            else:
+                self._data[CONF_URL] = url
+                self._data["emhass_version"] = version
+                self._profiles = (await async_load_profiles(self.hass)).profiles
+                return await self.async_step_price()
+            suggested = url
+
+        return self.async_show_form(
+            step_id="user",
+            data_schema=vol.Schema(
+                {vol.Required(CONF_URL, default=suggested): selector.TextSelector()}
+            ),
+            errors=errors,
+            description_placeholders={"min_version": MIN_EMHASS_VERSION},
+        )
+
+    # -- price ----------------------------------------------------------------
+
+    async def async_step_price(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return await self._async_profile_step(PROFILE_KIND_PRICE, CONF_PRICE, "price", user_input)
+
+    async def async_step_price_options(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        return await self._async_profile_options_step(CONF_PRICE, "price_options", user_input)
+
+    async def async_step_tariff(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        if user_input is not None:
+            self._options["tariff"] = _collect_tariff(user_input)
+            return await self.async_step_pv()
+
+        schema = {
+            **_tariff_side_schema("buy", {}),
+            **_tariff_side_schema("sell", {CONF_MODE: MODE_LINEAR}),
+        }
+        return self.async_show_form(step_id="tariff", data_schema=vol.Schema(schema))
+
+    # -- solar ----------------------------------------------------------------
+
+    async def async_step_pv(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return await self._async_profile_step(PROFILE_KIND_PV, CONF_PV, "pv", user_input)
+
+    async def async_step_pv_options(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        return await self._async_profile_options_step(CONF_PV, "pv_options", user_input)
+
+    # -- load -----------------------------------------------------------------
+
+    async def async_step_load(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return await self._async_profile_step(PROFILE_KIND_LOAD, CONF_LOAD, "load", user_input)
+
+    async def async_step_load_options(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        return await self._async_profile_options_step(CONF_LOAD, "load_options", user_input)
+
+    # -- plant ----------------------------------------------------------------
+
+    async def async_step_battery(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        if user_input is not None:
+            self._options["battery"] = {
+                key: value for key, value in user_input.items() if key != CONF_SOC_ENTITY
+            }
+            if soc := user_input.get(CONF_SOC_ENTITY):
+                self._options[CONF_SOC_ENTITY] = soc
+            return await self.async_step_grid()
+
+        return self.async_show_form(step_id="battery", data_schema=vol.Schema(battery_schema({})))
+
+    async def async_step_grid(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        if user_input is not None:
+            self._options["grid"] = {
+                "grid_import_max_w": user_input["grid_import_max_w"],
+                "grid_export_max_w": user_input["grid_export_max_w"],
+            }
+            self._options.update(
+                {
+                    key: user_input[key]
+                    for key in (
+                        CONF_TIME_STEP,
+                        CONF_MPC_INTERVAL,
+                        CONF_HORIZON_HOURS,
+                        CONF_DAYAHEAD_FALLBACK_TIME,
+                    )
+                }
+            )
+            return self.async_create_entry(
+                title="EMHASS Companion", data=self._data, options=self._options
+            )
+
+        return self.async_show_form(step_id="grid", data_schema=vol.Schema(grid_schema({})))
+
+    # -- shared profile plumbing ---------------------------------------------
+
+    async def _async_profile_step(
+        self,
+        kind: str,
+        option_key: str,
+        step_id: str,
+        user_input: dict[str, Any] | None,
+    ) -> ConfigFlowResult:
+        choices = available_profiles(self.hass, self._profiles, kind)
+        if not choices:
+            # Should not happen: every kind ships an always-available profile.
+            return self.async_abort(reason="no_profiles")
+
+        if user_input is not None:
+            self._options[option_key] = {
+                CONF_PROFILE: user_input[CONF_PROFILE],
+                CONF_PROFILE_OPTIONS: {},
+            }
+            return await getattr(self, f"async_step_{step_id}_options")()
+
+        return self.async_show_form(
+            step_id=step_id,
+            data_schema=vol.Schema({vol.Required(CONF_PROFILE): _profile_selector(choices)}),
+            description_placeholders={
+                "profiles": "\n".join(
+                    f"- **{profile.name}** — {profile.description or ''}" for profile in choices
+                )
+            },
+        )
+
+    async def _async_profile_options_step(
+        self, option_key: str, step_id: str, user_input: dict[str, Any] | None
+    ) -> ConfigFlowResult:
+        profile = self._profiles[self._options[option_key][CONF_PROFILE]]
+        next_step = {
+            CONF_PRICE: self.async_step_tariff,
+            CONF_PV: self.async_step_load,
+            CONF_LOAD: self.async_step_battery,
+        }[option_key]
+
+        if not profile.options:
+            return await next_step()
+
+        if user_input is not None:
+            self._options[option_key][CONF_PROFILE_OPTIONS] = user_input
+            return await next_step()
+
+        return self.async_show_form(
+            step_id=step_id,
+            data_schema=vol.Schema(profile.selector_schema()),
+            description_placeholders={
+                "profile": profile.name,
+                "notes": profile.notes or "",
+            },
+        )
+
+    # -- options --------------------------------------------------------------
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry) -> EmhassCompanionOptionsFlow:
+        return EmhassCompanionOptionsFlow()
+
+
+def battery_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
+    return {
+        vol.Required(
+            "use_battery", default=defaults.get("use_battery", False)
+        ): selector.BooleanSelector(),
+        vol.Optional(
+            "capacity_wh", default=defaults.get("capacity_wh", 0)
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0, max=1000000, step=100, unit_of_measurement="Wh", mode="box"
+            )
+        ),
+        vol.Optional(
+            "charge_power_max_w", default=defaults.get("charge_power_max_w", 0)
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0, max=100000, step=100, unit_of_measurement="W", mode="box"
+            )
+        ),
+        vol.Optional(
+            "discharge_power_max_w", default=defaults.get("discharge_power_max_w", 0)
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0, max=100000, step=100, unit_of_measurement="W", mode="box"
+            )
+        ),
+        vol.Optional(
+            "soc_min", default=defaults.get("soc_min", DEFAULT_SOC_MIN)
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(min=0, max=1, step=0.01, mode="slider")
+        ),
+        vol.Optional(
+            "soc_max", default=defaults.get("soc_max", DEFAULT_SOC_MAX)
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(min=0, max=1, step=0.01, mode="slider")
+        ),
+        vol.Optional(
+            "soc_target", default=defaults.get("soc_target", DEFAULT_SOC_TARGET)
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(min=0, max=1, step=0.01, mode="slider")
+        ),
+        vol.Optional(
+            CONF_SOC_ENTITY, default=defaults.get(CONF_SOC_ENTITY, "")
+        ): selector.EntitySelector(
+            selector.EntitySelectorConfig(domain="sensor", device_class="battery")
+        ),
+    }
+
+
+def grid_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
+    return {
+        vol.Required(
+            "grid_import_max_w",
+            default=defaults.get("grid_import_max_w", DEFAULT_GRID_IMPORT_MAX),
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0, max=100000, step=100, unit_of_measurement="W", mode="box"
+            )
+        ),
+        vol.Required(
+            "grid_export_max_w",
+            default=defaults.get("grid_export_max_w", DEFAULT_GRID_EXPORT_MAX),
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0, max=100000, step=100, unit_of_measurement="W", mode="box"
+            )
+        ),
+        vol.Required(
+            CONF_TIME_STEP, default=defaults.get(CONF_TIME_STEP, DEFAULT_TIME_STEP)
+        ): selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                mode=selector.SelectSelectorMode.DROPDOWN,
+                options=["5", "10", "15", "30", "60"],
+            )
+        ),
+        vol.Required(
+            CONF_MPC_INTERVAL,
+            default=defaults.get(CONF_MPC_INTERVAL, DEFAULT_MPC_INTERVAL),
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=5, max=60, step=5, unit_of_measurement="min", mode="box"
+            )
+        ),
+        vol.Required(
+            CONF_HORIZON_HOURS,
+            default=defaults.get(CONF_HORIZON_HOURS, DEFAULT_HORIZON_HOURS),
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=6, max=48, step=1, unit_of_measurement="h", mode="box"
+            )
+        ),
+        vol.Required(
+            CONF_DAYAHEAD_FALLBACK_TIME,
+            default=defaults.get(CONF_DAYAHEAD_FALLBACK_TIME, DEFAULT_DAYAHEAD_FALLBACK_TIME),
+        ): selector.TimeSelector(),
+    }
+
+
+class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
+    """Retune an existing entry.
+
+    A menu rather than a re-run of the whole wizard: changing the grid export
+    limit should not mean re-answering every question about price sources.
+    """
+
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=["battery", "grid", "tariff"],
+        )
+
+    async def async_step_battery(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        options = dict(self.config_entry.options)
+        if user_input is not None:
+            options["battery"] = {
+                key: value for key, value in user_input.items() if key != CONF_SOC_ENTITY
+            }
+            options[CONF_SOC_ENTITY] = user_input.get(CONF_SOC_ENTITY) or None
+            return self.async_create_entry(data=options)
+
+        defaults = {
+            **options.get("battery", {}),
+            CONF_SOC_ENTITY: options.get(CONF_SOC_ENTITY) or "",
+        }
+        return self.async_show_form(
+            step_id="battery", data_schema=vol.Schema(battery_schema(defaults))
+        )
+
+    async def async_step_grid(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        options = dict(self.config_entry.options)
+        if user_input is not None:
+            options["grid"] = {
+                "grid_import_max_w": user_input["grid_import_max_w"],
+                "grid_export_max_w": user_input["grid_export_max_w"],
+            }
+            options.update(
+                {
+                    key: user_input[key]
+                    for key in (
+                        CONF_TIME_STEP,
+                        CONF_MPC_INTERVAL,
+                        CONF_HORIZON_HOURS,
+                        CONF_DAYAHEAD_FALLBACK_TIME,
+                    )
+                }
+            )
+            return self.async_create_entry(data=options)
+
+        return self.async_show_form(
+            step_id="grid",
+            data_schema=vol.Schema(grid_schema({**options, **options.get("grid", {})})),
+        )
+
+    async def async_step_tariff(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        options = dict(self.config_entry.options)
+        if user_input is not None:
+            options["tariff"] = _collect_tariff(user_input)
+            return self.async_create_entry(data=options)
+
+        tariff = options.get("tariff", {})
+        schema = {
+            **_tariff_side_schema("buy", tariff.get("buy", {})),
+            **_tariff_side_schema("sell", tariff.get("sell", {})),
+        }
+        return self.async_show_form(step_id="tariff", data_schema=vol.Schema(schema))

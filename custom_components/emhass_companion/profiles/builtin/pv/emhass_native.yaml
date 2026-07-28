@@ -1,0 +1,64 @@
+name: EMHASS built-in forecast (Open-Meteo)
+kind: pv
+version: 1
+description: >-
+  Lets EMHASS produce the PV forecast itself from Open-Meteo weather data and a
+  description of your array. Needs no API key and no forecast integration.
+notes: >-
+  Choose this if you have no PV forecast integration installed. Accuracy is
+  lower than a dedicated service such as Solcast, but it requires nothing
+  beyond your array's size and orientation.
+
+detect:
+  always: true
+
+options:
+  peak_power_w:
+    name: Array peak power
+    description: Total DC peak power of your panels.
+    selector:
+      number:
+        min: 100
+        max: 100000
+        step: 100
+        unit_of_measurement: W
+        mode: box
+  inverter_power_w:
+    name: Inverter AC power
+    selector:
+      number:
+        min: 100
+        max: 100000
+        step: 100
+        unit_of_measurement: W
+        mode: box
+  surface_tilt:
+    name: Panel tilt
+    description: 0 is horizontal, 90 is vertical.
+    default: 30
+    selector:
+      number:
+        min: 0
+        max: 90
+        step: 1
+        unit_of_measurement: "°"
+  surface_azimuth:
+    name: Panel azimuth
+    description: 0 north, 90 east, 180 south, 270 west.
+    default: 180
+    selector:
+      number:
+        min: 0
+        max: 360
+        step: 1
+        unit_of_measurement: "°"
+
+emhass:
+  set_use_pv: true
+  weather_forecast_method: open-meteo
+  # EMHASS accepts a nominal power in place of a named module/inverter model.
+  # Lists, because EMHASS models multi-orientation arrays as parallel entries.
+  pv_module_model: ["{{ options.peak_power_w }}"]
+  pv_inverter_model: ["{{ options.inverter_power_w }}"]
+  surface_tilt: ["{{ options.surface_tilt }}"]
+  surface_azimuth: ["{{ options.surface_azimuth }}"]

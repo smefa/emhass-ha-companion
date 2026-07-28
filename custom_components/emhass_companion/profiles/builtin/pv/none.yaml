@@ -1,0 +1,13 @@
+name: No solar
+kind: pv
+version: 1
+description: Use this if you have no PV array.
+notes: >-
+  Disables PV modelling entirely. The optimiser then works purely on tariff and
+  battery arbitrage.
+
+detect:
+  always: true
+
+emhass:
+  set_use_pv: false

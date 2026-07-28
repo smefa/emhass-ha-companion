@@ -1,0 +1,64 @@
+name: Fixed tariff
+kind: price
+version: 1
+description: >-
+  A flat rate, or a simple peak / off-peak split. Use this when you have no
+  dynamic pricing integration.
+notes: >-
+  This profile fetches nothing. It hands the tariff to EMHASS's own peak /
+  off-peak handling, which means a working setup needs no price integration at
+  all.
+
+detect:
+  always: true
+
+options:
+  peak_cost:
+    name: Peak price
+    description: Import price per kWh during peak hours.
+    selector:
+      number:
+        min: 0
+        max: 100
+        step: any
+        mode: box
+  offpeak_cost:
+    name: Off-peak price
+    description: Import price per kWh outside peak hours.
+    selector:
+      number:
+        min: 0
+        max: 100
+        step: any
+        mode: box
+  peak_start:
+    name: Peak period start
+    default: "07:00:00"
+    selector:
+      time: {}
+  peak_end:
+    name: Peak period end
+    default: "22:00:00"
+    selector:
+      time: {}
+  sell_price:
+    name: Export price
+    description: What you are paid per kWh exported to the grid.
+    default: 0
+    selector:
+      number:
+        min: 0
+        max: 100
+        step: any
+        mode: box
+
+emhass:
+  load_cost_forecast_method: hp_hc_periods
+  load_peak_hours_cost: "{{ options.peak_cost }}"
+  load_offpeak_hours_cost: "{{ options.offpeak_cost }}"
+  load_peak_hour_periods:
+    period_hp_1:
+      - peak_start: "{{ options.peak_start }}"
+      - peak_end: "{{ options.peak_end }}"
+  production_price_forecast_method: constant
+  photovoltaic_production_sell_price: "{{ options.sell_price }}"

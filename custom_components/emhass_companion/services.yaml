@@ -1,0 +1,24 @@
+run_dayahead:
+
+run_mpc:
+
+test_profile:
+  fields:
+    profile:
+      required: true
+      example: price/nordpool_custom
+      selector:
+        text:
+    options:
+      required: false
+      example: '{"entity": "sensor.nordpool_kwh_se3_sek_3_10_025"}'
+      selector:
+        object:
+    limit:
+      required: false
+      default: 10
+      selector:
+        number:
+          min: 1
+          max: 500
+          mode: box

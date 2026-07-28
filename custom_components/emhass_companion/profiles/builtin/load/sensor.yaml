@@ -1,0 +1,44 @@
+name: House load sensor
+kind: load
+version: 1
+description: >-
+  Points EMHASS at a power sensor measuring your house load, and lets it build
+  the load forecast from that sensor's recorded history.
+notes: >-
+  The sensor should exclude your deferrable loads. If it includes them, the
+  optimiser sees their consumption twice -- once in the baseline forecast and
+  once in the load it is scheduling -- and will under-schedule them. A template
+  sensor subtracting the deferrables from total consumption is the usual fix.
+
+detect:
+  always: true
+
+options:
+  entity:
+    name: House load sensor
+    description: Power consumption excluding deferrable loads.
+    selector:
+      entity:
+        domain: sensor
+        device_class: power
+  method:
+    name: Forecast method
+    description: >-
+      "Typical" uses a generic daily profile. "Naive" repeats the last day,
+      which suits stable households. "ML forecaster" trains on your history and
+      is the most accurate, but must be trained before first use.
+    default: typical
+    selector:
+      select:
+        mode: dropdown
+        options:
+          - label: Typical daily profile
+            value: typical
+          - label: Naive (repeat yesterday)
+            value: naive
+          - label: Machine-learning forecaster
+            value: mlforecaster
+
+emhass:
+  sensor_power_load_no_var_loads: "{{ options.entity }}"
+  load_forecast_method: "{{ options.method }}"

@@ -1,0 +1,57 @@
+name: Load forecast from an entity attribute
+kind: load
+version: 1
+description: >-
+  Reads a ready-made load forecast from a list-valued attribute on any entity,
+  for example one produced by a template sensor or another forecasting
+  integration.
+notes: >-
+  Use this when you already generate a load prediction elsewhere and want
+  EMHASS to consume it rather than forecast for itself.
+
+detect:
+  always: true
+
+options:
+  entity:
+    name: Forecast entity
+    selector:
+      entity: {}
+  attribute:
+    name: Attribute name
+    description: The attribute holding the list of forecast records.
+    selector:
+      text: {}
+  time_field:
+    name: Timestamp field
+    default: time
+    selector:
+      text: {}
+  value_field:
+    name: Value field
+    default: value
+    selector:
+      text: {}
+  scale:
+    name: Scale factor
+    description: Multiplier to convert the values to watts. Use 1000 for kW.
+    default: 1
+    selector:
+      number:
+        min: 0.000001
+        max: 1000000
+        step: any
+        mode: box
+
+source:
+  type: attributes
+  entity: "{{ options.entity }}"
+  attributes:
+    - "{{ options.attribute }}"
+
+series:
+  time: "{{ options.time_field }}"
+  value: "{{ options.value_field }}"
+  scale: "{{ options.scale }}"
+
+unit: watts
