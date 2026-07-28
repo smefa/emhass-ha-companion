@@ -215,6 +215,8 @@ ruff check . && ruff format --check .
 
 Tests are split in two. `tests/` needs no running Home Assistant and runs on any platform. `tests/integration/` needs one, via `pytest-homeassistant-custom-component`, which does not load on Windows — run those on Linux or in a container.
 
+Run the bare `pytest` before pushing, not the two directories separately: collection problems only appear when both are collected together.
+
 Every built-in profile must ship a fixture in `tests/fixtures/`: a recorded blob from a real installation plus the series it should resolve to. That is what lets a profile for an integration none of us has installed still be verified, and what makes reviewing a contributed profile mechanical.
 
 ## Licence

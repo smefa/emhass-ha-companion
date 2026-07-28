@@ -41,4 +41,8 @@ known-first-party = ["custom_components"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-addopts = "-q"
+# importlib import mode lets tests/ and tests/integration/ hold modules with
+# the same basename (test_executor.py exists in both: one pure, one needing a
+# running Home Assistant). Under the default prepend mode the second one fails
+# to import and the entire run aborts during collection.
+addopts = "-q --import-mode=importlib"
