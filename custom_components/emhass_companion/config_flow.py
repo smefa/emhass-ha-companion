@@ -249,6 +249,40 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
             description_placeholders={"min_version": MIN_EMHASS_VERSION},
         )
 
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Change the EMHASS address without re-running the whole wizard.
+
+        Everything else (price/pv/load sources, tariff, battery, grid) stays
+        as configured -- only connectivity is in question here, so only
+        connectivity is re-checked.
+        """
+        errors: dict[str, str] = {}
+        entry = self._get_reconfigure_entry()
+        suggested = entry.data[CONF_URL]
+
+        if user_input is not None:
+            url = user_input[CONF_URL].rstrip("/")
+            version, error = await _async_validate_connection(self.hass, url)
+            if error:
+                errors["base"] = error
+            else:
+                self.hass.config_entries.async_update_entry(
+                    entry, data={**entry.data, CONF_URL: url, "emhass_version": version}
+                )
+                return self.async_abort(reason="reconfigure_successful")
+            suggested = url
+
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=vol.Schema(
+                {vol.Required(CONF_URL, default=suggested): selector.TextSelector()}
+            ),
+            errors=errors,
+            description_placeholders={"min_version": MIN_EMHASS_VERSION},
+        )
+
     # -- price ----------------------------------------------------------------
 
     async def async_step_price(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:

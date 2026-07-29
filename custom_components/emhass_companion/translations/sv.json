@@ -11,6 +11,16 @@
           "url": "Till exempel http://localhost:5000, eller tilläggets interna adress."
         }
       },
+      "reconfigure": {
+        "title": "Ändra EMHASS-adressen",
+        "description": "Version {min_version} eller senare krävs.\n\nAllt annat behålls som konfigurerat -- ändra pris-, sol-, förbruknings-, tariff-, batteri- eller nätinställningar via integrationens egna konfigurationsalternativ i stället.",
+        "data": {
+          "url": "EMHASS-adress"
+        },
+        "data_description": {
+          "url": "Till exempel http://localhost:5000, eller tilläggets interna adress."
+        }
+      },
       "price": {
         "title": "Elpriser",
         "description": "Endast källor som du har installerade visas.\n\n{profiles}",

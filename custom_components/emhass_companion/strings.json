@@ -3,7 +3,17 @@
     "step": {
       "user": {
         "title": "Connect to EMHASS",
-        "description": "EMHASS Companion drives an existing EMHASS installation. Version {min_version} or newer is required.\n\nIf you run the EMHASS add-on, the address below is filled in for you.",
+        "description": "EMHASS Companion needs an existing EMHASS installation. Version {min_version} or newer is required.\n\nIf you run the EMHASS add-on, the address below is filled in for you.",
+        "data": {
+          "url": "EMHASS address"
+        },
+        "data_description": {
+          "url": "For example http://localhost:5000, or the add-on's internal address."
+        }
+      },
+      "reconfigure": {
+        "title": "Change the EMHASS address",
+        "description": "Version {min_version} or newer is required.\n\nEverything else stays as configured -- reconfigure price, solar, load, tariff, battery or grid settings from the integration's own configuration options instead.",
         "data": {
           "url": "EMHASS address"
         },
@@ -76,7 +86,7 @@
           "soc_min": "Minimum charge level",
           "soc_max": "Maximum charge level",
           "soc_target": "Target charge level",
-          "soc_entity": "Battery charge level sensor"
+          "soc_entity": "Battery SOC sensor"
         },
         "data_description": {
           "soc_min": "As a fraction. 0.10 means the optimiser will not plan below 10%.",
@@ -132,7 +142,7 @@
           "soc_min": "Minimum charge level",
           "soc_max": "Maximum charge level",
           "soc_target": "Target charge level",
-          "soc_entity": "Battery charge level sensor"
+          "soc_entity": "Battery SOC sensor"
         }
       },
       "grid": {
