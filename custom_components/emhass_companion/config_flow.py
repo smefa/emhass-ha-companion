@@ -71,7 +71,13 @@ from .const import (
     PROFILE_KIND_PV,
     SUBENTRY_TYPE_DEFERRABLE,
 )
-from .profiles import Profile, async_load_profiles, available_profiles
+from .profiles import (
+    Profile,
+    ProfileError,
+    async_load_profiles,
+    async_resolve_series,
+    available_profiles,
+)
 from .tariff import MODE_LINEAR, MODE_PASSTHROUGH, MODE_TEMPLATE
 from .util import version_at_least
 
@@ -121,6 +127,36 @@ async def _async_addon_url(hass: HomeAssistant) -> str | None:
     if info.state != AddonState.RUNNING or not info.hostname:
         return None
     return f"http://{info.hostname}:{DEFAULT_PORT}"
+
+
+async def _async_detect_time_step(
+    hass: HomeAssistant, profiles: dict[str, Profile], price_selection: dict[str, Any]
+) -> int | None:
+    """Best-effort read of the chosen price source's native resolution.
+
+    Nord Pool has published 15-minute prices since October 2025; other
+    sources are still hourly. There is no reason to make someone count
+    minutes between two price timestamps by hand when the profile they just
+    picked already knows the answer -- this is only ever used to choose a
+    *default*, never to silently override a value the user goes on to type.
+    """
+    profile = profiles.get(price_selection.get(CONF_PROFILE, ""))
+    if profile is None or not profile.produces_series:
+        return None
+
+    try:
+        series = await async_resolve_series(
+            hass, profile, price_selection.get(CONF_PROFILE_OPTIONS) or {}
+        )
+    except ProfileError as err:
+        _LOGGER.debug("Could not detect price resolution: %s", err)
+        return None
+
+    step = series.step()
+    if step is None:
+        return None
+    minutes = round(step.total_seconds() / 60)
+    return minutes if minutes > 0 else None
 
 
 def _profile_selector(profiles: list[Profile]) -> selector.SelectSelector:
@@ -290,7 +326,23 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
                 title="EMHASS Companion", data=self._data, options=self._options
             )
 
-        return self.async_show_form(step_id="grid", data_schema=vol.Schema(grid_schema({})))
+        detected = await _async_detect_time_step(
+            self.hass, self._profiles, self._options.get(CONF_PRICE) or {}
+        )
+        defaults = {CONF_TIME_STEP: detected} if detected else {}
+        return self.async_show_form(
+            step_id="grid",
+            data_schema=vol.Schema(grid_schema(defaults)),
+            description_placeholders={
+                "detected_resolution": (
+                    f"\n\nDetected {detected}-minute resolution from your price "
+                    "source and set it as the default below — change it if "
+                    "you'd rather use something else."
+                )
+                if detected
+                else ""
+            },
+        )
 
     # -- shared profile plumbing ---------------------------------------------
 
@@ -504,6 +556,23 @@ def battery_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
     }
 
 
+STANDARD_TIME_STEPS = ("5", "10", "15", "20", "30", "60")
+
+
+def _time_step_options(defaults: dict[str, Any]) -> list[str]:
+    """The dropdown presets, plus whatever was detected or already stored.
+
+    A price source's real resolution is not guaranteed to be one of the
+    common values -- keeping it in the list (rather than only reachable via
+    typing it in) is what makes the auto-detected default actually show up
+    as a normal, selected option instead of looking unset.
+    """
+    options = set(STANDARD_TIME_STEPS)
+    if (current := defaults.get(CONF_TIME_STEP)) is not None:
+        options.add(str(current))
+    return sorted(options, key=int)
+
+
 def grid_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
     return {
         vol.Required(
@@ -522,13 +591,23 @@ def grid_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
                 min=0, max=100000, step=100, unit_of_measurement="W", mode="box"
             )
         ),
+        # A fixed list would leave anyone whose price source publishes at some
+        # other resolution stuck rounding to the nearest preset; custom_value
+        # lets them type the real number instead. Coerced and range-checked
+        # here rather than left as a free string, so a typo is a form error
+        # now instead of a crash reading the config entry months later.
         vol.Required(
-            CONF_TIME_STEP, default=defaults.get(CONF_TIME_STEP, DEFAULT_TIME_STEP)
-        ): selector.SelectSelector(
-            selector.SelectSelectorConfig(
-                mode=selector.SelectSelectorMode.DROPDOWN,
-                options=["5", "10", "15", "30", "60"],
-            )
+            CONF_TIME_STEP, default=str(defaults.get(CONF_TIME_STEP, DEFAULT_TIME_STEP))
+        ): vol.All(
+            selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                    options=_time_step_options(defaults),
+                    custom_value=True,
+                )
+            ),
+            vol.Coerce(int),
+            vol.Range(min=1, max=180),
         ),
         vol.Required(
             CONF_MPC_INTERVAL,

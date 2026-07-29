@@ -86,7 +86,7 @@
       },
       "grid": {
         "title": "Nätanslutning och schema",
-        "description": "Dina anslutningsgränser och hur ofta planen räknas om.",
+        "description": "Dina anslutningsgränser och hur ofta planen räknas om.{detected_resolution}",
         "data": {
           "grid_import_max_w": "Maximal effekt från nätet",
           "grid_export_max_w": "Maximal effekt till nätet",
@@ -96,7 +96,7 @@
           "dayahead_fallback_time": "Reservtid för dygnsplanering"
         },
         "data_description": {
-          "optimization_time_step": "Finare upplösning fångar fler prisdetaljer men gör optimeringen långsammare. 30 minuter passar de flesta hem.",
+          "optimization_time_step": "Den tidsupplösning EMHASS planerar med. Matchar du din priskällas egen upplösning (till exempel 15 minuter för dagens Nord Pool-priser) fångas mest detalj; en grövre upplösning löser snabbare. Välj i listan eller skriv valfritt antal minuter.",
           "dayahead_fallback_time": "En fullständig dygnsplan byggs normalt om automatiskt så snart nya priser kommer. Den här tiden används bara som reserv om det aldrig sker."
         }
       }

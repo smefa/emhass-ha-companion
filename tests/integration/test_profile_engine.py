@@ -6,10 +6,12 @@ calls, using the same recorded fixtures as the platform-independent tests.
 
 from __future__ import annotations
 
+from datetime import timedelta
 import json
 from pathlib import Path
 
 from homeassistant.core import HomeAssistant, SupportsResponse
+from homeassistant.util import dt as dt_util
 from homeassistant.util.yaml import load_yaml
 import pytest
 
@@ -140,10 +142,19 @@ async def test_service_source_iterates_days_and_digs_the_response(
 async def test_service_source_tolerates_no_data_for_tomorrow(
     hass: HomeAssistant,
 ) -> None:
-    """Tomorrow's prices do not exist for most of the day."""
+    """Tomorrow's prices do not exist for most of the day.
+
+    The fake handler must fail for the *actual* tomorrow, computed the same
+    way the code under test computes it -- not a hardcoded date, and not a
+    date-string suffix, which previously matched "today" too on whatever day
+    of the month happened to end in one of the chosen digits (this test broke
+    on the 29th because "today" is literally 2026-07-29; it would have broken
+    again on the 30th, 31st and 1st of any month).
+    """
+    tomorrow = (dt_util.now().date() + timedelta(days=1)).isoformat()
 
     async def _handler(call):
-        if call.data["date"].endswith(("29", "30", "31", "01")) or len(call.data) > 99:
+        if call.data["date"] == tomorrow:
             raise ValueError("no data")
         return {"SE3": [{"start": "2026-07-28T00:00:00+00:00", "price": 400.0}]}
 
@@ -151,11 +162,11 @@ async def test_service_source_tolerates_no_data_for_tomorrow(
         "nordpool", "get_prices_for_date", _handler, supports_response=SupportsResponse.ONLY
     )
 
-    # Whatever today is, the second (future) call may fail without breaking the run.
+    # Today's call succeeds; tomorrow's fails and must not break the run.
     series = await async_resolve_series(
         hass, _builtin("price/nordpool_core"), {"config_entry": "abc", "area": "SE3"}
     )
-    assert len(series) >= 1
+    assert len(series) == 1
 
 
 async def test_unknown_response_path_lists_the_available_keys(

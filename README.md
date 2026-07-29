@@ -74,6 +74,12 @@ Price sources return **raw spot prices**. Composing your real prices happens sep
 
 > Tax and subsidy schemes change. Nothing here is kept current for you — check your own numbers each year.
 
+### Time resolution
+
+The **Grid and schedule** step defaults the optimisation time step to whatever your chosen price source actually publishes at — Nord Pool has been 15-minute since October 2025, most other sources are still hourly — detected automatically, not something you have to work out yourself. Change it if you'd rather trade detail for a faster solve; it isn't limited to a fixed list, type any number of minutes.
+
+This is only the *resolution EMHASS plans at*. How often the plan is recalculated (below) is a separate setting.
+
 ## Scheduling
 
 Two cadences:

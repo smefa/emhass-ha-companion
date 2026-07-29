@@ -86,7 +86,7 @@
       },
       "grid": {
         "title": "Grid connection and schedule",
-        "description": "Your connection limits, and how often the plan is recalculated.",
+        "description": "Your connection limits, and how often the plan is recalculated.{detected_resolution}",
         "data": {
           "grid_import_max_w": "Maximum import power",
           "grid_export_max_w": "Maximum export power",
@@ -96,7 +96,7 @@
           "dayahead_fallback_time": "Day-ahead fallback time"
         },
         "data_description": {
-          "optimization_time_step": "Finer resolution captures more price detail but makes the optimisation slower. 30 minutes suits most homes.",
+          "optimization_time_step": "The step size EMHASS plans at. Matching your price source's own resolution (for example 15 minutes for current Nord Pool prices) captures the most detail; a coarser step solves faster. Pick from the list or type any number of minutes.",
           "dayahead_fallback_time": "A full day-ahead plan is normally rebuilt automatically as soon as new prices arrive. This time is only used as a backstop if that never happens."
         }
       }
