@@ -386,3 +386,50 @@ def test_translations_keep_their_placeholders():
             expected = set(pattern.findall(value))
             actual = set(pattern.findall(translated.get(key, "")))
             assert expected == actual, f"{path.name}{key}: placeholders {expected} became {actual}"
+
+
+# --- brand icon ---------------------------------------------------------------
+
+# Since Home Assistant 2026.3.0, a custom integration ships its own icon
+# directly rather than depending on a PR being merged into the separate
+# home-assistant/brands repository: https://developers.home-assistant.io/blog/2026/02/24/brands-proxy-api/
+BRAND_SPEC = {
+    "icon.png": (256, 256),
+    "icon@2x.png": (512, 512),
+}
+BRAND_LOGO_SHORTEST_SIDE = {
+    "logo.png": 256,
+    "logo@2x.png": 512,
+}
+
+
+@pytest.mark.parametrize(("filename", "size"), BRAND_SPEC.items())
+def test_brand_icon_matches_the_required_square_size(filename, size):
+    """The proxy serves whatever is on disk verbatim -- a wrong size ships as-is."""
+    from PIL import Image
+
+    path = COMPONENT / "brand" / filename
+    assert path.is_file(), f"missing {path}"
+    with Image.open(path) as img:
+        assert img.size == size, f"{filename} is {img.size}, expected {size}"
+        assert img.mode == "RGBA", f"{filename} has no alpha channel"
+
+
+@pytest.mark.parametrize(("filename", "shortest_side"), BRAND_LOGO_SHORTEST_SIDE.items())
+def test_brand_logo_is_landscape_with_the_right_height(filename, shortest_side):
+    from PIL import Image
+
+    path = COMPONENT / "brand" / filename
+    assert path.is_file(), f"missing {path}"
+    with Image.open(path) as img:
+        width, height = img.size
+        assert height == shortest_side, f"{filename} height is {height}, expected {shortest_side}"
+        assert width >= height, f"{filename} is not landscape: {img.size}"
+
+
+def test_brand_icon_has_a_transparent_background():
+    """Guidelines: "images with transparency are preferred"."""
+    from PIL import Image
+
+    with Image.open(COMPONENT / "brand" / "icon.png") as img:
+        assert img.getpixel((0, 0))[3] == 0, "top-left corner is not transparent"

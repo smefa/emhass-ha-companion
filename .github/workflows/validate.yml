@@ -25,10 +25,11 @@ jobs:
       - uses: hacs/action@main
         with:
           category: integration
-          # `brands` cannot pass until an icon and logo for this domain are
-          # merged into home-assistant/brands, which is a separate submission
-          # to a repository we do not control. Everything else is enforced.
-          ignore: brands
+          # No `ignore:` needed: HACS's brands check looks for
+          # custom_components/emhass_companion/brand/icon.png in the repo
+          # tree first and only falls back to the external
+          # home-assistant/brands repository if that is absent -- and we ship
+          # our own, so nothing here depends on an external PR being merged.
 
   ruff:
     name: ruff
