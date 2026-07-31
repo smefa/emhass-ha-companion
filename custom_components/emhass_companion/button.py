@@ -36,6 +36,12 @@ BUTTONS: tuple[EmhassButtonDescription, ...] = (
     ),
 )
 
+FORECAST_FIT_BUTTON = EmhassButtonDescription(
+    key="run_forecast_fit",
+    translation_key="run_forecast_fit",
+    press_fn=lambda coordinator: coordinator.async_run_forecast_fit(),
+)
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -43,7 +49,14 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     coordinator: EmhassCoordinator = entry.runtime_data.coordinator
-    async_add_entities(EmhassButton(coordinator, description) for description in BUTTONS)
+
+    descriptions = list(BUTTONS)
+    # Only meaningful when the load profile trains EMHASS's own mlforecaster --
+    # otherwise there is no model to fit and pressing it would just fail.
+    if coordinator.uses_mlforecaster:
+        descriptions.append(FORECAST_FIT_BUTTON)
+
+    async_add_entities(EmhassButton(coordinator, description) for description in descriptions)
 
 
 class EmhassButton(EmhassEntity, ButtonEntity):

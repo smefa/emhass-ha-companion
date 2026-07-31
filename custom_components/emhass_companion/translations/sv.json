@@ -83,12 +83,19 @@
           "capacity_wh": "Användbar kapacitet",
           "charge_power_max_w": "Maximal laddeffekt",
           "discharge_power_max_w": "Maximal urladdningseffekt",
+          "hybrid_inverter": "Delad växelriktare (hybrid)",
+          "inverter_ac_output_max_w": "Maximal AC-uteffekt (urladdning/export)",
+          "inverter_ac_input_max_w": "Maximal AC-ineffekt (laddning/import)",
+          "inverter_efficiency_dc_ac": "Verkningsgrad DC till AC",
+          "inverter_efficiency_ac_dc": "Verkningsgrad AC till DC",
           "soc_min": "Lägsta laddningsnivå",
           "soc_max": "Högsta laddningsnivå",
           "soc_target": "Önskad laddningsnivå",
           "soc_entity": "Sensor för batteriets laddningsnivå"
         },
         "data_description": {
+          "hybrid_inverter": "På om solpanelerna och batteriet delar en och samma växelriktares AC-effektgräns, vilket gäller de flesta hembatterisystem. Av om det är två separata växelriktare med varsin gräns.",
+          "inverter_ac_input_max_w": "Lämna på 0 för att använda samma gräns som maximal AC-uteffekt.",
           "soc_min": "Som andel. 0,10 betyder att optimeringen inte planerar under 10 %.",
           "soc_target": "Där optimeringen siktar på att lämna batteriet vid horisontens slut.",
           "soc_entity": "Läses vid varje körning så att planen utgår från verkligheten."
@@ -139,10 +146,19 @@
           "capacity_wh": "Användbar kapacitet",
           "charge_power_max_w": "Maximal laddeffekt",
           "discharge_power_max_w": "Maximal urladdningseffekt",
+          "hybrid_inverter": "Delad växelriktare (hybrid)",
+          "inverter_ac_output_max_w": "Maximal AC-uteffekt (urladdning/export)",
+          "inverter_ac_input_max_w": "Maximal AC-ineffekt (laddning/import)",
+          "inverter_efficiency_dc_ac": "Verkningsgrad DC till AC",
+          "inverter_efficiency_ac_dc": "Verkningsgrad AC till DC",
           "soc_min": "Lägsta laddningsnivå",
           "soc_max": "Högsta laddningsnivå",
           "soc_target": "Önskad laddningsnivå",
           "soc_entity": "Sensor för batteriets laddningsnivå"
+        },
+        "data_description": {
+          "hybrid_inverter": "På om solpanelerna och batteriet delar en och samma växelriktares AC-effektgräns, vilket gäller de flesta hembatterisystem. Av om det är två separata växelriktare med varsin gräns.",
+          "inverter_ac_input_max_w": "Lämna på 0 för att använda samma gräns som maximal AC-uteffekt."
         }
       },
       "grid": {
@@ -248,6 +264,9 @@
       },
       "should_run": {
         "name": "Bör vara igång"
+      },
+      "running": {
+        "name": "Kör"
       }
     },
     "switch": {
@@ -259,6 +278,15 @@
       },
       "use_time_window": {
         "name": "Begränsa till ett tidsfönster"
+      },
+      "semi_continuous": {
+        "name": "Kör bara på full effekt"
+      },
+      "single_constant": {
+        "name": "Måste köra i ett sammanhängande block"
+      },
+      "load_requested": {
+        "name": "Begärd"
       }
     },
     "select": {
@@ -279,6 +307,13 @@
           "force_on": "Tvinga på",
           "force_off": "Tvinga av"
         }
+      },
+      "recurrence": {
+        "name": "Återkommer",
+        "state": {
+          "daily": "Varje dag",
+          "on_demand": "Vid behov"
+        }
       }
     },
     "button": {
@@ -287,6 +322,9 @@
       },
       "run_mpc": {
         "name": "Räkna om nu"
+      },
+      "run_forecast_fit": {
+        "name": "Träna förbrukningsprognosen"
       }
     },
     "number": {
@@ -295,6 +333,15 @@
       },
       "operating_hours": {
         "name": "Timmar som behövs per dygn"
+      },
+      "minimum_power": {
+        "name": "Lägsta effekt när den kör"
+      },
+      "startup_penalty": {
+        "name": "Kostnad för att starta"
+      },
+      "max_startups": {
+        "name": "Högsta antal starter per plan"
       }
     },
     "time": {
@@ -353,7 +400,7 @@
       "step": {
         "user": {
           "title": "Lägg till en flyttbar last",
-          "description": "En last vars tidpunkt optimeringen får välja: en diskmaskin, en billaddare, en poolpump. Det du ändrar från dag till dag blir reglage på lastens egen sida när den lagts till.",
+          "description": "En last vars tidpunkt optimeringen får välja: en diskmaskin, en billaddare, en poolpump. Detta är värdena lasten börjar med -- när den lagts till blir vart och ett ett reglage på lastens egen sida, som du också kan ändra från en automation.",
           "data": {
             "name": "Namn",
             "nominal_power_w": "Effekt när den är igång",
@@ -363,46 +410,37 @@
             "semi_continuous": "Kör bara på full effekt",
             "single_constant": "Måste köra i ett sammanhängande block",
             "startup_penalty": "Kostnad för att starta",
-            "power_sensor": "Effektsensor",
-            "control_entity": "Styrenhet"
+            "power_sensor": "Körsensor",
+            "control_entity": "Styrenhet",
+            "minimum_power_w": "Lägsta effekt när den kör",
+            "max_startups": "Högsta antal starter per plan"
           },
           "data_description": {
             "nominal_power_w": "Ungefär vad lasten drar när den är igång.",
-            "operating_hours": "Hur länge den behöver köra totalt. Optimeringen väljer när.",
+            "operating_hours": "Hur länge den behöver köra totalt. Optimeringen väljer när. EMHASS planerar i steg om {time_step} minuter, så detta avrundas till närmaste hela steg ({time_step_hours} h).",
             "earliest_start": "Används bara om du sedan slår på lastens reglage för tidsfönster.",
             "latest_end": "Får vara tidigare än starttiden, för ett fönster över natten.",
             "semi_continuous": "På för en diskmaskin eller pump, som antingen är på eller av. Av för något vars effekt kan varieras, till exempel en billaddare.",
             "single_constant": "På om det vore ett problem att avbryta den, till exempel ett tvättprogram.",
             "startup_penalty": "Motverkar att den slås på och av gång på gång. Lämna på noll om det inte är ett problem.",
-            "power_sensor": "Valfritt men rekommenderas. Låter optimeringen veta att lasten redan kör, så att den inte debiteras startkostnad två gånger eller ombeds göra om arbete den redan gjort idag.",
-            "control_entity": "Valfritt. Om den anges slår integrationen på och av denna för att följa planen, när du aktiverat styrning. Lämna tom för att behålla styrningen i dina egna automationer."
+            "power_sensor": "Valfritt. Det säkraste sättet att låta optimeringen veta om lasten faktiskt kör -- fångar ett pass som avslutades tidigt, ett som aldrig blev av trots att det var planerat, eller ett som startades vid en annan tidpunkt än schemalagt. En effektsensor ger mest detalj (valfri enhet -- W, kW, MW, ... -- räknas automatiskt om till watt); en enkel av/på-binary_sensor fungerar också, och läses på samma sätt som en styrenhets tillstånd. Utan någon av dem och utan styrenhet antar optimeringen i stället att lasten följde sin egen senaste plan, vilket inte kan se något av detta.",
+            "control_entity": "Valfritt. Om den anges slår integrationen på och av denna för att följa planen, när du aktiverat styrning -- och dess tillstånd används dessutom som körsignal när det inte finns någon effektsensor. Lämna tom för att behålla styrningen i dina egna automationer. Utan vare sig denna eller en effektsensor litar optimeringen i stället på sin egen tidigare plan -- och antar att lasten körde när den var schemalagd. Det är bara så tillförlitligt som din egen efterlevnad, så en riktig sensor eller styrenhet är värd att lägga till när det går.",
+            "minimum_power_w": "Används bara när \"Kör bara på full effekt\" är av. Till exempel en billaddare som inte kan gå under 6 A -- optimeringen kör då lasten på minst denna effekt, eller låter den vara helt av. Noll betyder ingen gräns.",
+            "max_startups": "En hård gräns, till skillnad från kostnaden för att starta: för lågt värde gör att den önskade körtiden inte kan uppnås alls. Noll betyder ingen gräns."
           }
         },
         "reconfigure": {
           "title": "Redigera flyttbar last",
           "data": {
             "name": "Namn",
-            "nominal_power_w": "Effekt när den är igång",
-            "operating_hours": "Timmar som behövs per dygn",
-            "earliest_start": "Tidigast start",
-            "latest_end": "Senast klar",
-            "semi_continuous": "Kör bara på full effekt",
-            "single_constant": "Måste köra i ett sammanhängande block",
-            "startup_penalty": "Kostnad för att starta",
-            "power_sensor": "Effektsensor",
+            "power_sensor": "Körsensor",
             "control_entity": "Styrenhet"
           },
           "data_description": {
-            "nominal_power_w": "Ungefär vad lasten drar när den är igång.",
-            "operating_hours": "Hur länge den behöver köra totalt. Optimeringen väljer när.",
-            "earliest_start": "Används bara om du sedan slår på lastens reglage för tidsfönster.",
-            "latest_end": "Får vara tidigare än starttiden, för ett fönster över natten.",
-            "semi_continuous": "På för en diskmaskin eller pump, som antingen är på eller av. Av för något vars effekt kan varieras, till exempel en billaddare.",
-            "single_constant": "På om det vore ett problem att avbryta den, till exempel ett tvättprogram.",
-            "startup_penalty": "Motverkar att den slås på och av gång på gång. Lämna på noll om det inte är ett problem.",
-            "power_sensor": "Valfritt men rekommenderas. Låter optimeringen veta att lasten redan kör, så att den inte debiteras startkostnad två gånger eller ombeds göra om arbete den redan gjort idag.",
-            "control_entity": "Valfritt. Om den anges slår integrationen på och av denna för att följa planen, när du aktiverat styrning. Lämna tom för att behålla styrningen i dina egna automationer."
-          }
+            "power_sensor": "Valfritt. Det säkraste sättet att låta optimeringen veta om lasten faktiskt kör -- fångar ett pass som avslutades tidigt, ett som aldrig blev av trots att det var planerat, eller ett som startades vid en annan tidpunkt än schemalagt. En effektsensor ger mest detalj (valfri enhet -- W, kW, MW, ... -- räknas automatiskt om till watt); en enkel av/på-binary_sensor fungerar också, och läses på samma sätt som en styrenhets tillstånd. Utan någon av dem och utan styrenhet antar optimeringen i stället att lasten följde sin egen senaste plan, vilket inte kan se något av detta.",
+            "control_entity": "Valfritt. Om den anges slår integrationen på och av denna för att följa planen, när du aktiverat styrning -- och dess tillstånd används dessutom som körsignal när det inte finns någon effektsensor. Lämna tom för att behålla styrningen i dina egna automationer. Utan vare sig denna eller en effektsensor litar optimeringen i stället på sin egen tidigare plan -- och antar att lasten körde när den var schemalagd. Det är bara så tillförlitligt som din egen efterlevnad, så en riktig sensor eller styrenhet är värd att lägga till när det går."
+          },
+          "description": "Effekt, körtid, tidsfönster och lastmodell är reglage på lastens egen sida, inte inställningar här -- ändra dem där eller från en automation."
         }
       },
       "entry_type": "Flyttbar last",

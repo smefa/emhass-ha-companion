@@ -18,7 +18,7 @@ from typing import Any
 from homeassistant.util import dt as dt_util
 
 from .const import ACTION_MPC
-from .models import BatteryConfig, DeferrableLoad, GridConfig, Series
+from .models import BatteryConfig, DeferrableLoad, GridConfig, HybridInverterConfig, Series
 from .thermal import build_def_load_config
 
 _LOGGER = logging.getLogger(__name__)
@@ -139,6 +139,7 @@ class PayloadInputs:
     horizon_steps: int
     battery: BatteryConfig
     grid: GridConfig
+    hybrid_inverter: HybridInverterConfig
     loads: list[DeferrableLoad] = field(default_factory=list)
     pv: Series | None = None
     load: Series | None = None
@@ -212,11 +213,13 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
 
     # -- settings -------------------------------------------------------------
     payload.update(_battery_settings(inputs.battery))
+    payload.update(_hybrid_inverter_settings(inputs.hybrid_inverter))
     payload["maximum_power_from_grid"] = inputs.grid.import_max_w
     payload["maximum_power_to_grid"] = inputs.grid.export_max_w
 
-    deferrable, load_order = _deferrable_settings(inputs, step)
+    deferrable, load_order, deferrable_warnings = _deferrable_settings(inputs, step)
     payload.update(deferrable)
+    warnings.extend(deferrable_warnings)
 
     thermal = _thermal_settings(inputs, step, len(load_order))
     payload.update(thermal)
@@ -266,15 +269,59 @@ def _battery_settings(battery: BatteryConfig) -> dict[str, Any]:
     }
 
 
+def _hybrid_inverter_settings(hybrid: HybridInverterConfig) -> dict[str, Any]:
+    """Describe a shared-inverter plant's AC-side throughput to EMHASS.
+
+    Always sent, on or off: EMHASS's own ``inverter_is_hybrid`` gates whether
+    any of the rest is used at all, so leaving it disabled makes the other
+    values inert rather than wrong -- but the flag itself must be asserted on
+    every request the same way every other setting here is, so a value left
+    over in EMHASS's own persisted config is never what decides the answer.
+    """
+    if not hybrid.enabled:
+        return {"inverter_is_hybrid": False}
+    return {
+        "inverter_is_hybrid": True,
+        "inverter_ac_output_max": hybrid.ac_output_max_w,
+        "inverter_ac_input_max": hybrid.ac_input_max_w,
+        "inverter_efficiency_dc_ac": hybrid.efficiency_dc_ac,
+        "inverter_efficiency_ac_dc": hybrid.efficiency_ac_dc,
+    }
+
+
+def operating_timesteps(operating_hours: float, step_minutes: int) -> int:
+    """The whole number of timesteps a requested run time corresponds to.
+
+    EMHASS turns operating hours into an *energy equality*:
+    ``sum(p) * time_step == nominal_power * operating_hours``. A
+    semi-continuous load can only draw 0 or exactly its nominal power, so the
+    only energies it can reach are whole multiples of
+    ``nominal_power * time_step`` -- a request that is not a whole number of
+    timesteps has no solution at all, and EMHASS reports an infeasible problem
+    (or silently falls back to its relaxed LP) rather than rounding for us.
+
+    Rounding is to the nearest step, except that any non-zero request is
+    floored at one step: "run this for six minutes" turning into "never run" is
+    a worse answer than a slightly longer run.
+    """
+    if operating_hours <= 0:
+        return 0
+    return max(1, round(operating_hours * 60 / step_minutes))
+
+
 def _deferrable_settings(
     inputs: PayloadInputs, step: timedelta
-) -> tuple[dict[str, Any], list[str]]:
+) -> tuple[dict[str, Any], list[str], list[str]]:
     active = [load for load in inputs.loads if load.enabled]
     if not active:
-        return {"number_of_deferrable_loads": 0}, []
+        return {"number_of_deferrable_loads": 0}, [], []
 
+    warnings: list[str] = []
     starts: list[int] = []
     ends: list[int] = []
+    timesteps: list[int] = []
+    hours: list[float] = []
+    minimum_powers: list[float] = []
     for load in active:
         start_index, end_index = window_to_timesteps(
             load.earliest_start,
@@ -286,23 +333,69 @@ def _deferrable_settings(
         starts.append(start_index)
         ends.append(end_index)
 
+        # Quantise here rather than in the entity: the number the user typed is
+        # theirs to see, and the timestep it has to fit is only known when a
+        # request is built.
+        steps = operating_timesteps(load.operating_hours, inputs.time_step_minutes)
+        quantised = steps * inputs.time_step_minutes / 60
+        timesteps.append(steps)
+        hours.append(quantised)
+        if not math.isclose(quantised, load.operating_hours, rel_tol=1e-9, abs_tol=1e-9):
+            warnings.append(
+                f"{load.name}: {load.operating_hours:g} h is not a whole number of "
+                f"{inputs.time_step_minutes}-minute timesteps, so EMHASS is being "
+                f"asked for {quantised:g} h ({steps} timesteps) instead."
+            )
+
+        # A floor above the ceiling has no feasible power at all, and EMHASS
+        # reports that as an infeasible problem with no hint as to which load
+        # caused it.
+        if load.minimum_power_w > load.nominal_power_w:
+            warnings.append(
+                f"{load.name}: minimum power {load.minimum_power_w:g} W exceeds its "
+                f"nominal {load.nominal_power_w:g} W; using the nominal power as the floor."
+            )
+            minimum_powers.append(load.nominal_power_w)
+        else:
+            minimum_powers.append(load.minimum_power_w)
+
     settings: dict[str, Any] = {
         "number_of_deferrable_loads": len(active),
         "nominal_power_of_deferrable_loads": [load.nominal_power_w for load in active],
-        "operating_hours_of_each_deferrable_load": [load.operating_hours for load in active],
+        "minimum_power_of_deferrable_loads": minimum_powers,
+        "operating_hours_of_each_deferrable_load": hours,
         "start_timesteps_of_each_deferrable_load": starts,
         "end_timesteps_of_each_deferrable_load": ends,
         "treat_deferrable_load_as_semi_cont": [load.semi_continuous for load in active],
         "set_deferrable_load_single_constant": [load.single_constant for load in active],
         "set_deferrable_startup_penalty": [load.startup_penalty for load in active],
+        "set_deferrable_max_startups": [load.max_startups for load in active],
         # Feeding current state back stops EMHASS charging a startup penalty for
         # a load that is already running, and stops it re-scheduling work that
         # has already been done today.
         "def_current_state": [load.current_state for load in active],
         "def_current_operating_timesteps": [load.completed_timesteps for load in active],
+        # Companion has no per-load "max acceptable cost" feature of its own, so
+        # this is always disabled -- but it must still be sent, sized to the
+        # active load count. EMHASS's own optimisation.py indexes this list
+        # directly with no bounds check (unlike every sibling array above,
+        # which all have a `k < len(...)` guard), so if this is left to the
+        # persisted config instead, a stale shorter list left over from a
+        # previous, larger load count throws an uncaught IndexError and 500s
+        # the entire request. A zero disables the feature exactly as the
+        # key's absence would, but immune to whatever is on disk.
+        "deferrable_load_max_cost": [0.0 for _ in active],
     }
 
     if any(load.current_power_w for load in active):
         settings["def_current_power"] = [load.current_power_w for load in active]
 
-    return settings, [load.subentry_id for load in active]
+    if inputs.action == ACTION_MPC:
+        # Exact integers, with no hours-to-timesteps division for EMHASS to do
+        # and no float remainder to survive. EMHASS honours this key only on the
+        # branch that takes `prediction_horizon` (utils.treat_runtimeparams) --
+        # it is deliberately absent from associations.csv -- so the day-ahead
+        # request has to keep making do with the quantised hours above.
+        settings["operating_timesteps_of_each_deferrable_load"] = timesteps
+
+    return settings, [load.subentry_id for load in active], warnings

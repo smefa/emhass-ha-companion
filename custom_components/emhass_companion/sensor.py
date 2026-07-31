@@ -102,6 +102,7 @@ BATTERY_SENSORS: tuple[EmhassSensorDescription, ...] = (
         device_class=SensorDeviceClass.BATTERY,
         native_unit_of_measurement="%",
         state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=1,
         # soc_percent, not soc: the scaling from EMHASS's fraction happens once,
         # in the model.
         value_fn=_plan_value("soc_percent"),

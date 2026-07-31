@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import time, timedelta
+import math
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -32,7 +33,7 @@ from .const import (
     DEFAULT_TIME_STEP,
     STALE_PLAN_FACTOR,
 )
-from .models import BatteryConfig, GridConfig
+from .models import BatteryConfig, GridConfig, HybridInverterConfig
 from .tariff import Tariff
 
 
@@ -73,6 +74,7 @@ class EmhassConfig:
     tariff: Tariff = field(default_factory=lambda: Tariff.from_dict({}))
     battery: BatteryConfig = field(default_factory=BatteryConfig)
     grid: GridConfig = field(default_factory=GridConfig)
+    hybrid_inverter: HybridInverterConfig = field(default_factory=HybridInverterConfig)
     soc_entity: str | None = None
 
     @classmethod
@@ -92,6 +94,10 @@ class EmhassConfig:
             tariff=Tariff.from_dict(options.get("tariff")),
             battery=BatteryConfig.from_dict(options.get("battery")),
             grid=GridConfig.from_dict(options.get("grid")),
+            # Collected from the same form/options blob as battery -- a
+            # shared inverter throughput cap is meaningless without a battery
+            # to share it with.
+            hybrid_inverter=HybridInverterConfig.from_dict(options.get("battery")),
             soc_entity=options.get(CONF_SOC_ENTITY),
         )
 
@@ -99,6 +105,27 @@ class EmhassConfig:
     def horizon_steps(self) -> int:
         """Horizon expressed in timesteps, which is what EMHASS wants."""
         return max(1, round(self.horizon_hours * 60 / self.time_step_minutes))
+
+    @property
+    def dayahead_num_lags(self) -> int:
+        """Predict steps mlforecaster must produce in one day-ahead call.
+
+        Mirrors how ``payload.py`` derives ``delta_forecast_daily`` and how
+        EMHASS's own ``forecast.py`` then builds ``forecast_dates`` from it:
+        the day-ahead action always rounds the horizon *up* to a whole number
+        of days, so the actual number of steps EMHASS asks the trained model
+        for can exceed ``horizon_steps`` whenever ``horizon_hours`` is not a
+        multiple of 24 -- e.g. a 30-hour horizon at 15-minute resolution needs
+        96 * 2 = 192 steps, not the 120 ``horizon_steps`` would suggest.
+        A non-tuned EMHASS forecaster can only ever produce ``num_lags`` steps
+        per predict call (``machine_learning_forecaster.py``'s
+        ``predict()``: ``steps = self.lags_opt if self.is_tuned else
+        self.num_lags``), so ``num_lags`` must be at least this value.
+        """
+        hours = self.horizon_steps * self.time_step_minutes / 60
+        delta_forecast_days = max(1, math.ceil(hours / 24))
+        steps_per_day = round(24 * 60 / self.time_step_minutes)
+        return delta_forecast_days * steps_per_day
 
     @property
     def mpc_interval(self) -> timedelta:

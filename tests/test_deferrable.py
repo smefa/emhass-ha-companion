@@ -9,12 +9,15 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, time, timedelta
 
+from homeassistant.core import State
 import pytest
 
 from custom_components.emhass_companion.const import (
     LOAD_MODE_AUTO,
     LOAD_MODE_FORCE_OFF,
     LOAD_MODE_FORCE_ON,
+    RECURRENCE_DAILY,
+    RECURRENCE_ON_DEMAND,
 )
 from custom_components.emhass_companion.deferrable import (
     DeferrableRuntime,
@@ -116,6 +119,92 @@ def test_completed_timesteps_floors_to_whole_steps():
     assert load.completed_timesteps(now, 15) == 5
 
 
+# --- what tells a load it is running -----------------------------------------
+
+
+def test_a_power_sensor_is_preferred_as_the_running_source():
+    load = _load(power_sensor="sensor.dishwasher_power", control_entity="switch.dishwasher")
+    assert load.running_source == "sensor.dishwasher_power"
+
+
+def test_the_control_entity_is_the_running_source_without_a_meter():
+    """EMHASS remembers nothing between runs, so *something* has to tell it the
+    load already ran today. A metered load is ideal, but a load the executor
+    switches on is a perfectly good signal -- and one the user already gave us."""
+    load = _load(control_entity="switch.dishwasher")
+    assert load.running_source == "switch.dishwasher"
+
+
+def test_a_load_with_nothing_to_observe_has_no_running_source():
+    assert _load().running_source is None
+
+
+@pytest.mark.parametrize(
+    ("state", "expected"),
+    [
+        ("1900", 1900.0),
+        ("0", 0.0),
+        # An on/off source reads as the full nominal power, clearing
+        # running_threshold_w by construction rather than by luck.
+        ("on", 2000.0),
+        ("off", 0.0),
+        ("unavailable", None),
+        ("unknown", None),
+        ("", None),
+        ("not a number", None),
+    ],
+)
+def test_running_source_states_are_read_as_power(state, expected):
+    load = _load(nominal_power_w=2000)
+    assert load.state_to_power(State("switch.dishwasher", state)) == expected
+
+
+def test_a_missing_running_source_state_is_no_reading():
+    assert _load().state_to_power(None) is None
+
+
+@pytest.mark.parametrize(
+    ("raw", "unit", "expected_w"),
+    [
+        (1900, "W", 1900.0),
+        (1.9, "kW", 1900.0),
+        (0.0019, "MW", 1900.0),
+        (1900000, "mW", 1900.0),
+    ],
+)
+def test_a_power_sensor_in_another_unit_is_converted_to_watts(raw, unit, expected_w):
+    """nominal_power_w and running_threshold_w are both watts -- a sensor
+    reporting kW read without conversion would be 1000x too small, and the
+    load would look permanently idle no matter how much power it draws."""
+    load = _load(nominal_power_w=2000)
+    state = State("sensor.dishwasher_power", str(raw), {"unit_of_measurement": unit})
+    assert load.state_to_power(state) == pytest.approx(expected_w)
+
+
+def test_a_power_sensor_with_no_unit_is_read_as_watts():
+    load = _load(nominal_power_w=2000)
+    state = State("sensor.dishwasher_power", "1900")
+    assert load.state_to_power(state) == 1900.0
+
+
+def test_an_unrecognised_unit_falls_back_to_the_raw_number():
+    """A non-power unit on a power_sensor entity is a misconfiguration outside
+    this integration's control -- using the raw number beats discarding the
+    reading entirely."""
+    load = _load(nominal_power_w=2000)
+    state = State("sensor.dishwasher_power", "1900", {"unit_of_measurement": "bogus"})
+    assert load.state_to_power(state) == 1900.0
+
+
+def test_an_on_off_source_accumulates_runtime():
+    load = _load(control_entity="switch.dishwasher")
+    load.observe(State("switch.dishwasher", "on"), T0)
+    load.observe(State("switch.dishwasher", "off"), T0 + timedelta(hours=1))
+
+    assert load.elapsed_today(T0 + timedelta(hours=2)) == timedelta(hours=1)
+    assert load.completed_timesteps(T0 + timedelta(hours=2), 30) == 2
+
+
 # --- projection into the payload ---------------------------------------------
 
 
@@ -188,3 +277,65 @@ def test_mode_does_not_remove_a_load_from_the_optimisation():
     two would silently change the problem whenever someone paused a load.
     """
     assert _load(mode=LOAD_MODE_FORCE_OFF).to_load(T0, 30).enabled is True
+
+
+# --- on-demand recurrence -----------------------------------------------------
+
+
+def test_a_daily_load_participates_regardless_of_requested():
+    load = _load(recurrence=RECURRENCE_DAILY)
+    assert load.participates is True
+    load.requested = True
+    assert load.participates is True
+
+
+def test_an_on_demand_load_only_participates_once_requested():
+    load = _load(recurrence=RECURRENCE_ON_DEMAND)
+    assert load.participates is False
+    load.requested = True
+    assert load.participates is True
+
+
+def test_an_unrequested_on_demand_load_is_excluded_from_the_payload():
+    """Same path a disabled load takes -- payload.py filters on `enabled`."""
+    load = _load(recurrence=RECURRENCE_ON_DEMAND)
+    assert load.to_load(T0, 30).enabled is False
+
+
+def test_a_requested_on_demand_load_is_included_in_the_payload():
+    load = _load(recurrence=RECURRENCE_ON_DEMAND, requested=True)
+    assert load.to_load(T0, 30).enabled is True
+
+
+def test_disabled_wins_over_a_request():
+    load = _load(recurrence=RECURRENCE_ON_DEMAND, requested=True, enabled=False)
+    assert load.to_load(T0, 30).enabled is False
+
+
+def test_auto_disarm_is_a_no_op_for_a_daily_load():
+    load = _load(recurrence=RECURRENCE_DAILY, requested=True, operating_hours=1)
+    load.observe_power(1900, T0)
+    load.observe_power(0, T0 + timedelta(hours=1))
+    assert load.check_auto_disarm(T0 + timedelta(hours=1)) is False
+    assert load.requested is True
+
+
+def test_auto_disarm_is_a_no_op_when_nothing_is_requested():
+    load = _load(recurrence=RECURRENCE_ON_DEMAND, operating_hours=1)
+    assert load.check_auto_disarm(T0) is False
+
+
+def test_auto_disarm_waits_for_the_target_to_be_reached():
+    load = _load(recurrence=RECURRENCE_ON_DEMAND, requested=True, operating_hours=1)
+    load.observe_power(1900, T0)
+    load.observe_power(0, T0 + timedelta(minutes=30))
+    assert load.check_auto_disarm(T0 + timedelta(minutes=30)) is False
+    assert load.requested is True
+
+
+def test_auto_disarm_clears_the_request_once_the_target_is_reached():
+    load = _load(recurrence=RECURRENCE_ON_DEMAND, requested=True, operating_hours=1)
+    load.observe_power(1900, T0)
+    load.observe_power(0, T0 + timedelta(hours=1))
+    assert load.check_auto_disarm(T0 + timedelta(hours=1)) is True
+    assert load.requested is False

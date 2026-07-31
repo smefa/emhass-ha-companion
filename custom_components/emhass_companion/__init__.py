@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import logging
 
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import (
+    SIGNAL_CONFIG_ENTRY_CHANGED,
+    ConfigEntry,
+    ConfigEntryChange,
+)
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 from .api import EmhassClient, EmhassError
 from .const import (
@@ -18,6 +23,7 @@ from .const import (
     ISSUE_BAD_PROFILE,
     ISSUE_EMHASS_VERSION,
     MIN_EMHASS_VERSION,
+    SUBENTRY_TYPE_DEFERRABLE,
 )
 from .coordinator import EmhassCoordinator
 from .deferrable import DeferrableRegistry
@@ -76,6 +82,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
     coordinator = EmhassCoordinator(hass, entry, client, loads)
     await coordinator.async_load_profiles()
     _report_profile_errors(hass, coordinator)
+    await coordinator.async_sync_emhass_config()
 
     scheduler = Scheduler(hass, coordinator)
     executor = Executor(hass, coordinator)
@@ -86,9 +93,49 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     async_register_services(hass)
 
-    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     entry.async_on_unload(scheduler.async_stop)
     entry.async_on_unload(loads.async_stop)
+
+    @callback
+    def _async_entry_changed(change_type: ConfigEntryChange, changed_entry: ConfigEntry) -> None:
+        """Reload when a deferrable load subentry is added or removed.
+
+        Entities for a load are built exactly once, above, from
+        ``loads.all()`` -- adding or removing a subentry (Settings > Devices &
+        Services > this integration > Add/remove deferrable load) does not by
+        itself create or clean up anything. This signal is the correct place
+        to catch that: it fires from ``ConfigEntries._async_save_and_notify``,
+        strictly *after* the subentry is actually persisted, unlike scheduling
+        a reload from inside the subentry flow step itself (which races
+        ``ConfigSubentryFlowManager.async_finish_flow``'s own
+        ``async_add_subentry`` call -- sometimes running before the subentry
+        it is meant to pick up actually exists).
+
+        ``entry.update_listeners`` is not an option here: this entry's options
+        flow uses ``OptionsFlowWithReload``, which core refuses to combine with
+        any update listener. This dispatcher signal is a separate mechanism
+        the options flow does not use, so the two cannot conflict. Filtered to
+        deferrable-load membership specifically, not every UPDATED event --
+        that also fires on every state transition (including this reload's
+        own) and on options changes, and reloading on those too would just
+        spin forever reacting to its own side effects.
+        """
+        if changed_entry.entry_id != entry.entry_id:
+            return
+        if change_type != ConfigEntryChange.UPDATED or entry.runtime_data is None:
+            return
+        current = {
+            subentry_id
+            for subentry_id, subentry in entry.subentries.items()
+            if subentry.subentry_type == SUBENTRY_TYPE_DEFERRABLE
+        }
+        already_loaded = {load.subentry_id for load in entry.runtime_data.loads.all()}
+        if current != already_loaded:
+            hass.config_entries.async_schedule_reload(entry.entry_id)
+
+    entry.async_on_unload(
+        async_dispatcher_connect(hass, SIGNAL_CONFIG_ENTRY_CHANGED, _async_entry_changed)
+    )
 
     @callback
     def _async_plan_updated() -> None:
@@ -139,11 +186,6 @@ def _integration_version(hass: HomeAssistant) -> str:
         return async_get_loaded_integration(hass, DOMAIN).version or "0"
     except Exception:  # noqa: BLE001 - only affects cache busting
         return "0"
-
-
-async def _async_update_listener(hass: HomeAssistant, entry: EmhassConfigEntry) -> None:
-    """Reload when options change."""
-    await hass.config_entries.async_reload(entry.entry_id)
 
 
 def _check_version(hass: HomeAssistant, version: str | None) -> None:

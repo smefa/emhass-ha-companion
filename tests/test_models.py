@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from custom_components.emhass_companion.models import (
+    HybridInverterConfig,
     LastRun,
     Plan,
     Point,
@@ -16,6 +17,69 @@ from custom_components.emhass_companion.models import (
 )
 
 T0 = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+
+
+# --- HybridInverterConfig ------------------------------------------------------
+
+
+def test_hybrid_inverter_config_defaults_to_disabled():
+    config = HybridInverterConfig.from_dict(None)
+    assert config.enabled is False
+    assert config.efficiency_dc_ac == 1.0
+    assert config.efficiency_ac_dc == 1.0
+
+
+def test_ac_input_max_falls_back_to_ac_output_max_when_blank():
+    """Mirrors EMHASS's own fallback in optimization.py's
+    _add_hybrid_inverter_constraints: a plant with no separate input limit is
+    assumed symmetric, not zero-capacity."""
+    config = HybridInverterConfig.from_dict(
+        {"hybrid_inverter": True, "inverter_ac_output_max_w": 5000}
+    )
+    assert config.ac_input_max_w == 5000
+
+
+def test_ac_input_max_falls_back_when_explicitly_zero():
+    config = HybridInverterConfig.from_dict(
+        {
+            "hybrid_inverter": True,
+            "inverter_ac_output_max_w": 5000,
+            "inverter_ac_input_max_w": 0,
+        }
+    )
+    assert config.ac_input_max_w == 5000
+
+
+def test_ac_input_max_is_kept_when_genuinely_different():
+    config = HybridInverterConfig.from_dict(
+        {
+            "hybrid_inverter": True,
+            "inverter_ac_output_max_w": 5000,
+            "inverter_ac_input_max_w": 6000,
+        }
+    )
+    assert config.ac_input_max_w == 6000
+
+
+@pytest.mark.parametrize("stored_efficiency", [None, 0, 0.0])
+def test_efficiency_falls_back_to_one_when_blank_or_zero(stored_efficiency):
+    """A 0 efficiency would mean 100% conversion loss -- clearly never what a
+    user meant by leaving the field unset."""
+    data = {"hybrid_inverter": True}
+    if stored_efficiency is not None:
+        data["inverter_efficiency_dc_ac"] = stored_efficiency
+        data["inverter_efficiency_ac_dc"] = stored_efficiency
+    config = HybridInverterConfig.from_dict(data)
+    assert config.efficiency_dc_ac == 1.0
+    assert config.efficiency_ac_dc == 1.0
+
+
+def test_efficiency_is_kept_when_genuinely_set():
+    config = HybridInverterConfig.from_dict(
+        {"inverter_efficiency_dc_ac": 0.97, "inverter_efficiency_ac_dc": 0.98}
+    )
+    assert config.efficiency_dc_ac == 0.97
+    assert config.efficiency_ac_dc == 0.98
 
 
 def _series(*values: float, step_minutes: int = 30) -> Series:

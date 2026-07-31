@@ -32,7 +32,10 @@ async def async_setup_entry(
 
     for load in entry.runtime_data.loads.all():
         async_add_entities(
-            [LoadShouldRunBinarySensor(coordinator, load)],
+            [
+                LoadShouldRunBinarySensor(coordinator, load),
+                LoadRunningBinarySensor(coordinator, load),
+            ],
             config_subentry_id=load.subentry_id,
         )
 
@@ -106,4 +109,40 @@ class LoadShouldRunBinarySensor(EmhassLoadEntity, BinarySensorEntity):
             "mode": self.load.mode,
             "scheduled_power": self._scheduled_power(),
             "currently_running": self.load.is_running,
+        }
+
+
+class LoadRunningBinarySensor(EmhassLoadEntity, BinarySensorEntity):
+    """Whether this load is observed to be running right now.
+
+    The counterpart to ``should_run``: what the load is actually doing, rather
+    than what the plan wants. This is the state fed back to EMHASS as
+    ``def_current_state``, and the runtime it accumulates becomes
+    ``def_current_operating_timesteps`` -- EMHASS itself remembers nothing
+    between runs, so without this it would happily re-schedule a wash cycle
+    that finished an hour ago.
+
+    Reports off, not unknown, when there is nothing to observe: "we have no
+    way of knowing" and "not running" lead to the same request here, and an
+    unknown state would only make the sensor useless in a template.
+    """
+
+    _attr_translation_key = "running"
+
+    def __init__(self, coordinator: EmhassCoordinator, load: DeferrableRuntime) -> None:
+        super().__init__(coordinator, load, "running")
+
+    @property
+    def is_on(self) -> bool:
+        return self.load.is_running
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        elapsed = self.load.elapsed_today(dt_util.utcnow())
+        return {
+            "running_source": self.load.running_source,
+            "runtime_today": str(elapsed).split(".")[0],
+            "completed_timesteps": self.load.completed_timesteps(
+                dt_util.utcnow(), self.coordinator.config.time_step_minutes
+            ),
         }

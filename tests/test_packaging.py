@@ -156,11 +156,24 @@ EXPECTED_ENTITY_KEYS = {
         "runtime_today",
         "battery_action",
     },
-    "binary_sensor": {"plan_stale", "should_run"},
-    "switch": {"control_enabled", "load_enabled", "use_time_window"},
-    "select": {"system_mode", "load_mode"},
-    "button": {"run_dayahead", "run_mpc"},
-    "number": {"nominal_power", "operating_hours"},
+    "binary_sensor": {"plan_stale", "should_run", "running"},
+    "switch": {
+        "control_enabled",
+        "load_enabled",
+        "use_time_window",
+        "semi_continuous",
+        "single_constant",
+        "load_requested",
+    },
+    "select": {"system_mode", "load_mode", "recurrence"},
+    "button": {"run_dayahead", "run_mpc", "run_forecast_fit"},
+    "number": {
+        "nominal_power",
+        "minimum_power",
+        "operating_hours",
+        "startup_penalty",
+        "max_startups",
+    },
     "time": {"earliest_start", "latest_end"},
 }
 
@@ -176,9 +189,13 @@ def test_every_entity_has_a_translated_name(strings, platform, keys):
 
 
 def test_select_options_are_translated(strings):
-    from custom_components.emhass_companion.const import LOAD_MODES, SYSTEM_MODES
+    from custom_components.emhass_companion.const import LOAD_MODES, RECURRENCES, SYSTEM_MODES
 
-    for key, modes in (("system_mode", SYSTEM_MODES), ("load_mode", LOAD_MODES)):
+    for key, modes in (
+        ("system_mode", SYSTEM_MODES),
+        ("load_mode", LOAD_MODES),
+        ("recurrence", RECURRENCES),
+    ):
         states = strings["entity"]["select"][key]["state"]
         for mode in modes:
             assert mode in states, f"{key} option '{mode}' has no translation"
@@ -192,10 +209,14 @@ def test_deferrable_subentry_is_translated(strings):
     subentry = strings["config_subentries"][SUBENTRY_TYPE_DEFERRABLE]
     assert subentry["entry_type"]
 
-    fields = {str(marker.schema) for marker in deferrable_schema({})}
-    for step in ("user", "reconfigure"):
+    # The two steps deliberately show different fields: reconfigure offers only
+    # what the subentry still owns, because everything else became an entity the
+    # moment the load was created.
+    for step, initial in (("user", True), ("reconfigure", False)):
+        fields = {str(marker.schema) for marker in deferrable_schema({}, initial=initial)}
         labelled = set(subentry["step"][step]["data"])
         assert fields <= labelled, f"{step} is missing labels for {fields - labelled}"
+        assert labelled <= fields, f"{step} labels fields it does not show: {labelled - fields}"
 
 
 def test_every_platform_is_forwarded(strings):

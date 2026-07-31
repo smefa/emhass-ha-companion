@@ -15,10 +15,16 @@ import math
 from typing import Any, Self
 
 from .const import (
+    CONF_HYBRID_INVERTER,
+    CONF_INVERTER_AC_INPUT_MAX,
+    CONF_INVERTER_AC_OUTPUT_MAX,
+    CONF_INVERTER_EFFICIENCY_AC_DC,
+    CONF_INVERTER_EFFICIENCY_DC_AC,
     DEFAULT_CHARGE_EFFICIENCY,
     DEFAULT_DISCHARGE_EFFICIENCY,
     DEFAULT_GRID_EXPORT_MAX,
     DEFAULT_GRID_IMPORT_MAX,
+    DEFAULT_INVERTER_EFFICIENCY,
     DEFAULT_SOC_MAX,
     DEFAULT_SOC_MIN,
     DEFAULT_SOC_TARGET,
@@ -225,6 +231,48 @@ class GridConfig:
 
 
 @dataclass(slots=True)
+class HybridInverterConfig:
+    """AC-side throughput of a single inverter shared by PV and battery.
+
+    Meaningless for a plant with two separate inverters -- one for PV, one for
+    the battery -- since each then has its own, independent AC limit and
+    nothing is shared. EMHASS's own `inverter_is_hybrid` gates all of this;
+    disabled makes the rest inert rather than wrong, so it's safe to collect
+    them from the same form regardless of the toggle.
+    """
+
+    enabled: bool = False
+    ac_output_max_w: float = 0.0
+    ac_input_max_w: float = 0.0
+    efficiency_dc_ac: float = DEFAULT_INVERTER_EFFICIENCY
+    efficiency_ac_dc: float = DEFAULT_INVERTER_EFFICIENCY
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> HybridInverterConfig:
+        data = data or {}
+        ac_output_max_w = float(data.get(CONF_INVERTER_AC_OUTPUT_MAX, 0) or 0)
+        return cls(
+            enabled=bool(data.get(CONF_HYBRID_INVERTER, False)),
+            ac_output_max_w=ac_output_max_w,
+            # EMHASS itself falls back to the output limit when no separate
+            # input limit is configured (optimization.py's
+            # _add_hybrid_inverter_constraints: "if p_nom_inverter_input is
+            # None: p_nom_inverter_input = p_nom_inverter_output") -- mirrored
+            # here so a blank or 0 input field means the same thing to EMHASS
+            # as it does to a user who never touched it.
+            ac_input_max_w=float(data.get(CONF_INVERTER_AC_INPUT_MAX, 0) or 0) or ac_output_max_w,
+            efficiency_dc_ac=float(
+                data.get(CONF_INVERTER_EFFICIENCY_DC_AC, DEFAULT_INVERTER_EFFICIENCY)
+                or DEFAULT_INVERTER_EFFICIENCY
+            ),
+            efficiency_ac_dc=float(
+                data.get(CONF_INVERTER_EFFICIENCY_AC_DC, DEFAULT_INVERTER_EFFICIENCY)
+                or DEFAULT_INVERTER_EFFICIENCY
+            ),
+        )
+
+
+@dataclass(slots=True)
 class DeferrableLoad:
     """One deferrable load, as sent in a single optimisation request.
 
@@ -243,11 +291,13 @@ class DeferrableLoad:
     name: str
     nominal_power_w: float
     operating_hours: float
+    minimum_power_w: float = 0.0
     earliest_start: time | None = None
     latest_end: time | None = None
     semi_continuous: bool = True
     single_constant: bool = False
     startup_penalty: float = 0.0
+    max_startups: int = 0
     enabled: bool = True
 
     # Runtime state fed back to EMHASS so it does not re-charge a startup penalty

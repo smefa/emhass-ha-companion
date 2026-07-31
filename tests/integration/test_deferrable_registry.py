@@ -14,9 +14,11 @@ from custom_components.emhass_companion.const import (
     CONF_POWER_SENSOR,
     CONF_SEMI_CONTINUOUS,
     DOMAIN,
+    RECURRENCE_ON_DEMAND,
     SUBENTRY_TYPE_DEFERRABLE,
 )
 from custom_components.emhass_companion.deferrable import DeferrableRegistry
+from custom_components.emhass_companion.models import Plan, PlanRow
 
 POWER_SENSOR = "sensor.dishwasher_power"
 
@@ -207,3 +209,110 @@ async def test_to_loads_projects_every_load(hass: HomeAssistant) -> None:
     projected = registry.to_loads(dt_util.utcnow(), 30)
     assert [load.name for load in projected] == ["Car", "Dishwasher"]
     assert [load.nominal_power_w for load in projected] == [11000, 2000]
+
+
+# --- on-demand loads -----------------------------------------------------------
+
+
+async def test_unrequested_on_demand_load_is_excluded_from_to_loads(
+    hass: HomeAssistant,
+) -> None:
+    entry = _entry({"title": "Dishwasher", "data": {CONF_NOMINAL_POWER: 2000}})
+    entry.add_to_hass(hass)
+
+    registry = DeferrableRegistry(hass, entry)
+    registry.sync()
+    registry.all()[0].recurrence = RECURRENCE_ON_DEMAND
+
+    projected = registry.to_loads(dt_util.utcnow(), 30)
+    assert projected[0].enabled is False
+
+
+async def test_a_power_sensor_stopping_auto_disarms_a_fulfilled_request(
+    hass: HomeAssistant,
+) -> None:
+    """The lifecycle a user automation cannot build reliably: only the
+    integration knows enough about elapsed runtime to clear the request."""
+    entry = _entry(
+        {
+            "title": "Dishwasher",
+            "data": {CONF_NOMINAL_POWER: 2000, CONF_POWER_SENSOR: POWER_SENSOR},
+        }
+    )
+    entry.add_to_hass(hass)
+    hass.states.async_set(POWER_SENSOR, "0")
+
+    registry = DeferrableRegistry(hass, entry)
+    registry.sync()
+    registry.async_start()
+    load = registry.all()[0]
+    load.recurrence = RECURRENCE_ON_DEMAND
+    # A zero target is met by any run at all, however short -- keeps the test
+    # from racing real wall-clock time between the two state changes below.
+    load.operating_hours = 0
+    load.requested = True
+
+    hass.states.async_set(POWER_SENSOR, "1900")
+    await hass.async_block_till_done()
+    assert load.requested is True  # still running -- nothing to disarm yet
+
+    hass.states.async_set(POWER_SENSOR, "0")
+    await hass.async_block_till_done()
+    assert load.requested is False
+
+    registry.async_stop()
+
+
+async def test_a_power_sensor_stopping_early_does_not_disarm(hass: HomeAssistant) -> None:
+    entry = _entry(
+        {
+            "title": "Dishwasher",
+            "data": {CONF_NOMINAL_POWER: 2000, CONF_POWER_SENSOR: POWER_SENSOR},
+        }
+    )
+    entry.add_to_hass(hass)
+    hass.states.async_set(POWER_SENSOR, "0")
+
+    registry = DeferrableRegistry(hass, entry)
+    registry.sync()
+    registry.async_start()
+    load = registry.all()[0]
+    load.recurrence = RECURRENCE_ON_DEMAND
+    load.operating_hours = 2
+    load.requested = True
+
+    hass.states.async_set(POWER_SENSOR, "1900")
+    await hass.async_block_till_done()
+    hass.states.async_set(POWER_SENSOR, "0")
+    await hass.async_block_till_done()
+
+    assert load.requested is True
+
+    registry.async_stop()
+
+
+async def test_assume_from_plan_auto_disarms_a_sourceless_load(hass: HomeAssistant) -> None:
+    entry = _entry({"title": "Dishwasher", "data": {CONF_NOMINAL_POWER: 2000}})
+    entry.add_to_hass(hass)
+
+    registry = DeferrableRegistry(hass, entry)
+    registry.sync()
+    load = registry.get(next(iter(entry.subentries)))
+    load.recurrence = RECURRENCE_ON_DEMAND
+    load.operating_hours = 0.5
+    load.requested = True
+
+    now = dt_util.utcnow()
+    step = timedelta(minutes=15)
+    plan = Plan(
+        generated_at=now,
+        schema_version="1.0",
+        rows=[
+            PlanRow(timestamp=now, deferrables=(2000.0,)),
+            PlanRow(timestamp=now + step, deferrables=(2000.0,)),
+        ],
+    )
+
+    registry.assume_from_plan(plan, [load.subentry_id], now + timedelta(minutes=30))
+
+    assert load.requested is False

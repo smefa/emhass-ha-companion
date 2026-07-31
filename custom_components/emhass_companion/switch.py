@@ -8,7 +8,7 @@ from typing import Any
 
 from homeassistant.components.switch import SwitchEntity, SwitchEntityDescription
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import STATE_ON, EntityCategory
+from homeassistant.const import STATE_OFF, STATE_ON, EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
@@ -37,6 +37,18 @@ def _set_use_window(load: DeferrableRuntime, value: bool) -> None:
     load.use_time_window = value
 
 
+def _set_semi_continuous(load: DeferrableRuntime, value: bool) -> None:
+    load.semi_continuous = value
+
+
+def _set_single_constant(load: DeferrableRuntime, value: bool) -> None:
+    load.single_constant = value
+
+
+def _set_requested(load: DeferrableRuntime, value: bool) -> None:
+    load.requested = value
+
+
 LOAD_SWITCHES: tuple[LoadSwitchDescription, ...] = (
     LoadSwitchDescription(
         key="enabled",
@@ -52,6 +64,37 @@ LOAD_SWITCHES: tuple[LoadSwitchDescription, ...] = (
         entity_category=EntityCategory.CONFIG,
         get_fn=lambda load: load.use_time_window,
         set_fn=_set_use_window,
+        default=False,
+    ),
+    # Both of these change what EMHASS is asked to solve rather than how the
+    # answer is applied, so they belong to the load's live state: a car that
+    # charges at a variable rate on a sunny afternoon and at full power
+    # overnight is one load whose model changes, not two loads.
+    LoadSwitchDescription(
+        key="semi_continuous",
+        translation_key="semi_continuous",
+        entity_category=EntityCategory.CONFIG,
+        get_fn=lambda load: load.semi_continuous,
+        set_fn=_set_semi_continuous,
+        default=True,
+    ),
+    LoadSwitchDescription(
+        key="single_constant",
+        translation_key="single_constant",
+        entity_category=EntityCategory.CONFIG,
+        get_fn=lambda load: load.single_constant,
+        set_fn=_set_single_constant,
+        default=False,
+    ),
+    # Not a config switch: arming a load is a day-to-day action, not a
+    # setup-time setting, so it belongs with the load's primary entities
+    # rather than tucked into Configuration. Only meaningful for an on-demand
+    # load; see docs/on_demand_loads.md.
+    LoadSwitchDescription(
+        key="requested",
+        translation_key="load_requested",
+        get_fn=lambda load: load.requested,
+        set_fn=_set_requested,
         default=False,
     ),
 )
@@ -137,7 +180,14 @@ class LoadSwitch(EmhassLoadEntity, SwitchEntity, RestoreEntity):
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
-        if (last := await self.async_get_last_state()) is not None:
+        # Only a genuine on/off restores. An unknown/unavailable last state
+        # would otherwise read as "off" and silently flip every switch whose
+        # default is on -- turning a load off, or turning a semi-continuous
+        # load into a variable-power one, on the first restart after adding it.
+        if (last := await self.async_get_last_state()) is not None and last.state in (
+            STATE_ON,
+            STATE_OFF,
+        ):
             self.entity_description.set_fn(self.load, last.state == STATE_ON)
 
     @property

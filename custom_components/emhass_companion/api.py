@@ -111,14 +111,35 @@ class EmhassClient:
         return await self._request("GET", ENDPOINT_GET_CONFIG)
 
     async def async_set_config(self, config: dict[str, Any]) -> None:
-        """Write EMHASS's configuration.
+        """Write EMHASS's configuration verbatim.
 
         Called once at setup so that ``params.pkl`` exists -- every ``/action/*``
         request fails without it -- and thereafter only on explicit user request.
         Per-run values are sent as runtime parameters instead, which override
         whatever is stored here.
+
+        This is **not** a patch: EMHASS rebuilds its config from its packaged
+        defaults and overlays only the keys present in ``config``, so any key
+        left out reverts to that default. Prefer
+        :meth:`async_set_config_merged` unless a full reset to EMHASS's
+        defaults plus exactly these keys is actually what's wanted.
         """
         await self._request("POST", ENDPOINT_SET_CONFIG, json=config, expect_json=False)
+
+    async def async_set_config_merged(self, patch: dict[str, Any]) -> None:
+        """Update EMHASS's configuration without clobbering unrelated keys.
+
+        ``/set-config`` rebuilds EMHASS's config from its packaged defaults and
+        overlays only the keys given in one request -- it is not a patch. A
+        caller that posts a single corrected key silently resets every other
+        custom value (a load sensor, a time step, a solar API key, ...) back to
+        EMHASS's shipped default. The only safe way to change a subset of keys
+        is to fetch the currently *effective* config, overlay the intended
+        changes on top of that, and post the whole thing back.
+        """
+        current = await self.async_get_config()
+        current.update(patch)
+        await self.async_set_config(current)
 
     # -- optimisation ---------------------------------------------------------
 

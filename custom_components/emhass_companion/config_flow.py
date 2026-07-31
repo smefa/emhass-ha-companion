@@ -32,9 +32,16 @@ from .const import (
     CONF_DAYAHEAD_FALLBACK_TIME,
     CONF_EARLIEST_START,
     CONF_HORIZON_HOURS,
+    CONF_HYBRID_INVERTER,
     CONF_INVERTER,
+    CONF_INVERTER_AC_INPUT_MAX,
+    CONF_INVERTER_AC_OUTPUT_MAX,
+    CONF_INVERTER_EFFICIENCY_AC_DC,
+    CONF_INVERTER_EFFICIENCY_DC_AC,
     CONF_LATEST_END,
     CONF_LOAD,
+    CONF_MAX_STARTUPS,
+    CONF_MINIMUM_POWER,
     CONF_MODE,
     CONF_MPC_INTERVAL,
     CONF_MULTIPLIER,
@@ -57,6 +64,7 @@ from .const import (
     DEFAULT_GRID_EXPORT_MAX,
     DEFAULT_GRID_IMPORT_MAX,
     DEFAULT_HORIZON_HOURS,
+    DEFAULT_INVERTER_EFFICIENCY,
     DEFAULT_MPC_INTERVAL,
     DEFAULT_SOC_MAX,
     DEFAULT_SOC_MIN,
@@ -172,6 +180,16 @@ def _profile_selector(profiles: list[Profile]) -> selector.SelectSelector:
 
 
 def _tariff_side_schema(prefix: str, defaults: dict[str, Any]) -> dict[Any, Any]:
+    # A 0 export multiplier zeroes out the entire sell-price series, silently
+    # discarding solar export revenue from every optimisation rather than
+    # producing an obviously-wrong result -- treated as "not set" instead of
+    # taken at face value. `or 1.0` catches both a genuinely absent key and
+    # (the same dict.get gotcha fixed for `template` above) an already
+    # persisted 0 or None, which `.get(key, default)` would otherwise hand
+    # straight back.
+    multiplier_default = defaults.get(CONF_MULTIPLIER, 1.0)
+    if prefix == "sell":
+        multiplier_default = multiplier_default or 1.0
     return {
         vol.Required(
             f"{prefix}_{CONF_MODE}", default=defaults.get(CONF_MODE, MODE_LINEAR)
@@ -185,7 +203,7 @@ def _tariff_side_schema(prefix: str, defaults: dict[str, Any]) -> dict[Any, Any]
         # "any" rather than a fixed step: NumberSelector rejects steps below
         # 0.001, and per-kWh prices routinely need more precision than that.
         vol.Optional(
-            f"{prefix}_{CONF_MULTIPLIER}", default=defaults.get(CONF_MULTIPLIER, 1.0)
+            f"{prefix}_{CONF_MULTIPLIER}", default=multiplier_default
         ): selector.NumberSelector(
             selector.NumberSelectorConfig(min=0, max=10, step="any", mode="box")
         ),
@@ -195,7 +213,18 @@ def _tariff_side_schema(prefix: str, defaults: dict[str, Any]) -> dict[Any, Any]
             selector.NumberSelectorConfig(min=-100, max=100, step="any", mode="box")
         ),
         vol.Optional(
-            f"{prefix}_{CONF_TEMPLATE}", default=defaults.get(CONF_TEMPLATE, "")
+            # `or ""` rather than a bare `.get(..., "")`: an *already persisted*
+            # None (from before this was fixed, or from any future bug) must
+            # fall back the same as a genuinely absent key. `.get(key,
+            # default)` only applies `default` when the key is missing, so a
+            # stored `None` would otherwise flow straight into
+            # TemplateSelector's validator (`cv.template`), which raises
+            # "template value is None" on every subsequent load of this step
+            # -- including one that never touches the template field at all,
+            # since voluptuous validates a field's default whenever the
+            # submitted form omits that key.
+            f"{prefix}_{CONF_TEMPLATE}",
+            default=defaults.get(CONF_TEMPLATE) or "",
         ): selector.TemplateSelector(),
     }
 
@@ -203,12 +232,24 @@ def _tariff_side_schema(prefix: str, defaults: dict[str, Any]) -> dict[Any, Any]
 def _collect_tariff(user_input: dict[str, Any]) -> dict[str, Any]:
     tariff: dict[str, Any] = {}
     for side in ("buy", "sell"):
+        multiplier = user_input.get(f"{side}_{CONF_MULTIPLIER}", 1.0)
+        # Export multiplier specifically: see the matching comment in
+        # _tariff_side_schema. A blank submission already falls back to 1.0
+        # via the schema default above; this catches an explicit 0 typed into
+        # the field, which the schema's `min=0` does not reject.
+        if side == "sell" and not multiplier:
+            multiplier = 1.0
         tariff[side] = {
             CONF_MODE: user_input[f"{side}_{CONF_MODE}"],
-            CONF_MULTIPLIER: user_input.get(f"{side}_{CONF_MULTIPLIER}", 1.0),
+            CONF_MULTIPLIER: multiplier,
             CONF_ADDER: user_input.get(f"{side}_{CONF_ADDER}", 0.0),
-            CONF_TEMPLATE: user_input.get(f"{side}_{CONF_TEMPLATE}") or None,
         }
+        # Omit rather than store None: an absent key falls back to "" the next
+        # time this step loads (see the matching comment in
+        # _tariff_side_schema); a stored None does not, because dict.get's
+        # default only applies when the key itself is missing.
+        if template := user_input.get(f"{side}_{CONF_TEMPLATE}"):
+            tariff[side][CONF_TEMPLATE] = template
     return tariff
 
 
@@ -456,57 +497,125 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
         return {SUBENTRY_TYPE_DEFERRABLE: DeferrableLoadSubentryFlow}
 
 
-def deferrable_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
+def _optional_blank(key: str, defaults: dict[str, Any]) -> vol.Optional:
+    """An optional field that can genuinely be left empty.
+
+    A ``default`` is fatal here: voluptuous fills the absent key with it and
+    hands the result to the selector, and neither ``TimeSelector`` nor
+    ``EntitySelector`` accepts an empty string -- so an empty default made a
+    blank field fail with "Invalid time specified:" / "Entity is neither a
+    valid entity ID nor a valid UUID" before the step ever ran. That also put
+    the cleanup below out of reach, since the schema runs first.
+
+    A *suggested* value prefills the form without becoming a value the schema
+    has to validate, so a blank field simply arrives as an absent key.
+    """
+    if (current := defaults.get(key)) in (None, ""):
+        return vol.Optional(key)
+    return vol.Optional(key, description={"suggested_value": current})
+
+
+def deferrable_schema(
+    defaults: dict[str, Any], step_minutes: int = DEFAULT_TIME_STEP, *, initial: bool = True
+) -> dict[Any, Any]:
     """Fields for adding or reconfiguring a deferrable load.
 
-    Only set-once values live here. Everything a user might change from day to
-    day -- power, hours, the time window, the override mode -- is an entity, so
-    that changing it does not reload the config entry.
+    Split by who owns the value afterwards. The subentry owns what the load
+    *is* -- its name, its meter, what the executor switches -- and only those
+    fields appear when reconfiguring. Everything the optimiser is *told* is
+    owned by an entity from the moment the load exists, so that an automation
+    can change it without reloading the config entry; the fields here are the
+    values a new load starts from, and re-offering them later would show an
+    edit box whose contents the restored entity immediately overrides.
     """
-    return {
-        vol.Required(CONF_NAME, default=defaults.get(CONF_NAME, "")): selector.TextSelector(),
-        vol.Required(
-            CONF_NOMINAL_POWER, default=defaults.get(CONF_NOMINAL_POWER, 2000)
-        ): selector.NumberSelector(
-            selector.NumberSelectorConfig(
-                min=1, max=100000, step=10, unit_of_measurement="W", mode="box"
-            )
-        ),
-        vol.Required(
-            CONF_OPERATING_HOURS, default=defaults.get(CONF_OPERATING_HOURS, 2)
-        ): selector.NumberSelector(
-            selector.NumberSelectorConfig(
-                min=0, max=24, step=0.25, unit_of_measurement="h", mode="box"
-            )
-        ),
-        vol.Optional(
-            CONF_EARLIEST_START, default=defaults.get(CONF_EARLIEST_START, "")
-        ): selector.TimeSelector(),
-        vol.Optional(
-            CONF_LATEST_END, default=defaults.get(CONF_LATEST_END, "")
-        ): selector.TimeSelector(),
-        vol.Required(
-            CONF_SEMI_CONTINUOUS, default=defaults.get(CONF_SEMI_CONTINUOUS, True)
-        ): selector.BooleanSelector(),
-        vol.Required(
-            CONF_SINGLE_CONSTANT, default=defaults.get(CONF_SINGLE_CONSTANT, False)
-        ): selector.BooleanSelector(),
-        vol.Optional(
-            CONF_STARTUP_PENALTY, default=defaults.get(CONF_STARTUP_PENALTY, 0)
-        ): selector.NumberSelector(
-            selector.NumberSelectorConfig(min=0, max=100, step="any", mode="box")
-        ),
-        vol.Optional(
-            CONF_POWER_SENSOR, default=defaults.get(CONF_POWER_SENSOR, "")
-        ): selector.EntitySelector(
-            selector.EntitySelectorConfig(domain="sensor", device_class="power")
-        ),
-        vol.Optional(
-            CONF_CONTROL_ENTITY, default=defaults.get(CONF_CONTROL_ENTITY, "")
-        ): selector.EntitySelector(
-            selector.EntitySelectorConfig(domain=["switch", "input_boolean", "script"])
+    schema: dict[Any, Any] = {
+        # Length-checked because the name becomes the subentry title: an empty
+        # string passes TextSelector, then gets stripped by _clean_deferrable,
+        # and the title lookup raises KeyError instead of a form error.
+        vol.Required(CONF_NAME, default=defaults.get(CONF_NAME, "")): vol.All(
+            selector.TextSelector(), vol.Length(min=1)
         ),
     }
+
+    if initial:
+        schema.update(
+            {
+                vol.Required(
+                    CONF_NOMINAL_POWER, default=defaults.get(CONF_NOMINAL_POWER, 2000)
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1, max=100000, step=10, unit_of_measurement="W", mode="box"
+                    )
+                ),
+                # Shown unconditionally even though it only bites when the load
+                # is not semi-continuous: a config flow form cannot show or hide
+                # a field in reaction to another field in the same form, and the
+                # same call is already made for the hybrid inverter settings
+                # below. The description says when it applies.
+                vol.Optional(
+                    CONF_MINIMUM_POWER, default=defaults.get(CONF_MINIMUM_POWER, 0)
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, max=100000, step=10, unit_of_measurement="W", mode="box"
+                    )
+                ),
+                # Stepped by the optimisation timestep, which is the only
+                # granularity EMHASS can honour for a load that is either fully
+                # on or fully off (see payload.operating_timesteps).
+                vol.Required(
+                    CONF_OPERATING_HOURS, default=defaults.get(CONF_OPERATING_HOURS, 2)
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=24,
+                        step=round(step_minutes / 60, 4),
+                        unit_of_measurement="h",
+                        mode="box",
+                    )
+                ),
+                _optional_blank(CONF_EARLIEST_START, defaults): selector.TimeSelector(),
+                _optional_blank(CONF_LATEST_END, defaults): selector.TimeSelector(),
+                vol.Required(
+                    CONF_SEMI_CONTINUOUS, default=defaults.get(CONF_SEMI_CONTINUOUS, True)
+                ): selector.BooleanSelector(),
+                vol.Required(
+                    CONF_SINGLE_CONSTANT, default=defaults.get(CONF_SINGLE_CONSTANT, False)
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_STARTUP_PENALTY, default=defaults.get(CONF_STARTUP_PENALTY, 0)
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0, max=100, step="any", mode="box")
+                ),
+                vol.Optional(
+                    CONF_MAX_STARTUPS, default=defaults.get(CONF_MAX_STARTUPS, 0)
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0, max=100, step=1, mode="box")
+                ),
+            }
+        )
+
+    schema.update(
+        {
+            # Two very different kinds of "yes/no" both belong here: a numeric
+            # power sensor (state_to_power reads and unit-converts it) and a
+            # binary_sensor (state_to_power already treats on/off as
+            # nominal-or-zero -- the same path control_entity's fallback uses).
+            # Not every load has a meter; a door/vibration/current-clamp
+            # binary_sensor is often all that exists.
+            _optional_blank(CONF_POWER_SENSOR, defaults): selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    filter=[
+                        {"domain": "sensor", "device_class": "power"},
+                        {"domain": "binary_sensor"},
+                    ]
+                )
+            ),
+            _optional_blank(CONF_CONTROL_ENTITY, defaults): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain=["switch", "input_boolean", "script"])
+            ),
+        }
+    )
+    return schema
 
 
 def _clean_deferrable(user_input: dict[str, Any]) -> dict[str, Any]:
@@ -517,12 +626,37 @@ def _clean_deferrable(user_input: dict[str, Any]) -> dict[str, Any]:
 class DeferrableLoadSubentryFlow(ConfigSubentryFlow):
     """Add or reconfigure one deferrable load."""
 
+    @property
+    def _step_minutes(self) -> int:
+        return int(self._get_entry().options.get(CONF_TIME_STEP, DEFAULT_TIME_STEP))
+
+    def _placeholders(self) -> dict[str, str]:
+        """Values the form's own text refers to.
+
+        The timestep is worth stating outright: it is the granularity of every
+        answer EMHASS can give, and it is configured two menus away from here.
+        """
+        step = self._step_minutes
+        return {"time_step": str(step), "time_step_hours": f"{step / 60:g}"}
+
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
         if user_input is not None:
             data = _clean_deferrable(user_input)
+            # Entities for a load are built once, in async_setup_entry, from
+            # entry.runtime_data.loads.all() -- creating a subentry here does
+            # not by itself add anything. __init__.py's SIGNAL_CONFIG_ENTRY_CHANGED
+            # listener is what schedules the reload, and deliberately not this
+            # step: ConfigSubentryFlowManager.async_finish_flow only calls
+            # async_add_subentry *after* this step returns, so reloading from
+            # here would race it -- sometimes running before the subentry
+            # exists to be picked up.
             return self.async_create_entry(title=data[CONF_NAME], data=data)
 
-        return self.async_show_form(step_id="user", data_schema=vol.Schema(deferrable_schema({})))
+        return self.async_show_form(
+            step_id="user",
+            data_schema=vol.Schema(deferrable_schema({}, self._step_minutes)),
+            description_placeholders=self._placeholders(),
+        )
 
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
@@ -530,14 +664,23 @@ class DeferrableLoadSubentryFlow(ConfigSubentryFlow):
         subentry = self._get_reconfigure_subentry()
 
         if user_input is not None:
-            data = _clean_deferrable(user_input)
+            # The fields this step no longer offers are still part of the
+            # subentry -- they are what a load starts from, and dropping them
+            # here would reset a load to the defaults on its next reload.
+            data = {**subentry.data, **_clean_deferrable(user_input)}
+            for key in (CONF_POWER_SENSOR, CONF_CONTROL_ENTITY):
+                if key not in user_input:
+                    data.pop(key, None)
             return self.async_update_and_abort(
                 self._get_entry(), subentry, title=data[CONF_NAME], data=data
             )
 
         return self.async_show_form(
             step_id="reconfigure",
-            data_schema=vol.Schema(deferrable_schema(dict(subentry.data))),
+            data_schema=vol.Schema(
+                deferrable_schema(dict(subentry.data), self._step_minutes, initial=False)
+            ),
+            description_placeholders=self._placeholders(),
         )
 
 
@@ -567,6 +710,40 @@ def battery_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
                 min=0, max=100000, step=100, unit_of_measurement="W", mode="box"
             )
         ),
+        # A hybrid inverter shares one AC-side throughput limit between PV and
+        # battery. Left off, the fields below are collected but never sent to
+        # EMHASS (see payload.py's _hybrid_inverter_settings) -- harmless to
+        # show unconditionally, matching how the battery fields above already
+        # behave when "use_battery" is off.
+        vol.Required(
+            CONF_HYBRID_INVERTER, default=defaults.get(CONF_HYBRID_INVERTER, False)
+        ): selector.BooleanSelector(),
+        vol.Optional(
+            CONF_INVERTER_AC_OUTPUT_MAX, default=defaults.get(CONF_INVERTER_AC_OUTPUT_MAX, 0)
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0, max=100000, step=100, unit_of_measurement="W", mode="box"
+            )
+        ),
+        vol.Optional(
+            CONF_INVERTER_AC_INPUT_MAX, default=defaults.get(CONF_INVERTER_AC_INPUT_MAX, 0)
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0, max=100000, step=100, unit_of_measurement="W", mode="box"
+            )
+        ),
+        vol.Optional(
+            CONF_INVERTER_EFFICIENCY_DC_AC,
+            default=defaults.get(CONF_INVERTER_EFFICIENCY_DC_AC, DEFAULT_INVERTER_EFFICIENCY),
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(min=0.5, max=1.0, step=0.01, mode="slider")
+        ),
+        vol.Optional(
+            CONF_INVERTER_EFFICIENCY_AC_DC,
+            default=defaults.get(CONF_INVERTER_EFFICIENCY_AC_DC, DEFAULT_INVERTER_EFFICIENCY),
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(min=0.5, max=1.0, step=0.01, mode="slider")
+        ),
         vol.Optional(
             "soc_min", default=defaults.get("soc_min", DEFAULT_SOC_MIN)
         ): selector.NumberSelector(
@@ -582,9 +759,7 @@ def battery_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
         ): selector.NumberSelector(
             selector.NumberSelectorConfig(min=0, max=1, step=0.01, mode="slider")
         ),
-        vol.Optional(
-            CONF_SOC_ENTITY, default=defaults.get(CONF_SOC_ENTITY, "")
-        ): selector.EntitySelector(
+        _optional_blank(CONF_SOC_ENTITY, defaults): selector.EntitySelector(
             selector.EntitySelectorConfig(domain="sensor", device_class="battery")
         ),
     }

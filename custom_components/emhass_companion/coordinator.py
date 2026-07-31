@@ -18,9 +18,16 @@ from .api import EmhassClient, EmhassError
 from .configuration import EmhassConfig, ProfileSelection
 from .const import (
     ACTION_DAYAHEAD,
+    ACTION_FORECAST_FIT,
     ACTION_MPC,
     DOMAIN,
+    EMHASS_CONF_LOAD_FORECAST_METHOD,
+    EMHASS_CONF_NUM_LAGS,
+    EMHASS_CONF_SENSOR_LOAD,
+    EMHASS_CONF_TIME_STEP,
+    EMHASS_CONF_VAR_MODEL,
     ISSUE_PLAN_SCHEMA,
+    LOAD_FORECAST_METHOD_MLFORECASTER,
     MODE_AUTO,
     PROFILE_KIND_LOAD,
     PROFILE_KIND_PRICE,
@@ -111,6 +118,78 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
 
     def reload_config(self) -> None:
         self.config = EmhassConfig.from_entry(self.config_entry)
+
+    def load_forecast_settings(self) -> dict[str, Any]:
+        """The ``emhass:`` settings the configured load profile contributes.
+
+        Exposed (unlike the private ``_settings`` used for the other kinds)
+        because both the "train forecaster" button and the config sync step
+        need to know what the load profile resolves to before any run happens.
+        """
+        return self._settings(self.config.load)
+
+    @property
+    def uses_mlforecaster(self) -> bool:
+        """Whether the configured load profile trains EMHASS's own ML model.
+
+        Gates both the "Train load forecaster" button and the fit-relevant
+        settings in :meth:`async_sync_emhass_config` -- neither means anything
+        for the "typical"/"naive" methods or for a load profile that supplies
+        its own forecast (``forecast_entity``), which never touch mlforecaster
+        at all.
+        """
+        method = self.load_forecast_settings().get(EMHASS_CONF_LOAD_FORECAST_METHOD)
+        return method == LOAD_FORECAST_METHOD_MLFORECASTER
+
+    async def async_sync_emhass_config(self) -> None:
+        """Push the settings EMHASS must have before any run.
+
+        EMHASS persists its configuration independently of the runtime
+        parameters a run sends, and ``/set-config`` is not additive (see
+        :meth:`EmhassClient.async_set_config_merged`) -- so rather than trying
+        to detect what drifted, this always asserts the complete, currently
+        true picture, the same way ``payload.py`` always sends every setting
+        rather than only what changed.
+
+        Two things specifically must never be left to drift:
+
+        - ``optimization_time_step`` must match what every run actually sends
+          (``time_step_minutes``); a mismatch is a hard crash inside EMHASS's
+          skforecast layer when a trained model is asked to predict at a
+          different frequency than it was fit at, not a soft error.
+        - When the load profile trains mlforecaster, EMHASS's own
+          ``sensor_power_load_no_var_loads`` (``retrieve_hass_conf``) and
+          ``var_model`` (``optim_conf``) are two independently persisted
+          copies of the same sensor; EMHASS's ``_get_ml_param()`` falls back
+          to whichever ``var_model`` is currently on disk regardless of a
+          per-request ``sensor_power_load_no_var_loads`` override, so the two
+          must always be pushed together. ``num_lags`` must cover a full
+          day-ahead call in one predict, or EMHASS returns a clean but fatal
+          "unable to obtain N lags_opt values" for every day-ahead run.
+
+        Non-fatal on failure: EMHASS being briefly unreachable at setup should
+        not cost the whole integration, only leave the next optimisation or
+        fit to fail loudly (and diagnosably) instead.
+        """
+        patch: dict[str, Any] = {EMHASS_CONF_TIME_STEP: self.config.time_step_minutes}
+
+        settings = self.load_forecast_settings()
+        if settings.get(EMHASS_CONF_LOAD_FORECAST_METHOD) == LOAD_FORECAST_METHOD_MLFORECASTER:
+            sensor = settings.get(EMHASS_CONF_SENSOR_LOAD)
+            if sensor:
+                patch[EMHASS_CONF_SENSOR_LOAD] = sensor
+                patch[EMHASS_CONF_VAR_MODEL] = sensor
+                patch[EMHASS_CONF_NUM_LAGS] = self.config.dayahead_num_lags
+
+        try:
+            await self.client.async_set_config_merged(patch)
+        except EmhassError as err:
+            _LOGGER.warning(
+                "Could not sync configuration to EMHASS (%s); continuing setup. "
+                "The next optimisation or forecaster fit may fail until this "
+                "succeeds -- reloading the integration will retry it.",
+                err,
+            )
 
     # -- deferrable loads -----------------------------------------------------
 
@@ -231,6 +310,12 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             settings.update(self._settings(selection))
 
         now = dt_util.utcnow()
+        # Sourceless loads (no power sensor, no control entity) get their
+        # accumulator advanced from the *previous* run's plan before it is
+        # replaced -- the only chance to see it, and the reason this must run
+        # before deferrable_loads() below reads completed_timesteps out of it.
+        if self.data is not None:
+            self.loads.assume_from_plan(self.data.plan, self.data.load_order, now)
         inputs = PayloadInputs(
             action=action,
             now=now,
@@ -238,6 +323,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             horizon_steps=config.horizon_steps,
             battery=config.battery,
             grid=config.grid,
+            hybrid_inverter=config.hybrid_inverter,
             loads=self.deferrable_loads(now),
             pv=pv or None,
             load=load or None,
@@ -312,6 +398,24 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
 
     async def async_run_mpc(self) -> None:
         await self.async_run(ACTION_MPC)
+
+    async def async_run_forecast_fit(self) -> None:
+        """Train EMHASS's mlforecaster model on the configured load sensor's history.
+
+        Deliberately bypasses :meth:`async_run`: a fit produces no plan and no
+        ``last-run`` outcome worth storing in ``self.data``, it just trains and
+        saves a model file. Runtime parameters are sent explicitly rather than
+        relying on the persisted config, for the same reason
+        :meth:`async_sync_emhass_config` pushes them proactively -- so this
+        works correctly even if that sync has not run yet or failed.
+        """
+        settings = self.load_forecast_settings()
+        runtime_params: dict[str, Any] = {
+            EMHASS_CONF_LOAD_FORECAST_METHOD: LOAD_FORECAST_METHOD_MLFORECASTER,
+        }
+        if sensor := settings.get(EMHASS_CONF_SENSOR_LOAD):
+            runtime_params[EMHASS_CONF_SENSOR_LOAD] = sensor
+        await self.client.async_run_action(ACTION_FORECAST_FIT, runtime_params)
 
     @property
     def plan_is_stale(self) -> bool:

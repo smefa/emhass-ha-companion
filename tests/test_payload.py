@@ -16,6 +16,7 @@ from custom_components.emhass_companion.models import (
     BatteryConfig,
     DeferrableLoad,
     GridConfig,
+    HybridInverterConfig,
     Point,
     Series,
 )
@@ -23,6 +24,7 @@ from custom_components.emhass_companion.payload import (
     PayloadInputs,
     build_payload,
     in_window,
+    operating_timesteps,
     window_to_timesteps,
 )
 
@@ -154,6 +156,7 @@ def _inputs(**overrides) -> PayloadInputs:
         "horizon_steps": DAY_STEPS,
         "battery": BatteryConfig(),
         "grid": GridConfig(),
+        "hybrid_inverter": HybridInverterConfig(),
     }
     return PayloadInputs(**{**defaults, **overrides})
 
@@ -228,6 +231,33 @@ def test_battery_enabled_sends_every_limit():
     assert payload["soc_init"] == 0.098
 
 
+# --- hybrid inverter -----------------------------------------------------------
+
+
+def test_hybrid_inverter_disabled_sends_only_the_flag():
+    """Disabled must still assert the flag -- never leave it to EMHASS's own
+    persisted config.json, the same reasoning as the battery flag above."""
+    payload = build_payload(_inputs()).payload
+    assert payload["inverter_is_hybrid"] is False
+    assert "inverter_ac_output_max" not in payload
+
+
+def test_hybrid_inverter_enabled_sends_every_limit():
+    hybrid = HybridInverterConfig(
+        enabled=True,
+        ac_output_max_w=5000,
+        ac_input_max_w=6000,
+        efficiency_dc_ac=0.97,
+        efficiency_ac_dc=0.98,
+    )
+    payload = build_payload(_inputs(hybrid_inverter=hybrid)).payload
+    assert payload["inverter_is_hybrid"] is True
+    assert payload["inverter_ac_output_max"] == 5000
+    assert payload["inverter_ac_input_max"] == 6000
+    assert payload["inverter_efficiency_dc_ac"] == 0.97
+    assert payload["inverter_efficiency_ac_dc"] == 0.98
+
+
 def test_no_deferrable_loads_is_a_valid_configuration():
     payload = build_payload(_inputs()).payload
     assert payload["number_of_deferrable_loads"] == 0
@@ -274,16 +304,173 @@ def test_deferrable_arrays_are_parallel_to_load_order():
 
     for key in (
         "nominal_power_of_deferrable_loads",
+        "minimum_power_of_deferrable_loads",
         "operating_hours_of_each_deferrable_load",
+        "operating_timesteps_of_each_deferrable_load",
         "start_timesteps_of_each_deferrable_load",
         "end_timesteps_of_each_deferrable_load",
         "treat_deferrable_load_as_semi_cont",
         "set_deferrable_load_single_constant",
         "set_deferrable_startup_penalty",
+        "set_deferrable_max_startups",
         "def_current_state",
         "def_current_operating_timesteps",
+        "deferrable_load_max_cost",
     ):
         assert len(payload[key]) == len(result.load_order), key
+
+
+# --- operating hours must land on timestep boundaries ------------------------
+
+
+@pytest.mark.parametrize(
+    ("hours", "step_minutes", "expected_steps"),
+    [
+        (2, 30, 4),
+        (2, 15, 8),
+        (0, 30, 0),
+        # Rounds to the nearest step ...
+        (2.6, 30, 5),
+        (0.4, 30, 1),
+        # ... except that a non-zero request never rounds down to "never run".
+        (0.1, 30, 1),
+        (0.01, 60, 1),
+    ],
+)
+def test_operating_hours_become_whole_timesteps(hours, step_minutes, expected_steps):
+    assert operating_timesteps(hours, step_minutes) == expected_steps
+
+
+@pytest.mark.usefixtures("stockholm_timezone")
+def test_a_run_time_off_the_timestep_grid_is_quantised_and_reported():
+    """EMHASS enforces `sum(p) * dt == nominal * hours` as an equality.
+
+    A semi-continuous load can only draw 0 or exactly its nominal power, so
+    2.6 h at a 30-minute step has no solution at all -- EMHASS reports an
+    infeasible problem rather than rounding. Quantising here is what keeps that
+    from happening, and the warning is what stops it being a silent change.
+    """
+    loads = [
+        DeferrableLoad(
+            subentry_id="car",
+            name="Car",
+            nominal_power_w=11000,
+            operating_hours=2.6,
+            semi_continuous=True,
+        )
+    ]
+    result = build_payload(_inputs(loads=loads))
+
+    assert result.payload["operating_hours_of_each_deferrable_load"] == [2.5]
+    assert result.payload["operating_timesteps_of_each_deferrable_load"] == [5]
+    assert any("2.5 h" in warning for warning in result.warnings)
+
+
+@pytest.mark.usefixtures("stockholm_timezone")
+def test_a_run_time_already_on_the_grid_is_not_reported():
+    loads = [
+        DeferrableLoad(
+            subentry_id="dishwasher", name="Dishwasher", nominal_power_w=2000, operating_hours=2
+        )
+    ]
+    result = build_payload(_inputs(loads=loads))
+
+    assert result.payload["operating_hours_of_each_deferrable_load"] == [2.0]
+    assert result.warnings == []
+
+
+@pytest.mark.usefixtures("stockholm_timezone")
+def test_exact_timesteps_are_sent_only_for_mpc():
+    """EMHASS honours this key only on the branch that takes a prediction
+    horizon (utils.treat_runtimeparams); it is absent from associations.csv, so
+    the day-ahead request has to make do with the quantised hours."""
+    loads = [
+        DeferrableLoad(
+            subentry_id="dishwasher", name="Dishwasher", nominal_power_w=2000, operating_hours=2
+        )
+    ]
+
+    mpc = build_payload(_inputs(loads=loads, action=ACTION_MPC)).payload
+    dayahead = build_payload(_inputs(loads=loads, action=ACTION_DAYAHEAD)).payload
+
+    assert mpc["operating_timesteps_of_each_deferrable_load"] == [4]
+    assert "operating_timesteps_of_each_deferrable_load" not in dayahead
+    assert dayahead["operating_hours_of_each_deferrable_load"] == [2.0]
+
+
+# --- minimum power -----------------------------------------------------------
+
+
+@pytest.mark.usefixtures("stockholm_timezone")
+def test_minimum_power_is_sent_per_load():
+    loads = [
+        DeferrableLoad(
+            subentry_id="car",
+            name="Car",
+            nominal_power_w=11000,
+            minimum_power_w=1380,
+            operating_hours=3,
+            semi_continuous=False,
+        )
+    ]
+    payload = build_payload(_inputs(loads=loads)).payload
+    assert payload["minimum_power_of_deferrable_loads"] == [1380]
+
+
+@pytest.mark.usefixtures("stockholm_timezone")
+def test_a_minimum_power_above_nominal_is_clamped():
+    """A floor above the ceiling leaves no feasible power at all, and EMHASS
+    reports that as an infeasible problem naming no load in particular."""
+    loads = [
+        DeferrableLoad(
+            subentry_id="car",
+            name="Car",
+            nominal_power_w=3000,
+            minimum_power_w=5000,
+            operating_hours=1,
+            semi_continuous=False,
+        )
+    ]
+    result = build_payload(_inputs(loads=loads))
+
+    assert result.payload["minimum_power_of_deferrable_loads"] == [3000]
+    assert any("minimum power" in warning for warning in result.warnings)
+
+
+@pytest.mark.usefixtures("stockholm_timezone")
+def test_max_startups_is_sent_per_load():
+    loads = [
+        DeferrableLoad(
+            subentry_id="heatpump",
+            name="Heat pump",
+            nominal_power_w=3000,
+            operating_hours=4,
+            max_startups=2,
+        )
+    ]
+    payload = build_payload(_inputs(loads=loads)).payload
+    assert payload["set_deferrable_max_startups"] == [2]
+
+
+@pytest.mark.usefixtures("stockholm_timezone")
+def test_deferrable_load_max_cost_is_disabled_but_correctly_sized():
+    """Companion has no per-load max-cost feature -- but must still send this.
+
+    EMHASS's optimisation.py indexes this list with no bounds check, unlike
+    every sibling array (all `k < len(...)` guarded). Leaving it to whatever is
+    persisted in EMHASS's own config is how a load count increase turns into an
+    uncaught IndexError and a 500 on every optimisation, rather than the clean
+    "unlimited" behaviour a missing key would give.
+    """
+    loads = [
+        DeferrableLoad(
+            subentry_id=f"load{i}", name=f"Load {i}", nominal_power_w=1000, operating_hours=1
+        )
+        for i in range(3)
+    ]
+    payload = build_payload(_inputs(loads=loads)).payload
+
+    assert payload["deferrable_load_max_cost"] == [0.0, 0.0, 0.0]
 
 
 def test_disabled_loads_are_excluded():

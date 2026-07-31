@@ -36,13 +36,29 @@ class LoadNumberDescription(NumberEntityDescription):
     get_fn: Callable[[DeferrableRuntime], float]
     set_fn: Callable[[DeferrableRuntime, float], None]
 
+    step_is_time_step: bool = False
+    """Take the step from the configured optimisation timestep instead of
+    ``native_step``, for a value EMHASS can only honour in whole timesteps."""
+
 
 def _set_nominal_power(load: DeferrableRuntime, value: float) -> None:
     load.nominal_power_w = value
 
 
+def _set_minimum_power(load: DeferrableRuntime, value: float) -> None:
+    load.minimum_power_w = value
+
+
 def _set_operating_hours(load: DeferrableRuntime, value: float) -> None:
     load.operating_hours = value
+
+
+def _set_startup_penalty(load: DeferrableRuntime, value: float) -> None:
+    load.startup_penalty = value
+
+
+def _set_max_startups(load: DeferrableRuntime, value: float) -> None:
+    load.max_startups = int(value)
 
 
 LOAD_NUMBERS: tuple[LoadNumberDescription, ...] = (
@@ -60,16 +76,52 @@ LOAD_NUMBERS: tuple[LoadNumberDescription, ...] = (
         set_fn=_set_nominal_power,
     ),
     LoadNumberDescription(
+        key="minimum_power",
+        translation_key="minimum_power",
+        device_class=NumberDeviceClass.POWER,
+        native_unit_of_measurement=UnitOfPower.WATT,
+        native_min_value=0,
+        native_max_value=100000,
+        native_step=10,
+        mode=NumberMode.BOX,
+        entity_category=EntityCategory.CONFIG,
+        get_fn=lambda load: load.minimum_power_w,
+        set_fn=_set_minimum_power,
+    ),
+    LoadNumberDescription(
         key="operating_hours",
         translation_key="operating_hours",
         native_unit_of_measurement=UnitOfTime.HOURS,
         native_min_value=0,
         native_max_value=24,
         native_step=0.25,
+        step_is_time_step=True,
         mode=NumberMode.BOX,
         entity_category=EntityCategory.CONFIG,
         get_fn=lambda load: load.operating_hours,
         set_fn=_set_operating_hours,
+    ),
+    LoadNumberDescription(
+        key="startup_penalty",
+        translation_key="startup_penalty",
+        native_min_value=0,
+        native_max_value=100,
+        native_step=0.01,
+        mode=NumberMode.BOX,
+        entity_category=EntityCategory.CONFIG,
+        get_fn=lambda load: load.startup_penalty,
+        set_fn=_set_startup_penalty,
+    ),
+    LoadNumberDescription(
+        key="max_startups",
+        translation_key="max_startups",
+        native_min_value=0,
+        native_max_value=100,
+        native_step=1,
+        mode=NumberMode.BOX,
+        entity_category=EntityCategory.CONFIG,
+        get_fn=lambda load: float(load.max_startups),
+        set_fn=_set_max_startups,
     ),
 )
 
@@ -100,6 +152,12 @@ class LoadNumber(EmhassLoadEntity, RestoreNumber):
     ) -> None:
         super().__init__(coordinator, load, description.key)
         self.entity_description = description
+        if description.step_is_time_step:
+            # EMHASS can only run a load for a whole number of timesteps, so
+            # the arrows should land on values it can actually honour. The
+            # payload quantises regardless (payload.operating_timesteps) --
+            # this is about not inviting a value that has to be adjusted.
+            self._attr_native_step = coordinator.config.time_step_minutes / 60
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()

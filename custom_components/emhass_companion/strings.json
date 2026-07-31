@@ -83,12 +83,19 @@
           "capacity_wh": "Usable capacity",
           "charge_power_max_w": "Maximum charge power",
           "discharge_power_max_w": "Maximum discharge power",
+          "hybrid_inverter": "Shared inverter (hybrid)",
+          "inverter_ac_output_max_w": "Maximum AC output (discharge/export)",
+          "inverter_ac_input_max_w": "Maximum AC input (charge/import)",
+          "inverter_efficiency_dc_ac": "DC to AC efficiency",
+          "inverter_efficiency_ac_dc": "AC to DC efficiency",
           "soc_min": "Minimum charge level",
           "soc_max": "Maximum charge level",
           "soc_target": "Target charge level",
           "soc_entity": "Battery SOC sensor"
         },
         "data_description": {
+          "hybrid_inverter": "On if PV and the battery share one inverter's AC-side power limit, which is most home battery systems. Off if they are two independent inverters, each with its own limit.",
+          "inverter_ac_input_max_w": "Leave at 0 to use the same limit as maximum AC output.",
           "soc_min": "As a fraction. 0.10 means the optimiser will not plan below 10%.",
           "soc_target": "Where the optimiser aims to leave the battery at the end of the horizon.",
           "soc_entity": "Read at the start of every run so the plan starts from reality."
@@ -139,10 +146,19 @@
           "capacity_wh": "Usable capacity",
           "charge_power_max_w": "Maximum charge power",
           "discharge_power_max_w": "Maximum discharge power",
+          "hybrid_inverter": "Shared inverter (hybrid)",
+          "inverter_ac_output_max_w": "Maximum AC output (discharge/export)",
+          "inverter_ac_input_max_w": "Maximum AC input (charge/import)",
+          "inverter_efficiency_dc_ac": "DC to AC efficiency",
+          "inverter_efficiency_ac_dc": "AC to DC efficiency",
           "soc_min": "Minimum charge level",
           "soc_max": "Maximum charge level",
           "soc_target": "Target charge level",
           "soc_entity": "Battery SOC sensor"
+        },
+        "data_description": {
+          "hybrid_inverter": "On if PV and the battery share one inverter's AC-side power limit, which is most home battery systems. Off if they are two independent inverters, each with its own limit.",
+          "inverter_ac_input_max_w": "Leave at 0 to use the same limit as maximum AC output."
         }
       },
       "grid": {
@@ -248,6 +264,9 @@
       },
       "should_run": {
         "name": "Should run"
+      },
+      "running": {
+        "name": "Running"
       }
     },
     "switch": {
@@ -259,6 +278,15 @@
       },
       "use_time_window": {
         "name": "Restrict to a time window"
+      },
+      "semi_continuous": {
+        "name": "Runs at full power only"
+      },
+      "single_constant": {
+        "name": "Must run in one unbroken block"
+      },
+      "load_requested": {
+        "name": "Requested"
       }
     },
     "select": {
@@ -279,6 +307,13 @@
           "force_on": "Force on",
           "force_off": "Force off"
         }
+      },
+      "recurrence": {
+        "name": "Recurrence",
+        "state": {
+          "daily": "Every day",
+          "on_demand": "On demand"
+        }
       }
     },
     "button": {
@@ -287,6 +322,9 @@
       },
       "run_mpc": {
         "name": "Recalculate now"
+      },
+      "run_forecast_fit": {
+        "name": "Train load forecaster"
       }
     },
     "number": {
@@ -295,6 +333,15 @@
       },
       "operating_hours": {
         "name": "Hours needed per day"
+      },
+      "minimum_power": {
+        "name": "Lowest power while running"
+      },
+      "startup_penalty": {
+        "name": "Cost of starting"
+      },
+      "max_startups": {
+        "name": "Most starts per plan"
       }
     },
     "time": {
@@ -353,7 +400,7 @@
       "step": {
         "user": {
           "title": "Add a deferrable load",
-          "description": "A load whose timing the optimiser may choose: a dishwasher, a car charger, a pool pump. Things you change day to day become controls on the load's own page once it is added.",
+          "description": "A load whose timing the optimiser may choose: a dishwasher, a car charger, a pool pump. These are the values the load starts with -- once it is added, each becomes a control on the load's own page that you can also change from an automation.",
           "data": {
             "name": "Name",
             "nominal_power_w": "Power when running",
@@ -363,46 +410,37 @@
             "semi_continuous": "Runs at full power only",
             "single_constant": "Must run in one unbroken block",
             "startup_penalty": "Cost of starting",
-            "power_sensor": "Power sensor",
-            "control_entity": "Control entity"
+            "power_sensor": "Running sensor",
+            "control_entity": "Control entity",
+            "minimum_power_w": "Lowest power while running",
+            "max_startups": "Most starts per plan"
           },
           "data_description": {
             "nominal_power_w": "Roughly what this load draws while it is on.",
-            "operating_hours": "How long it needs to run in total. The optimiser chooses when.",
+            "operating_hours": "How long it needs to run in total. The optimiser chooses when. EMHASS plans in {time_step}-minute steps, so this is rounded to the nearest whole step ({time_step_hours} h).",
             "earliest_start": "Only used if you turn on the load's time window switch afterwards.",
             "latest_end": "May be earlier than the start time, for an overnight window.",
             "semi_continuous": "On for a dishwasher or pump, which are either on or off. Off for something whose power can be varied, such as a car charger.",
             "single_constant": "On if interrupting it would be a problem, such as a wash cycle.",
             "startup_penalty": "Discourages switching on and off repeatedly. Leave at zero unless that is a problem.",
-            "power_sensor": "Optional but recommended. Lets the optimiser know the load is already running, so it is not charged a start-up cost twice or asked to repeat work it has already done today.",
-            "control_entity": "Optional. If set, the integration switches this on and off to follow the plan, once you enable control. Leave empty to keep control in your own automations."
+            "power_sensor": "Optional. The most reliable way to tell the optimiser whether this load is actually running -- catching a run that finished early, one that never happened despite being planned, or one started at a different time than scheduled. A power sensor gives the most detail (any unit -- W, kW, MW, ... -- is converted to watts automatically); a plain on/off binary_sensor works too, read the same way a control entity's state is. Without either and no control entity, the optimiser instead assumes the load followed its own last plan, which cannot see any of that.",
+            "control_entity": "Optional. If set, the integration switches this on and off to follow the plan, once you enable control -- and its state doubles as the running signal when there is no power sensor. Leave empty to keep control in your own automations. With neither this nor a power sensor set, the optimiser instead trusts its own previous plan -- assuming the load ran whenever it was scheduled to. That is only as accurate as your own follow-through, so a real sensor or control entity is worth adding when you can.",
+            "minimum_power_w": "Only used when \"Runs at full power only\" is off. A car charger that cannot go below 6 A, for instance -- the optimiser then either runs the load at this power or more, or leaves it off entirely. Zero means no floor.",
+            "max_startups": "A hard limit, unlike the cost of starting: too low and the requested run time cannot be reached at all. Zero means no limit."
           }
         },
         "reconfigure": {
           "title": "Edit deferrable load",
           "data": {
             "name": "Name",
-            "nominal_power_w": "Power when running",
-            "operating_hours": "Hours needed per day",
-            "earliest_start": "Earliest start",
-            "latest_end": "Latest finish",
-            "semi_continuous": "Runs at full power only",
-            "single_constant": "Must run in one unbroken block",
-            "startup_penalty": "Cost of starting",
-            "power_sensor": "Power sensor",
+            "power_sensor": "Running sensor",
             "control_entity": "Control entity"
           },
           "data_description": {
-            "nominal_power_w": "Roughly what this load draws while it is on.",
-            "operating_hours": "How long it needs to run in total. The optimiser chooses when.",
-            "earliest_start": "Only used if you turn on the load's time window switch afterwards.",
-            "latest_end": "May be earlier than the start time, for an overnight window.",
-            "semi_continuous": "On for a dishwasher or pump, which are either on or off. Off for something whose power can be varied, such as a car charger.",
-            "single_constant": "On if interrupting it would be a problem, such as a wash cycle.",
-            "startup_penalty": "Discourages switching on and off repeatedly. Leave at zero unless that is a problem.",
-            "power_sensor": "Optional but recommended. Lets the optimiser know the load is already running, so it is not charged a start-up cost twice or asked to repeat work it has already done today.",
-            "control_entity": "Optional. If set, the integration switches this on and off to follow the plan, once you enable control. Leave empty to keep control in your own automations."
-          }
+            "power_sensor": "Optional. The most reliable way to tell the optimiser whether this load is actually running -- catching a run that finished early, one that never happened despite being planned, or one started at a different time than scheduled. A power sensor gives the most detail (any unit -- W, kW, MW, ... -- is converted to watts automatically); a plain on/off binary_sensor works too, read the same way a control entity's state is. Without either and no control entity, the optimiser instead assumes the load followed its own last plan, which cannot see any of that.",
+            "control_entity": "Optional. If set, the integration switches this on and off to follow the plan, once you enable control -- and its state doubles as the running signal when there is no power sensor. Leave empty to keep control in your own automations. With neither this nor a power sensor set, the optimiser instead trusts its own previous plan -- assuming the load ran whenever it was scheduled to. That is only as accurate as your own follow-through, so a real sensor or control entity is worth adding when you can."
+          },
+          "description": "Power, run time, the time window and the load model are controls on the load's own page, not settings here -- change them there or from an automation."
         }
       },
       "entry_type": "Deferrable load",

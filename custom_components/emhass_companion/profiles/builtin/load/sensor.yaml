@@ -10,6 +10,11 @@ notes: >-
   once in the load it is scheduling -- and will under-schedule them. A template
   sensor subtracting the deferrables from total consumption is the usual fix.
 
+  Choosing "ML forecaster" adds a "Train load forecaster" button to the EMHASS
+  Companion device. Press it once after setup, and again whenever you want the
+  model retrained on more recent history -- day-ahead and MPC runs use
+  whatever was last trained and otherwise fail outright with no model file.
+
 detect:
   always: true
 

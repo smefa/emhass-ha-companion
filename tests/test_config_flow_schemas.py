@@ -14,13 +14,14 @@ import voluptuous as vol
 
 from custom_components.emhass_companion.config_flow import (
     STANDARD_TIME_STEPS,
+    _collect_tariff,
     _profile_selector,
     _tariff_side_schema,
     _time_step_options,
     battery_schema,
     grid_schema,
 )
-from custom_components.emhass_companion.const import CONF_TIME_STEP
+from custom_components.emhass_companion.const import CONF_MULTIPLIER, CONF_TIME_STEP
 from custom_components.emhass_companion.profiles import BUILTIN_ROOT
 from custom_components.emhass_companion.profiles.schema import Profile, validate_document
 
@@ -33,6 +34,61 @@ def test_tariff_schema_builds(side):
 def test_tariff_schema_builds_with_stored_values():
     stored = {"mode": "linear", "multiplier": 1.25, "adder": 0.5375}
     assert vol.Schema(_tariff_side_schema("buy", stored))
+
+
+# --- export multiplier must never end up at 0 --------------------------------
+# (schema-validation coverage for this lives in
+# tests/integration/test_config_flow_schemas.py -- validating the full
+# _tariff_side_schema dict always touches the template field too, which
+# needs a real event loop.)
+
+
+def test_collect_tariff_coerces_an_explicit_zero_sell_multiplier_to_one():
+    """The schema's `min=0` does not reject 0 -- this is the other half of the
+    fix, for a 0 actually typed into the field rather than left blank."""
+    user_input = {
+        "buy_mode": "linear",
+        "buy_multiplier": 0,
+        "buy_adder": 0.0,
+        "sell_mode": "linear",
+        "sell_multiplier": 0,
+        "sell_adder": 0.0,
+    }
+    tariff = _collect_tariff(user_input)
+    assert tariff["sell"][CONF_MULTIPLIER] == 1.0
+    assert tariff["buy"][CONF_MULTIPLIER] == 0  # import is untouched
+
+
+def test_collect_tariff_leaves_a_nonzero_sell_multiplier_alone():
+    user_input = {
+        "buy_mode": "linear",
+        "sell_mode": "linear",
+        "sell_multiplier": 1.25,
+    }
+    tariff = _collect_tariff(user_input)
+    assert tariff["sell"][CONF_MULTIPLIER] == 1.25
+
+
+def test_collect_tariff_never_persists_a_none_template():
+    """A stored `None` (rather than an absent key) reintroduces the bug covered
+    in tests/integration/test_config_flow_schemas.py.
+
+    dict.get's fallback only applies when the key is missing entirely; a
+    stored None survives every `.get(key, default)` read forever after.
+    """
+    user_input = {
+        "buy_mode": "linear",
+        "buy_multiplier": 1.0,
+        "buy_adder": 0.0,
+        "buy_template": "",  # left blank in the form
+        "sell_mode": "linear",
+        "sell_multiplier": 1.0,
+        "sell_adder": 0.0,
+        "sell_template": "",
+    }
+    tariff = _collect_tariff(user_input)
+    assert "template" not in tariff["buy"]
+    assert "template" not in tariff["sell"]
 
 
 def test_battery_schema_builds():

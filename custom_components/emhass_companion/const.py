@@ -32,6 +32,23 @@ ENDPOINT_ACTION: Final = "/action/{action}"
 ACTION_DAYAHEAD: Final = "dayahead-optim"
 ACTION_MPC: Final = "naive-mpc-optim"
 ACTION_PERFECT: Final = "perfect-optim"
+ACTION_FORECAST_FIT: Final = "forecast-model-fit"
+
+# EMHASS config.json keys that must stay consistent with each other and with
+# what a run actually asks for. `var_model` (optim_conf) is a separate,
+# independently-persisted copy of the load sensor from `retrieve_hass_conf`'s
+# `sensor_power_load_no_var_loads` -- EMHASS's own `_get_ml_param()` falls back
+# to whichever `var_model` is currently on disk regardless of a per-request
+# `sensor_power_load_no_var_loads` override, so the two must be pushed together.
+EMHASS_CONF_SENSOR_LOAD: Final = "sensor_power_load_no_var_loads"
+EMHASS_CONF_VAR_MODEL: Final = "var_model"
+EMHASS_CONF_NUM_LAGS: Final = "num_lags"
+EMHASS_CONF_LOAD_FORECAST_METHOD: Final = "load_forecast_method"
+# Same wire name EMHASS's own runtime parameter uses (see payload.py); a
+# mismatch between this persisted value and what a run actually sends is a
+# hard crash inside EMHASS's skforecast layer, not a soft error.
+EMHASS_CONF_TIME_STEP: Final = "optimization_time_step"
+LOAD_FORECAST_METHOD_MLFORECASTER: Final = "mlforecaster"
 
 # --- Config entry keys -------------------------------------------------------
 
@@ -70,6 +87,15 @@ CONF_SOC_TARGET: Final = "soc_target"
 CONF_CHARGE_EFFICIENCY: Final = "charge_efficiency"
 CONF_DISCHARGE_EFFICIENCY: Final = "discharge_efficiency"
 
+# A hybrid inverter shares one AC-side throughput limit between PV and
+# battery; a "two separate inverters" plant has no such shared cap. Lives
+# alongside the battery fields (same form) since it is meaningless without one.
+CONF_HYBRID_INVERTER: Final = "hybrid_inverter"
+CONF_INVERTER_AC_OUTPUT_MAX: Final = "inverter_ac_output_max_w"
+CONF_INVERTER_AC_INPUT_MAX: Final = "inverter_ac_input_max_w"
+CONF_INVERTER_EFFICIENCY_DC_AC: Final = "inverter_efficiency_dc_ac"
+CONF_INVERTER_EFFICIENCY_AC_DC: Final = "inverter_efficiency_ac_dc"
+
 CONF_GRID_IMPORT_MAX: Final = "grid_import_max_w"
 CONF_GRID_EXPORT_MAX: Final = "grid_export_max_w"
 
@@ -80,15 +106,28 @@ CONF_PV_ENTITY: Final = "pv_entity"
 # Deferrable load subentry keys
 CONF_NAME: Final = "name"
 CONF_NOMINAL_POWER: Final = "nominal_power_w"
+# Floor on the power a load may draw while it is on, sent as EMHASS's
+# `minimum_power_of_deferrable_loads`. Only bites when the load is *not*
+# semi-continuous: semi-cont pins the power to `nominal * binary`, leaving
+# nothing for a floor to constrain.
+CONF_MINIMUM_POWER: Final = "minimum_power_w"
 CONF_OPERATING_HOURS: Final = "operating_hours"
 CONF_EARLIEST_START: Final = "earliest_start"
 CONF_LATEST_END: Final = "latest_end"
 CONF_SEMI_CONTINUOUS: Final = "semi_continuous"
 CONF_SINGLE_CONSTANT: Final = "single_constant"
 CONF_STARTUP_PENALTY: Final = "startup_penalty"
-# Optional: the load's own power sensor. Without it EMHASS is never told that a
-# load is already running, so it can re-charge a startup penalty or re-schedule
-# work already done today.
+# Hard cap on how many times a load may be switched on across the horizon,
+# sent as EMHASS's `set_deferrable_max_startups`. 0 means no cap; unlike the
+# startup penalty this is a constraint, not a cost, so a too-low value makes
+# the requested run time unreachable rather than merely expensive.
+CONF_MAX_STARTUPS: Final = "max_startups"
+# Optional: the load's own running sensor -- a numeric power sensor or a plain
+# on/off binary_sensor, both read by deferrable.state_to_power. Without one
+# (and no control entity either) the optimiser has no way to observe the load
+# at all; see DeferrableRuntime.assume_from_plan for what happens instead. The
+# key stays "power_sensor" for backwards compatibility with existing subentries
+# even though it now accepts a binary_sensor too.
 CONF_POWER_SENSOR: Final = "power_sensor"
 CONF_USE_TIME_WINDOW: Final = "use_time_window"
 # Optional: what the executor switches to actually run the load. Without it the
@@ -127,6 +166,9 @@ DEFAULT_SOC_MAX: Final = 0.95
 DEFAULT_SOC_TARGET: Final = 0.50
 DEFAULT_CHARGE_EFFICIENCY: Final = 0.95
 DEFAULT_DISCHARGE_EFFICIENCY: Final = 0.95
+# EMHASS's own default for both AC/DC conversion directions -- no assumed loss
+# unless the user knows one and states it.
+DEFAULT_INVERTER_EFFICIENCY: Final = 1.0
 DEFAULT_GRID_IMPORT_MAX: Final = 9000
 DEFAULT_GRID_EXPORT_MAX: Final = 9000
 
@@ -154,6 +196,13 @@ LOAD_MODE_AUTO: Final = "auto"
 LOAD_MODE_FORCE_ON: Final = "force_on"
 LOAD_MODE_FORCE_OFF: Final = "force_off"
 LOAD_MODES: Final = (LOAD_MODE_AUTO, LOAD_MODE_FORCE_ON, LOAD_MODE_FORCE_OFF)
+
+# A daily load wants its operating_hours every day, same as today's only
+# behaviour. An on-demand load wants nothing until armed -- see
+# DeferrableRuntime.requested and docs/on_demand_loads.md.
+RECURRENCE_DAILY: Final = "daily"
+RECURRENCE_ON_DEMAND: Final = "on_demand"
+RECURRENCES: Final = (RECURRENCE_DAILY, RECURRENCE_ON_DEMAND)
 
 # --- Profiles ----------------------------------------------------------------
 
