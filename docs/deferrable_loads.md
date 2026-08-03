@@ -29,7 +29,7 @@ you might change day to day becomes a control on the load's own page:
 | `switch.<load>_restrict_to_a_time_window` | Whether the window below applies |
 | `time.<load>_earliest_start` / `_latest_finish` | The window. May cross midnight |
 | `number.<load>_power_when_running` / `_hours_needed_per_day` | |
-| `number.<load>_minimum_time_on` / `_minimum_time_off` | Protects compressor-driven loads from short-cycling — see below |
+| `number.<load>_minimum_on_time` / `_minimum_off_time` | Protects compressor-driven loads from short-cycling — see below |
 | `button.<load>_run_now` | Run this load immediately, regardless of recurrence |
 
 Two distinctions worth knowing, because conflating either causes confusion:
@@ -95,13 +95,20 @@ the motivating case is a pool heater. See [surplus_loads.md](surplus_loads.md).
 
 ## Minimum on/off time
 
-`number.<load>_minimum_time_on` / `_minimum_time_off` give a compressor-driven
+`number.<load>_minimum_on_time` / `_minimum_off_time` give a compressor-driven
 load (a heat pump, a freezer) a minimum dwell time once it switches on or off,
 so the plan cannot ask it to cycle faster than the hardware allows. Both
 default to zero (no minimum). They only apply to a daily or on-demand load —
 a load on spare solar has no hard timing constraints, for the same reason it
 has no maximum-startups setting: a broken-cloud day can make a hard timing
 requirement infeasible against a run window the plan itself derives.
+
+Sent to EMHASS as `def_minimum_on_time` / `def_minimum_off_time`, in the same
+per-timestep units as the rest of the `def_*` settings. Each run also reports
+back how long the load has already been continuously on or off, as
+`def_current_on_timesteps` / `def_current_off_timesteps`, so a dwell time in
+progress is still honoured correctly across restarts rather than resetting to
+zero on every solve.
 
 ## Load groups
 

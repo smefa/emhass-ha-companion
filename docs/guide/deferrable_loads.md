@@ -61,6 +61,20 @@ Every field the load's device page can show, in the order it appears:
 - **16. Surplus priority** — which load gets first claim on spare solar when
   you have more than one. Lower number goes first. *On spare solar* loads
   only.
+- **17. Minimum time on** / **18. Minimum time off** — once the load switches
+  on or off, it must stay that way at least this long, so the plan can't ask
+  it to cycle faster than the hardware allows. Protects compressor-driven
+  loads (a heat pump, a freezer) from short-cycling. 0 means no minimum.
+  *Every day* and *on demand* loads only — a load on spare solar has no hard
+  timing constraints of its own.
+
+## Load groups
+
+Two or more of your loads can share a circuit — a subpanel or fuse limit, or
+an EV charger and an immersion heater that must never run at once. That's a
+**load group**, added the same way as a load, from **Add load group** in the
+integration's menu. See **[Load groups](../load_groups.md)** in the technical
+reference for the full detail.
 
 ## Controls & Sensors
 
