@@ -59,9 +59,13 @@ async def test_a_load_can_be_added_with_every_optional_field_blank(
     assert result["type"] is FlowResultType.FORM
 
     result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {CONF_NAME: "Dishwasher"}
+    )
+    assert result["type"] is FlowResultType.FORM
+
+    result = await hass.config_entries.subentries.async_configure(
         result["flow_id"],
         {
-            CONF_NAME: "Dishwasher",
             CONF_NOMINAL_POWER: 2000,
             CONF_OPERATING_HOURS: 2,
             CONF_SEMI_CONTINUOUS: True,
@@ -85,9 +89,11 @@ async def test_a_binary_sensor_is_accepted_as_the_running_sensor(hass: HomeAssis
 
     result = await _start_add(hass, entry)
     result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {CONF_NAME: "Dishwasher"}
+    )
+    result = await hass.config_entries.subentries.async_configure(
         result["flow_id"],
         {
-            CONF_NAME: "Dishwasher",
             CONF_NOMINAL_POWER: 2000,
             CONF_OPERATING_HOURS: 2,
             CONF_SEMI_CONTINUOUS: True,

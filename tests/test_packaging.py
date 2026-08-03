@@ -150,13 +150,18 @@ EXPECTED_ENTITY_KEYS = {
         "optimization_status",
         "plan_cost",
         "last_payload",
+        "solar_surplus",
+        "solar_surplus_energy",
+        "solar_surplus_start",
+        "solar_surplus_end",
         # per deferrable load
         "scheduled_power",
         "next_start",
         "runtime_today",
         "battery_action",
+        "surplus_budget",
     },
-    "binary_sensor": {"plan_stale", "should_run", "running"},
+    "binary_sensor": {"plan_stale", "should_run", "running", "solar_surplus"},
     "switch": {
         "control_enabled",
         "load_enabled",
@@ -165,14 +170,17 @@ EXPECTED_ENTITY_KEYS = {
         "single_constant",
         "load_requested",
     },
-    "select": {"system_mode", "load_mode", "recurrence"},
-    "button": {"run_dayahead", "run_mpc", "run_forecast_fit"},
+    "select": {"system_mode", "recurrence"},
+    "button": {"run_dayahead", "run_mpc", "run_forecast_fit", "run_now"},
     "number": {
         "nominal_power",
         "minimum_power",
         "operating_hours",
         "startup_penalty",
         "max_startups",
+        "energy_needed",
+        "surplus_headroom",
+        "surplus_threshold",
     },
     "time": {"earliest_start", "latest_end"},
 }
@@ -189,11 +197,10 @@ def test_every_entity_has_a_translated_name(strings, platform, keys):
 
 
 def test_select_options_are_translated(strings):
-    from custom_components.emhass_companion.const import LOAD_MODES, RECURRENCES, SYSTEM_MODES
+    from custom_components.emhass_companion.const import RECURRENCES, SYSTEM_MODES
 
     for key, modes in (
         ("system_mode", SYSTEM_MODES),
-        ("load_mode", LOAD_MODES),
         ("recurrence", RECURRENCES),
     ):
         states = strings["entity"]["select"][key]["state"]
@@ -203,20 +210,36 @@ def test_select_options_are_translated(strings):
 
 def test_deferrable_subentry_is_translated(strings):
     """A subentry with no translations shows raw field names when adding a load."""
-    from custom_components.emhass_companion.config_flow import deferrable_schema
-    from custom_components.emhass_companion.const import SUBENTRY_TYPE_DEFERRABLE
+    from custom_components.emhass_companion.config_flow import (
+        deferrable_kind_schema,
+        deferrable_schema,
+    )
+    from custom_components.emhass_companion.const import RECURRENCES, SUBENTRY_TYPE_DEFERRABLE
 
     subentry = strings["config_subentries"][SUBENTRY_TYPE_DEFERRABLE]
     assert subentry["entry_type"]
 
-    # The two steps deliberately show different fields: reconfigure offers only
-    # what the subentry still owns, because everything else became an entity the
-    # moment the load was created.
-    for step, initial in (("user", True), ("reconfigure", False)):
-        fields = {str(marker.schema) for marker in deferrable_schema({}, initial=initial)}
+    # Each step deliberately shows different fields: the first asks only what
+    # decides the rest, and reconfigure offers only what the subentry still
+    # owns, because everything else became an entity the moment the load was
+    # created.
+    for step, schema in (
+        ("user", deferrable_kind_schema({})),
+        ("reconfigure", deferrable_schema({}, initial=False)),
+    ):
+        fields = {str(marker.schema) for marker in schema}
         labelled = set(subentry["step"][step]["data"])
         assert fields <= labelled, f"{step} is missing labels for {fields - labelled}"
         assert labelled <= fields, f"{step} labels fields it does not show: {labelled - fields}"
+
+    # The settings step shows a different subset per recurrence, so its one set
+    # of labels has to cover every branch and label nothing that no branch shows.
+    shown: set[str] = set()
+    for recurrence in RECURRENCES:
+        shown |= {str(marker.schema) for marker in deferrable_schema({}, recurrence=recurrence)}
+    labelled = set(subentry["step"]["settings"]["data"])
+    assert shown <= labelled, f"settings is missing labels for {shown - labelled}"
+    assert labelled <= shown, f"settings labels fields no recurrence shows: {labelled - shown}"
 
 
 def test_every_platform_is_forwarded(strings):
@@ -237,9 +260,15 @@ def test_services_yaml_matches_registered_services(strings):
         SERVICE_RUN_DAYAHEAD,
         SERVICE_RUN_MPC,
         SERVICE_TEST_PROFILE,
+        SERVICE_TYPICAL_LOAD_FORECAST,
     )
 
-    registered = {SERVICE_RUN_DAYAHEAD, SERVICE_RUN_MPC, SERVICE_TEST_PROFILE}
+    registered = {
+        SERVICE_RUN_DAYAHEAD,
+        SERVICE_RUN_MPC,
+        SERVICE_TEST_PROFILE,
+        SERVICE_TYPICAL_LOAD_FORECAST,
+    }
     declared = set(load_yaml(str(COMPONENT / "services.yaml")))
     described = set(strings["services"])
 

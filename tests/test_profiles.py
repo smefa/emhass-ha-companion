@@ -15,7 +15,11 @@ from pathlib import Path
 from homeassistant.util.yaml import load_yaml
 import pytest
 
-from custom_components.emhass_companion.const import PROFILE_KINDS
+from custom_components.emhass_companion.const import (
+    DEFAULT_CONTROL,
+    PROFILE_KINDS,
+    PROFILE_SCHEMA_VERSION,
+)
 from custom_components.emhass_companion.profiles import BUILTIN_ROOT, _load_profiles
 from custom_components.emhass_companion.profiles.engine import _map_records
 from custom_components.emhass_companion.profiles.schema import (
@@ -329,3 +333,200 @@ def test_inverter_control_is_optional():
 @pytest.mark.parametrize("kind", ["price", "pv", "load", "inverter"])
 def test_every_kind_ships_at_least_one_profile(kind: str):
     assert list((BUILTIN_ROOT / kind).glob("*.yaml")), f"no {kind} profiles shipped"
+
+
+# --- inverter control semantics ----------------------------------------------
+#
+# Every case here is a wrong number reaching real hardware if it regresses.
+
+
+def _inverter(control: dict, **overrides) -> dict:
+    document = {
+        "name": "Test inverter",
+        "kind": "inverter",
+        "version": 2,
+        "control": control,
+        "actions": {"self_consume": [{"service": "select.select_option"}]},
+    }
+    return validate_document({**document, **overrides})
+
+
+def test_percent_units_require_a_rating_to_be_a_percentage_of():
+    with pytest.raises(ProfileError, match="rated_power_w"):
+        _inverter({"power_unit": "percent_of_rated"})
+
+
+def test_restore_required_needs_a_way_to_restore():
+    with pytest.raises(ProfileError, match="restore"):
+        validate_document(
+            {
+                "name": "Test inverter",
+                "kind": "inverter",
+                "version": 2,
+                "control": {"restore_required": True},
+                "actions": {"idle": [{"service": "select.select_option"}]},
+            }
+        )
+
+
+def test_a_restore_action_satisfies_restore_required():
+    document = validate_document(
+        {
+            "name": "Test inverter",
+            "kind": "inverter",
+            "version": 2,
+            "control": {"restore_required": True},
+            "actions": {"restore": [{"service": "select.select_option"}]},
+        }
+    )
+    assert "restore" in document["actions"]
+
+
+def test_unknown_action_names_are_rejected():
+    with pytest.raises(ProfileError, match="unknown action"):
+        validate_document(
+            {
+                "name": "Test inverter",
+                "kind": "inverter",
+                "version": 2,
+                "actions": {
+                    "self_consume": [{"service": "a.b"}],
+                    "frobnicate": [{"service": "a.b"}],
+                },
+            }
+        )
+
+
+# --- pairing: anything that can be turned on must be definable to turn off ---
+#
+# An export limit (or a grid-charge permission) left in place because a
+# profile defines the "on" half but not the "off" half is a silent, ongoing
+# cost -- the same failure mode restore_required guards against for the
+# battery, just for money instead of a battery stuck in the wrong mode.
+
+
+def test_curtail_without_uncurtail_is_rejected():
+    with pytest.raises(ProfileError, match="uncurtail"):
+        validate_document(
+            {
+                "name": "Test inverter",
+                "kind": "inverter",
+                "version": 2,
+                "actions": {
+                    "self_consume": [{"service": "a.b"}],
+                    "curtail": [{"service": "a.b"}],
+                },
+            }
+        )
+
+
+def test_uncurtail_without_curtail_is_rejected():
+    with pytest.raises(ProfileError, match="curtail"):
+        validate_document(
+            {
+                "name": "Test inverter",
+                "kind": "inverter",
+                "version": 2,
+                "actions": {
+                    "self_consume": [{"service": "a.b"}],
+                    "uncurtail": [{"service": "a.b"}],
+                },
+            }
+        )
+
+
+def test_curtail_and_uncurtail_defined_together_is_accepted():
+    document = validate_document(
+        {
+            "name": "Test inverter",
+            "kind": "inverter",
+            "version": 2,
+            "actions": {
+                "self_consume": [{"service": "a.b"}],
+                "curtail": [{"service": "a.b"}],
+                "uncurtail": [{"service": "a.b"}],
+            },
+        }
+    )
+    assert "curtail" in document["actions"]
+    assert "uncurtail" in document["actions"]
+
+
+def test_neither_curtail_nor_uncurtail_is_accepted():
+    """Curtailment is entirely optional -- most installs define neither."""
+    document = validate_document(
+        {
+            "name": "Test inverter",
+            "kind": "inverter",
+            "version": 2,
+            "actions": {"self_consume": [{"service": "a.b"}]},
+        }
+    )
+    assert "curtail" not in document["actions"]
+
+
+def test_allow_grid_charge_without_block_is_rejected():
+    with pytest.raises(ProfileError, match="block_grid_charge"):
+        validate_document(
+            {
+                "name": "Test inverter",
+                "kind": "inverter",
+                "version": 2,
+                "actions": {
+                    "self_consume": [{"service": "a.b"}],
+                    "allow_grid_charge": [{"service": "a.b"}],
+                },
+            }
+        )
+
+
+def test_a_version_1_profile_gets_the_pre_control_defaults():
+    """An unmigrated profile must behave exactly as it did before `control:`."""
+    document = validate_document(
+        {
+            "name": "Old inverter",
+            "kind": "inverter",
+            "version": 1,
+            "actions": {"self_consume": [{"service": "select.select_option"}]},
+        }
+    )
+    assert document["control"]["power_unit"] == "w"
+    assert document["control"]["lifetime"] == "persistent"
+    assert document["control"]["signed"] is False
+
+
+def test_a_block_commented_out_entirely_is_treated_as_empty():
+    """`limits:` with every line commented out parses as None, not as {}."""
+    document = validate_document(
+        {
+            "name": "Test inverter",
+            "kind": "inverter",
+            "version": 2,
+            "limits": None,
+            "sensors": None,
+            "control": None,
+            "actions": {"self_consume": [{"service": "select.select_option"}]},
+        }
+    )
+    assert document["limits"] == {}
+    assert document["control"]["power_unit"] == "w"
+
+
+# --- the contributor template ------------------------------------------------
+
+
+def test_the_inverter_template_is_a_valid_profile():
+    """The template is what contributors copy, so it must not rot."""
+    path = Path(__file__).parent.parent / "docs" / "inverter_profile_template.yaml"
+    document = validate_document(load_yaml(str(path)))
+    assert document["kind"] == "inverter"
+    assert document["version"] == PROFILE_SCHEMA_VERSION
+
+
+def test_the_inverter_template_demonstrates_every_control_key():
+    """A key missing from the template is a key nobody will know exists."""
+    path = Path(__file__).parent.parent / "docs" / "inverter_profile_template.yaml"
+    raw = load_yaml(str(path))
+    assert set(DEFAULT_CONTROL) <= set(raw["control"]), (
+        "the template's control block no longer shows every option"
+    )

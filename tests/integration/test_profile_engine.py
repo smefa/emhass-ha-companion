@@ -15,8 +15,15 @@ from homeassistant.util import dt as dt_util
 from homeassistant.util.yaml import load_yaml
 import pytest
 
+from custom_components.emhass_companion.config_flow import _suggested_entities
 from custom_components.emhass_companion.profiles import BUILTIN_ROOT, Profile
-from custom_components.emhass_companion.profiles.engine import async_resolve_series, render
+from custom_components.emhass_companion.profiles.engine import (
+    action_variables,
+    async_resolve_series,
+    convert_curtail_power,
+    convert_power,
+    render,
+)
 from custom_components.emhass_companion.profiles.schema import ProfileError, validate_document
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
@@ -183,6 +190,43 @@ async def test_unknown_response_path_lists_the_available_keys(
         await async_resolve_series(
             hass, _builtin("price/nordpool_core"), {"config_entry": "abc", "area": "NO1"}
         )
+
+
+# --- typical household load ---------------------------------------------------
+
+
+async def test_typical_household_profile_resolves_via_its_own_service(
+    hass: HomeAssistant,
+) -> None:
+    """End-to-end through the integration's own registered service, not a mock.
+
+    Exercises the whole path a real optimisation run takes: the profile's
+    `average_w` option is rendered into the service call, the service (backed
+    by typical_load.typical_day_records) computes two days of records, and the
+    engine digs them out via `response_path: forecast`.
+    """
+    from custom_components.emhass_companion.services import async_register_services
+
+    async_register_services(hass)
+
+    series = await async_resolve_series(hass, _builtin("load/emhass_native"), {"average_w": 1200})
+
+    # for_days: [0, 1] -- today and tomorrow, 48 half-hour records each.
+    assert len(series) == 96
+    assert series.step().total_seconds() == 30 * 60
+    assert all(value >= 0 for value in series.values)
+
+
+async def test_typical_household_profile_scales_with_average_w(hass: HomeAssistant) -> None:
+    """Doubling the declared average must double the whole forecast."""
+    from custom_components.emhass_companion.services import async_register_services
+
+    async_register_services(hass)
+
+    low = await async_resolve_series(hass, _builtin("load/emhass_native"), {"average_w": 600})
+    high = await async_resolve_series(hass, _builtin("load/emhass_native"), {"average_w": 1200})
+
+    assert sum(high.values) == pytest.approx(2 * sum(low.values), rel=0.01)
 
 
 # --- template escape hatch ---------------------------------------------------
@@ -436,3 +480,192 @@ async def test_test_profile_service_reports_a_bad_template_instead_of_raising(
 
     with pytest.raises(ProfileError):
         resolve_settings(hass, profile, {})
+
+
+# --- inverter power conversion -----------------------------------------------
+#
+# The unit a profile declares is the difference between 1500 W and 1500 % of
+# rated. Each case here is a hundred-fold error delivered to a real battery if
+# the conversion regresses.
+
+
+def _control_profile(control: dict) -> Profile:
+    document = validate_document(
+        {
+            "name": "Test inverter",
+            "kind": "inverter",
+            "version": 2,
+            "control": control,
+            "actions": {"self_consume": [{"service": "select.select_option"}]},
+        }
+    )
+    return Profile(
+        key="inverter/test", path="<test>", kind="inverter", name="Test inverter", document=document
+    )
+
+
+@pytest.mark.parametrize(
+    ("control", "action", "power_w", "expected"),
+    [
+        # Watts, magnitude only: the direction is a mode select's job.
+        ({}, "force_charge", -1500, 1500),
+        ({}, "force_discharge", 1500, 1500),
+        # Signed, EMHASS's convention: positive is discharge.
+        ({"signed": True}, "force_charge", -1500, -1500),
+        ({"signed": True}, "force_discharge", 1500, 1500),
+        # Hardware that calls charging positive instead.
+        ({"signed": True, "invert_sign": True}, "force_charge", -1500, 1500),
+        # kW, for Sigenergy and Fox ESS.
+        ({"power_unit": "kw", "round_to": 0.001}, "force_charge", -1500, 1.5),
+        # Percent of rated, for GoodWe's eco_mode_power.
+        (
+            {"power_unit": "percent_of_rated", "rated_power_w": 10000},
+            "force_charge",
+            -1500,
+            15,
+        ),
+        # Percent in hundredths, for Fronius SunSpec.
+        (
+            {"power_unit": "percent_hundredths", "rated_power_w": 10000},
+            "force_charge",
+            -1500,
+            1500,
+        ),
+        # A charge boost covers conversion loss on the way to the cells.
+        ({"charge_boost": 1.03}, "force_charge", -1000, 1030),
+        # ...and applies to charging only.
+        ({"charge_boost": 1.03}, "force_discharge", 1000, 1000),
+        # Idle is zero however the profile is configured.
+        ({"signed": True}, "idle", 0, 0),
+    ],
+)
+def test_power_converts_to_the_unit_the_profile_declares(
+    hass: HomeAssistant, control: dict, action: str, power_w: float, expected: float
+) -> None:
+    profile = _control_profile(control)
+    assert convert_power(hass, profile, {}, action, power_w) == pytest.approx(expected)
+
+
+def test_a_percentage_is_clamped_to_the_inverter_rating(hass: HomeAssistant) -> None:
+    """A plan that overshoots should be clamped, not rejected by the inverter."""
+    profile = _control_profile({"power_unit": "percent_of_rated", "rated_power_w": 5000})
+    assert convert_power(hass, profile, {}, "force_charge", -9000) == 100
+
+
+def test_a_rating_may_be_read_from_the_inverter_itself(hass: HomeAssistant) -> None:
+    hass.states.async_set("sensor.rated", "8000")
+    profile = _control_profile(
+        {
+            "power_unit": "percent_of_rated",
+            "rated_power_w": "{{ states('sensor.rated') | float }}",
+        }
+    )
+    assert convert_power(hass, profile, {}, "force_discharge", 4000) == 50
+
+
+def test_an_unreadable_rating_is_reported_not_silently_zero(hass: HomeAssistant) -> None:
+    profile = _control_profile(
+        {"power_unit": "percent_of_rated", "rated_power_w": "{{ states('sensor.absent') }}"}
+    )
+    with pytest.raises(ProfileError, match="not a number"):
+        convert_power(hass, profile, {}, "force_charge", -1000)
+
+
+def test_actions_receive_both_the_converted_and_the_raw_value(hass: HomeAssistant) -> None:
+    """`power_w` stays available for anything the conversion cannot express."""
+    profile = _control_profile({"power_unit": "kw", "round_to": 0.001})
+    scope = action_variables(hass, profile, {}, "force_charge", power_w=-2500)
+    assert scope["power"] == pytest.approx(2.5)
+    assert scope["power_w"] == -2500
+    assert scope["magnitude_w"] == 2500
+
+
+# --- curtailment power conversion ---------------------------------------------
+#
+# Mirrors the power_unit tests above: a curtailment target lives in its own
+# `curtail_unit`, which is frequently a different register/unit than the
+# battery setpoint on the same inverter.
+
+
+@pytest.mark.parametrize(
+    ("control", "curtail_w", "expected"),
+    [
+        ({}, 1200, 1200),  # plain watts, the default
+        ({"curtail_unit": "kw", "round_to": 0.001}, 1200, 1.2),
+        ({"curtail_unit": "percent_of_rated", "rated_power_w": 10000}, 1500, 15),
+        ({"curtail_unit": "percent_hundredths", "rated_power_w": 10000}, 1500, 1500),
+        # No sign: a curtailment target is always a plain magnitude.
+        ({}, -1200, 1200),
+    ],
+)
+def test_curtail_power_converts_to_the_unit_the_profile_declares(
+    hass: HomeAssistant, control: dict, curtail_w: float, expected: float
+) -> None:
+    profile = _control_profile(control)
+    assert convert_curtail_power(hass, profile, {}, curtail_w) == pytest.approx(expected)
+
+
+def test_curtail_power_is_clamped_to_the_inverter_rating(hass: HomeAssistant) -> None:
+    profile = _control_profile({"curtail_unit": "percent_of_rated", "rated_power_w": 5000})
+    assert convert_curtail_power(hass, profile, {}, 9000) == 100
+
+
+def test_curtail_w_is_zero_for_actions_curtailment_does_not_apply_to(hass: HomeAssistant) -> None:
+    """Computing it unconditionally is how a curtailment profile's
+    rated_power_w template failing would break rendering force_charge too."""
+    profile = _control_profile({"curtail_unit": "percent_of_rated", "rated_power_w": 5000})
+    scope = action_variables(hass, profile, {}, "force_charge", power_w=-1000, curtail_w=99999)
+    assert scope["curtail_w"] == 0
+
+
+def test_curtail_w_is_converted_for_the_curtail_action(hass: HomeAssistant) -> None:
+    profile = _control_profile({"curtail_unit": "kw", "round_to": 0.001})
+    scope = action_variables(hass, profile, {}, "curtail", curtail_w=1500)
+    assert scope["curtail_w"] == pytest.approx(1.5)
+
+
+# --- setup suggestions -------------------------------------------------------
+
+
+def test_an_option_is_prefilled_with_a_suggestion_that_exists(hass: HomeAssistant) -> None:
+    hass.states.async_set("select.ems_mode", "Self-consumption mode (default)")
+    document = validate_document(
+        {
+            "name": "Test inverter",
+            "kind": "inverter",
+            "version": 2,
+            "options": {
+                "mode_select": {
+                    "suggest": ["select.not_here", "select.ems_mode"],
+                    "selector": {"entity": {"domain": "select"}},
+                }
+            },
+            "actions": {"self_consume": [{"service": "select.select_option"}]},
+        }
+    )
+    profile = Profile(
+        key="inverter/test", path="<test>", kind="inverter", name="Test", document=document
+    )
+    assert _suggested_entities(hass, profile) == {"mode_select": "select.ems_mode"}
+
+
+def test_an_option_whose_suggestions_all_miss_is_left_blank(hass: HomeAssistant) -> None:
+    """A wrong guess must never be smuggled in as a real answer."""
+    document = validate_document(
+        {
+            "name": "Test inverter",
+            "kind": "inverter",
+            "version": 2,
+            "options": {
+                "mode_select": {
+                    "suggest": ["select.absent"],
+                    "selector": {"entity": {"domain": "select"}},
+                }
+            },
+            "actions": {"self_consume": [{"service": "select.select_option"}]},
+        }
+    )
+    profile = Profile(
+        key="inverter/test", path="<test>", kind="inverter", name="Test", document=document
+    )
+    assert _suggested_entities(hass, profile) == {}

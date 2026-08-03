@@ -18,7 +18,14 @@ from typing import Any
 from homeassistant.util import dt as dt_util
 
 from .const import ACTION_MPC
-from .models import BatteryConfig, DeferrableLoad, GridConfig, HybridInverterConfig, Series
+from .models import (
+    BatteryConfig,
+    DeferrableLoad,
+    DeferrableLoadGroup,
+    GridConfig,
+    HybridInverterConfig,
+    Series,
+)
 from .thermal import build_def_load_config
 
 _LOGGER = logging.getLogger(__name__)
@@ -58,25 +65,80 @@ def _next_occurrence(after: datetime, target: time, *, strict: bool = False) -> 
     return candidate
 
 
-def window_to_timesteps(
+def _resolve_wall_clock(
     earliest: time | None,
     latest: time | None,
+    local_start: datetime,
+) -> tuple[datetime | None, datetime | None]:
+    """Project a recurring wall-clock window onto the absolute time axis.
+
+    Returns ``(opens_at, closes_at)``, either of which is None when that end is
+    unconstrained. ``opens_at`` is None for a window that is *already open* as
+    well as for one with no start: at 23:00 inside a 22:00-06:00 window the
+    load may run now, and pushing the start to tomorrow's 22:00 would waste the
+    cheap overnight hours entirely.
+    """
+    if earliest is None and latest is None:
+        return None, None
+
+    active = in_window(local_start.time(), earliest, latest)
+    if earliest is None or active:
+        opens_at = None
+        anchor = local_start
+    else:
+        opens_at = _next_occurrence(local_start, earliest)
+        anchor = opens_at
+
+    closes_at = None if latest is None else _next_occurrence(anchor, latest, strict=True)
+    return opens_at, closes_at
+
+
+@dataclass(slots=True)
+class LoadWindow:
+    """One load's start/end constraint, as EMHASS timestep indices."""
+
+    start_index: int
+    end_index: int
+    warnings: list[str] = field(default_factory=list)
+
+
+def resolve_load_window(
+    *,
+    name: str,
+    earliest: time | None,
+    latest: time | None,
+    deadline: datetime | None,
     grid_start: datetime,
     step: timedelta,
     horizon_steps: int,
-) -> tuple[int, int]:
-    """Convert a wall-clock window into EMHASS timestep indices.
+    operating_steps: int = 0,
+    start_at: datetime | None = None,
+    end_at: datetime | None = None,
+) -> LoadWindow:
+    """Combine every kind of "when may this run" into timestep indices.
 
-    EMHASS interprets these indices *relative to the moment the optimisation is
-    launched*, not as wall-clock times, so they have to be recomputed on every
-    single request -- a window cached at launch would slide through the day.
+    Three constraints of quite different natures meet here:
 
-    In EMHASS's convention ``0`` means "unconstrained": a start of 0 is "may
-    begin immediately" and an end of 0 is "may run to the end of the horizon".
+    * a *wall-clock window*, standing config describing the appliance and the
+      household ("never before 22:00"), which recurs and so has to be
+      re-projected onto the absolute axis on every request,
+    * an *absolute window* (``start_at``/``end_at``), derived for this one
+      request from the shape of this one day -- a surplus load's sunny hours,
+      which mean nothing tomorrow, and
+    * a *deadline*, one request's own "finish within N hours", already
+      absolute because it was anchored when the run was asked for.
+
+    All may apply, and the answer is their intersection. Resolving each to
+    absolute datetimes first and converting once at the end means the DST-safe
+    arithmetic below only has to be right in one place.
+
+    EMHASS interprets the result *relative to the moment the optimisation is
+    launched*, not as wall-clock times, which is why none of this can be cached
+    between runs. In its convention ``0`` means "unconstrained": a start of 0
+    is "may begin immediately", an end of 0 "may run to the end of the
+    horizon".
     """
-    if earliest is None and latest is None:
-        return 0, 0
-
+    warnings: list[str] = []
     local_start = dt_util.as_local(grid_start)
     step_seconds = step.total_seconds()
 
@@ -91,39 +153,132 @@ def window_to_timesteps(
         """
         return (moment.astimezone(UTC) - local_start.astimezone(UTC)).total_seconds() / step_seconds
 
-    # A window that is already open must not be pushed to its next opening
-    # tomorrow -- at 23:00 inside a 22:00-06:00 window the load may run *now*.
-    active = in_window(local_start.time(), earliest, latest)
+    opens_at, closes_at = _resolve_wall_clock(earliest, latest, local_start)
 
-    if earliest is None or active:
+    # A derived window narrows a standing one, never widens it: both are hard,
+    # so the intersection is the only safe reading. Deliberately folded in
+    # before the deadline logic below, so a deadline still measures itself
+    # against whatever the two windows leave.
+    if start_at is not None and (opens_at is None or start_at > opens_at):
+        opens_at = start_at
+    if end_at is not None and (closes_at is None or end_at < closes_at):
+        closes_at = end_at
+
+    ends_at = closes_at
+    end_is_deadline = False
+    if deadline is not None:
+        if closes_at is None or deadline < closes_at:
+            ends_at = deadline
+            end_is_deadline = True
+
+        # An explicit, dated request beats a standing preference: a deadline
+        # that expires before the window even opens would otherwise leave the
+        # load unable to run at all, and a request that silently does nothing
+        # for hours is worse than one that breaks quiet hours audibly.
+        if opens_at is not None and deadline <= opens_at:
+            warnings.append(
+                f"{name}: the requested deadline falls before its time window opens "
+                f"({earliest:%H:%M}); running as soon as possible instead."
+            )
+            opens_at = None
+            ends_at = deadline
+            end_is_deadline = True
+
+    # Rounded, not ceiled. ``opens_at`` is almost always a clean boundary --
+    # a wall-clock time, or a surplus window derived from plan rows on their
+    # own grid -- while ``grid_start`` is the literal instant this run
+    # happened to launch, essentially never exactly on that grid. Ceiling
+    # treats *any* fractional remainder as a full step still to wait out, so
+    # a run that starts mere seconds before its own window opens would be
+    # told to wait a whole extra step regardless -- silently discarding
+    # nearly all of a real, already-open timestep, every single run. Rounding
+    # only pushes the start out when opens_at is genuinely closer to the next
+    # step than this one, which is the case an index is coarse enough to
+    # actually get wrong.
+    start_index = 0 if opens_at is None else max(round(elapsed_steps(opens_at)), 0)
+    if start_index >= horizon_steps:
+        warnings.append(
+            f"{name}: its time window opens beyond the {horizon_steps}-step horizon, "
+            f"so the earliest start is being ignored for this run."
+        )
         start_index = 0
-        anchor = local_start
-    else:
-        opens_at = _next_occurrence(local_start, earliest)
-        start_index = math.ceil(elapsed_steps(opens_at))
-        anchor = opens_at
 
-    if latest is None:
+    if ends_at is None:
         end_index = 0
     else:
-        closes_at = _next_occurrence(anchor, latest, strict=True)
-        end_index = math.floor(elapsed_steps(closes_at))
-        # Beyond the horizon is the same as unconstrained, and saying so keeps
-        # EMHASS from clamping a nonsensical index.
+        end_index = math.floor(elapsed_steps(ends_at))
         if end_index >= horizon_steps:
+            # Beyond the horizon is the same as unconstrained, and saying so
+            # keeps EMHASS from clamping a nonsensical index. A deadline that
+            # starts out here becomes binding on its own as later runs advance
+            # the horizon towards it.
             end_index = 0
+        elif end_is_deadline and end_index - start_index < operating_steps:
+            # The deadline can no longer be met -- either it has passed, or the
+            # run no longer fits in what is left of it, which is the ordinary
+            # outcome of an anchored deadline as the clock advances towards it.
+            #
+            # Both must be relaxed rather than sent as-is. Asking EMHASS to fit
+            # a run into a window too small for it makes the *whole problem*
+            # infeasible, taking the battery and every other load down with it;
+            # and falling through to 0 would turn a missed deadline into
+            # "whenever", the one answer the user definitely did not ask for.
+            # Scheduling it as soon as it physically fits misses the deadline
+            # by as little as possible, which is the nearest thing to what was
+            # actually requested.
+            soonest = min(start_index + max(operating_steps, 1), horizon_steps - 1)
+            missed = (
+                "has already passed"
+                if end_index <= start_index
+                else ("no longer leaves room for the full run")
+            )
+            warnings.append(
+                f"{name}: its deadline {missed}; scheduling it at the earliest opportunity instead."
+            )
+            end_index = max(soonest, 0)
 
-    if start_index >= horizon_steps:
-        _LOGGER.warning(
-            "Deferrable load window (%s-%s) opens beyond the %d-step horizon; "
-            "treating it as unconstrained for this run",
-            earliest,
-            latest,
-            horizon_steps,
+    if (
+        operating_steps > 0
+        and end_index > 0
+        and not end_is_deadline
+        and end_index - start_index < operating_steps
+    ):
+        # A standing time window too narrow for the run. Unlike a deadline this
+        # is a configuration error rather than the passage of time, so it is
+        # reported rather than silently overridden -- widening it here would
+        # breach the user's quiet hours every night without them ever finding
+        # out why. EMHASS reports it as an infeasible *problem* with no hint
+        # which load caused it, so naming the load is the whole value here.
+        warnings.append(
+            f"{name}: its allowed window is {end_index - start_index} timesteps but it "
+            f"needs {operating_steps}; EMHASS may report the problem as infeasible."
         )
-        return 0, 0
 
-    return max(start_index, 0), max(end_index, 0)
+    return LoadWindow(start_index, max(end_index, 0), warnings)
+
+
+def window_to_timesteps(
+    earliest: time | None,
+    latest: time | None,
+    grid_start: datetime,
+    step: timedelta,
+    horizon_steps: int,
+) -> tuple[int, int]:
+    """A wall-clock window alone, as timestep indices.
+
+    The deadline-free case of :func:`resolve_load_window`, kept separate
+    because it is the shape most of the window behaviour is specified in.
+    """
+    window = resolve_load_window(
+        name="",
+        earliest=earliest,
+        latest=latest,
+        deadline=None,
+        grid_start=grid_start,
+        step=step,
+        horizon_steps=horizon_steps,
+    )
+    return window.start_index, window.end_index
 
 
 # --- payload -----------------------------------------------------------------
@@ -141,12 +296,16 @@ class PayloadInputs:
     grid: GridConfig
     hybrid_inverter: HybridInverterConfig
     loads: list[DeferrableLoad] = field(default_factory=list)
+    load_groups: list[DeferrableLoadGroup] = field(default_factory=list)
     pv: Series | None = None
     load: Series | None = None
     buy_price: Series | None = None
     sell_price: Series | None = None
     outdoor_temperature: Series | None = None
     soc_init: float | None = None
+    pv_live_w: float | None = None
+    load_live_w: float | None = None
+    mix_beta: float = 0.5
     extra_settings: dict[str, Any] = field(default_factory=dict)
 
 
@@ -181,6 +340,13 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
     # -- inputs ---------------------------------------------------------------
     # Supplying a forecast key makes EMHASS switch that forecast's method to
     # "list" by itself, so the method is deliberately not set here.
+    # Live values to blend into the first step of the matching forecast, MPC
+    # only -- see models.Series.blend_first. A day-ahead run's first step is
+    # tomorrow, not now, so there is nothing live to blend there.
+    live_values = {
+        "pv_power_forecast": inputs.pv_live_w,
+        "load_power_forecast": inputs.load_live_w,
+    }
     for key, series, label in (
         ("pv_power_forecast", inputs.pv, "PV forecast"),
         ("load_power_forecast", inputs.load, "Load forecast"),
@@ -194,6 +360,17 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
     ):
         if series is None or not series:
             continue
+        if key == "pv_power_forecast":
+            # Profile math (efficiency factors, unit conversions) leaves tiny
+            # float noise like 210.10000000000002 W; round to whole watts
+            # since sub-watt PV precision is meaningless anyway.
+            series = series.map_values(round)
+        elif key == "load_cost_forecast":
+            # Tariff math (multiplier/adder) leaves the same float noise on
+            # a per-kWh price; round rather than lose currency precision.
+            series = series.map_values(lambda v: round(v, 4))
+        if inputs.action == ACTION_MPC and (live_value := live_values.get(key)) is not None:
+            series = series.blend_first(live_value, inputs.mix_beta)
         payload[key] = series.to_payload()
         if not series.covers(horizon_end):
             # EMHASS forward-fills a timestamped forecast onto its grid, so a
@@ -210,6 +387,13 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
     if inputs.soc_init is not None:
         # A fraction in [0, 1]; the percentage form belongs only to display.
         payload["soc_init"] = round(inputs.soc_init, 4)
+        # EMHASS enforces total battery throughput over the horizon as a hard
+        # equality against (soc_init - soc_final). Leaving soc_final unset
+        # makes EMHASS default it to soc_init anyway, so this is a no-op for
+        # the solver -- but it's sent explicitly rather than left to that
+        # silent fallback, since a future default change on EMHASS's side
+        # would otherwise change plans here without warning.
+        payload["soc_final"] = payload["soc_init"]
 
     # -- settings -------------------------------------------------------------
     payload.update(_battery_settings(inputs.battery))
@@ -220,6 +404,10 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
     deferrable, load_order, deferrable_warnings = _deferrable_settings(inputs, step)
     payload.update(deferrable)
     warnings.extend(deferrable_warnings)
+
+    group_settings, group_warnings = _deferrable_load_group_settings(inputs.load_groups, load_order)
+    payload.update(group_settings)
+    warnings.extend(group_warnings)
 
     thermal = _thermal_settings(inputs, step, len(load_order))
     payload.update(thermal)
@@ -238,13 +426,18 @@ def _thermal_settings(inputs: PayloadInputs, step: timedelta, load_count: int) -
     """Describe any thermal loads to EMHASS.
 
     Sending ``def_load_config`` overwrites ``number_of_deferrable_loads`` with
-    its own length, so it is built from the active load count with an empty
-    entry for every ordinary load. A list containing only the thermal ones
-    would silently drop the rest off the end of the optimisation.
+    its own length, so it is built from the full load count with an empty entry
+    for every ordinary load. A list containing only the thermal ones would
+    silently drop the rest off the end of the optimisation.
+
+    A parked load gets an empty entry even if it is thermal: its temperature
+    targets are exactly the kind of demand that would contradict the zero
+    operating hours it is being sent with.
     """
-    active = [load for load in inputs.loads if load.enabled]
     thermal_by_index = {
-        index: load.thermal for index, load in enumerate(active) if load.thermal is not None
+        index: load.thermal
+        for index, load in enumerate(inputs.loads)
+        if load.thermal is not None and load.wants_to_run
     }
 
     config = build_def_load_config(
@@ -309,72 +502,189 @@ def operating_timesteps(operating_hours: float, step_minutes: int) -> int:
     return max(1, round(operating_hours * 60 / step_minutes))
 
 
+@dataclass(slots=True)
+class _LoadSettings:
+    """One load's row across every per-load array EMHASS expects."""
+
+    nominal_power_w: float
+    minimum_power_w: float
+    hours: float
+    timesteps: int
+    start_index: int
+    end_index: int
+    semi_continuous: bool
+    single_constant: bool
+    startup_penalty: float
+    max_startups: int
+    on_time_steps: int
+    off_time_steps: int
+    current_state: bool
+    current_power_w: float
+    completed_timesteps: int
+    current_on_timesteps: int
+    current_off_timesteps: int
+
+
+def _park(load: DeferrableLoad) -> _LoadSettings:
+    """Describe a load that must not run, without removing it from the run.
+
+    Leaving a load out is what used to happen, and it made every *other*
+    load's ``P_deferrable{k}`` number shift underneath it as loads were
+    disabled or requests came and went -- so no automation or dashboard could
+    refer to "deferrable 2" and mean anything durable. Sending it parked keeps
+    the numbering a fixed property of the system.
+
+    Everything that could make a zero-hour load do something is neutralised
+    rather than passed through. In particular the current state is reported as
+    off and its completed timesteps as zero however the appliance is actually
+    behaving: telling EMHASS that a load is running, or has already run, while
+    also demanding it total zero energy is a contradiction, and EMHASS answers
+    a contradiction by declaring the whole problem infeasible -- taking every
+    other load and the battery down with it.
+
+    The nominal power is kept truthful because EMHASS wants a positive power
+    per load, and a parked load reaches zero energy through its run time, not
+    through its rating.
+    """
+    return _LoadSettings(
+        nominal_power_w=load.nominal_power_w,
+        minimum_power_w=0.0,
+        hours=0.0,
+        timesteps=0,
+        start_index=0,
+        end_index=0,
+        semi_continuous=True,
+        single_constant=False,
+        startup_penalty=0.0,
+        max_startups=0,
+        on_time_steps=0,
+        off_time_steps=0,
+        current_state=False,
+        current_power_w=0.0,
+        completed_timesteps=0,
+        current_on_timesteps=0,
+        current_off_timesteps=0,
+    )
+
+
+def _describe(
+    load: DeferrableLoad, inputs: PayloadInputs, step: timedelta, warnings: list[str]
+) -> _LoadSettings:
+    """Describe a load that is asking for run time."""
+    # Quantise here rather than in the entity: the number the user typed is
+    # theirs to see, and the timestep it has to fit is only known when a
+    # request is built.
+    steps = operating_timesteps(load.operating_hours, inputs.time_step_minutes)
+    quantised = steps * inputs.time_step_minutes / 60
+    if not math.isclose(quantised, load.operating_hours, rel_tol=1e-9, abs_tol=1e-9):
+        warnings.append(
+            f"{load.name}: {load.operating_hours:g} h is not a whole number of "
+            f"{inputs.time_step_minutes}-minute timesteps, so EMHASS is being "
+            f"asked for {quantised:g} h ({steps} timesteps) instead."
+        )
+
+    # What actually still has to fit in the window is the run *remaining*,
+    # not the full target: def_current_operating_timesteps already tells
+    # EMHASS to credit completed_timesteps against the energy/timestep
+    # requirement internally, and the window has to shrink the same way or
+    # the two disagree. Left at the full `steps`, a load nearing the end of
+    # its target keeps failing the "does it fit" check and the deadline
+    # recovery below as if nothing had run yet -- forcing a fresh full-width
+    # window pinned to "now" on every request instead of settling into
+    # whatever's actually left.
+    remaining_steps = max(steps - load.completed_timesteps, 0)
+
+    # After the quantisation above, so the feasibility check inside knows
+    # how many timesteps actually have to fit in the window it produces.
+    window = resolve_load_window(
+        name=load.name,
+        earliest=load.earliest_start,
+        latest=load.latest_end,
+        deadline=load.deadline_at,
+        grid_start=inputs.now,
+        step=step,
+        horizon_steps=inputs.horizon_steps,
+        operating_steps=remaining_steps,
+        start_at=load.start_at,
+        end_at=load.end_at,
+    )
+    warnings.extend(window.warnings)
+
+    # A floor above the ceiling has no feasible power at all, and EMHASS
+    # reports that as an infeasible problem with no hint as to which load
+    # caused it.
+    minimum_power_w = load.minimum_power_w
+    if load.minimum_power_w > load.nominal_power_w:
+        warnings.append(
+            f"{load.name}: minimum power {load.minimum_power_w:g} W exceeds its "
+            f"nominal {load.nominal_power_w:g} W; using the nominal power as the floor."
+        )
+        minimum_power_w = load.nominal_power_w
+
+    return _LoadSettings(
+        nominal_power_w=load.nominal_power_w,
+        minimum_power_w=minimum_power_w,
+        hours=quantised,
+        timesteps=steps,
+        start_index=window.start_index,
+        end_index=window.end_index,
+        semi_continuous=load.semi_continuous,
+        single_constant=load.single_constant,
+        startup_penalty=load.startup_penalty,
+        max_startups=load.max_startups,
+        on_time_steps=operating_timesteps(
+            load.minimum_on_time_minutes / 60, inputs.time_step_minutes
+        ),
+        off_time_steps=operating_timesteps(
+            load.minimum_off_time_minutes / 60, inputs.time_step_minutes
+        ),
+        current_state=load.current_state,
+        current_power_w=load.current_power_w,
+        completed_timesteps=load.completed_timesteps,
+        current_on_timesteps=load.current_on_timesteps,
+        current_off_timesteps=load.current_off_timesteps,
+    )
+
+
 def _deferrable_settings(
     inputs: PayloadInputs, step: timedelta
 ) -> tuple[dict[str, Any], list[str], list[str]]:
-    active = [load for load in inputs.loads if load.enabled]
-    if not active:
+    # Every configured load, always, in the registry's stable order: a load's
+    # deferrable number is meant to be as durable as the load itself.
+    loads = list(inputs.loads)
+    if not loads:
         return {"number_of_deferrable_loads": 0}, [], []
 
     warnings: list[str] = []
-    starts: list[int] = []
-    ends: list[int] = []
-    timesteps: list[int] = []
-    hours: list[float] = []
-    minimum_powers: list[float] = []
-    for load in active:
-        start_index, end_index = window_to_timesteps(
-            load.earliest_start,
-            load.latest_end,
-            inputs.now,
-            step,
-            inputs.horizon_steps,
-        )
-        starts.append(start_index)
-        ends.append(end_index)
-
-        # Quantise here rather than in the entity: the number the user typed is
-        # theirs to see, and the timestep it has to fit is only known when a
-        # request is built.
-        steps = operating_timesteps(load.operating_hours, inputs.time_step_minutes)
-        quantised = steps * inputs.time_step_minutes / 60
-        timesteps.append(steps)
-        hours.append(quantised)
-        if not math.isclose(quantised, load.operating_hours, rel_tol=1e-9, abs_tol=1e-9):
-            warnings.append(
-                f"{load.name}: {load.operating_hours:g} h is not a whole number of "
-                f"{inputs.time_step_minutes}-minute timesteps, so EMHASS is being "
-                f"asked for {quantised:g} h ({steps} timesteps) instead."
-            )
-
-        # A floor above the ceiling has no feasible power at all, and EMHASS
-        # reports that as an infeasible problem with no hint as to which load
-        # caused it.
-        if load.minimum_power_w > load.nominal_power_w:
-            warnings.append(
-                f"{load.name}: minimum power {load.minimum_power_w:g} W exceeds its "
-                f"nominal {load.nominal_power_w:g} W; using the nominal power as the floor."
-            )
-            minimum_powers.append(load.nominal_power_w)
-        else:
-            minimum_powers.append(load.minimum_power_w)
+    described = [
+        _describe(load, inputs, step, warnings) if load.wants_to_run else _park(load)
+        for load in loads
+    ]
 
     settings: dict[str, Any] = {
-        "number_of_deferrable_loads": len(active),
-        "nominal_power_of_deferrable_loads": [load.nominal_power_w for load in active],
-        "minimum_power_of_deferrable_loads": minimum_powers,
-        "operating_hours_of_each_deferrable_load": hours,
-        "start_timesteps_of_each_deferrable_load": starts,
-        "end_timesteps_of_each_deferrable_load": ends,
-        "treat_deferrable_load_as_semi_cont": [load.semi_continuous for load in active],
-        "set_deferrable_load_single_constant": [load.single_constant for load in active],
-        "set_deferrable_startup_penalty": [load.startup_penalty for load in active],
-        "set_deferrable_max_startups": [load.max_startups for load in active],
+        "number_of_deferrable_loads": len(described),
+        "nominal_power_of_deferrable_loads": [row.nominal_power_w for row in described],
+        "minimum_power_of_deferrable_loads": [row.minimum_power_w for row in described],
+        "operating_hours_of_each_deferrable_load": [row.hours for row in described],
+        "start_timesteps_of_each_deferrable_load": [row.start_index for row in described],
+        "end_timesteps_of_each_deferrable_load": [row.end_index for row in described],
+        "treat_deferrable_load_as_semi_cont": [row.semi_continuous for row in described],
+        "set_deferrable_load_single_constant": [row.single_constant for row in described],
+        "set_deferrable_startup_penalty": [row.startup_penalty for row in described],
+        "set_deferrable_max_startups": [row.max_startups for row in described],
+        # Minimum dwell time once a load switches on/off, protecting
+        # compressor-driven loads from short-cycling. Paired with the current
+        # on/off streak below so EMHASS can enforce it correctly across
+        # restarts rather than assuming every load just switched.
+        "def_minimum_on_time": [row.on_time_steps for row in described],
+        "def_minimum_off_time": [row.off_time_steps for row in described],
         # Feeding current state back stops EMHASS charging a startup penalty for
         # a load that is already running, and stops it re-scheduling work that
         # has already been done today.
-        "def_current_state": [load.current_state for load in active],
-        "def_current_operating_timesteps": [load.completed_timesteps for load in active],
+        "def_current_state": [row.current_state for row in described],
+        "def_current_operating_timesteps": [row.completed_timesteps for row in described],
+        "def_current_on_timesteps": [row.current_on_timesteps for row in described],
+        "def_current_off_timesteps": [row.current_off_timesteps for row in described],
         # Companion has no per-load "max acceptable cost" feature of its own, so
         # this is always disabled -- but it must still be sent, sized to the
         # active load count. EMHASS's own optimisation.py indexes this list
@@ -384,11 +694,11 @@ def _deferrable_settings(
         # previous, larger load count throws an uncaught IndexError and 500s
         # the entire request. A zero disables the feature exactly as the
         # key's absence would, but immune to whatever is on disk.
-        "deferrable_load_max_cost": [0.0 for _ in active],
+        "deferrable_load_max_cost": [0.0 for _ in described],
     }
 
-    if any(load.current_power_w for load in active):
-        settings["def_current_power"] = [load.current_power_w for load in active]
+    if any(row.current_power_w for row in described):
+        settings["def_current_power"] = [row.current_power_w for row in described]
 
     if inputs.action == ACTION_MPC:
         # Exact integers, with no hours-to-timesteps division for EMHASS to do
@@ -396,6 +706,51 @@ def _deferrable_settings(
         # branch that takes `prediction_horizon` (utils.treat_runtimeparams) --
         # it is deliberately absent from associations.csv -- so the day-ahead
         # request has to keep making do with the quantised hours above.
-        settings["operating_timesteps_of_each_deferrable_load"] = timesteps
+        settings["operating_timesteps_of_each_deferrable_load"] = [
+            row.timesteps for row in described
+        ]
 
-    return settings, [load.subentry_id for load in active], warnings
+    return settings, [load.subentry_id for load in loads], warnings
+
+
+def _deferrable_load_group_settings(
+    load_groups: list[DeferrableLoadGroup], load_order: list[str]
+) -> tuple[dict[str, Any], list[str]]:
+    """Describe cross-load relationships (a shared budget or mutual exclusion).
+
+    Each group's members are resolved from subentry ids into the
+    ``"deferrable{k}"`` name EMHASS expects, using their position in
+    ``load_order``. A member no longer present there (the load was deleted or
+    renamed since the group was created) is dropped with a warning rather than
+    failing the whole request; a group left with fewer than two valid members
+    is meaningless and dropped entirely.
+    """
+    warnings: list[str] = []
+    groups: list[dict[str, Any]] = []
+
+    for group in load_groups:
+        names: list[str] = []
+        for subentry_id in group.load_subentry_ids:
+            if subentry_id not in load_order:
+                warnings.append(
+                    f"Load group {group.name!r}: a referenced load no longer "
+                    "exists, dropping it from the group."
+                )
+                continue
+            names.append(f"deferrable{load_order.index(subentry_id)}")
+
+        if len(names) < 2:
+            warnings.append(
+                f"Load group {group.name!r}: fewer than 2 valid loads remain, "
+                "dropping the group entirely."
+            )
+            continue
+
+        entry: dict[str, Any] = {"names": names, "mutual_exclusion": group.mutual_exclusion}
+        if group.max_power_w is not None:
+            entry["max_power"] = group.max_power_w
+        groups.append(entry)
+
+    if not groups:
+        return {}, warnings
+    return {"deferrable_load_groups": groups}, warnings

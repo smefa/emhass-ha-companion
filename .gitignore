@@ -15,6 +15,9 @@ build/
 node_modules/
 frontend-src/dist/
 
+# mkdocs build output
+site/
+
 .DS_Store
 .vscode/
 .idea/

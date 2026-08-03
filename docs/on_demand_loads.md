@@ -1,114 +1,134 @@
-# On-demand deferrable loads
+# On-demand loads
 
-*Status: implemented (recurrence select, requested switch, auto-disarm,
-tests, translations). Blueprints not yet written. The deferred
-parameterised-request service is planned separately in
-[request_run_service.md](request_run_service.md).*
+By default a deferrable load wants its configured hours **every single day**.
+Some loads don't work like that:
 
-## The problem
-
-The companion currently assumes every enabled deferrable load wants its
-`operating_hours` every single day. Many loads don't work like that:
-
-- a hot water tank only needs heating when its temperature has dropped,
+- a hot water tank only needs heating once its temperature has dropped,
 - a dishwasher only needs a run after someone has loaded it,
 - a pool pump may only need to run after heavy use.
 
-These are all the same abstraction: a load with **no standing demand** that
-gets **armed by an event** — a sensor crossing a threshold, or a human. The
-trigger vocabulary belongs to Home Assistant automations; what belongs in the
-integration is the **request lifecycle**, because only the integration knows
-when a run has actually completed (it already tracks runtime per load in
-`DeferrableRegistry`), and hand-rolling completion detection, midnight
-boundaries and restart persistence in user automations is exactly what
-everyone would get subtly wrong.
+These share one shape: no standing demand, armed by an event. Switch a
+load's recurrence to *On demand* and it wants nothing until something arms
+it — then it enters the plan exactly like any other deferrable load, and
+disarms itself once its hours are met.
 
-Guiding principle: **automations declare *whether* and *how much*; EMHASS
-keeps deciding *when*.** Triggers only flip a switch on the load's device —
-they never drive the appliance directly.
+*Status: implemented — recurrence, the requested switch, deadlines and
+auto-disarm all work today. There is no ready-made blueprint yet, so wire
+the requested switch up with a plain automation (examples below). A
+`request_run` service with per-request overrides is planned separately —
+see [Request-run service (planned)](request_run_service.md).*
 
-## New entities (per deferrable load)
+## Setup
 
-Both follow the existing entity-owned pattern: `Restore*Entity`, registry is
-the runtime source of truth, no config-entry reload on change.
+On the load's device page:
 
-- **`select.<load>_recurrence`** — `daily` | `on_demand`. Defaults to `daily`,
-  which is exactly today's behaviour, so existing installs are untouched. No
-  new subentry form field: the user flips the select after creating the load.
-- **`switch.<load>_requested`** — only meaningful in `on_demand` mode. On =
-  a run is requested; the load enters the optimisation until the run is
-  completed. Off = no demand (and turning it off cancels a pending request).
-  A switch rather than a button so that automations can *cancel*, dashboards
-  show pending state, and conditions can read it ("don't re-notify if already
-  requested").
+1. Set **Recurrence** (`select.<load>_recurrence`) to **On demand**.
+2. Automate something to turn **Requested** (`switch.<load>_requested`) on.
 
-No separate `binary_sensor` for pending state — the switch itself is the
-observable state.
+Guiding principle: your automation declares *whether* and *how much*; EMHASS
+still decides *when*. The trigger only flips a switch — it never drives the
+appliance directly.
 
-## Registry changes
+| Entity | |
+|---|---|
+| `select.<load>_recurrence` | *Every day* (default) / *On demand* / *On spare solar* — see [Surplus loads](surplus_loads.md) for the third option |
+| `switch.<load>_requested` | On = a run is wanted; the load enters the plan until it's done. Off = no demand, and turning it off **cancels** a pending request |
+| `number.<load>_run_within` | Optional deadline, in hours — see below. Only available while recurrence is *On demand* — a surplus load has no run-length target for a deadline to count down against either |
 
-`DeferrableRuntime` gains two entity-owned fields:
+There is no separate "pending" sensor — the requested switch's own state is
+what to watch or display.
 
-```python
-recurrence: str = RECURRENCE_DAILY   # "daily" | "on_demand"
-requested: bool = False
+## Example automations
+
+**Arm from a sensor threshold** — a hot water tank whose temperature has
+dropped:
+
+```yaml
+triggers:
+  - trigger: numeric_state
+    entity_id: sensor.tank_temperature
+    below: 45
+    for: "00:10:00"
+actions:
+  - action: switch.turn_on
+    target:
+      entity_id: switch.hot_water_requested
 ```
 
-**Payload:** a load participates in the optimisation when
-`enabled and (recurrence == "daily" or requested)`. Not-requested on-demand
-loads take the *same* path as `enabled=False` loads — excluded from the
-`active` list in `payload.py` — so there are no new payload semantics, and
-the per-run `load_order` bookkeeping already copes with loads entering and
-leaving the active set.
+The switch's own lifecycle provides the hysteresis: once requested, the
+sensor dropping further does nothing until the run completes and the switch
+turns itself off again.
 
-**Auto-disarm (the part users can't build themselves):** when an on-demand
-load's `elapsed_today` reaches its `operating_hours` target, the registry
-clears `requested` and notifies, turning the switch off. Checked at the
-existing observation points:
+**Arm from an event** — a dishwasher door sensor, an `input_boolean`, or a
+button:
 
-- in `_async_source_changed`, on the running→stopped transition, and
-- after `assume_from_plan` for sourceless loads, so completion works even
-  when the only evidence is our own past plan.
+```yaml
+triggers:
+  - trigger: state
+    entity_id: binary_sensor.dishwasher_door
+    to: "off"
+actions:
+  - action: switch.turn_on
+    target:
+      entity_id: switch.dishwasher_requested
+```
 
-**Midnight:** `reset_day` clears runtime counters but **not** `requested`.
-An unfulfilled request deliberately survives the day boundary — a dishwasher
-loaded at 23:00 should run in the cheap early-morning hours, and the reset
-re-opens the full `operating_hours` for the new day. A fulfilled request has
-already disarmed itself before midnight.
+**Cancel** is the same call with `switch.turn_off` — turning the switch off
+mid-run clears the request.
 
-**Force modes:** unchanged and orthogonal. `resolve_should_run` still only
-overrides the *signal*; an unrequested on-demand load is simply absent from
-the plan, exactly like a disabled one.
+## Deadlines: "run within N hours"
 
-## Blueprints
+Two different kinds of constraint apply to a load, and it's worth keeping
+them apart:
 
-Shipped in `blueprints/` in the repo, importable via `my.home-assistant.io`
-links in the README. Each takes the load's `requested` switch as its input
-and is deliberately tiny — a user who outgrows one copies the generated
-automation and edits it.
+- **A time window** (`switch.<load>_restrict_to_a_time_window` and its
+  `time.<load>_earliest_start` / `_latest_finish`) is standing config — a
+  property of the appliance or the household ("never before 22:00"). It
+  applies to every load, whatever its recurrence, and recurs every day.
+- **A deadline** (`number.<load>_run_within`) belongs to *this* request. It
+  counts from the moment the request was armed, not from "now" on each
+  recalculation — a deadline that re-derived itself from the clock would
+  slide forward and never arrive. It is only available on-demand loads,
+  because a daily load has no request event to anchor it to.
 
-1. **Request on sensor threshold** — numeric sensor below (or above, for
-   cooling-type loads) a threshold *for N minutes* (debounce input), then turn
-   the requested switch on. The switch's own lifecycle provides the
-   hysteresis: once requested, re-triggers are no-ops until the run completes.
-2. **Request from a trigger entity** — a switch / input_boolean / button /
-   NFC tag turns the requested switch on. Covers "dishwasher is loaded".
+Both may apply at once. If they conflict:
 
-## Tests
+| Situation | Result |
+|---|---|
+| Deadline falls before the time window opens | Deadline wins, load runs ASAP |
+| Deadline has already passed | Scheduled at the earliest opportunity |
+| Deadline is further out than the plan horizon | Unconstrained for now; starts to bind as the horizon catches up |
 
-- Unit (`tests/test_deferrable.py`): recurrence/requested defaults; on-demand
-  load excluded from `to_loads` output when unrequested and included when
-  requested; auto-disarm at target; request survives `reset_day`; cancel via
-  `requested = False`.
-- Integration: new select/switch entities created per load, restore behaviour,
-  switch reflects auto-disarm after a simulated completed run.
+The deadline winning over a quiet-hours window is deliberate: an explicit,
+timed request is judged more important than a standing preference — a
+request that silently does nothing for hours is worse than one that breaks
+a preference audibly.
 
-## Explicitly out of scope (for now)
+Progress toward a deadline is tracked per request, not reset at midnight —
+so a dishwasher loaded at 23:00 keeps its progress and its deadline across
+the day boundary instead of being told it needs to start over.
 
-- `emhass_companion.request_run` service with per-request overrides — planned
-  in [request_run_service.md](request_run_service.md).
-- Appliance preset profiles (`kind: appliance`) prefill for the subentry flow.
-- A thermal-model "hot water tank" flavour of the subentry (min tank
-  temperature instead of comfort window, tank sensor as `start_temperature`).
-  The threshold blueprint is the accessible version; the thermal model is the
-  better one and should eventually be offered alongside it.
+## Greyed-out settings
+
+Some settings are only meaningful in certain states, and report unavailable
+rather than accepting a value that would silently never be read:
+
+| Entity | Unavailable when |
+|---|---|
+| `switch.<load>_requested` | Recurrence is *Every day* |
+| `number.<load>_run_within` | Recurrence is anything but *On demand* (also unavailable on a surplus load) |
+| `time.<load>_earliest_start` / `_latest_finish` | The time-window switch is off |
+| `number.<load>_lowest_power_while_running` | The load runs at full power only |
+
+## Deferrable numbering stays stable
+
+EMHASS refers to its loads as `P_deferrable0`, `P_deferrable1`, … in its own
+charts and logs, with no name attached. The Companion sends **every**
+configured load on every run — an idle on-demand load is sent "parked" at
+zero hours rather than left out — specifically so that number never shifts
+just because a request lapsed or a load got disabled. It still moves if you
+add or remove a load, since the assignment is by name order.
+
+The number is shown as the diagnostic `sensor.<load>_emhass_deferrable_number`,
+and as an `emhass_deferrable` attribute on `should_run` and
+`scheduled_power`, useful if you're cross-referencing EMHASS's own output.

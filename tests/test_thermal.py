@@ -54,14 +54,20 @@ def test_band_has_exactly_one_value_per_timestep():
 
 @pytest.mark.usefixtures("stockholm_timezone")
 def test_comfort_window_maps_to_the_right_timesteps():
-    """06:00-22:00 from local midnight is steps 12 through 43 at 30 minutes."""
+    """06:00-22:00 from local midnight is steps 12 through 43 at 30 minutes.
+
+    The default heating_rate (3.0) and a 3-degree comfort/setback gap give a
+    1-hour ramp, so step 11 (05:30, 30 minutes before comfort_start) is
+    halfway up it rather than flat setback.
+    """
     minimums, _ = _config().comfort_band(_midnight_utc(), HALF_HOUR, DAY_STEPS)
 
     assert minimums[0] == 18.0  # 00:00, setback
-    assert minimums[11] == 18.0  # 05:30, still setback
+    assert minimums[9] == 18.0  # 04:30, still outside the 1-hour ramp
+    assert minimums[11] == 19.5  # 05:30, halfway up the ramp to comfort_start
     assert minimums[12] == 21.0  # 06:00, comfort begins
     assert minimums[43] == 21.0  # 21:30, last comfort step
-    assert minimums[44] == 18.0  # 22:00, setback resumes
+    assert minimums[44] == 18.0  # 22:00, setback resumes (next ramp is hours away)
 
 
 @pytest.mark.usefixtures("stockholm_timezone")
@@ -106,7 +112,7 @@ def test_the_band_follows_the_launch_time_not_the_clock():
 def test_a_finer_timestep_yields_a_longer_band():
     minimums, _ = _config().comfort_band(_midnight_utc(), timedelta(minutes=15), 96)
     assert len(minimums) == 96
-    assert minimums[23] == 18.0  # 05:45
+    assert minimums[23] == 20.25  # 05:45, 3/4 up the 1-hour ramp
     assert minimums[24] == 21.0  # 06:00
 
 

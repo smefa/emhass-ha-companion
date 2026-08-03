@@ -204,9 +204,13 @@ actions:
   idle: ...
 ```
 
-Action templates get `power_w`, `soc` and `soc_target`. Any action can call `script.turn_on` instead, which covers inverters needing multi-step or conditional sequences without a plugin loader.
+Action templates get `{{ power }}` (converted to the unit the profile declares), plus `power_w`, `magnitude_w`, `duration_min`, `soc` and `soc_target`. Any action can call `script.turn_on` instead, which covers inverters needing multi-step or conditional sequences without a plugin loader.
 
-> Inverter profiles are defined but not yet executed — that is phase 3.
+> **Writing an inverter profile?** Start from
+> **[inverter_profile_template.yaml](inverter_profile_template.yaml)** — one
+> self-contained file covering the `control:` block, the unit conversions, the
+> command-lifetime rules and a worked example per control model. It is a valid
+> profile as it stands, and a test keeps it that way.
 
 ## Testing a profile
 

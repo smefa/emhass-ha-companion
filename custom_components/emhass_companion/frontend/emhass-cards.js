@@ -26,6 +26,7 @@ const COLORS = {
   sell: "var(--success-color, #43a047)",
   grid: "var(--divider-color, #e0e0e0)",
   muted: "var(--secondary-text-color, #727272)",
+  deadline: "var(--warning-color, #ffa600)",
 };
 
 /* ------------------------------------------------------------------ utils */
@@ -93,6 +94,21 @@ function formatTime(ms, hass) {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+/**
+ * Time remaining, as a deadline is best read: "in 4 h 20 m".
+ *
+ * A wall-clock time would make the reader do the subtraction, which is the
+ * arithmetic a duration-based deadline exists to avoid in the first place.
+ * Past due is called out rather than shown as a negative.
+ */
+function formatCountdown(ms) {
+  if (!Number.isFinite(ms)) return "–";
+  if (ms <= 0) return "overdue";
+  const minutes = Math.floor(ms / 60000);
+  const hours = Math.floor(minutes / 60);
+  return hours > 0 ? `in ${hours} h ${minutes % 60} m` : `in ${minutes} m`;
 }
 
 /* --------------------------------------------------------------- discovery */
@@ -464,6 +480,8 @@ class EmhassDeferrableCard extends HTMLElement {
           ha-card { padding: 12px 16px 16px 16px; }
           .head { display:flex; justify-content:space-between; align-items:center; }
           .name { font-size:1.1em; font-weight:500; }
+          .name .slot { font-size:.75em; font-weight:400; color: var(--secondary-text-color);
+                        margin-left:6px; }
           .state { font-size:.9em; padding:2px 8px; border-radius:10px; }
           .on  { background: var(--success-color, #43a047); color: white; }
           .off { background: var(--divider-color, #e0e0e0);
@@ -508,8 +526,34 @@ class EmhassDeferrableCard extends HTMLElement {
     const scheduled = find("scheduled_power");
     const nextStart = find("next_start");
     const runtime = find("runtime_today");
+    const recurrence = find("recurrence");
+    const requested = find("requested");
 
+    const onDemand = recurrence && recurrence.state === "on_demand";
+    const onSurplus = recurrence && recurrence.state === "surplus";
+    const budget = onSurplus ? find("surplus_budget") : null;
+    // Only a pending request has a deadline, and the integration is the one
+    // that decides that -- reading the attribute rather than recomputing it
+    // here keeps the card from disagreeing with what was actually sent.
+    const deadline =
+      requested && requested.attributes ? Date.parse(requested.attributes.deadline_at) : NaN;
+    const hasDeadline = Number.isFinite(deadline);
+
+    // EMHASS calls its loads P_deferrable0, P_deferrable1, ... and never says
+    // which appliance a number is. Showing it here is what lets someone read
+    // EMHASS's own charts and logs against this dashboard. It is read live
+    // rather than stored, because the number shifts as loads join and leave
+    // the optimisation.
+    const slot = shouldRun && shouldRun.attributes
+      ? shouldRun.attributes.emhass_deferrable
+      : null;
     name.textContent = load.name;
+    if (slot !== null && slot !== undefined) {
+      const tag = document.createElement("span");
+      tag.className = "slot";
+      tag.textContent = `P_deferrable${slot}`;
+      name.appendChild(tag);
+    }
 
     // Unknown is shown distinctly from off: with no usable plan the correct
     // answer is "we do not know", and rendering that as "off" would quietly
@@ -519,14 +563,32 @@ class EmhassDeferrableCard extends HTMLElement {
     state.textContent =
       value === "on" ? "Run now" : value === "off" ? "Idle" : "No plan";
 
+    const NEXT_START_REASONS = {
+      no_plan: "No plan yet",
+      already_running: "Running now",
+      not_scheduled: "Not scheduled",
+    };
     facts.innerHTML = [
       ["Scheduled", scheduled ? formatPower(Number(scheduled.state)) : "–"],
       [
         "Next start",
         nextStart && !["unknown", "unavailable"].includes(nextStart.state)
           ? formatTime(Date.parse(nextStart.state), hass)
-          : "–",
+          : NEXT_START_REASONS[
+              (nextStart && nextStart.attributes && nextStart.attributes.reason) || ""
+            ] || "–",
       ],
+      // Shown only while a request is actually pending: a deadline is a
+      // property of one request, so an empty slot the rest of the time would
+      // be noise on every daily load.
+      ...(hasDeadline ? [["Deadline", formatCountdown(deadline - Date.now())]] : []),
+      // A surplus load asks for no fixed run time, so "hours needed" would be
+      // meaningless; what it actually got from the last plan is the number
+      // worth showing, and the only visible sign of why it is or is not
+      // running today.
+      ...(budget && Number.isFinite(Number(budget.state))
+        ? [["Spare solar", `${Number(budget.state).toFixed(1)} h`]]
+        : []),
       [
         "Ran today",
         runtime && Number.isFinite(Number(runtime.state))
@@ -539,12 +601,14 @@ class EmhassDeferrableCard extends HTMLElement {
 
     chart.textContent = "";
     const points = series(scheduled, "schedule");
-    if (points.length > 1) chart.appendChild(this._timeline(points));
+    if (points.length > 1) {
+      chart.appendChild(this._timeline(points, hasDeadline ? deadline : null));
+    }
 
-    this._controls(load);
+    this._controls(load, onDemand, onSurplus);
   }
 
-  _timeline(points) {
+  _timeline(points, deadline) {
     const width = 400;
     const height = 26;
     const svg = el("svg", {
@@ -576,14 +640,33 @@ class EmhassDeferrableCard extends HTMLElement {
         stroke: COLORS.load, "stroke-width": 2,
       }, svg);
     }
+
+    // The one question a deadline raises is whether the plan actually finishes
+    // the load before it, which is exactly what this line answers at a glance.
+    // Dashed so it reads as a constraint rather than as scheduled power.
+    if (deadline !== null && deadline >= t0 && deadline <= t1) {
+      el("line", {
+        x1: x(deadline), x2: x(deadline), y1: 0, y2: 24,
+        stroke: COLORS.deadline, "stroke-width": 2, "stroke-dasharray": "3 2",
+      }, svg);
+    }
     return svg;
   }
 
-  _controls(load) {
+  _controls(load, onDemand, onSurplus) {
     const container = this.shadowRoot.querySelector(".controls");
-    const wanted = ["_mode", "_enabled"];
+    // The request controls are meaningless on a daily load -- its entities
+    // report unavailable -- so they are left out rather than shown greyed.
+    // A surplus load is armed by the same switch but has no deadline to set;
+    // what it takes instead is an optional energy cap.
+    let wanted = ["run_now", "enabled"];
+    if (onDemand) {
+      wanted = ["run_now", "enabled", "requested", "run_within"];
+    } else if (onSurplus) {
+      wanted = ["run_now", "enabled", "requested", "energy_needed"];
+    }
     const ids = load.entities.filter((id) =>
-      wanted.some((suffix) => id.includes(suffix.slice(1))),
+      wanted.some((suffix) => id.includes(suffix)),
     );
     const config = ids.map((entity) => ({ entity }));
 

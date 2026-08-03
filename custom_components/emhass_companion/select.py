@@ -9,7 +9,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
-from .const import LOAD_MODES, MODE_AUTO, RECURRENCE_DAILY, RECURRENCES, SYSTEM_MODES
+from .const import MODE_AUTO, RECURRENCES, SYSTEM_MODES
 from .coordinator import EmhassCoordinator
 from .deferrable import DeferrableRuntime
 from .entity import EmhassEntity, EmhassLoadEntity
@@ -26,10 +26,12 @@ async def async_setup_entry(
     async_add_entities([EmhassModeSelect(coordinator)])
 
     for load in entry.runtime_data.loads.all():
-        async_add_entities(
-            [LoadModeSelect(coordinator, load), LoadRecurrenceSelect(coordinator, load)],
-            config_subentry_id=load.subentry_id,
-        )
+        # A thermal load's demand is its comfort band, which stands every day
+        # by nature -- recurrence is a property of a run-time target.
+        if not load.is_thermal:
+            async_add_entities(
+                [LoadRecurrenceSelect(coordinator, load)], config_subentry_id=load.subentry_id
+            )
 
 
 class EmhassModeSelect(EmhassEntity, SelectEntity, RestoreEntity):
@@ -65,43 +67,14 @@ class EmhassModeSelect(EmhassEntity, SelectEntity, RestoreEntity):
         self.async_write_ha_state()
 
 
-class LoadModeSelect(EmhassLoadEntity, SelectEntity, RestoreEntity):
-    """Manual override for one deferrable load.
-
-    This overrides the *signal*, not the optimisation: EMHASS still plans the
-    load either way. A load that should be left out of planning altogether is
-    turned off with its Enabled switch instead, so that "force off" never
-    silently changes what is being solved.
-    """
-
-    _attr_translation_key = "load_mode"
-    _attr_entity_category = EntityCategory.CONFIG
-    _attr_options = list(LOAD_MODES)
-
-    def __init__(self, coordinator: EmhassCoordinator, load: DeferrableRuntime) -> None:
-        super().__init__(coordinator, load, "mode")
-
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        last = await self.async_get_last_state()
-        if last is not None and last.state in LOAD_MODES:
-            self.load.mode = last.state
-
-    @property
-    def current_option(self) -> str:
-        return self.load.mode
-
-    async def async_select_option(self, option: str) -> None:
-        self.load.mode = option
-        self.load.notify()
-
-
 class LoadRecurrenceSelect(EmhassLoadEntity, SelectEntity, RestoreEntity):
-    """Whether a load wants its operating hours every day, or only on request.
+    """What makes a load want to run: the calendar, a request, or spare solar.
 
-    See docs/on_demand_loads.md. Switching back to daily also clears any
-    pending request, so a load does not come back armed from a state set
-    while it was last on demand.
+    See docs/on_demand_loads.md and docs/surplus_loads.md. Any change clears a
+    pending request: what "armed" means differs by recurrence -- on demand it
+    is a run of a known length that disarms when finished, on surplus it is
+    open-ended -- so carrying one across would leave a load armed under rules
+    it was not armed under.
     """
 
     _attr_translation_key = "recurrence"
@@ -122,7 +95,8 @@ class LoadRecurrenceSelect(EmhassLoadEntity, SelectEntity, RestoreEntity):
         return self.load.recurrence
 
     async def async_select_option(self, option: str) -> None:
+        if option != self.load.recurrence:
+            self.load.cancel()
         self.load.recurrence = option
-        if option == RECURRENCE_DAILY:
-            self.load.requested = False
         self.load.notify()
+        await self.coordinator.async_request_refresh()

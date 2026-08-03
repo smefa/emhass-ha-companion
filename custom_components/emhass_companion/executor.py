@@ -16,14 +16,20 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 import logging
-from typing import Any
+from typing import Any, Final
 
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
 from .configuration import EmhassConfig
 from .const import (
+    ACTION_CURTAIL,
+    ACTION_PREPARE,
+    ACTION_RESTORE,
+    ACTION_UNCURTAIL,
+    COMMAND_REFRESH_FRACTION,
     DEFAULT_POWER_DEADBAND_W,
+    LIFETIME_PERSISTENT,
     MODE_AUTO,
     MODE_FORCE_CHARGE,
     MODE_FORCE_DISCHARGE,
@@ -38,8 +44,15 @@ from .profiles import (
     async_execute_steps,
     render_action,
 )
+from .strategy import decide_battery, decide_curtailment
 
 _LOGGER = logging.getLogger(__name__)
+
+# Keys into Executor._last_applied. Two independent write-suppression tracks,
+# since a curtailment write must never be suppressed by the battery's deadband
+# or vice versa -- they are different axes of the same inverter.
+AXIS_BATTERY: Final = "battery"
+AXIS_CURTAIL: Final = "curtail"
 
 
 @dataclass(slots=True)
@@ -56,10 +69,26 @@ class Decision:
     """False when the control gate is off, or nothing needed changing."""
 
     steps: list[dict[str, Any]] = field(default_factory=list)
-    """The service calls this decision resolved to."""
+    """The service calls this decision resolved to -- battery and curtailment
+    both, in the order they would be applied."""
 
     error: str | None = None
     at: datetime | None = None
+
+    curtail: bool | None = None
+    """Whether to curtail export right now. None means not applicable: no
+    inverter profile, or the profile defines no curtail/uncurtail actions --
+    the set of actions a profile defines is its capability list, and reporting
+    a would-be curtail decision for hardware that cannot act on it would be
+    reporting a capability the install does not have."""
+
+    curtail_w: float = 0.0
+
+    rules: list[str] = field(default_factory=list)
+    """Ordered, human-readable trace of which strategy rule fired. The old
+    hand-written automation this replaces was a five-level nested `choose`
+    with no way to tell which branch ran; this is what makes that visible on
+    the sensor, in dry-run, before control is ever handed over."""
 
     def as_attributes(self) -> dict[str, Any]:
         return {
@@ -71,7 +100,19 @@ class Decision:
             "steps": self.steps,
             "error": self.error,
             "at": self.at.isoformat() if self.at else None,
+            "curtail": self.curtail,
+            "curtail_w": round(self.curtail_w),
+            "rules": self.rules,
         }
+
+
+@dataclass(slots=True)
+class _Command:
+    """The last command actually issued on one axis, and when."""
+
+    action: str
+    power_w: float
+    at: datetime
 
 
 class Executor:
@@ -81,8 +122,15 @@ class Executor:
         self.hass = hass
         self.coordinator = coordinator
         self.last_decision: Decision | None = None
-        self._last_applied: tuple[str, float] | None = None
+        self._last_applied: dict[str, _Command] = {}
         self._listeners: list = []
+        # Whether `prepare` has run since control was last handed back. Some
+        # inverters gate remote control behind a mode that has to be opened
+        # once per session rather than before every write.
+        self._prepared = False
+        # Used to notice the control gate being switched *off*, which is one of
+        # the moments an inverter has to be given back.
+        self._control_was_enabled = False
 
     # -- gates ----------------------------------------------------------------
 
@@ -103,13 +151,26 @@ class Executor:
         decision.at = dt_util.utcnow()
 
         profile = self._inverter_profile()
-        if profile is not None:
+        resolved_action = decision.action
+        battery_steps: list[dict[str, Any]] = []
+        curtail_action = ACTION_UNCURTAIL
+        curtail_steps: list[dict[str, Any]] = []
+
+        if profile is None:
+            decision.curtail = None
+        else:
+            resolved_action = self._resolve_action(profile, decision.action)
+            if resolved_action != decision.action:
+                decision.rules.append(
+                    f"{decision.action}→{resolved_action}: profile defines no "
+                    f"'{decision.action}' action"
+                )
             try:
-                decision.steps = render_action(
+                battery_steps = render_action(
                     self.hass,
                     profile,
                     self.coordinator.config.inverter.options,
-                    decision.action,
+                    resolved_action,
                     power_w=round(decision.power_w),
                     soc=self.coordinator.soc_percent,
                     soc_target=self.coordinator.config.battery.soc_target * 100,
@@ -118,15 +179,129 @@ class Executor:
                 decision.error = str(err)
                 _LOGGER.error("Cannot resolve inverter action: %s", err)
 
+            if profile.defines(ACTION_CURTAIL) and profile.defines(ACTION_UNCURTAIL):
+                curtail_action = ACTION_CURTAIL if decision.curtail else ACTION_UNCURTAIL
+                try:
+                    curtail_steps = render_action(
+                        self.hass,
+                        profile,
+                        self.coordinator.config.inverter.options,
+                        curtail_action,
+                        power_w=0,
+                        curtail_w=round(decision.curtail_w),
+                        soc=self.coordinator.soc_percent,
+                        soc_target=self.coordinator.config.battery.soc_target * 100,
+                    )
+                except ProfileError as err:
+                    decision.error = f"{decision.error}; {err}" if decision.error else str(err)
+                    _LOGGER.error("Cannot resolve curtailment action: %s", err)
+            else:
+                # The set of actions a profile defines is its capability list:
+                # no curtail/uncurtail pair means curtailment is not
+                # applicable, not that it is off right now.
+                decision.curtail = None
+
+        decision.steps = [*battery_steps, *curtail_steps]
+
         if not self.control_enabled:
+            # Turning the gate off mid-session is a handover, not just a stop:
+            # a persistent-register inverter would otherwise sit in whatever
+            # forced mode the last command left it in, indefinitely.
+            if self._control_was_enabled:
+                self._control_was_enabled = False
+                await self.async_restore("control switch turned off")
             decision.reason = f"{decision.reason} (control disabled, not applied)"
             self.last_decision = decision
             _LOGGER.debug("Would apply %s: %s", decision.action, decision.reason)
             return decision
 
-        await self._async_execute(decision)
+        self._control_was_enabled = True
+        await self._async_execute(
+            decision, resolved_action, battery_steps, curtail_action, curtail_steps
+        )
         self.last_decision = decision
         return decision
+
+    async def async_restore(self, reason: str) -> None:
+        """Hand control of the battery, and any curtailment, back to the inverter.
+
+        Runs on every path that ends a control session -- shutdown, unload, the
+        control gate being switched off -- not just on a stale plan. For an
+        inverter whose registers persist until changed, skipping this is what
+        leaves a battery force-charging through the evening peak because Home
+        Assistant restarted at the wrong moment. An export limit left in place
+        is the same failure mode for money instead of the battery: silent and
+        indefinite, so it is restored first, before the battery.
+
+        Deliberately bypasses the deadband and the "nothing changed" check: the
+        whole point is to write even when the last command still looks current.
+        It also bypasses the control gate, because the gate being switched off
+        is one of the things it has to react to -- checking it here would skip
+        the handover in precisely the case the handover exists for. The two
+        restores run independently so a failure in one still lets the other
+        through.
+
+        What it does check is whether this executor ever took control. Writing
+        to an inverter we have never written to would mean a dry run reaching
+        for the hardware on shutdown, and fighting whatever automation is
+        actually in charge.
+        """
+        profile = self._inverter_profile()
+        if profile is None or (not self._last_applied and not self._prepared):
+            return
+
+        await self._async_restore_curtailment(profile, reason)
+        await self._async_restore_battery(profile, reason)
+
+    async def _async_restore_curtailment(self, profile: Profile, reason: str) -> None:
+        if AXIS_CURTAIL not in self._last_applied:
+            return
+        if not (profile.defines(ACTION_CURTAIL) and profile.defines(ACTION_UNCURTAIL)):
+            return
+
+        try:
+            steps = render_action(
+                self.hass,
+                profile,
+                self.coordinator.config.inverter.options,
+                ACTION_UNCURTAIL,
+                power_w=0,
+                curtail_w=0,
+                soc=self.coordinator.soc_percent,
+                soc_target=self.coordinator.config.battery.soc_target * 100,
+            )
+            await async_execute_steps(self.hass, steps)
+        except Exception as err:  # noqa: BLE001 - never let a shutdown path raise
+            _LOGGER.error("Could not restore curtailment (%s): %s", reason, err)
+            return
+
+        del self._last_applied[AXIS_CURTAIL]
+        _LOGGER.info("Restored curtailment: %s", reason)
+
+    async def _async_restore_battery(self, profile: Profile, reason: str) -> None:
+        action = ACTION_RESTORE if profile.defines(ACTION_RESTORE) else MODE_SELF_CONSUME
+        if not profile.defines(action):
+            _LOGGER.debug("Profile %s defines no way to restore control", profile.key)
+            return
+
+        try:
+            steps = render_action(
+                self.hass,
+                profile,
+                self.coordinator.config.inverter.options,
+                action,
+                power_w=0,
+                soc=self.coordinator.soc_percent,
+                soc_target=self.coordinator.config.battery.soc_target * 100,
+            )
+            await async_execute_steps(self.hass, steps)
+        except Exception as err:  # noqa: BLE001 - never let a shutdown path raise
+            _LOGGER.error("Could not restore inverter control (%s): %s", reason, err)
+            return
+
+        self._last_applied.pop(AXIS_BATTERY, None)
+        self._prepared = False
+        _LOGGER.info("Restored inverter control: %s", reason)
 
     # -- decision -------------------------------------------------------------
 
@@ -136,12 +311,16 @@ class Executor:
 
         if mode != MODE_AUTO:
             # A manual mode suspends the optimiser entirely rather than
-            # competing with it.
+            # competing with it. No plan is being followed, so there is no
+            # basis for curtailing either -- uncurtail rather than leave
+            # whatever the last automatic decision happened to set.
             return Decision(
                 action=mode,
                 power_w=self._manual_power(mode, config),
                 reason="manual override",
                 loads=self._decide_loads(use_plan=False),
+                curtail=False,
+                rules=["manual override active; uncurtailing"],
             )
 
         if self.coordinator.plan_is_stale or not self.coordinator.data.plan:
@@ -151,6 +330,8 @@ class Executor:
                 action=MODE_SELF_CONSUME,
                 reason="no current plan; falling back to self-consumption",
                 loads=self._decide_loads(use_plan=False),
+                curtail=False,
+                rules=["no current plan; uncurtailing"],
             )
 
         row = self.coordinator.data.plan.row_at(dt_util.utcnow())
@@ -159,14 +340,25 @@ class Executor:
                 action=MODE_SELF_CONSUME,
                 reason="plan has no battery power for this moment",
                 loads=self._decide_loads(use_plan=True),
+                curtail=False,
+                rules=["plan has no battery power for this moment; uncurtailing"],
             )
 
-        action, power = _battery_action(row.p_batt, config)
+        in_self_consume = (
+            self.last_decision is not None and self.last_decision.action == MODE_SELF_CONSUME
+        )
+        action, power, battery_rules = decide_battery(row, config, in_self_consume=in_self_consume)
+        curtail, curtail_w, curtail_rules = decide_curtailment(
+            row, config, self.coordinator.soc_percent
+        )
         return Decision(
             action=action,
             power_w=power,
             reason=f"plan schedules {row.p_batt:.0f} W",
             loads=self._decide_loads(use_plan=True),
+            curtail=curtail,
+            curtail_w=curtail_w,
+            rules=[*battery_rules, *curtail_rules],
         )
 
     def _manual_power(self, mode: str, config: EmhassConfig) -> float:
@@ -197,45 +389,150 @@ class Executor:
 
     # -- execution ------------------------------------------------------------
 
-    async def _async_execute(self, decision: Decision) -> None:
-        await self._async_apply_battery(decision)
+    async def _async_execute(
+        self,
+        decision: Decision,
+        resolved_action: str,
+        battery_steps: list[dict[str, Any]],
+        curtail_action: str,
+        curtail_steps: list[dict[str, Any]],
+    ) -> None:
+        await self._async_apply_battery(decision, resolved_action, battery_steps)
+        await self._async_apply_curtailment(decision, curtail_action, curtail_steps)
         await self._async_apply_loads(decision)
 
-    async def _async_apply_battery(self, decision: Decision) -> None:
-        if not decision.steps:
+    async def _async_apply_battery(
+        self, decision: Decision, resolved_action: str, steps: list[dict[str, Any]]
+    ) -> None:
+        if not steps:
             return
 
-        current = (decision.action, decision.power_w)
-        if self._unchanged(current):
-            _LOGGER.debug("Skipping %s: unchanged within the deadband", decision.action)
+        profile = self._inverter_profile()
+        now = dt_util.utcnow()
+        if not self._should_issue(
+            axis=AXIS_BATTERY,
+            action=resolved_action,
+            power_w=decision.power_w,
+            profile=profile,
+            now=now,
+        ):
             return
 
         try:
-            await async_execute_steps(self.hass, decision.steps)
-        except Exception as err:  # noqa: BLE001 - surfaced, and must not stop loads
+            if profile is not None:
+                await self._async_prepare(profile, decision)
+            await async_execute_steps(self.hass, steps)
+        except Exception as err:  # noqa: BLE001 - surfaced, and must not stop loads/curtail
             decision.error = str(err)
-            _LOGGER.error("Failed to apply inverter action %s: %s", decision.action, err)
+            _LOGGER.error("Failed to apply inverter action %s: %s", resolved_action, err)
             return
 
-        self._last_applied = current
+        self._last_applied[AXIS_BATTERY] = _Command(resolved_action, decision.power_w, now)
         decision.applied = True
         _LOGGER.info(
-            "Applied %s at %.0f W (%s)", decision.action, decision.power_w, decision.reason
+            "Applied %s at %.0f W (%s)", resolved_action, decision.power_w, decision.reason
         )
 
-    def _unchanged(self, current: tuple[str, float]) -> bool:
-        """Whether this is close enough to the last applied command to skip.
+    async def _async_apply_curtailment(
+        self, decision: Decision, curtail_action: str, steps: list[dict[str, Any]]
+    ) -> None:
+        if not steps or decision.curtail is None:
+            return
 
-        The deadband only applies while the action itself is unchanged -- a
-        switch from charging to discharging is always issued, however small the
-        power difference.
+        profile = self._inverter_profile()
+        now = dt_util.utcnow()
+        if not self._should_issue(
+            axis=AXIS_CURTAIL,
+            action=curtail_action,
+            power_w=decision.curtail_w,
+            profile=profile,
+            now=now,
+        ):
+            return
+
+        try:
+            await async_execute_steps(self.hass, steps)
+        except Exception as err:  # noqa: BLE001 - one bad axis must not stop the other
+            decision.error = f"{decision.error}; {err}" if decision.error else str(err)
+            _LOGGER.error("Failed to apply curtailment action %s: %s", curtail_action, err)
+            return
+
+        self._last_applied[AXIS_CURTAIL] = _Command(curtail_action, decision.curtail_w, now)
+        decision.applied = True
+        _LOGGER.info("Applied %s (%s)", curtail_action, decision.reason)
+
+    async def _async_prepare(self, profile: Profile, decision: Decision) -> None:
+        """Open the inverter's remote-control gate, once per session.
+
+        SolarEdge needs its storage control mode set to Remote Control, Victron
+        needs ESS switched to external control, Sigenergy needs remote EMS
+        enabled. All of them are once-per-session rather than once-per-write.
         """
-        if self._last_applied is None:
+        if self._prepared or not profile.defines(ACTION_PREPARE):
+            return
+        steps = render_action(
+            self.hass,
+            profile,
+            self.coordinator.config.inverter.options,
+            ACTION_PREPARE,
+            power_w=round(decision.power_w),
+            soc=self.coordinator.soc_percent,
+            soc_target=self.coordinator.config.battery.soc_target * 100,
+        )
+        await async_execute_steps(self.hass, steps)
+        self._prepared = True
+        _LOGGER.debug("Prepared %s for remote control", profile.key)
+
+    def _should_issue(
+        self, *, axis: str, action: str, power_w: float, profile: Profile | None, now: datetime
+    ) -> bool:
+        """Whether this command is worth sending, on one axis.
+
+        Three independent reasons to write, and one reason not to:
+
+        * the action changed -- always sent, however small the power difference,
+          because charging and discharging (or curtailing and not) are not
+          interchangeable;
+        * the power moved further than the deadband;
+        * the last command is running out of time. An inverter whose forced mode
+          carries its own duration reverts on its own, so an unchanged command
+          still has to be re-sent before it lapses. Suppressing that as
+          "unchanged" is how a battery quietly stops following the plan halfway
+          through the evening.
+
+        The one reason not to is a profile's own minimum write interval, for a
+        bus that does not tolerate being hammered.
+
+        Keyed by ``axis`` because the battery and curtailment writes are
+        independent commands to the same inverter -- a curtailment change must
+        never be suppressed by the battery's deadband, or vice versa.
+        """
+        control = profile.control if profile is not None else {}
+        last = self._last_applied.get(axis)
+
+        if last is None:
+            return True
+
+        age = (now - last.at).total_seconds()
+        if age < float(control.get("min_write_interval_s", 0)):
+            _LOGGER.debug("Skipping %s %s: inside the minimum write interval", axis, action)
             return False
-        last_action, last_power = self._last_applied
-        if last_action != current[0]:
-            return False
-        return abs(current[1] - last_power) < DEFAULT_POWER_DEADBAND_W
+
+        if last.action != action:
+            return True
+
+        deadband = float(control.get("deadband_w", DEFAULT_POWER_DEADBAND_W))
+        if abs(power_w - last.power_w) >= deadband:
+            return True
+
+        if control.get("lifetime", LIFETIME_PERSISTENT) != LIFETIME_PERSISTENT:
+            lifetime_s = float(control["duration_min"]) * 60
+            if age >= lifetime_s * COMMAND_REFRESH_FRACTION:
+                _LOGGER.debug("Re-issuing %s %s before it expires", axis, action)
+                return True
+
+        _LOGGER.debug("Skipping %s %s: unchanged within the deadband", axis, action)
+        return False
 
     async def _async_apply_loads(self, decision: Decision) -> None:
         for subentry_id, should_run in decision.loads.items():
@@ -273,25 +570,30 @@ class Executor:
 
     # -- profile --------------------------------------------------------------
 
+    def _resolve_action(self, profile: Profile, action: str) -> str:
+        """The action to actually render, when the plan's own choice is undefined.
+
+        The set of actions a profile defines is its capability list
+        (const.py): a profile with no ``idle`` is saying its hardware has no
+        true standby, not that the executor should refuse a decision the plan
+        legitimately produced. ``idle`` falling back to ``self_consume`` is
+        the one substitution this makes -- every other battery action is
+        already guaranteed to exist by validation (``self_consume``/``restore``
+        for ``restore_required``), or has no sensible substitute at all
+        (forcing charge instead of discharge is not a fallback, it is the
+        opposite decision).
+        """
+        if profile.defines(action):
+            return action
+        if action == MODE_IDLE:
+            return MODE_SELF_CONSUME
+        return action
+
     def _inverter_profile(self) -> Profile | None:
         selection = self.coordinator.config.inverter
         if not selection.key:
             return None
         return self.coordinator.profiles.get(selection.key)
-
-
-def _battery_action(p_batt: float, config: EmhassConfig) -> tuple[str, float]:
-    """Map planned battery power onto an action.
-
-    EMHASS's convention: positive is discharge, negative is charge. Getting
-    that backwards inverts every decision the optimiser makes, so it is stated
-    here rather than assumed at the call site.
-    """
-    if p_batt > DEFAULT_POWER_DEADBAND_W:
-        return MODE_FORCE_DISCHARGE, min(p_batt, config.battery.discharge_power_max_w)
-    if p_batt < -DEFAULT_POWER_DEADBAND_W:
-        return MODE_FORCE_CHARGE, min(-p_batt, config.battery.charge_power_max_w)
-    return MODE_IDLE, 0.0
 
 
 __all__ = ["Decision", "Executor"]

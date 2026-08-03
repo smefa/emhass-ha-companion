@@ -225,7 +225,7 @@ async def test_unrequested_on_demand_load_is_excluded_from_to_loads(
     registry.all()[0].recurrence = RECURRENCE_ON_DEMAND
 
     projected = registry.to_loads(dt_util.utcnow(), 30)
-    assert projected[0].enabled is False
+    assert projected[0].wants_to_run is False
 
 
 async def test_a_power_sensor_stopping_auto_disarms_a_fulfilled_request(

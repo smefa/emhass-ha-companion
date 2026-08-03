@@ -10,6 +10,7 @@ from custom_components.emhass_companion.models import (
     HybridInverterConfig,
     LastRun,
     Plan,
+    PlanRow,
     Point,
     Series,
     SeriesError,
@@ -153,6 +154,35 @@ def test_scaled_applies_factor_then_offset():
     assert _series(2.0).scaled(10, 1).values == (21.0,)
 
 
+def test_blend_first_at_beta_zero_keeps_the_forecast():
+    series = _series(100.0, 200.0)
+    assert series.blend_first(9000.0, beta=0).values == (100.0, 200.0)
+
+
+def test_blend_first_at_beta_one_uses_only_the_live_value():
+    series = _series(100.0, 200.0)
+    assert series.blend_first(9000.0, beta=1).values == (9000.0, 200.0)
+
+
+def test_blend_first_at_beta_half_splits_evenly():
+    series = _series(100.0, 200.0)
+    assert series.blend_first(300.0, beta=0.5).values == (200.0, 200.0)
+
+
+def test_blend_first_only_touches_the_earliest_point():
+    series = _series(100.0, 200.0, 300.0)
+    blended = series.blend_first(0.0, beta=1)
+    assert blended.values == (0.0, 200.0, 300.0)
+    assert blended.start == series.start
+    assert blended.end == series.end
+
+
+def test_blend_first_on_an_empty_series_is_a_no_op():
+    blended = Series.empty().blend_first(9000.0, beta=1)
+    assert not blended
+    assert blended.values == ()
+
+
 def test_empty_series_is_falsy_and_has_no_bounds():
     empty = Series.empty()
     assert not empty
@@ -289,3 +319,81 @@ def test_last_run_handles_never_having_run():
     last_run = LastRun.from_response({"status": "no-run", "timestamp": None})
     assert not last_run.ok
     assert last_run.timestamp is None
+
+
+# --- plan lookup across the launch-to-boundary gap ----------------------------
+
+
+def _plan_rows(start, count, step_minutes=15):
+    from custom_components.emhass_companion.models import PlanRow
+
+    return [
+        PlanRow(timestamp=start + timedelta(minutes=step_minutes * i), deferrables=[float(i)])
+        for i in range(count)
+    ]
+
+
+def test_a_moment_just_before_the_plan_starts_uses_the_first_row():
+    """EMHASS aligns its horizon to the next timestep boundary after launch, so
+    "now" sits in front of row zero for the first minutes after every run.
+
+    Reporting no plan there blanks every plan-derived sensor on a regular
+    cycle, for a plan that is in fact perfectly fresh.
+    """
+    start = datetime(2026, 7, 31, 12, 30, tzinfo=UTC)
+    plan = Plan(generated_at=start, schema_version="1.0", rows=_plan_rows(start, 4))
+    row = plan.row_at(datetime(2026, 7, 31, 12, 27, 16, tzinfo=UTC))
+    assert row is not None
+    assert row.timestamp == start
+
+
+def test_a_moment_more_than_one_step_early_is_still_uncovered():
+    start = datetime(2026, 7, 31, 12, 30, tzinfo=UTC)
+    plan = Plan(generated_at=start, schema_version="1.0", rows=_plan_rows(start, 4))
+    assert plan.row_at(datetime(2026, 7, 31, 12, 10, tzinfo=UTC)) is None
+
+
+def test_hold_last_semantics_are_unchanged_inside_the_plan():
+    start = datetime(2026, 7, 31, 12, 30, tzinfo=UTC)
+    plan = Plan(generated_at=start, schema_version="1.0", rows=_plan_rows(start, 4))
+    row = plan.row_at(datetime(2026, 7, 31, 12, 52, tzinfo=UTC))
+    assert row is not None
+    assert row.timestamp == datetime(2026, 7, 31, 12, 45, tzinfo=UTC)
+
+
+def test_a_single_row_plan_has_no_step_to_reach_back_with():
+    start = datetime(2026, 7, 31, 12, 30, tzinfo=UTC)
+    plan = Plan(generated_at=start, schema_version="1.0", rows=_plan_rows(start, 1))
+    assert plan.step is None
+    assert plan.row_at(datetime(2026, 7, 31, 12, 29, tzinfo=UTC)) is None
+
+
+def test_predicted_temperatures_are_parsed_per_thermal_load():
+    """Only thermal loads have the column, so the mapping is by deferrable
+    number -- a positional sequence would shift every thermal load that sits
+    after an ordinary one."""
+    record = {
+        "timestamp": "2026-07-28T10:00:00+00:00",
+        "P_deferrable0": 0.0,
+        "P_deferrable1": 3000.0,
+        "predicted_temp_heater1": 20.42,
+    }
+    row = PlanRow.from_record(record)
+    assert row.temperatures == {1: 20.42}
+    assert 0 not in row.temperatures
+
+
+def test_temperature_series_reads_one_thermal_loads_trajectory():
+    rows = [
+        PlanRow(
+            timestamp=datetime(2026, 7, 28, 10, 0, tzinfo=UTC) + timedelta(minutes=30 * i),
+            deferrables=(0.0, 3000.0),
+            temperatures={1: 20.0 + i},
+        )
+        for i in range(3)
+    ]
+    plan = Plan(
+        generated_at=datetime(2026, 7, 28, 10, 0, tzinfo=UTC), schema_version="1.0", rows=rows
+    )
+    assert plan.temperature_series(1).values == (20.0, 21.0, 22.0)
+    assert not plan.temperature_series(0)

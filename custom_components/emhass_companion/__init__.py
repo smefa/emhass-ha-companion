@@ -1,4 +1,13 @@
-"""The EMHASS Companion integration."""
+"""The EMHASS Companion integration.
+
+Copyright (C) 2026 Tomas Smedberg.
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU Affero General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option) any
+later version. It is distributed without any warranty; see the LICENSE file at
+the repository root for the full terms.
+"""
 
 from __future__ import annotations
 
@@ -9,8 +18,8 @@ from homeassistant.config_entries import (
     ConfigEntry,
     ConfigEntryChange,
 )
-from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP, Platform
+from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -22,8 +31,8 @@ from .const import (
     DOMAIN,
     ISSUE_BAD_PROFILE,
     ISSUE_EMHASS_VERSION,
+    LOAD_SUBENTRY_TYPES,
     MIN_EMHASS_VERSION,
-    SUBENTRY_TYPE_DEFERRABLE,
 )
 from .coordinator import EmhassCoordinator
 from .deferrable import DeferrableRegistry
@@ -95,6 +104,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
 
     entry.async_on_unload(scheduler.async_stop)
     entry.async_on_unload(loads.async_stop)
+    entry.async_on_unload(coordinator.async_stop_clock)
+
+    async def _async_restore_on_unload() -> None:
+        await executor.async_restore("integration unloaded")
+
+    @callback
+    def _async_restore_on_stop(_event: Event) -> None:
+        entry.async_create_background_task(
+            hass, executor.async_restore("Home Assistant stopping"), "emhass_restore"
+        )
+
+    # An inverter whose registers persist until changed has no idea Home
+    # Assistant went away. Without these two, a restart during a forced charge
+    # leaves the battery charging until somebody notices the bill.
+    entry.async_on_unload(_async_restore_on_unload)
+    entry.async_on_unload(
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, _async_restore_on_stop)
+    )
 
     @callback
     def _async_entry_changed(change_type: ConfigEntryChange, changed_entry: ConfigEntry) -> None:
@@ -127,7 +154,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
         current = {
             subentry_id
             for subentry_id, subentry in entry.subentries.items()
-            if subentry.subentry_type == SUBENTRY_TYPE_DEFERRABLE
+            if subentry.subentry_type in LOAD_SUBENTRY_TYPES
         }
         already_loaded = {load.subentry_id for load in entry.runtime_data.loads.all()}
         if current != already_loaded:
@@ -152,6 +179,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
     entry.async_on_unload(coordinator.async_add_listener(_async_plan_updated))
 
     loads.async_start()
+    coordinator.async_start_clock()
     scheduler.async_start()
     entry.async_create_background_task(hass, scheduler.async_run_initial(), "emhass_initial_run")
 

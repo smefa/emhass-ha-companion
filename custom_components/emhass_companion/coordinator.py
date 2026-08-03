@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
@@ -20,22 +22,32 @@ from .const import (
     ACTION_DAYAHEAD,
     ACTION_FORECAST_FIT,
     ACTION_MPC,
+    CONF_GROUP_LOAD_IDS,
+    CONF_GROUP_MAX_POWER,
+    CONF_GROUP_MUTUAL_EXCLUSION,
+    DEFAULT_MIX_BETA,
+    DEFAULT_SURPLUS_THRESHOLD_W,
     DOMAIN,
     EMHASS_CONF_LOAD_FORECAST_METHOD,
     EMHASS_CONF_NUM_LAGS,
     EMHASS_CONF_SENSOR_LOAD,
     EMHASS_CONF_TIME_STEP,
     EMHASS_CONF_VAR_MODEL,
+    ISSUE_OPTIMIZATION_INFEASIBLE,
     ISSUE_PLAN_SCHEMA,
+    ISSUE_RUN_FAILED,
     LOAD_FORECAST_METHOD_MLFORECASTER,
     MODE_AUTO,
+    PROFILE_KEY_LOAD_SENSOR,
     PROFILE_KIND_LOAD,
     PROFILE_KIND_PRICE,
     PROFILE_KIND_PV,
+    PROFILE_KIND_TEMPERATURE,
+    SUBENTRY_TYPE_LOAD_GROUP,
     SUPPORTED_PLAN_SCHEMA_MAJOR,
 )
 from .deferrable import DeferrableRegistry
-from .models import DeferrableLoad, LastRun, Plan, Series
+from .models import DeferrableLoad, DeferrableLoadGroup, LastRun, Plan, Series
 from .payload import PayloadInputs, PayloadResult, build_payload
 from .profiles import (
     Profile,
@@ -108,8 +120,72 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         # entity states to find out whether it is allowed to act.
         self.control_enabled = False
         self.system_mode = MODE_AUTO
+        # Owned by the surplus threshold number. Reporting only: it decides
+        # what the hub's surplus sensors call a window, and nothing else. Each
+        # load budgets against its own power plus its own headroom instead.
+        self.surplus_threshold_w = DEFAULT_SURPLUS_THRESHOLD_W
+        # Owned by the mix beta number. Weight given to the live PV/load
+        # reading when it is blended into the first naive-mpc-optim forecast
+        # step; see payload.build_payload and models.Series.blend_first.
+        self.mix_beta = DEFAULT_MIX_BETA
+
+        self._unsub_tick: Callable[[], None] | None = None
+
+    # -- surplus --------------------------------------------------------------
+
+    def surplus_series(self) -> Series:
+        """Spare PV in the current plan, before surplus loads take any.
+
+        The series every surplus sensor renders, and the same one the budgets
+        were derived from -- so what the dashboard shows and what the pool was
+        actually given can never disagree.
+        """
+        if not self.data:
+            return Series.empty()
+        return self.loads.surplus_series(self.data.plan, self.data.load_order)
 
     # -- lifecycle ------------------------------------------------------------
+
+    @callback
+    def async_start_clock(self) -> None:
+        """Re-publish plan-derived entities as the plan's own clock advances.
+
+        Every sensor that answers "right now" -- should_run, scheduled power,
+        the planned series -- reads the plan at ``utcnow()``. Those are
+        ``CoordinatorEntity``s, so they are only written when an optimisation
+        completes; between runs their published state is frozen at whatever
+        the answer was at the *previous* run, however far the plan has since
+        moved on.
+
+        That is not merely stale, it is self-sustaining: EMHASS starts its
+        horizon at the next timestep boundary after launch, so at the instant
+        of every run "now" sits before row zero. A load whose power sensor
+        chatters gets dragged back to life by its own registry notifications;
+        one driven by a control entity that rarely changes state has nothing
+        to nudge it and stays unknown indefinitely.
+
+        Ticking on the optimisation timestep is the smallest fix that holds:
+        one timer for the whole entry, and every plan-derived entity
+        recomputes as the row under "now" changes.
+        """
+        self.async_stop_clock()
+        self._unsub_tick = async_track_time_interval(
+            self.hass,
+            self._async_tick,
+            timedelta(minutes=self.config.time_step_minutes),
+        )
+
+    @callback
+    def async_stop_clock(self) -> None:
+        if self._unsub_tick is not None:
+            self._unsub_tick()
+            self._unsub_tick = None
+
+    @callback
+    def _async_tick(self, _now: datetime) -> None:
+        # Not a refresh: no new data is fetched, the same plan is simply read
+        # at the new time.
+        self.async_update_listeners()
 
     async def async_load_profiles(self) -> None:
         result = await async_load_profiles(self.hass)
@@ -201,6 +277,26 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         """
         return self.loads.to_loads(now, self.config.time_step_minutes)
 
+    def load_groups(self) -> list[DeferrableLoadGroup]:
+        """Configured load groups, read straight from their subentries.
+
+        Unlike loads, a group carries no live/restorable state of its own --
+        it is stateless and cheap to rebuild on every call, so it is read
+        directly from ``entry.subentries`` rather than mirrored into a
+        registry.
+        """
+        return [
+            DeferrableLoadGroup(
+                subentry_id=subentry_id,
+                name=subentry.title,
+                load_subentry_ids=tuple(subentry.data.get(CONF_GROUP_LOAD_IDS, ())),
+                max_power_w=subentry.data.get(CONF_GROUP_MAX_POWER),
+                mutual_exclusion=bool(subentry.data.get(CONF_GROUP_MUTUAL_EXCLUSION, False)),
+            )
+            for subentry_id, subentry in self.config_entry.subentries.items()
+            if subentry.subentry_type == SUBENTRY_TYPE_LOAD_GROUP
+        ]
+
     # -- running --------------------------------------------------------------
 
     async def _async_update_data(self) -> EmhassData:
@@ -211,10 +307,19 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         try:
             data = await self._run(action)
         except ProfileError as err:
+            self._track_run_failed_issue(True, action, str(err))
             raise UpdateFailed(f"Data source error: {err}") from err
         except EmhassError as err:
+            self._track_run_failed_issue(True, action, str(err))
             raise UpdateFailed(f"EMHASS error: {err}") from err
+        except UpdateFailed as err:
+            # Raised directly by _run() when EMHASS answers 200 but flags the
+            # run itself as failed (last_run.status == "error"), rather than
+            # rejecting the request outright.
+            self._track_run_failed_issue(True, action, str(err))
+            raise
 
+        self._track_run_failed_issue(False, action, "")
         if notify:
             self.async_set_updated_data(data)
         return data
@@ -233,11 +338,14 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
                 action,
             )
             plan = self.data.plan if self.data else None
-        elif last_run.status == "no-run":
-            _LOGGER.warning(
-                "EMHASS reports no completed run after %s; the plan may be missing",
-                action,
-            )
+            self._track_infeasible_issue(True, action)
+        else:
+            self._track_infeasible_issue(False, action)
+            if last_run.status == "no-run":
+                _LOGGER.warning(
+                    "EMHASS reports no completed run after %s; the plan may be missing",
+                    action,
+                )
 
         if plan is not None and not self._schema_supported(plan):
             plan = None
@@ -293,6 +401,50 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         )
         return False
 
+    def _track_infeasible_issue(self, infeasible: bool, action: str) -> None:
+        """Raise or clear the whole-integration infeasible-run repair.
+
+        EMHASS reports infeasibility for the problem as a whole, with no hint
+        at which load caused it, so this is one issue per integration rather
+        than per load (contrast :meth:`LoadNumber._check_thermal_reachability`,
+        which can name the offending load and so gets its own issue each).
+        """
+        if not infeasible:
+            ir.async_delete_issue(self.hass, DOMAIN, ISSUE_OPTIMIZATION_INFEASIBLE)
+            return
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            ISSUE_OPTIMIZATION_INFEASIBLE,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=ISSUE_OPTIMIZATION_INFEASIBLE,
+            translation_placeholders={"action": action},
+        )
+
+    def _track_run_failed_issue(self, failed: bool, action: str, message: str) -> None:
+        """Raise or clear the whole-integration run-failed repair.
+
+        Covers a run that errored outright -- EMHASS unreachable, it rejected
+        the request, or raised internally -- as distinct from
+        :meth:`_track_infeasible_issue`, where EMHASS answered normally but
+        found no usable plan. Without this, such a failure was only a
+        DataUpdateCoordinator warning in the log, easy to miss until stale
+        data or a stuck plan made it obvious some time later.
+        """
+        if not failed:
+            ir.async_delete_issue(self.hass, DOMAIN, ISSUE_RUN_FAILED)
+            return
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            ISSUE_RUN_FAILED,
+            is_fixable=False,
+            severity=ir.IssueSeverity.ERROR,
+            translation_key=ISSUE_RUN_FAILED,
+            translation_placeholders={"action": action, "error": message},
+        )
+
     async def _build(self, action: str) -> tuple[PayloadInputs, PayloadResult]:
         config = self.config
         spot, pv, load = await asyncio.gather(
@@ -301,6 +453,12 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             self._series(config.load, PROFILE_KIND_LOAD),
         )
 
+        # Only fetched once a thermal load exists: the outdoor forecast is what
+        # the thermal model cools towards, and means nothing without one.
+        outdoor = Series.empty()
+        if self.loads.has_thermal and config.temperature:
+            outdoor = await self._series(config.temperature, PROFILE_KIND_TEMPERATURE)
+
         buy = sell = None
         if spot:
             buy, sell = config.tariff.compose(self.hass, spot)
@@ -308,6 +466,10 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         settings: dict[str, Any] = {}
         for selection in (config.price, config.pv, config.load):
             settings.update(self._settings(selection))
+        if self.loads.has_thermal:
+            # A temperature profile may contribute settings instead of a series
+            # (EMHASS built-in lets EMHASS fetch Open-Meteo itself).
+            settings.update(self._settings(config.temperature))
 
         now = dt_util.utcnow()
         # Sourceless loads (no power sensor, no control entity) get their
@@ -316,6 +478,13 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         # before deferrable_loads() below reads completed_timesteps out of it.
         if self.data is not None:
             self.loads.assume_from_plan(self.data.plan, self.data.load_order, now)
+            # Re-derive each surplus load's hours and window from the spare PV
+            # the previous plan predicted. Must run *after*
+            # assume_from_plan (whose accumulator feeds the energy cap) and
+            # before deferrable_loads() below reads the budget back out.
+            self.loads.apply_surplus(
+                self.data.plan, self.data.load_order, now, config.time_step_minutes
+            )
         inputs = PayloadInputs(
             action=action,
             now=now,
@@ -325,11 +494,16 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             grid=config.grid,
             hybrid_inverter=config.hybrid_inverter,
             loads=self.deferrable_loads(now),
+            load_groups=self.load_groups(),
             pv=pv or None,
             load=load or None,
             buy_price=buy,
             sell_price=sell,
+            outdoor_temperature=outdoor or None,
             soc_init=self._read_soc(),
+            pv_live_w=self._read_pv_live(),
+            load_live_w=self._read_load_live(),
+            mix_beta=self.mix_beta,
             extra_settings=settings,
         )
         return inputs, build_payload(inputs)
@@ -387,6 +561,50 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             _LOGGER.warning(
                 "Battery SOC entity %s has a non-numeric state: %s",
                 self.config.soc_entity,
+                state.state,
+            )
+            return None
+
+    def _read_pv_live(self) -> float | None:
+        """Current PV power, in watts, for blending into the MPC forecast."""
+        if not self.config.pv_live_entity:
+            return None
+        return self._read_live_power(self.config.pv_live_entity, "Live PV power")
+
+    def _read_load_live(self) -> float | None:
+        """Current house load power, in watts, for blending into the MPC forecast.
+
+        Only available through the "House load sensor" load profile
+        (``load/sensor``) -- that is the one profile that already asks for a
+        live load-power sensor (to build EMHASS's own history-based forecast
+        from), so this reads the same entity rather than asking the user to
+        pick it a second time. Any other load profile has no live sensor to
+        read.
+        """
+        if self.config.load.key != PROFILE_KEY_LOAD_SENSOR:
+            return None
+        entity_id = self.config.load.options.get("entity")
+        if not entity_id:
+            return None
+        return self._read_live_power(entity_id, "Live load power")
+
+    def _read_live_power(self, entity_id: str, label: str) -> float | None:
+        state = self.hass.states.get(entity_id)
+        if state is None or state.state in ("unknown", "unavailable", ""):
+            _LOGGER.warning(
+                "%s entity %s is unavailable; the MPC forecast will not be "
+                "blended with a live value this run",
+                label,
+                entity_id,
+            )
+            return None
+        try:
+            return float(state.state)
+        except ValueError:
+            _LOGGER.warning(
+                "%s entity %s has a non-numeric state: %s",
+                label,
+                entity_id,
                 state.state,
             )
             return None

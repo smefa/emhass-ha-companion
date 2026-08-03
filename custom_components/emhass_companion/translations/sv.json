@@ -91,14 +91,17 @@
           "soc_min": "Lägsta laddningsnivå",
           "soc_max": "Högsta laddningsnivå",
           "soc_target": "Önskad laddningsnivå",
-          "soc_entity": "Sensor för batteriets laddningsnivå"
+          "self_consume_threshold_w": "Tröskel för övergång till egenanvändning",
+          "soc_entity": "Sensor för batteriets laddningsnivå",
+          "pv_entity": "Sensor för aktuell soleffekt"
         },
         "data_description": {
           "hybrid_inverter": "På om solpanelerna och batteriet delar en och samma växelriktares AC-effektgräns, vilket gäller de flesta hembatterisystem. Av om det är två separata växelriktare med varsin gräns.",
-          "inverter_ac_input_max_w": "Lämna på 0 för att använda samma gräns som maximal AC-uteffekt.",
-          "soc_min": "Som andel. 0,10 betyder att optimeringen inte planerar under 10 %.",
+          "soc_min": "Optimeringen planerar aldrig batteriet under denna nivå.",
           "soc_target": "Där optimeringen siktar på att lämna batteriet vid horisontens slut.",
-          "soc_entity": "Läses vid varje körning så att planen utgår från verkligheten."
+          "self_consume_threshold_w": "När planens näteffekt ligger inom detta antal watt från noll lämnas batteriet till växelriktarens egen egenanvändningsläge istället för planens tvingade laddning/urladdning -- även en stor planerad laddning eller urladdning åsidosätts, eftersom egenanvändning följer verklig sol- och lastdata bättre än en prognos vid små obalanser. När läget väl har lämnats över måste näteffekten överstiga dubbla detta värde innan planen kan tvinga batteriet igen, så att läget inte växlar fram och tillbaka vid varje omräkning. Inte samma sak som laddningsnivåerna ovan, som bara begränsar vad optimeringen får planera mellan.",
+          "soc_entity": "Läses vid varje körning så att planen utgår från verkligheten.",
+          "pv_entity": "Valfritt. Blandas in i det första steget av varje MPC-prognos, viktat av reglaget \"Live-värdets vikt\". Last blandas in på samma sätt automatiskt, med sensorn vald under Husets förbrukning > Sensor för husets last -- ingen separat sensor behövs där."
         }
       },
       "grid": {
@@ -107,12 +110,14 @@
         "data": {
           "grid_import_max_w": "Maximal effekt från nätet",
           "grid_export_max_w": "Maximal effekt till nätet",
+          "curtail_on_negative_price": "Begränsa export vid negativt pris",
           "optimization_time_step": "Tidsupplösning (minuter)",
           "mpc_interval_minutes": "Räkna om var",
           "horizon_hours": "Planeringshorisont",
           "dayahead_fallback_time": "Reservtid för dygnsplanering"
         },
         "data_description": {
+          "curtail_on_negative_price": "Får bara effekt tillsammans med en växelriktarprofil som stödjer exportbegränsning. Begränsar exporten till noll närhelst säljpriset är negativt och batteriet saknar utrymme att ta hand om överskottet istället. Avstängt som standard, eftersom EMHASS egen exportbegränsning redan tar hänsyn till detta när den är aktiverad.",
           "optimization_time_step": "Den tidsupplösning EMHASS planerar med. Matchar du din priskällas egen upplösning (till exempel 15 minuter för dagens Nord Pool-priser) fångas mest detalj; en grövre upplösning löser snabbare. Välj i listan eller skriv valfritt antal minuter.",
           "dayahead_fallback_time": "En fullständig dygnsplan byggs normalt om automatiskt så snart nya priser kommer. Den här tiden används bara som reserv om det aldrig sker."
         }
@@ -133,11 +138,24 @@
       "init": {
         "title": "EMHASS Companion",
         "menu_options": {
+          "load": "Husets förbrukning",
           "battery": "Batteri",
           "grid": "Nät och schema",
           "tariff": "Köp- och säljpriser",
-          "inverter": "Batteristyrning"
+          "inverter": "Växelriktarstyrning",
+          "temperature": "Utetemperatur"
         }
+      },
+      "load": {
+        "title": "Husets förbrukning",
+        "description": "Hur EMHASS ska förutsäga hushållets grundförbrukning.",
+        "data": {
+          "profile": "Källa för förbrukningsprognos"
+        }
+      },
+      "load_options": {
+        "title": "Konfigurera {profile}",
+        "description": "{notes}"
       },
       "battery": {
         "title": "Batteri",
@@ -154,11 +172,14 @@
           "soc_min": "Lägsta laddningsnivå",
           "soc_max": "Högsta laddningsnivå",
           "soc_target": "Önskad laddningsnivå",
-          "soc_entity": "Sensor för batteriets laddningsnivå"
+          "self_consume_threshold_w": "Tröskel för övergång till egenanvändning",
+          "soc_entity": "Sensor för batteriets laddningsnivå",
+          "pv_entity": "Sensor för aktuell soleffekt"
         },
         "data_description": {
           "hybrid_inverter": "På om solpanelerna och batteriet delar en och samma växelriktares AC-effektgräns, vilket gäller de flesta hembatterisystem. Av om det är två separata växelriktare med varsin gräns.",
-          "inverter_ac_input_max_w": "Lämna på 0 för att använda samma gräns som maximal AC-uteffekt."
+          "self_consume_threshold_w": "När planens näteffekt ligger inom detta antal watt från noll lämnas batteriet till växelriktarens egen egenanvändningsläge istället för planens tvingade laddning/urladdning -- även en stor planerad laddning eller urladdning åsidosätts, eftersom egenanvändning följer verklig sol- och lastdata bättre än en prognos vid små obalanser. När läget väl har lämnats över måste näteffekten överstiga dubbla detta värde innan planen kan tvinga batteriet igen, så att läget inte växlar fram och tillbaka vid varje omräkning. Inte samma sak som laddningsnivåerna ovan, som bara begränsar vad optimeringen får planera mellan.",
+          "pv_entity": "Valfritt. Blandas in i det första steget av varje MPC-prognos, viktat av reglaget \"Live-värdets vikt\". Last blandas in på samma sätt automatiskt, med sensorn vald under Husets förbrukning > Sensor för husets last -- ingen separat sensor behövs där."
         }
       },
       "grid": {
@@ -166,10 +187,14 @@
         "data": {
           "grid_import_max_w": "Maximal effekt från nätet",
           "grid_export_max_w": "Maximal effekt till nätet",
+          "curtail_on_negative_price": "Begränsa export vid negativt pris",
           "optimization_time_step": "Tidsupplösning (minuter)",
           "mpc_interval_minutes": "Räkna om var",
           "horizon_hours": "Planeringshorisont",
           "dayahead_fallback_time": "Reservtid för dygnsplanering"
+        },
+        "data_description": {
+          "curtail_on_negative_price": "Får bara effekt tillsammans med en växelriktarprofil som stödjer exportbegränsning. Begränsar exporten till noll närhelst säljpriset är negativt och batteriet saknar utrymme att ta hand om överskottet istället. Avstängt som standard, eftersom EMHASS egen exportbegränsning redan tar hänsyn till detta när den är aktiverad."
         }
       },
       "tariff": {
@@ -186,13 +211,28 @@
         }
       },
       "inverter": {
-        "title": "Batteristyrning",
+        "title": "Växelriktarstyrning",
         "description": "Hur batteriet faktiskt styrs. Lämnar du detta tomt läser integrationen bara — planen är din att agera på hur du vill.\n\nInget skrivs till din utrustning förrän du dessutom slår på reglaget Styrning aktiverad.",
         "data": {
           "profile": "Växelriktarprofil"
         }
       },
       "inverter_options": {
+        "title": "Konfigurera {profile}",
+        "description": "{notes}",
+        "data": {
+          "export_limit_switch": "Exportgränsbrytare",
+          "export_limit_number": "Exportgränseffekt"
+        }
+      },
+      "temperature": {
+        "title": "Utetemperatur",
+        "description": "Var utetemperaturprognosen kommer ifrån. Används först när en termisk last finns: det är vad den termiska modellen driver mot när lasten är av.\n\nLämna tomt så hämtar EMHASS sitt eget väder -- vilket bara blir rätt när solprognosen också är EMHASS inbyggd (Open-Meteo). Med någon annan solkälla, välj en väderentitet här.",
+        "data": {
+          "profile": "Temperaturkälla"
+        }
+      },
+      "temperature_options": {
         "title": "Konfigurera {profile}",
         "description": "{notes}"
       }
@@ -204,6 +244,19 @@
         "linear": "Linjär (multiplikator och tillägg)",
         "passthrough": "Innehåller redan kostnader",
         "template": "Mall"
+      }
+    },
+    "sense": {
+      "options": {
+        "heat": "Värmer (värmepump, elpatron, varmvatten)",
+        "cool": "Kyler (luftkonditionering)"
+      }
+    },
+    "recurrence": {
+      "options": {
+        "daily": "Varje dag",
+        "on_demand": "Vid behov",
+        "surplus": "På solöverskott"
       }
     }
   },
@@ -256,6 +309,27 @@
           "force_discharge": "Laddar ur",
           "idle": "Vila"
         }
+      },
+      "deferrable_number": {
+        "name": "EMHASS-nummer för styrbar last"
+      },
+      "planned_temperature": {
+        "name": "Planerad temperatur"
+      },
+      "solar_surplus": {
+        "name": "Solöverskott"
+      },
+      "solar_surplus_energy": {
+        "name": "Solöverskott energi"
+      },
+      "solar_surplus_start": {
+        "name": "Solöverskott från"
+      },
+      "solar_surplus_end": {
+        "name": "Solöverskott till"
+      },
+      "surplus_budget": {
+        "name": "Budget för solöverskott"
       }
     },
     "binary_sensor": {
@@ -267,6 +341,9 @@
       },
       "running": {
         "name": "Kör"
+      },
+      "solar_surplus": {
+        "name": "Solöverskott"
       }
     },
     "switch": {
@@ -274,16 +351,16 @@
         "name": "Styrning aktiverad"
       },
       "load_enabled": {
-        "name": "Aktiverad"
+        "name": "01. Aktiverad"
       },
       "use_time_window": {
-        "name": "Begränsa till ett tidsfönster"
+        "name": "13. Begränsa till ett tidsfönster"
       },
       "semi_continuous": {
-        "name": "Kör bara på full effekt"
+        "name": "12. Kör bara på full effekt"
       },
       "single_constant": {
-        "name": "Måste köra i ett sammanhängande block"
+        "name": "11. Måste köra i ett sammanhängande block"
       },
       "load_requested": {
         "name": "Begärd"
@@ -300,19 +377,12 @@
           "idle": "Vila"
         }
       },
-      "load_mode": {
-        "name": "Läge",
-        "state": {
-          "auto": "Följ planen",
-          "force_on": "Tvinga på",
-          "force_off": "Tvinga av"
-        }
-      },
       "recurrence": {
-        "name": "Återkommer",
+        "name": "10. Återkommer",
         "state": {
           "daily": "Varje dag",
-          "on_demand": "Vid behov"
+          "on_demand": "Vid behov",
+          "surplus": "På solöverskott"
         }
       }
     },
@@ -325,31 +395,82 @@
       },
       "run_forecast_fit": {
         "name": "Träna förbrukningsprognosen"
+      },
+      "run_now": {
+        "name": "Kör nu"
       }
     },
     "number": {
       "nominal_power": {
-        "name": "Effekt när den är igång"
+        "name": "03. Effekt när den är igång"
       },
       "operating_hours": {
-        "name": "Timmar som behövs per dygn"
+        "name": "02. Timmar som behövs per dygn"
       },
       "minimum_power": {
-        "name": "Lägsta effekt när den kör"
+        "name": "04. Lägsta effekt när den kör"
       },
       "startup_penalty": {
-        "name": "Kostnad för att starta"
+        "name": "09. Kostnad för att starta"
       },
       "max_startups": {
-        "name": "Högsta antal starter per plan"
+        "name": "08. Högsta antal starter per plan"
+      },
+      "run_within": {
+        "name": "07. Kör inom"
+      },
+      "comfort_temperature": {
+        "name": "Komforttemperatur"
+      },
+      "setback_temperature": {
+        "name": "Sänkningstemperatur"
+      },
+      "max_temperature": {
+        "name": "Högsta temperatur"
+      },
+      "heating_rate": {
+        "name": "Uppvärmningstakt"
+      },
+      "cooling_constant": {
+        "name": "Värmeförlustkonstant"
+      },
+      "thermal_inertia": {
+        "name": "Svarsfördröjning"
+      },
+      "surplus_threshold": {
+        "name": "Gräns för solöverskott"
+      },
+      "mix_beta": {
+        "name": "Live-värdets vikt"
+      },
+      "energy_needed": {
+        "name": "14. Energi som behövs"
+      },
+      "surplus_headroom": {
+        "name": "15. Marginal för solöverskott"
+      },
+      "surplus_priority": {
+        "name": "16. Prioritet för solöverskott"
+      },
+      "minimum_on_time": {
+        "name": "17. Minsta tid på"
+      },
+      "minimum_off_time": {
+        "name": "18. Minsta tid av"
       }
     },
     "time": {
       "earliest_start": {
-        "name": "Tidigast start"
+        "name": "05. Tidigast start"
       },
       "latest_end": {
-        "name": "Senast klar"
+        "name": "06. Senast klar"
+      },
+      "comfort_start": {
+        "name": "Komfort från"
+      },
+      "comfort_end": {
+        "name": "Komfort till"
       }
     }
   },
@@ -365,6 +486,18 @@
     "plan_schema_unsupported": {
       "title": "EMHASS planformat kan inte tolkas",
       "description": "EMHASS returnerade en optimeringsplan med schemaversion {found}, men den här integrationen förstår huvudversion {supported}. En ny huvudversion innebär att kolumner bytt namn eller tagits bort, eller att en enhet eller teckenkonvention ändrats, så planen ignoreras i stället för att tolkas fel. Uppdatera EMHASS Companion, eller rapportera detta om ingen uppdatering finns."
+    },
+    "thermal_comfort_unreachable": {
+      "title": "{name} kan inte nå sitt komfortschema",
+      "description": "Vid {heating_rate} °C/h kan {name} inte gå från {current} °C till de {required} °C som schemat kräver till {time} -- det bästa den klarar för fullt är {achievable} °C. Detta kontrolleras utan att räkna med värmeförluster, så det verkliga underskottet är minst så här stort. Sänk komforttemperaturen, flytta komfortfönstret senare, eller höj uppvärmningstakten om den är satt för försiktigt för den här lasten."
+    },
+    "optimization_infeasible": {
+      "title": "EMHASS kunde inte hitta en genomförbar plan",
+      "description": "Den senaste körningen av {action} rapporterade att optimeringsproblemet var olösbart, även efter att EMHASS försökte igen med lättade villkor. Den tidigare planen behålls istället för en oanvändbar. Detta beror nästan alltid på en styrbar last vars nödvändiga körtid inte får plats inom den återstående horisonten, eller ett komfortschema som en termisk last inte kan nå -- kontrollera varje lasts varaktighet och tidsfönster mot planens horisont. Detta löser sig automatiskt så snart en körning löses framgångsrikt."
+    },
+    "run_failed": {
+      "title": "Den senaste körningen av {action} misslyckades",
+      "description": "EMHASS producerade ingen plan: {error}\n\nDen tidigare planen behålls. Detta löser sig automatiskt så snart en körning lyckas igen -- kontrollera EMHASS-tilläggets loggar för hela felet om det inte löser sig av sig själv."
     }
   },
   "services": {
@@ -393,6 +526,20 @@
           "description": "Hur många poster ur serien som ska ingå i svaret."
         }
       }
+    },
+    "typical_load_forecast": {
+      "name": "Typisk hushållsprognos",
+      "description": "Ligger bakom profilen \"Typiskt hushåll\". Ger ett dygns förbrukningskurva i halvtimmesupplösning, skalad så att medelvärdet matchar den angivna effekten.",
+      "fields": {
+        "day": {
+          "name": "Dag",
+          "description": "Vilket kalenderdygn som ska prognostiseras, i lokal tidszon."
+        },
+        "average_w": {
+          "name": "Medeleffekt",
+          "description": "Hushållets typiska medeleffekt, i watt."
+        }
+      }
     }
   },
   "config_subentries": {
@@ -400,33 +547,13 @@
       "step": {
         "user": {
           "title": "Lägg till en flyttbar last",
-          "description": "En last vars tidpunkt optimeringen får välja: en diskmaskin, en billaddare, en poolpump. Detta är värdena lasten börjar med -- när den lagts till blir vart och ett ett reglage på lastens egen sida, som du också kan ändra från en automation.",
+          "description": "En last vars tidpunkt optimeraren får välja: en diskmaskin, en billaddare, en poolpump. Vad som gör att den vill köra avgör vilka inställningar den har, så det frågas först.",
           "data": {
             "name": "Namn",
-            "nominal_power_w": "Effekt när den är igång",
-            "operating_hours": "Timmar som behövs per dygn",
-            "earliest_start": "Tidigast start",
-            "latest_end": "Senast klar",
-            "semi_continuous": "Kör bara på full effekt",
-            "single_constant": "Måste köra i ett sammanhängande block",
-            "startup_penalty": "Kostnad för att starta",
-            "power_sensor": "Körsensor",
-            "control_entity": "Styrenhet",
-            "minimum_power_w": "Lägsta effekt när den kör",
-            "max_startups": "Högsta antal starter per plan"
+            "recurrence": "Kör"
           },
           "data_description": {
-            "nominal_power_w": "Ungefär vad lasten drar när den är igång.",
-            "operating_hours": "Hur länge den behöver köra totalt. Optimeringen väljer när. EMHASS planerar i steg om {time_step} minuter, så detta avrundas till närmaste hela steg ({time_step_hours} h).",
-            "earliest_start": "Används bara om du sedan slår på lastens reglage för tidsfönster.",
-            "latest_end": "Får vara tidigare än starttiden, för ett fönster över natten.",
-            "semi_continuous": "På för en diskmaskin eller pump, som antingen är på eller av. Av för något vars effekt kan varieras, till exempel en billaddare.",
-            "single_constant": "På om det vore ett problem att avbryta den, till exempel ett tvättprogram.",
-            "startup_penalty": "Motverkar att den slås på och av gång på gång. Lämna på noll om det inte är ett problem.",
-            "power_sensor": "Valfritt. Det säkraste sättet att låta optimeringen veta om lasten faktiskt kör -- fångar ett pass som avslutades tidigt, ett som aldrig blev av trots att det var planerat, eller ett som startades vid en annan tidpunkt än schemalagt. En effektsensor ger mest detalj (valfri enhet -- W, kW, MW, ... -- räknas automatiskt om till watt); en enkel av/på-binary_sensor fungerar också, och läses på samma sätt som en styrenhets tillstånd. Utan någon av dem och utan styrenhet antar optimeringen i stället att lasten följde sin egen senaste plan, vilket inte kan se något av detta.",
-            "control_entity": "Valfritt. Om den anges slår integrationen på och av denna för att följa planen, när du aktiverat styrning -- och dess tillstånd används dessutom som körsignal när det inte finns någon effektsensor. Lämna tom för att behålla styrningen i dina egna automationer. Utan vare sig denna eller en effektsensor litar optimeringen i stället på sin egen tidigare plan -- och antar att lasten körde när den var schemalagd. Det är bara så tillförlitligt som din egen efterlevnad, så en riktig sensor eller styrenhet är värd att lägga till när det går.",
-            "minimum_power_w": "Används bara när \"Kör bara på full effekt\" är av. Till exempel en billaddare som inte kan gå under 6 A -- optimeringen kör då lasten på minst denna effekt, eller låter den vara helt av. Noll betyder ingen gräns.",
-            "max_startups": "En hård gräns, till skillnad från kostnaden för att starta: för lågt värde gör att den önskade körtiden inte kan uppnås alls. Noll betyder ingen gräns."
+            "recurrence": "Varje dag -- den behöver ett bestämt antal timmar varje dygn och optimeraren väljer när. Vid behov -- den kör bara när något aktiverar den, ett bestämt antal timmar. På solöverskott -- den tar den sol som huset, de andra lasterna och batteriet inte redan använder, så länge den är aktiverad. En last på solöverskott har varken timmar eller tidsfönster; båda kommer från planen."
           }
         },
         "reconfigure": {
@@ -441,12 +568,151 @@
             "control_entity": "Valfritt. Om den anges slår integrationen på och av denna för att följa planen, när du aktiverat styrning -- och dess tillstånd används dessutom som körsignal när det inte finns någon effektsensor. Lämna tom för att behålla styrningen i dina egna automationer. Utan vare sig denna eller en effektsensor litar optimeringen i stället på sin egen tidigare plan -- och antar att lasten körde när den var schemalagd. Det är bara så tillförlitligt som din egen efterlevnad, så en riktig sensor eller styrenhet är värd att lägga till när det går."
           },
           "description": "Effekt, körtid, tidsfönster och lastmodell är reglage på lastens egen sida, inte inställningar här -- ändra dem där eller från en automation."
+        },
+        "settings": {
+          "title": "Inställningar för lasten",
+          "description": "Detta är värdena lasten börjar med -- när den har lagts till blir vart och ett en kontroll på lastens egen sida som du också kan ändra från en automation.",
+          "data": {
+            "nominal_power_w": "Effekt när den är igång",
+            "minimum_power_w": "Lägsta effekt när den kör",
+            "semi_continuous": "Kör bara på full effekt",
+            "startup_penalty": "Kostnad för att starta",
+            "operating_hours": "Timmar som behövs per dygn",
+            "earliest_start": "Tidigaste start",
+            "latest_end": "Senaste slut",
+            "single_constant": "Måste köra i ett sammanhängande block",
+            "max_startups": "Högsta antal starter per plan",
+            "minimum_on_time_minutes": "Minsta tid på",
+            "minimum_off_time_minutes": "Minsta tid av",
+            "energy_needed_kwh": "Energi som behövs",
+            "surplus_headroom_w": "Marginal för solöverskott",
+            "surplus_priority": "Prioritet för solöverskott",
+            "power_sensor": "Körsensor",
+            "control_entity": "Styrenhet"
+          },
+          "data_description": {
+            "nominal_power_w": "Ungefär vad lasten drar när den är igång.",
+            "minimum_power_w": "Används bara när \"Kör bara på full effekt\" är av.",
+            "semi_continuous": "På för en diskmaskin eller pump, som antingen är på eller av. Av för något vars effekt kan varieras, som en billaddare.",
+            "startup_penalty": "Motverkar att den slås på och av upprepade gånger. Lämna på noll om det inte är ett problem. På solöverskott är detta rätt sätt att hindra korta cykler -- det prissätter en omstart i stället för att förbjuda ett avbrott, så lasten kör i ett block en klar dag men kan delas över två toppar en molnig.",
+            "operating_hours": "Hur länge den behöver köra totalt. Optimeraren väljer när. EMHASS planerar i steg om {time_step} minuter, så detta avrundas till närmaste hela steg ({time_step_hours} h).",
+            "earliest_start": "Används bara om du slår på lastens tidsfönster efteråt.",
+            "latest_end": "Får vara tidigare än starttiden, för ett fönster över natten.",
+            "single_constant": "På om det vore ett problem att avbryta den, som ett tvättprogram.",
+            "minimum_on_time_minutes": "När lasten slås på måste den vara på minst så här länge. Skyddar kompressordrivna laster (värmepumpar, frysar) mot korta cykler. Noll betyder ingen minimigräns.",
+            "minimum_off_time_minutes": "När lasten stängs av måste den vara av minst så här länge. Noll betyder ingen minimigräns.",
+            "energy_needed_kwh": "Valfri total: lasten slutar be om mer när den fått så här mycket. Lämna på noll för att låta den köra på det solöverskott som finns tills du stänger av dess Begärd-brytare.",
+            "surplus_headroom_w": "Hur mycket solöverskott det måste finnas utöver lastens egen förbrukning innan ett tidssteg räknas. En marginal mot att solprognosen slår fel -- utan den importerar ett tidssteg som räknats vid exakt lastens effekt så snart ett moln kommer.",
+            "surplus_priority": "Betyder bara något med fler än en last på solöverskott. Lägsta numret gör anspråk på det delade överskottet först; lika värden avgörs av namn. Lämna på noll om du inte har flera och vill att en ska köras före en annan."
+          }
         }
       },
       "entry_type": "Flyttbar last",
       "initiate_flow": {
         "user": "Lägg till flyttbar last",
         "reconfigure": "Redigera flyttbar last"
+      }
+    },
+    "thermal_load": {
+      "entry_type": "Termisk last",
+      "initiate_flow": {
+        "user": "Lägg till termisk last",
+        "reconfigure": "Redigera termisk last"
+      },
+      "step": {
+        "user": {
+          "title": "Lägg till en termisk last",
+          "description": "En last vars temperatur optimeringen styr i stället för dess körtid: en värmepump, direktverkande el, en luftkonditionering. I stället för \"kör N timmar\" anger du ett komfortband, och optimeringen hittar de billigaste timmarna som håller temperaturen inom det -- och förvärmer när elen är billig där bandet tillåter.\n\nDetta är värdena lasten börjar med -- när den lagts till blir vart och ett ett reglage på lastens egen sida, som du också kan ändra från en automation.\n\nModellen behöver också en utetemperaturprognos: välj en under Konfigurera > Utetemperatur, eller lämna det åt EMHASS om din solprognos är EMHASS inbyggd (Open-Meteo).",
+          "data": {
+            "name": "Namn",
+            "temperature_sensor": "Temperatursensor",
+            "sense": "Värmer eller kyler",
+            "nominal_power_w": "Effekt när den är igång",
+            "comfort_temperature": "Komforttemperatur",
+            "setback_temperature": "Sänkningstemperatur",
+            "max_temperature": "Högsta temperatur",
+            "comfort_start": "Komfort från",
+            "comfort_end": "Komfort till",
+            "heating_rate": "Uppvärmningstakt",
+            "cooling_constant": "Värmeförlustkonstant",
+            "thermal_inertia": "Svarsfördröjning",
+            "power_sensor": "Körsensor",
+            "control_entity": "Styrenhet"
+          },
+          "data_description": {
+            "temperature_sensor": "Rummet (eller tanken) som temperaturerna nedan gäller. Rekommenderas starkt: utan den utgår varje plan från en gissad temperatur i stället för den verkliga.",
+            "sense": "Om lasten höjer temperaturen när den kör (värmepump, elpatron, varmvatten) eller sänker den (luftkonditionering).",
+            "nominal_power_w": "Ungefär vad lasten drar när den är på.",
+            "comfort_temperature": "Temperaturen som hålls medan komfortfönstret är aktivt. Optimeringen får gå över den när elen är billig, aldrig under.",
+            "setback_temperature": "Lägsta godtagbara temperatur utanför komfortfönstret.",
+            "max_temperature": "Ett hårt tak som gäller hela tiden. Utrymmet mellan komforttemperaturen och taket är det lager optimeringen spelar med -- lite extra värme medan elen är billig.",
+            "comfort_start": "När komforttemperaturen börjar gälla varje dag.",
+            "comfort_end": "När den slutar och sänkningen tar över. Får vara tidigare än starttiden, för ett fönster över midnatt.",
+            "heating_rate": "Hur fort temperaturen ändras med lasten på full effekt. Titta en kall morgon: ett hus som går från 18 till 21 °C på två timmar med värmen för fullt har 1,5 °C/h. För kyla: hur fort den sjunker.",
+            "cooling_constant": "Hur fort värmen läcker ut: grader förlorade per timme, per grads skillnad mot utetemperaturen. De flesta hus ligger mellan 0,05 (välisolerat) och 0,3 (dragigt). Kommer den planerade värmen för tidigt, sänk; för sent, höj.",
+            "thermal_inertia": "Hur lång tid efter påslag innan temperaturen svarar. Golvvärme i betong kan ta en timme eller mer; en radiator eller fläkt svarar nästan direkt. Lämna på 0 om du är osäker.",
+            "power_sensor": "Valfritt. Talar om för optimeringen om lasten faktiskt är igång. En effektsensor ger mest detalj (alla enheter räknas om till watt automatiskt); en enkel på/av-binärsensor fungerar också.",
+            "control_entity": "Valfritt. Om satt slår integrationen på och av den här för att följa planen, när du aktiverat styrning -- och dess tillstånd fungerar som körsignal när effektsensor saknas. Lämna tomt för att behålla styrningen i egna automationer."
+          }
+        },
+        "reconfigure": {
+          "title": "Redigera termisk last",
+          "data": {
+            "name": "Namn",
+            "temperature_sensor": "Temperatursensor",
+            "sense": "Värmer eller kyler",
+            "power_sensor": "Körsensor",
+            "control_entity": "Styrenhet"
+          },
+          "data_description": {
+            "temperature_sensor": "Rummet (eller tanken) som temperaturerna nedan gäller. Rekommenderas starkt: utan den utgår varje plan från en gissad temperatur i stället för den verkliga.",
+            "sense": "Om lasten höjer temperaturen när den kör (värmepump, elpatron, varmvatten) eller sänker den (luftkonditionering).",
+            "power_sensor": "Valfritt. Talar om för optimeringen om lasten faktiskt är igång. En effektsensor ger mest detalj (alla enheter räknas om till watt automatiskt); en enkel på/av-binärsensor fungerar också.",
+            "control_entity": "Valfritt. Om satt slår integrationen på och av den här för att följa planen, när du aktiverat styrning -- och dess tillstånd fungerar som körsignal när effektsensor saknas. Lämna tomt för att behålla styrningen i egna automationer."
+          }
+        }
+      }
+    },
+    "load_group": {
+      "entry_type": "Lastgrupp",
+      "initiate_flow": {
+        "user": "Lägg till lastgrupp",
+        "reconfigure": "Redigera lastgrupp"
+      },
+      "step": {
+        "user": {
+          "title": "Lägg till en lastgrupp",
+          "description": "Gruppera två eller fler befintliga flyttbara laster som delar en krets -- en säkringsgräns, eller en billaddare och en elpatron som aldrig får köra samtidigt.",
+          "data": {
+            "name": "Namn",
+            "load_subentry_ids": "Laster i gruppen",
+            "mutual_exclusion": "Bara en får köra åt gången",
+            "max_power_w": "Delad effektbudget"
+          },
+          "data_description": {
+            "load_subentry_ids": "Minst två laster.",
+            "mutual_exclusion": "På om lasterna aldrig får köra samtidigt, till exempel två apparater på samma säkring.",
+            "max_power_w": "Den sammanlagda effekt dessa laster får dra samtidigt. Krävs om inte \"Bara en får köra åt gången\" är på."
+          }
+        },
+        "reconfigure": {
+          "title": "Redigera lastgrupp",
+          "data": {
+            "name": "Namn",
+            "load_subentry_ids": "Laster i gruppen",
+            "mutual_exclusion": "Bara en får köra åt gången",
+            "max_power_w": "Delad effektbudget"
+          },
+          "data_description": {
+            "load_subentry_ids": "Minst två laster.",
+            "mutual_exclusion": "På om lasterna aldrig får köra samtidigt, till exempel två apparater på samma säkring.",
+            "max_power_w": "Den sammanlagda effekt dessa laster får dra samtidigt. Krävs om inte \"Bara en får köra åt gången\" är på."
+          }
+        }
+      },
+      "error": {
+        "too_few_loads": "Välj minst två laster för gruppen.",
+        "max_power_required": "Ange en delad effektbudget, eller slå på \"Bara en får köra åt gången\"."
       }
     }
   }

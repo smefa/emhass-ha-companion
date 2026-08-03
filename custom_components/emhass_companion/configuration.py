@@ -24,7 +24,9 @@ from .const import (
     CONF_PROFILE,
     CONF_PROFILE_OPTIONS,
     CONF_PV,
+    CONF_PV_ENTITY,
     CONF_SOC_ENTITY,
+    CONF_TEMPERATURE,
     CONF_TIME_STEP,
     CONF_URL,
     DEFAULT_DAYAHEAD_FALLBACK_TIME,
@@ -71,11 +73,14 @@ class EmhassConfig:
     pv: ProfileSelection = field(default_factory=ProfileSelection)
     load: ProfileSelection = field(default_factory=ProfileSelection)
     inverter: ProfileSelection = field(default_factory=ProfileSelection)
+    # Outdoor temperature forecast, consulted only once a thermal load exists.
+    temperature: ProfileSelection = field(default_factory=ProfileSelection)
     tariff: Tariff = field(default_factory=lambda: Tariff.from_dict({}))
     battery: BatteryConfig = field(default_factory=BatteryConfig)
     grid: GridConfig = field(default_factory=GridConfig)
     hybrid_inverter: HybridInverterConfig = field(default_factory=HybridInverterConfig)
     soc_entity: str | None = None
+    pv_live_entity: str | None = None
 
     @classmethod
     def from_entry(cls, entry: ConfigEntry) -> EmhassConfig:
@@ -91,6 +96,7 @@ class EmhassConfig:
             pv=ProfileSelection.from_dict(options.get(CONF_PV)),
             load=ProfileSelection.from_dict(options.get(CONF_LOAD)),
             inverter=ProfileSelection.from_dict(options.get(CONF_INVERTER)),
+            temperature=ProfileSelection.from_dict(options.get(CONF_TEMPERATURE)),
             tariff=Tariff.from_dict(options.get("tariff")),
             battery=BatteryConfig.from_dict(options.get("battery")),
             grid=GridConfig.from_dict(options.get("grid")),
@@ -99,6 +105,7 @@ class EmhassConfig:
             # to share it with.
             hybrid_inverter=HybridInverterConfig.from_dict(options.get("battery")),
             soc_entity=options.get(CONF_SOC_ENTITY),
+            pv_live_entity=options.get(CONF_PV_ENTITY),
         )
 
     @property

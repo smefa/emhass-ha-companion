@@ -1,0 +1,74 @@
+site_name: EMHASS Companion
+site_description: A Home Assistant integration that makes EMHASS usable without writing YAML.
+site_url: https://smefa.github.io/emhass-ha-companion/
+repo_name: smefa/emhass-ha-companion
+repo_url: https://github.com/smefa/emhass-ha-companion
+edit_uri: edit/main/docs/
+
+docs_dir: docs
+
+theme:
+  name: material
+  logo: assets/logo.png
+  favicon: assets/icon.png
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: teal
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: teal
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.tracking
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.action.edit
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - User Guide:
+      - guide/index.md
+      - Install: guide/install.md
+      - Setup: guide/setup.md
+      - Deferrable loads: guide/deferrable_loads.md
+      - Thermal loads: guide/thermal_loads.md
+      - Surplus loads: guide/surplus_loads.md
+      - Inverter control: guide/inverter_control.md
+      - Dashboard cards: guide/dashboard_cards.md
+  - Technical reference:
+      - Setup: setup.md
+      - Loads:
+          - Deferrable loads: deferrable_loads.md
+          - Thermal loads: thermal_loads.md
+          - Surplus loads: surplus_loads.md
+          - On-demand loads: on_demand_loads.md
+          - Load groups: load_groups.md
+          - Request-run service (planned): request_run_service.md
+      - Dashboard cards: dashboard_cards.md
+      - Entities: entities.md
+      - Handing over control: handing_over_control.md
+      - Inverter control: inverter_control.md
+      - Data sources: data_sources.md
+      - Template additions: template_additions.md
+      - Writing a profile: profiles.md
+      - Inverter profile roadmap: inverter_profile_roadmap.md
+      - Troubleshooting: troubleshooting.md

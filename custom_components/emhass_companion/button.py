@@ -13,7 +13,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .coordinator import EmhassCoordinator
-from .entity import EmhassEntity
+from .deferrable import DeferrableRuntime
+from .entity import EmhassEntity, EmhassLoadEntity
 
 PARALLEL_UPDATES = 1
 
@@ -58,6 +59,14 @@ async def async_setup_entry(
 
     async_add_entities(EmhassButton(coordinator, description) for description in descriptions)
 
+    for load in entry.runtime_data.loads.all():
+        # A thermal load's target is its comfort band, not a run-time total,
+        # so there is no operating_hours for a forced run to disarm against.
+        if not load.is_thermal:
+            async_add_entities(
+                [LoadRunNowButton(coordinator, load)], config_subentry_id=load.subentry_id
+            )
+
 
 class EmhassButton(EmhassEntity, ButtonEntity):
     entity_description: EmhassButtonDescription
@@ -71,3 +80,24 @@ class EmhassButton(EmhassEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         await self.entity_description.press_fn(self.coordinator)
+
+
+class LoadRunNowButton(EmhassLoadEntity, ButtonEntity):
+    """Run this load immediately, regardless of recurrence.
+
+    Distinct from the on-demand ``requested`` switch: that arms the load for
+    the optimiser to place somewhere in its window/deadline, still choosing
+    *when*. This skips that decision and turns the load on right now. It
+    clears itself once the load's operating_hours target for the day is met
+    -- see DeferrableRuntime.check_auto_disarm -- so pressing it again after
+    that starts a fresh day's worth of forced running.
+    """
+
+    _attr_translation_key = "run_now"
+
+    def __init__(self, coordinator: EmhassCoordinator, load: DeferrableRuntime) -> None:
+        super().__init__(coordinator, load, "run_now")
+
+    async def async_press(self) -> None:
+        self.load.force_run()
+        self.load.notify()

@@ -25,8 +25,11 @@ from homeassistant.util.yaml import load_yaml
 
 from ..const import PROFILE_KINDS, USER_PROFILE_DIR
 from .engine import (
+    action_variables,
     async_execute_steps,
     async_resolve_series,
+    convert_curtail_power,
+    convert_power,
     render,
     render_action,
     resolve_limits,
@@ -39,10 +42,13 @@ __all__ = [
     "Profile",
     "ProfileError",
     "ProfileLoadResult",
+    "action_variables",
     "async_execute_steps",
     "async_load_profiles",
     "async_resolve_series",
     "available_profiles",
+    "convert_curtail_power",
+    "convert_power",
     "render",
     "render_action",
     "resolve_limits",

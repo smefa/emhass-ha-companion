@@ -20,7 +20,12 @@ SUPPORTED_PLAN_SCHEMA_MAJOR: Final = 1
 
 DEFAULT_PORT: Final = 5000
 DEFAULT_URL: Final = f"http://localhost:{DEFAULT_PORT}"
-ADDON_SLUG: Final = "emhass"
+# The add-on has no official listing, so it is only ever installed from a
+# third-party repository -- Supervisor always prefixes its slug with a hash of
+# that repository's URL (e.g. "5b918bf2_emhass"), never the bare "emhass".
+# The hash isn't knowable in advance, so the add-on is found by its name
+# instead of a hardcoded slug; see `_async_addon_url` in config_flow.py.
+ADDON_NAME: Final = "EMHASS"
 
 ENDPOINT_HEALTHZ: Final = "/healthz"
 ENDPOINT_PLAN: Final = "/api/v1/plan"
@@ -101,6 +106,10 @@ CONF_GRID_EXPORT_MAX: Final = "grid_export_max_w"
 
 CONF_SOC_ENTITY: Final = "soc_entity"
 CONF_LOAD_ENTITY: Final = "load_entity"
+# The live PV power reading blended into the first naive-mpc-optim forecast
+# step (payload.build_payload), weighted by number.MixBetaNumber. No PV
+# profile exposes a raw current-power sensor on its own -- they are all
+# forecast sources -- so this is asked for separately.
 CONF_PV_ENTITY: Final = "pv_entity"
 
 # Deferrable load subentry keys
@@ -122,6 +131,12 @@ CONF_STARTUP_PENALTY: Final = "startup_penalty"
 # startup penalty this is a constraint, not a cost, so a too-low value makes
 # the requested run time unreachable rather than merely expensive.
 CONF_MAX_STARTUPS: Final = "max_startups"
+# Minimum dwell time once a load switches on/off, protecting compressor-driven
+# loads (heat pumps, freezers) from short-cycling. Minutes in config/UI, sent
+# to EMHASS as timesteps (`def_minimum_on_time`/`def_minimum_off_time`). 0
+# means no minimum.
+CONF_MINIMUM_ON_TIME: Final = "minimum_on_time_minutes"
+CONF_MINIMUM_OFF_TIME: Final = "minimum_off_time_minutes"
 # Optional: the load's own running sensor -- a numeric power sensor or a plain
 # on/off binary_sensor, both read by deferrable.state_to_power. Without one
 # (and no control entity either) the optimiser has no way to observe the load
@@ -133,6 +148,25 @@ CONF_USE_TIME_WINDOW: Final = "use_time_window"
 # Optional: what the executor switches to actually run the load. Without it the
 # load is advisory only and the user automates on should_run themselves.
 CONF_CONTROL_ENTITY: Final = "control_entity"
+
+# Surplus loads. The margin a timestep's surplus must clear *above* the load's
+# own draw before it counts towards the budget. Its whole job is to absorb PV
+# forecast error: a slot counted at exactly the load's power imports the moment
+# the forecast comes in light. It also opens a band -- between the load's power
+# and the load's power plus this -- of slots that do not add to the budget but
+# are still safe to run through, which is what lets a startup penalty produce
+# one unbroken run without a hard contiguity constraint.
+CONF_SURPLUS_HEADROOM: Final = "surplus_headroom_w"
+# A total, not a rate: "put this much in and stop". 0 means no cap, and the
+# load runs on whatever surplus exists until its request is turned off.
+CONF_ENERGY_NEEDED: Final = "energy_needed_kwh"
+# Which surplus load gets first claim on a shared series -- lower runs first,
+# ties broken by name. Only meaningful with two or more surplus loads; a
+# single one has nothing to compete with.
+CONF_SURPLUS_PRIORITY: Final = "surplus_priority"
+# What makes the load want to run; see RECURRENCES below. Asked first when
+# adding a load, because it decides which of the other fields even apply.
+CONF_RECURRENCE: Final = "recurrence"
 
 # Thermal deferrable loads
 CONF_LOAD_TYPE: Final = "load_type"
@@ -151,6 +185,21 @@ CONF_COMFORT_START: Final = "comfort_start"
 CONF_COMFORT_END: Final = "comfort_end"
 
 SUBENTRY_TYPE_DEFERRABLE: Final = "deferrable_load"
+# A separate subentry type, not a field on the deferrable one: each type gets
+# its own "Add ..." button in the integrations UI, and what a load *is* --
+# run-time-driven or temperature-driven -- is fixed at creation, exactly the
+# property a subentry type is meant to carry.
+SUBENTRY_TYPE_THERMAL: Final = "thermal_load"
+LOAD_SUBENTRY_TYPES: Final = (SUBENTRY_TYPE_DEFERRABLE, SUBENTRY_TYPE_THERMAL)
+# A load group is not itself a load: it expresses a relationship between
+# existing deferrable-load subentries (a shared power budget or mutual
+# exclusion), so it is deliberately excluded from LOAD_SUBENTRY_TYPES above --
+# the registry and entity-platform filters that iterate that tuple should
+# never try to treat a group as a load.
+SUBENTRY_TYPE_LOAD_GROUP: Final = "load_group"
+CONF_GROUP_LOAD_IDS: Final = "load_subentry_ids"
+CONF_GROUP_MAX_POWER: Final = "max_power_w"
+CONF_GROUP_MUTUAL_EXCLUSION: Final = "mutual_exclusion"
 
 # --- Defaults ----------------------------------------------------------------
 
@@ -176,6 +225,37 @@ DEFAULT_GRID_EXPORT_MAX: Final = 9000
 DEFAULT_POWER_DEADBAND_W: Final = 100
 STALE_PLAN_FACTOR: Final = 2
 
+# Self-consumption classification (strategy.decide_battery): "does the plan
+# want any grid exchange at all", read straight from the plan's own P_grid
+# column. Not the same question as soc_min/soc_max -- those are planning
+# limits, this is a real-time mode choice.
+DEFAULT_SELF_CONSUME_THRESHOLD_W: Final = 300
+# Once in self-consumption, P_grid must clear threshold * this factor before
+# forcing resumes -- damps boundary chatter a single static threshold would
+# let through on every recalculation.
+SELF_CONSUME_EXIT_FACTOR: Final = 2.0
+
+# Curtailment (strategy.decide_curtailment). Plan-driven (P_PV_curtailment) is
+# the primary rule; the negative-price rule is opt-in because it is a second
+# optimiser competing with EMHASS's own curtailment cost function.
+DEFAULT_CURTAIL_ON_NEGATIVE_PRICE: Final = False
+
+# Surplus loads
+DEFAULT_SURPLUS_HEADROOM_W: Final = 300
+# 0 for every load until someone sets otherwise, so allocation falls back to
+# the existing name order -- adding this feature changes nothing by default.
+DEFAULT_SURPLUS_PRIORITY: Final = 0
+# Reporting only: the level the hub's surplus binary sensor and its start/end
+# timestamps describe. Deliberately *not* what any load budgets against -- that
+# threshold is the load's own power plus its own headroom, because "is there
+# enough sun for the pool" and "is there enough sun for the car" are different
+# questions with different answers.
+DEFAULT_SURPLUS_THRESHOLD_W: Final = 500
+# Weight given to the live PV/load reading when blended into the first
+# naive-mpc-optim forecast step (payload.build_payload). 0.5 matches EMHASS's
+# own default for the same blend (Forecast.get_mix_forecast).
+DEFAULT_MIX_BETA: Final = 0.5
+
 # --- Modes -------------------------------------------------------------------
 
 MODE_AUTO: Final = "auto"
@@ -192,17 +272,75 @@ BATTERY_ACTIONS: Final = (
 )
 SYSTEM_MODES: Final = (MODE_AUTO, *BATTERY_ACTIONS)
 
+# --- Inverter actions --------------------------------------------------------
+#
+# The four battery actions above are what a plan resolves to. These are the
+# lifecycle and side-channel actions around them. A profile defines only the
+# ones its hardware has: the set of actions it defines *is* its capability
+# list, which is why there is no separate `capabilities:` block to keep in sync.
+
+# Run once before the first forced command of a session. This is where an
+# inverter that gates remote control behind a mode -- SolarEdge's "Remote
+# Control", Victron's "External control", Sigenergy's remote_ems_enable --
+# opens that gate.
+ACTION_PREPARE: Final = "prepare"
+
+# How control is handed back. Distinct from `self_consume` because for some
+# inverters giving control back means undoing `prepare` as well, and because
+# `restore` must run on paths where no plan exists at all (shutdown, unload).
+# Falls back to `self_consume` when a profile does not define it.
+ACTION_RESTORE: Final = "restore"
+
+# PV curtailment, driven by the plan's own P_PV_curtailment column rather than
+# by the battery decision -- the two are independent.
+ACTION_CURTAIL: Final = "curtail"
+ACTION_UNCURTAIL: Final = "uncurtail"
+
+# Grid charging is separately permissioned on most hybrids (Growatt's
+# allow_grid_charge, Deye's grid_charge_enabled, SolarEdge's ac_charge_policy).
+# EMHASS knows nothing about it, so a plan can schedule a grid charge the
+# inverter will silently refuse unless the gate is asserted first.
+ACTION_ALLOW_GRID_CHARGE: Final = "allow_grid_charge"
+ACTION_BLOCK_GRID_CHARGE: Final = "block_grid_charge"
+
+INVERTER_ACTIONS: Final = (
+    *BATTERY_ACTIONS,
+    ACTION_PREPARE,
+    ACTION_RESTORE,
+    ACTION_CURTAIL,
+    ACTION_UNCURTAIL,
+    ACTION_ALLOW_GRID_CHARGE,
+    ACTION_BLOCK_GRID_CHARGE,
+)
+
 LOAD_MODE_AUTO: Final = "auto"
 LOAD_MODE_FORCE_ON: Final = "force_on"
-LOAD_MODE_FORCE_OFF: Final = "force_off"
-LOAD_MODES: Final = (LOAD_MODE_AUTO, LOAD_MODE_FORCE_ON, LOAD_MODE_FORCE_OFF)
 
 # A daily load wants its operating_hours every day, same as today's only
 # behaviour. An on-demand load wants nothing until armed -- see
 # DeferrableRuntime.requested and docs/on_demand_loads.md.
+#
+# A surplus load is armed the same way, but asks for no fixed run time at all:
+# its hours and its window are derived from the exported power the last plan
+# predicted (see surplus.py), so it takes whatever the optimiser can spare and
+# nothing more. Its operating hours, time window and deadline are all derived
+# rather than configured, and the entities backing them report unavailable.
 RECURRENCE_DAILY: Final = "daily"
 RECURRENCE_ON_DEMAND: Final = "on_demand"
-RECURRENCES: Final = (RECURRENCE_DAILY, RECURRENCE_ON_DEMAND)
+RECURRENCE_SURPLUS: Final = "surplus"
+RECURRENCES: Final = (RECURRENCE_DAILY, RECURRENCE_ON_DEMAND, RECURRENCE_SURPLUS)
+
+# Attributes of the Requested switch. requested_at is the instant a deadline
+# counts from, and is carried here rather than in an entity of its own so the
+# whole request -- flag plus anchor -- is restored as one unit. request_runtime
+# is the progress made towards operating_hours since that anchor -- without it
+# surviving a restart too, a request that already ran its full target (or any
+# part of it) forgets that progress and reverts to looking freshly armed, with
+# requested_at still the original, now stale, anchor (issue: "deferrable not
+# updating run time").
+ATTR_REQUESTED_AT: Final = "requested_at"
+ATTR_DEADLINE_AT: Final = "deadline_at"
+ATTR_REQUEST_RUNTIME_SECONDS: Final = "request_runtime_seconds"
 
 # --- Profiles ----------------------------------------------------------------
 
@@ -219,10 +357,110 @@ PROFILE_KINDS: Final = (
     PROFILE_KIND_TEMPERATURE,
     PROFILE_KIND_INVERTER,
 )
+# Built-in profile keys are f"{kind}/{filename stem}" (profiles/__init__.py).
+# The "House load sensor" profile is the one load profile with a live
+# load-power sensor of its own (profiles/builtin/load/sensor.yaml) --
+# coordinator._read_load_live reads it directly rather than asking for a
+# second, separate live-load entity.
+PROFILE_KEY_LOAD_SENSOR: Final = "load/sensor"
 
 # The profile schema is a public API for contributors and for users writing local
 # profiles. Bump only with a documented migration.
-PROFILE_SCHEMA_VERSION: Final = 1
+#
+# 2 adds the inverter `control:` block -- command semantics (unit, sign,
+# lifetime) that the executor needs in order to decide *when* to write.
+# Version 1 inverter profiles keep loading and are given the defaults in
+# DEFAULT_CONTROL below, which describe exactly the behaviour they had before.
+PROFILE_SCHEMA_VERSION: Final = 2
+
+# --- Inverter control semantics ----------------------------------------------
+#
+# The archetype does not change what the engine does -- every profile still
+# resolves to a list of service calls. It exists so that a profile can be
+# reviewed against the model it claims to implement, and so the config flow can
+# explain the shape to a user. Behaviour comes from `lifetime` and the unit
+# fields below, which are orthogonal to it.
+
+# One signed number carries magnitude and direction (SolaX remotecontrol_active_power,
+# Sigenergy active_power_fixed_adjustment).
+ARCHETYPE_SIGNED_POWER: Final = "signed_power"
+# Direction from a select, magnitude from a number (Sungrow, SolarEdge, GoodWe, Fox ESS).
+ARCHETYPE_MODE_AND_MAGNITUDE: Final = "mode_and_magnitude"
+# A service call carrying power *and* a lifetime (Huawei forcible_charge).
+ARCHETYPE_COMMAND_WITH_DURATION: Final = "command_with_duration"
+# The write is a grid target, not a battery one (Victron ESS AcPowerSetPoint).
+ARCHETYPE_GRID_SETPOINT: Final = "grid_setpoint"
+# Rewrite a time-of-use slot; no session concept at all (Deye Prog1-6, Growatt SPH).
+ARCHETYPE_TOU_REWRITE: Final = "tou_rewrite"
+CONTROL_ARCHETYPES: Final = (
+    ARCHETYPE_SIGNED_POWER,
+    ARCHETYPE_MODE_AND_MAGNITUDE,
+    ARCHETYPE_COMMAND_WITH_DURATION,
+    ARCHETYPE_GRID_SETPOINT,
+    ARCHETYPE_TOU_REWRITE,
+)
+
+# What the number an action writes actually means. Getting this wrong is a 100x
+# error delivered to somebody's inverter, which is why it is declared once per
+# profile rather than open-coded in every action template.
+POWER_UNIT_W: Final = "w"
+POWER_UNIT_KW: Final = "kw"
+# Percent of rated power (GoodWe eco_mode_power, most Growatt families).
+POWER_UNIT_PERCENT: Final = "percent_of_rated"
+# Percent in hundredths, 0-10000 (Fronius SunSpec InWRte/OutWRte).
+POWER_UNIT_PERCENT_HUNDREDTHS: Final = "percent_hundredths"
+POWER_UNITS: Final = (
+    POWER_UNIT_W,
+    POWER_UNIT_KW,
+    POWER_UNIT_PERCENT,
+    POWER_UNIT_PERCENT_HUNDREDTHS,
+)
+PERCENT_UNITS: Final = (POWER_UNIT_PERCENT, POWER_UNIT_PERCENT_HUNDREDTHS)
+
+# What a `curtail`/`uncurtail` write actually targets. The mechanisms are
+# physically different -- an export limit still lets PV serve load and
+# battery, a zero-export switch does not distinguish -- and only the profile
+# knows which one its hardware has.
+CURTAIL_MODE_EXPORT_LIMIT: Final = "export_limit"
+CURTAIL_MODE_ZERO_EXPORT_SWITCH: Final = "zero_export_switch"
+CURTAIL_MODES: Final = (CURTAIL_MODE_EXPORT_LIMIT, CURTAIL_MODE_ZERO_EXPORT_SWITCH)
+
+# How long a command survives without being re-sent.
+#
+# Registers that hold their value until changed. The deadband is safe here, and
+# `restore` is mandatory -- nothing else will ever put the inverter back.
+LIFETIME_PERSISTENT: Final = "persistent"
+# The command carries its own duration and the inverter reverts when it elapses
+# (Huawei forcible_charge). Must be re-issued before it expires.
+LIFETIME_EXPIRES: Final = "expires"
+# A countdown the controller is expected to keep reloading (Fox ESS timeout_set,
+# SolaX remotecontrol_duration, Victron's implicit ESS revert).
+LIFETIME_WATCHDOG: Final = "watchdog"
+CONTROL_LIFETIMES: Final = (LIFETIME_PERSISTENT, LIFETIME_EXPIRES, LIFETIME_WATCHDOG)
+
+# Re-issue an expiring command once this fraction of its life has passed. Half
+# gives a full command's worth of margin against a slow bus or a missed cycle.
+COMMAND_REFRESH_FRACTION: Final = 0.5
+DEFAULT_COMMAND_DURATION_MIN: Final = 30
+
+# Applied to every version 1 inverter profile, and as the floor under a version 2
+# `control:` block. These values describe what the executor did before this
+# block existed, so an unmigrated profile behaves exactly as it always did.
+DEFAULT_CONTROL: Final = {
+    "archetype": ARCHETYPE_MODE_AND_MAGNITUDE,
+    "power_unit": POWER_UNIT_W,
+    "signed": False,
+    "invert_sign": False,
+    "charge_boost": 1.0,
+    "round_to": 1,
+    "lifetime": LIFETIME_PERSISTENT,
+    "duration_min": DEFAULT_COMMAND_DURATION_MIN,
+    "deadband_w": DEFAULT_POWER_DEADBAND_W,
+    "min_write_interval_s": 0,
+    "restore_required": True,
+    "curtail_mode": CURTAIL_MODE_EXPORT_LIMIT,
+    "curtail_unit": POWER_UNIT_W,
+}
 
 # Deliberately only three. Anything a declarative source cannot express belongs in
 # a `template` source rather than in a fourth keyword -- that is the line that
@@ -250,3 +488,13 @@ BUILTIN_PROFILE_DIR: Final = "profiles/builtin"
 ISSUE_EMHASS_VERSION: Final = "emhass_version_unsupported"
 ISSUE_PLAN_SCHEMA: Final = "plan_schema_unsupported"
 ISSUE_BAD_PROFILE: Final = "invalid_profile"
+# Suffixed with the load's subentry_id: one issue per thermal load, not one
+# for the whole integration, since the fix is load-specific (its own rates or
+# schedule) and other loads are unaffected.
+ISSUE_THERMAL_UNREACHABLE: Final = "thermal_comfort_unreachable"
+# Whole-integration issue, not per-load: EMHASS reports infeasibility for the
+# problem as a whole, with no hint at which load caused it.
+ISSUE_OPTIMIZATION_INFEASIBLE: Final = "optimization_infeasible"
+# A run that errored outright (EMHASS unreachable, rejected the request, or
+# raised internally) rather than merely failing to find a feasible plan.
+ISSUE_RUN_FAILED: Final = "run_failed"

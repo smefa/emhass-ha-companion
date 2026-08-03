@@ -20,6 +20,18 @@ from homeassistant.helpers import selector
 import voluptuous as vol
 
 from ..const import (
+    ACTION_ALLOW_GRID_CHARGE,
+    ACTION_BLOCK_GRID_CHARGE,
+    ACTION_CURTAIL,
+    ACTION_UNCURTAIL,
+    CONTROL_ARCHETYPES,
+    CONTROL_LIFETIMES,
+    CURTAIL_MODES,
+    DEFAULT_CONTROL,
+    INVERTER_ACTIONS,
+    MODE_SELF_CONSUME,
+    PERCENT_UNITS,
+    POWER_UNITS,
     PROFILE_KIND_INVERTER,
     PROFILE_KINDS,
     PROFILE_SCHEMA_VERSION,
@@ -50,13 +62,79 @@ def _validate_selector(config: Any) -> dict[str, Any]:
     return config
 
 
+def _empty_block(schema: Any) -> Any:
+    """Treat a null block as an empty one.
+
+    ``limits:`` with every line commented out parses as ``None``, not as an
+    empty mapping. That is an ordinary thing to do while writing a profile, and
+    being told "expected dict" for it is a poor way to find out.
+    """
+    return vol.All(lambda value: {} if value is None else value, schema)
+
+
 OPTION_SCHEMA = vol.Schema(
     {
         vol.Optional("name"): cv.string,
         vol.Optional("description"): cv.string,
         vol.Optional("required", default=True): cv.boolean,
         vol.Optional("default"): vol.Any(cv.string, int, float, bool, list, dict, None),
+        # Candidate entity ids, best first. The config flow pre-fills the field
+        # with the first one that actually exists, so a user who has already
+        # told us which inverter they own normally reads a filled-in form
+        # rather than typing entity ids.
+        #
+        # This is deliberately *not* detection: it runs after the profile has
+        # been chosen, so a wrong guess is a visibly wrong entity id in a form
+        # field, never a silently wrong control model.
+        vol.Optional("suggest", default=[]): vol.All(cv.ensure_list, [cv.string]),
         vol.Required("selector"): _validate_selector,
+    }
+)
+
+# The semantics of the command, as opposed to its content. `actions:` says what
+# to write; this says what the number means and how long the write survives --
+# which is what the executor needs in order to decide *when* to write.
+CONTROL_SCHEMA = vol.Schema(
+    {
+        vol.Optional("archetype", default=DEFAULT_CONTROL["archetype"]): vol.In(CONTROL_ARCHETYPES),
+        vol.Optional("power_unit", default=DEFAULT_CONTROL["power_unit"]): vol.In(POWER_UNITS),
+        # Rated power, required to express a setpoint as a percentage of it.
+        # A template, so it can read the inverter's own reported rating.
+        vol.Optional("rated_power_w"): vol.Any(vol.Coerce(float), cv.string),
+        # True when one value carries direction as well as magnitude. The sign
+        # follows EMHASS's convention (positive = discharge) unless inverted.
+        vol.Optional("signed", default=DEFAULT_CONTROL["signed"]): cv.boolean,
+        # For hardware that calls charging positive (SolarEdge's battery power,
+        # Victron's grid setpoint) rather than EMHASS's discharge-positive.
+        vol.Optional("invert_sign", default=DEFAULT_CONTROL["invert_sign"]): cv.boolean,
+        # Multiplier applied to charge magnitude only, to cover conversion loss
+        # between what is asked for and what reaches the cells.
+        vol.Optional("charge_boost", default=DEFAULT_CONTROL["charge_boost"]): vol.All(
+            vol.Coerce(float), vol.Range(min=0.5, max=2.0)
+        ),
+        vol.Optional("round_to", default=DEFAULT_CONTROL["round_to"]): vol.All(
+            vol.Coerce(float), vol.Range(min=0)
+        ),
+        vol.Optional("lifetime", default=DEFAULT_CONTROL["lifetime"]): vol.In(CONTROL_LIFETIMES),
+        vol.Optional("duration_min", default=DEFAULT_CONTROL["duration_min"]): vol.All(
+            vol.Coerce(float), vol.Range(min=1)
+        ),
+        vol.Optional("deadband_w", default=DEFAULT_CONTROL["deadband_w"]): vol.All(
+            vol.Coerce(float), vol.Range(min=0)
+        ),
+        # A floor on how often this profile may write at all, for buses that do
+        # not tolerate being hammered.
+        vol.Optional(
+            "min_write_interval_s", default=DEFAULT_CONTROL["min_write_interval_s"]
+        ): vol.All(vol.Coerce(float), vol.Range(min=0)),
+        vol.Optional("restore_required", default=DEFAULT_CONTROL["restore_required"]): cv.boolean,
+        # What a `curtail`/`uncurtail` write targets, and in what unit --
+        # separate from `power_unit` because the register a curtailment limit
+        # lives in is frequently not the same one the battery setpoint does.
+        vol.Optional("curtail_mode", default=DEFAULT_CONTROL["curtail_mode"]): vol.In(
+            CURTAIL_MODES
+        ),
+        vol.Optional("curtail_unit", default=DEFAULT_CONTROL["curtail_unit"]): vol.In(POWER_UNITS),
     }
 )
 
@@ -127,14 +205,73 @@ def _validate_source(source: dict[str, Any]) -> dict[str, Any]:
     return source
 
 
+def _validate_inverter(document: dict[str, Any]) -> dict[str, Any]:
+    """Cross-field rules for an inverter profile.
+
+    Every rule here exists because breaking it produces a write to real
+    hardware that is wrong rather than absent -- a percentage sent as watts, a
+    forced charge that outlives its plan, a battery left in forced mode because
+    nothing could hand control back.
+    """
+    if not document.get("actions"):
+        raise vol.Invalid("inverter profiles require an 'actions' block")
+
+    if unknown := sorted(set(document["actions"]) - set(INVERTER_ACTIONS)):
+        raise vol.Invalid(
+            f"unknown action(s): {', '.join(unknown)}; "
+            f"the defined set is: {', '.join(sorted(INVERTER_ACTIONS))}"
+        )
+
+    # A version 1 profile predates `control:` entirely. Giving it the defaults
+    # reproduces the behaviour it had before the block existed, rather than
+    # forcing a migration on profiles that already work.
+    control = {**DEFAULT_CONTROL, **(document.get("control") or {})}
+    document["control"] = control
+
+    if control["power_unit"] in PERCENT_UNITS and not control.get("rated_power_w"):
+        raise vol.Invalid(
+            f"power_unit '{control['power_unit']}' expresses the setpoint as a "
+            "proportion of the inverter's rating, so 'rated_power_w' is required "
+            "-- without it there is nothing to take a percentage of"
+        )
+
+    # Restoring is the only thing standing between a persistent-register
+    # inverter and being left in forced mode indefinitely.
+    actions = document["actions"]
+    if control["restore_required"] and not (
+        actions.get("restore") or actions.get(MODE_SELF_CONSUME)
+    ):
+        raise vol.Invalid(
+            "restore_required is set, so this profile must define either a "
+            "'restore' or a 'self_consume' action; without one nothing can hand "
+            "control back to the inverter on shutdown"
+        )
+
+    # Anything that can be switched on must be switchable off. An export limit
+    # left in place because a profile defines `curtail` but not `uncurtail` is
+    # the same failure mode as a battery with no `restore` -- silent, and it
+    # costs money instead of just looking wrong.
+    for on_action, off_action in (
+        (ACTION_CURTAIL, ACTION_UNCURTAIL),
+        (ACTION_ALLOW_GRID_CHARGE, ACTION_BLOCK_GRID_CHARGE),
+    ):
+        has_on, has_off = bool(actions.get(on_action)), bool(actions.get(off_action))
+        if has_on != has_off:
+            defined, missing = (on_action, off_action) if has_on else (off_action, on_action)
+            raise vol.Invalid(
+                f"profile defines '{defined}' but not '{missing}' -- anything this "
+                "profile can turn on must be definable to turn back off"
+            )
+
+    return document
+
+
 def _validate_profile(document: dict[str, Any]) -> dict[str, Any]:
     """Cross-field rules that the flat schema cannot express."""
     kind = document["kind"]
 
     if kind == PROFILE_KIND_INVERTER:
-        if not document.get("actions"):
-            raise vol.Invalid("inverter profiles require an 'actions' block")
-        return document
+        return _validate_inverter(document)
 
     # Source profiles either fetch a series themselves, or delegate the forecast
     # to EMHASS's own methods via `emhass:` settings (that is how "user has no
@@ -163,16 +300,32 @@ PROFILE_SCHEMA = vol.All(
             ),
             vol.Optional("description"): cv.string,
             vol.Optional("notes"): cv.string,
+            # Inverter metadata. Display only -- `brand` groups the picker and
+            # `requires` names the integration the profile needs, which is the
+            # only defence against someone choosing their brand when what they
+            # have installed is the read-only cloud integration of the same name.
+            vol.Optional("brand"): cv.string,
+            vol.Optional("models", default=[]): vol.All(cv.ensure_list, [cv.string]),
+            vol.Optional("requires"): cv.string,
+            vol.Optional("docs"): cv.string,
+            # Inverter profiles are always offered; the user picks their own
+            # hardware. `detect` remains for source profiles, where "is Solcast
+            # installed" is a question the integration domain genuinely answers.
             vol.Optional("detect", default={}): DETECT_SCHEMA,
             vol.Optional("options", default={}): vol.Schema({cv.string: OPTION_SCHEMA}),
             # source profiles
             vol.Optional("source"): SOURCE_SCHEMA,
             vol.Optional("series"): SERIES_SCHEMA,
             vol.Optional("unit"): vol.In([UNIT_WATTS, UNIT_CURRENCY_PER_KWH, UNIT_CELSIUS]),
-            vol.Optional("emhass", default={}): dict,
+            # `_empty_block` rather than a bare `dict` throughout: commenting
+            # out every line of a block leaves the key present with a null
+            # value, which is a likely thing for a profile author to do and a
+            # baffling thing to be told is "expected dict".
+            vol.Optional("emhass", default={}): _empty_block(dict),
             # inverter profiles
-            vol.Optional("sensors", default={}): vol.Schema({cv.string: cv.string}),
-            vol.Optional("limits", default={}): dict,
+            vol.Optional("control", default={}): _empty_block(CONTROL_SCHEMA),
+            vol.Optional("sensors", default={}): _empty_block(vol.Schema({cv.string: cv.string})),
+            vol.Optional("limits", default={}): _empty_block(dict),
             vol.Optional("actions", default={}): vol.Schema(
                 {cv.string: vol.All(cv.ensure_list, [ACTION_STEP_SCHEMA])}
             ),
@@ -228,6 +381,34 @@ class Profile:
     @property
     def emhass_settings(self) -> dict[str, Any]:
         return self.document.get("emhass", {})
+
+    @property
+    def brand(self) -> str | None:
+        return self.document.get("brand")
+
+    @property
+    def models(self) -> list[str]:
+        return self.document.get("models", [])
+
+    @property
+    def requires(self) -> str | None:
+        """The integration this profile needs, shown next to its name."""
+        return self.document.get("requires")
+
+    @property
+    def control(self) -> dict[str, Any]:
+        """Command semantics, with every default filled in."""
+        return {**DEFAULT_CONTROL, **self.document.get("control", {})}
+
+    def defines(self, action: str) -> bool:
+        """Whether this profile can perform ``action``.
+
+        The set of actions a profile defines is its capability list -- a
+        profile with no ``force_charge`` is saying its hardware cannot be
+        commanded to charge at a given power, which the executor reports rather
+        than papers over.
+        """
+        return bool(self.document.get("actions", {}).get(action))
 
     @property
     def sensors(self) -> dict[str, str]:

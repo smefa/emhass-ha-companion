@@ -12,21 +12,31 @@ from homeassistant.core import (
     callback,
 )
 from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers import config_validation as cv
 from homeassistant.util import dt as dt_util
 import voluptuous as vol
 
 from .const import ACTION_DAYAHEAD, ACTION_MPC, DOMAIN
 from .profiles import ProfileError, async_resolve_series, resolve_settings
+from .typical_load import typical_day_records
 
 SERVICE_RUN_DAYAHEAD = "run_dayahead"
 SERVICE_RUN_MPC = "run_mpc"
 SERVICE_TEST_PROFILE = "test_profile"
+SERVICE_TYPICAL_LOAD_FORECAST = "typical_load_forecast"
 
 TEST_PROFILE_SCHEMA = vol.Schema(
     {
         vol.Required("profile"): str,
         vol.Optional("options", default=dict): dict,
         vol.Optional("limit", default=10): vol.All(int, vol.Range(min=1, max=500)),
+    }
+)
+
+TYPICAL_LOAD_FORECAST_SCHEMA = vol.Schema(
+    {
+        vol.Required("day"): cv.date,
+        vol.Required("average_w"): vol.All(vol.Coerce(float), vol.Range(min=0)),
     }
 )
 
@@ -128,6 +138,20 @@ def async_register_services(hass: HomeAssistant) -> None:
         )
         return result
 
+    async def _typical_load_forecast(call: ServiceCall) -> ServiceResponse:
+        """Back the "Typical household" load profile's ``source: service`` block.
+
+        Kept as a service rather than a fourth engine source type: the engine
+        deliberately offers only attributes/service/template, and a service is
+        the existing, sanctioned way for a profile to fetch code-computed
+        records -- this one is just backed by our own domain instead of a
+        third-party integration's.
+        """
+        records = await hass.async_add_executor_job(
+            typical_day_records, call.data["day"], call.data["average_w"]
+        )
+        return {"forecast": records}
+
     hass.services.async_register(DOMAIN, SERVICE_RUN_DAYAHEAD, _run_dayahead)
     hass.services.async_register(DOMAIN, SERVICE_RUN_MPC, _run_mpc)
     hass.services.async_register(
@@ -137,9 +161,21 @@ def async_register_services(hass: HomeAssistant) -> None:
         schema=TEST_PROFILE_SCHEMA,
         supports_response=SupportsResponse.ONLY,
     )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_TYPICAL_LOAD_FORECAST,
+        _typical_load_forecast,
+        schema=TYPICAL_LOAD_FORECAST_SCHEMA,
+        supports_response=SupportsResponse.ONLY,
+    )
 
 
 @callback
 def async_unregister_services(hass: HomeAssistant) -> None:
-    for service in (SERVICE_RUN_DAYAHEAD, SERVICE_RUN_MPC, SERVICE_TEST_PROFILE):
+    for service in (
+        SERVICE_RUN_DAYAHEAD,
+        SERVICE_RUN_MPC,
+        SERVICE_TEST_PROFILE,
+        SERVICE_TYPICAL_LOAD_FORECAST,
+    ):
         hass.services.async_remove(DOMAIN, service)

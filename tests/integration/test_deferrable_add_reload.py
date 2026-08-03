@@ -39,6 +39,7 @@ from custom_components.emhass_companion.const import (
     DOMAIN,
     SUBENTRY_TYPE_DEFERRABLE,
 )
+from custom_components.emhass_companion.models import LastRun
 
 
 def _mock_client() -> AsyncMock:
@@ -49,6 +50,14 @@ def _mock_client() -> AsyncMock:
     # validator rejects -- and entity_platform swallows that per-entity,
     # silently leaving the device with zero entities rather than raising.
     client.base_url = "http://localhost:5000"
+    # The reload's own setup fires the scheduler's startup day-ahead run as a
+    # background task (see the test below). Left as a bare AsyncMock, that
+    # call unpacks to a ValueError, which the retry loop in schedule.py
+    # treats as a normal failure and retries with its *real* backoff delays
+    # (up to 5m45s total) before giving up -- this test cares about the
+    # reload racing entity creation, not about that outcome, so a clean
+    # "nothing to report" result lets it succeed on the first attempt.
+    client.async_optimize = AsyncMock(return_value=(LastRun(status="no-run"), None))
     return client
 
 
@@ -70,9 +79,11 @@ async def test_a_newly_added_load_gets_entities_without_a_manual_reload(
             (entry.entry_id, SUBENTRY_TYPE_DEFERRABLE), context={"source": SOURCE_USER}
         )
         result = await hass.config_entries.subentries.async_configure(
+            result["flow_id"], {CONF_NAME: "Dishwasher"}
+        )
+        result = await hass.config_entries.subentries.async_configure(
             result["flow_id"],
             {
-                CONF_NAME: "Dishwasher",
                 CONF_NOMINAL_POWER: 2000,
                 CONF_OPERATING_HOURS: 2,
                 CONF_SEMI_CONTINUOUS: True,

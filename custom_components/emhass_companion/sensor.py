@@ -15,7 +15,13 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityCategory, UnitOfPower, UnitOfTime
+from homeassistant.const import (
+    EntityCategory,
+    UnitOfEnergy,
+    UnitOfPower,
+    UnitOfTemperature,
+    UnitOfTime,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
@@ -25,6 +31,7 @@ from .coordinator import EmhassCoordinator, EmhassData
 from .deferrable import DeferrableRuntime
 from .entity import EmhassEntity, EmhassLoadEntity
 from .models import Series
+from .surplus import total_energy_wh, window_of
 
 PARALLEL_UPDATES = 0
 
@@ -192,7 +199,34 @@ async def async_setup_entry(
         descriptions.extend(BATTERY_SENSORS)
 
     async_add_entities(EmhassSensor(coordinator, description) for description in descriptions)
-    async_add_entities([EmhassDecisionSensor(coordinator)])
+    async_add_entities(
+        [
+            EmhassDecisionSensor(coordinator),
+            SolarSurplusSensor(coordinator),
+            SolarSurplusEnergySensor(coordinator),
+            SolarSurplusStartSensor(coordinator),
+            SolarSurplusEndSensor(coordinator),
+        ]
+    )
+
+    # These three were written, translated and unit-tested, but never actually
+    # added to Home Assistant, so no load ever had them -- which is also why
+    # the deferrable card had no schedule to draw.
+    for load in entry.runtime_data.loads.all():
+        entities: list[SensorEntity] = [
+            LoadScheduledPowerSensor(coordinator, load),
+            LoadNextStartSensor(coordinator, load),
+            LoadRuntimeTodaySensor(coordinator, load),
+            LoadDeferrableNumberSensor(coordinator, load),
+        ]
+        if load.is_thermal:
+            entities.append(LoadPlannedTemperatureSensor(coordinator, load))
+        else:
+            # Recurrence is a live setting, so a load can become a surplus load
+            # long after setup; the sensor is created for every standard load
+            # and reports unavailable until it is one.
+            entities.append(LoadSurplusBudgetSensor(coordinator, load))
+        async_add_entities(entities, config_subentry_id=load.subentry_id)
 
 
 class EmhassSensor(EmhassEntity, SensorEntity):
@@ -227,6 +261,41 @@ class EmhassSensor(EmhassEntity, SensorEntity):
         return attributes or None
 
 
+class LoadDeferrableNumberSensor(EmhassLoadEntity, SensorEntity):
+    """Which ``P_deferrable{k}`` this load is inside EMHASS.
+
+    EMHASS names its deferrable loads by number and says nowhere which
+    appliance a number belongs to -- its own charts, logs and the sensors it
+    publishes are all ``P_deferrable0``, ``P_deferrable1``, and so on. Reading
+    any of that against this integration means having the mapping to hand,
+    which is what this sensor is for.
+
+    It is meaningful as a stored number only because every configured load is
+    now sent on every run, parked at zero hours when it wants nothing; before
+    that, disabling one load silently renumbered the others.
+    """
+
+    _attr_translation_key = "deferrable_number"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: EmhassCoordinator, load: DeferrableRuntime) -> None:
+        super().__init__(coordinator, load, "deferrable_number")
+
+    @property
+    def native_value(self) -> int | None:
+        return self.deferrable_number
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {
+            "emhass_variable": f"P_deferrable{self.deferrable_number}",
+            # What the load was in the plan currently in hand. Differs from the
+            # number above only in the window between adding or removing a load
+            # and the next optimisation.
+            "in_current_plan": self.plan_index,
+        }
+
+
 class LoadScheduledPowerSensor(EmhassLoadEntity, SensorEntity):
     """The power EMHASS has scheduled for this load right now."""
 
@@ -245,12 +314,50 @@ class LoadScheduledPowerSensor(EmhassLoadEntity, SensorEntity):
         return data.plan.deferrable_series(index)
 
     @property
+    def native_value(self) -> float:
+        # No plan yet or before the first point still means "nothing
+        # scheduled", which is a real 0 W, not an unknown state.
+        return self._series().value_at(dt_util.utcnow()) or 0.0
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {
+            "schedule": self._series().to_attribute(),
+            "emhass_deferrable": self.deferrable_number,
+        }
+
+
+class LoadPlannedTemperatureSensor(EmhassLoadEntity, SensorEntity):
+    """The temperature EMHASS expects this thermal load's room to be at now.
+
+    EMHASS's docs suggest using exactly this as a climate entity's setpoint:
+    the plan already accounts for price, so following the predicted trajectory
+    is what realises the savings. The full trajectory rides along as a
+    ``forecast`` attribute, same shape as every other planned series here.
+    """
+
+    _attr_translation_key = "planned_temperature"
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 1
+
+    def __init__(self, coordinator: EmhassCoordinator, load: DeferrableRuntime) -> None:
+        super().__init__(coordinator, load, "planned_temperature")
+
+    def _series(self) -> Series:
+        data = self.coordinator.data
+        if not data or data.plan is None or (index := self.plan_index) is None:
+            return Series.empty()
+        return data.plan.temperature_series(index)
+
+    @property
     def native_value(self) -> float | None:
         return self._series().value_at(dt_util.utcnow())
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        return {"schedule": self._series().to_attribute()}
+        return {"forecast": self._series().to_attribute()}
 
 
 class LoadNextStartSensor(EmhassLoadEntity, SensorEntity):
@@ -259,14 +366,19 @@ class LoadNextStartSensor(EmhassLoadEntity, SensorEntity):
     _attr_translation_key = "next_start"
     _attr_device_class = SensorDeviceClass.TIMESTAMP
 
+    # Why the state is unknown, exposed via extra_state_attributes so the
+    # frontend card can show something better than a bare "unknown".
+    _REASON_NO_PLAN = "no_plan"
+    _REASON_ALREADY_RUNNING = "already_running"
+    _REASON_NOT_SCHEDULED = "not_scheduled"
+
     def __init__(self, coordinator: EmhassCoordinator, load: DeferrableRuntime) -> None:
         super().__init__(coordinator, load, "next_start")
 
-    @property
-    def native_value(self) -> datetime | None:
+    def _resolve(self) -> tuple[datetime | None, str | None]:
         data = self.coordinator.data
         if not data or data.plan is None or (index := self.plan_index) is None:
-            return None
+            return None, self._REASON_NO_PLAN
 
         threshold = self.load.running_threshold_w
         now = dt_util.utcnow()
@@ -287,9 +399,20 @@ class LoadNextStartSensor(EmhassLoadEntity, SensorEntity):
                 continue
             running = _is_running(row)
             if running and not previous_on:
-                return row.timestamp
+                return row.timestamp, None
             previous_on = running
-        return None
+
+        reason = self._REASON_ALREADY_RUNNING if previous_on else self._REASON_NOT_SCHEDULED
+        return None, reason
+
+    @property
+    def native_value(self) -> datetime | None:
+        return self._resolve()[0]
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        _, reason = self._resolve()
+        return {"reason": reason} if reason else None
 
 
 class LoadRuntimeTodaySensor(EmhassLoadEntity, RestoreSensor):
@@ -337,6 +460,169 @@ class LoadRuntimeTodaySensor(EmhassLoadEntity, RestoreSensor):
             "completed_timesteps": self.load.completed_timesteps(dt_util.utcnow(), step),
             "currently_running": self.load.is_running,
             "power_sensor": self.load.power_sensor,
+        }
+
+
+class SolarSurplusBase(EmhassEntity):
+    """Shared reading of the plan's spare PV.
+
+    All four surplus sensors answer questions about one series, so they compute
+    it the same way -- through the coordinator, which is also where the budgets
+    handed to EMHASS came from. A sensor that derived its own would eventually
+    disagree with what the pool was actually given.
+    """
+
+    def _series(self) -> Series:
+        return self.coordinator.surplus_series()
+
+    def _window(self) -> tuple[datetime | None, datetime | None]:
+        return window_of(self._series(), self.coordinator.surplus_threshold_w)
+
+
+class SolarSurplusSensor(SolarSurplusBase, SensorEntity):
+    """PV the plan expects the house not to need, before any surplus load takes it.
+
+    This is the quantity a "run it on spare sun only" load is entitled to:
+    generation left after the house and after every *ordinary* scheduled
+    deferrable. Deliberately independent of what the battery or the grid do
+    with it -- a slot the battery is charging on is still spare PV, just PV
+    the optimiser chose to put somewhere else for now, not proof the sun isn't
+    up. So this is not the same as exported power: consuming it here may well
+    forgo battery charge or export revenue the plan had earmarked for it, the
+    same trade a surplus load always makes against the rest of the plan.
+    """
+
+    _attr_translation_key = "solar_surplus"
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator: EmhassCoordinator) -> None:
+        super().__init__(coordinator, "solar_surplus")
+
+    @property
+    def native_value(self) -> float | None:
+        return self._series().value_at(dt_util.utcnow())
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        series = self._series()
+        start, end = self._window()
+        return {
+            "forecast": series.to_attribute(),
+            "threshold": self.coordinator.surplus_threshold_w,
+            "window_start": start.isoformat() if start else None,
+            "window_end": end.isoformat() if end else None,
+        }
+
+
+class SolarSurplusEnergySensor(SolarSurplusBase, SensorEntity):
+    """How much spare solar is left in the plan's horizon.
+
+    Usually the more useful trigger of the two: whether to start heating a pool
+    or charge a car is a question about kilowatt-hours coming, not about the
+    watts available at this instant.
+    """
+
+    _attr_translation_key = "solar_surplus_energy"
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+    _attr_suggested_display_precision = 2
+
+    def __init__(self, coordinator: EmhassCoordinator) -> None:
+        super().__init__(coordinator, "solar_surplus_energy")
+
+    @property
+    def native_value(self) -> float | None:
+        # Only what is still ahead: energy already exported is not a budget
+        # anything can be planned against.
+        now = dt_util.utcnow()
+        series = Series(point for point in self._series() if point.time >= now)
+        if not series:
+            return 0.0
+        step = series.step() or timedelta(minutes=self.coordinator.config.time_step_minutes)
+        return total_energy_wh(series, step) / 1000
+
+
+class SolarSurplusStartSensor(SolarSurplusBase, SensorEntity):
+    """When the plan's surplus first reaches the reporting threshold."""
+
+    _attr_translation_key = "solar_surplus_start"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+
+    def __init__(self, coordinator: EmhassCoordinator) -> None:
+        super().__init__(coordinator, "solar_surplus_start")
+
+    @property
+    def native_value(self) -> datetime | None:
+        return self._window()[0]
+
+
+class SolarSurplusEndSensor(SolarSurplusBase, SensorEntity):
+    """When the plan's surplus was last above the reporting threshold.
+
+    Spans any dips in between rather than closing at the first cloud: "spare
+    sun until 15:30" is the answer worth having, and the gaps inside that are
+    the optimiser's problem rather than the user's.
+    """
+
+    _attr_translation_key = "solar_surplus_end"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+
+    def __init__(self, coordinator: EmhassCoordinator) -> None:
+        super().__init__(coordinator, "solar_surplus_end")
+
+    @property
+    def native_value(self) -> datetime | None:
+        return self._window()[1]
+
+
+class LoadSurplusBudgetSensor(EmhassLoadEntity, SensorEntity):
+    """What this surplus load was allowed to ask EMHASS for on the last run.
+
+    The whole feature is a derivation the user never sees the inputs to, so
+    this is the entity that makes it inspectable: a pool that is not running
+    is either short of surplus, short of headroom, or beaten to it by a
+    higher-priority load, and those look identical from the outside.
+    """
+
+    _attr_translation_key = "surplus_budget"
+    _attr_device_class = SensorDeviceClass.DURATION
+    _attr_native_unit_of_measurement = UnitOfTime.HOURS
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_suggested_display_precision = 2
+
+    def __init__(self, coordinator: EmhassCoordinator, load: DeferrableRuntime) -> None:
+        super().__init__(coordinator, load, "surplus_budget")
+
+    @property
+    def available(self) -> bool:
+        return self.load.on_surplus
+
+    @property
+    def native_value(self) -> float | None:
+        return self.load.surplus_budget.hours
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        budget = self.load.surplus_budget
+        remaining = self.load.remaining_energy_wh(dt_util.utcnow())
+        return {
+            "window_start": (budget.window_start.isoformat() if budget.window_start else None),
+            "window_end": budget.window_end.isoformat() if budget.window_end else None,
+            "energy_wh": round(budget.energy_wh, 1),
+            "timesteps": budget.steps,
+            # The threshold this load actually budgets against, which is not the
+            # hub's reporting one and is the first thing to check when a load
+            # gets nothing on an obviously sunny day.
+            "run_floor_w": self.load.surplus_run_floor_w,
+            "headroom_w": self.load.surplus_headroom_w,
+            "qualifies_above_w": self.load.surplus_run_floor_w + self.load.surplus_headroom_w,
+            "energy_remaining_wh": None if remaining is None else round(remaining, 1),
+            # What was actually sent to EMHASS as this load's ceiling for the
+            # run -- equal to nominal_power_w unless the load may modulate and
+            # the day fell short of it. See surplus.allocate.
+            "nominal_power_w": round(budget.nominal_w, 1),
         }
 
 

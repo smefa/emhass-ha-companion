@@ -29,10 +29,11 @@ from custom_components.emhass_companion.profiles import async_load_profiles
 
 
 class _RuntimeData:
-    """Stand-in for EmhassRuntimeData; button.py only ever reads .coordinator."""
+    """Stand-in for EmhassRuntimeData; button.py only reads .coordinator and .loads."""
 
-    def __init__(self, coordinator: EmhassCoordinator) -> None:
+    def __init__(self, coordinator: EmhassCoordinator, loads: DeferrableRegistry) -> None:
         self.coordinator = coordinator
+        self.loads = loads
 
 
 async def _setup(hass: HomeAssistant, *, options: dict) -> set[str]:
@@ -44,7 +45,7 @@ async def _setup(hass: HomeAssistant, *, options: dict) -> set[str]:
 
     coordinator = EmhassCoordinator(hass, entry, AsyncMock(spec=EmhassClient), loads)
     coordinator.profiles = (await async_load_profiles(hass)).profiles
-    entry.runtime_data = _RuntimeData(coordinator)
+    entry.runtime_data = _RuntimeData(coordinator, loads)
 
     added: list = []
     await async_setup_entry(hass, entry, added.extend)

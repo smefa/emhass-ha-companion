@@ -91,14 +91,17 @@
           "soc_min": "Minimum charge level",
           "soc_max": "Maximum charge level",
           "soc_target": "Target charge level",
-          "soc_entity": "Battery SOC sensor"
+          "self_consume_threshold_w": "Self-consumption handoff threshold",
+          "soc_entity": "Battery SOC sensor",
+          "pv_entity": "Live PV power sensor"
         },
         "data_description": {
           "hybrid_inverter": "On if PV and the battery share one inverter's AC-side power limit, which is most home battery systems. Off if they are two independent inverters, each with its own limit.",
-          "inverter_ac_input_max_w": "Leave at 0 to use the same limit as maximum AC output.",
-          "soc_min": "As a fraction. 0.10 means the optimiser will not plan below 10%.",
+          "soc_min": "The optimiser will not plan the battery below this level.",
           "soc_target": "Where the optimiser aims to leave the battery at the end of the horizon.",
-          "soc_entity": "Read at the start of every run so the plan starts from reality."
+          "self_consume_threshold_w": "When the plan's grid power is within this many watts of zero, the battery is handed to the inverter's own self-consumption mode instead of the plan's forced charge/discharge -- even a large planned charge or discharge is overridden, because self-consumption tracks real-time PV and load better than a forecast can at small imbalances. Once handed over, grid power must exceed twice this value before the plan can force the battery again, so it doesn't flip modes every recalculation. Not the same as the charge-level limits above, which only bound what the optimiser may plan between.",
+          "soc_entity": "Read at the start of every run so the plan starts from reality.",
+          "pv_entity": "Optional. Blended into the first step of every MPC forecast, weighted by the \"Live value weight\" number entity. Load is blended the same way automatically, using the sensor picked under House consumption > House load sensor -- no separate entity needed there."
         }
       },
       "grid": {
@@ -107,12 +110,14 @@
         "data": {
           "grid_import_max_w": "Maximum import power",
           "grid_export_max_w": "Maximum export power",
+          "curtail_on_negative_price": "Curtail export at a negative price",
           "optimization_time_step": "Time resolution (minutes)",
           "mpc_interval_minutes": "Recalculate every",
           "horizon_hours": "Planning horizon",
           "dayahead_fallback_time": "Day-ahead fallback time"
         },
         "data_description": {
+          "curtail_on_negative_price": "Only takes effect for an inverter profile that supports curtailment. Curtails to zero export whenever the sell price is negative and the battery has no room left to absorb the surplus instead. Off by default, since EMHASS's own curtailment already prices this in when enabled.",
           "optimization_time_step": "The step size EMHASS plans at. Matching your price source's own resolution (for example 15 minutes for current Nord Pool prices) captures the most detail; a coarser step solves faster. Pick from the list or type any number of minutes.",
           "dayahead_fallback_time": "A full day-ahead plan is normally rebuilt automatically as soon as new prices arrive. This time is only used as a backstop if that never happens."
         }
@@ -133,11 +138,24 @@
       "init": {
         "title": "EMHASS Companion",
         "menu_options": {
+          "load": "House consumption",
           "battery": "Battery",
           "grid": "Grid and schedule",
           "tariff": "Buy and sell prices",
-          "inverter": "Battery control"
+          "inverter": "Inverter control",
+          "temperature": "Outdoor temperature"
         }
+      },
+      "load": {
+        "title": "House consumption",
+        "description": "How EMHASS should predict your household's baseline consumption.",
+        "data": {
+          "profile": "Load forecast source"
+        }
+      },
+      "load_options": {
+        "title": "Configure {profile}",
+        "description": "{notes}"
       },
       "battery": {
         "title": "Battery",
@@ -154,11 +172,14 @@
           "soc_min": "Minimum charge level",
           "soc_max": "Maximum charge level",
           "soc_target": "Target charge level",
-          "soc_entity": "Battery SOC sensor"
+          "self_consume_threshold_w": "Self-consumption handoff threshold",
+          "soc_entity": "Battery SOC sensor",
+          "pv_entity": "Live PV power sensor"
         },
         "data_description": {
           "hybrid_inverter": "On if PV and the battery share one inverter's AC-side power limit, which is most home battery systems. Off if they are two independent inverters, each with its own limit.",
-          "inverter_ac_input_max_w": "Leave at 0 to use the same limit as maximum AC output."
+          "self_consume_threshold_w": "When the plan's grid power is within this many watts of zero, the battery is handed to the inverter's own self-consumption mode instead of the plan's forced charge/discharge -- even a large planned charge or discharge is overridden, because self-consumption tracks real-time PV and load better than a forecast can at small imbalances. Once handed over, grid power must exceed twice this value before the plan can force the battery again, so it doesn't flip modes every recalculation. Not the same as the charge-level limits above, which only bound what the optimiser may plan between.",
+          "pv_entity": "Optional. Blended into the first step of every MPC forecast, weighted by the \"Live value weight\" number entity. Load is blended the same way automatically, using the sensor picked under House consumption > House load sensor -- no separate entity needed there."
         }
       },
       "grid": {
@@ -166,10 +187,14 @@
         "data": {
           "grid_import_max_w": "Maximum import power",
           "grid_export_max_w": "Maximum export power",
+          "curtail_on_negative_price": "Curtail export at a negative price",
           "optimization_time_step": "Time resolution (minutes)",
           "mpc_interval_minutes": "Recalculate every",
           "horizon_hours": "Planning horizon",
           "dayahead_fallback_time": "Day-ahead fallback time"
+        },
+        "data_description": {
+          "curtail_on_negative_price": "Only takes effect for an inverter profile that supports curtailment. Curtails to zero export whenever the sell price is negative and the battery has no room left to absorb the surplus instead. Off by default, since EMHASS's own curtailment already prices this in when enabled."
         }
       },
       "tariff": {
@@ -186,13 +211,28 @@
         }
       },
       "inverter": {
-        "title": "Battery control",
+        "title": "Inverter control",
         "description": "How the battery is actually commanded. Leave this unset and the integration only ever reads — the plan is yours to act on however you like.\n\nNothing is written to your hardware until you also turn on the Control enabled switch.",
         "data": {
           "profile": "Inverter profile"
         }
       },
       "inverter_options": {
+        "title": "Configure {profile}",
+        "description": "{notes}",
+        "data": {
+          "export_limit_switch": "Export limit switch",
+          "export_limit_number": "Export limit power"
+        }
+      },
+      "temperature": {
+        "title": "Outdoor temperature",
+        "description": "Where the outdoor temperature forecast comes from. Only used once a thermal load exists: it is what the thermal model drifts towards while the load is off.\n\nLeave unset to let EMHASS fetch its own weather data -- which is only right when the solar forecast is also EMHASS built-in (Open-Meteo). With any other solar source, pick a weather entity here.",
+        "data": {
+          "profile": "Temperature source"
+        }
+      },
+      "temperature_options": {
         "title": "Configure {profile}",
         "description": "{notes}"
       }
@@ -204,6 +244,19 @@
         "linear": "Linear (multiplier and addition)",
         "passthrough": "Already includes costs",
         "template": "Template"
+      }
+    },
+    "sense": {
+      "options": {
+        "heat": "Heats (heat pump, heater, hot water)",
+        "cool": "Cools (air conditioning)"
+      }
+    },
+    "recurrence": {
+      "options": {
+        "daily": "Every day",
+        "on_demand": "On demand",
+        "surplus": "On spare solar"
       }
     }
   },
@@ -256,6 +309,27 @@
           "force_discharge": "Discharging",
           "idle": "Idle"
         }
+      },
+      "deferrable_number": {
+        "name": "EMHASS deferrable number"
+      },
+      "planned_temperature": {
+        "name": "Planned temperature"
+      },
+      "solar_surplus": {
+        "name": "Spare solar"
+      },
+      "solar_surplus_energy": {
+        "name": "Spare solar energy"
+      },
+      "solar_surplus_start": {
+        "name": "Spare solar from"
+      },
+      "solar_surplus_end": {
+        "name": "Spare solar until"
+      },
+      "surplus_budget": {
+        "name": "Spare solar budget"
       }
     },
     "binary_sensor": {
@@ -267,6 +341,9 @@
       },
       "running": {
         "name": "Running"
+      },
+      "solar_surplus": {
+        "name": "Spare solar"
       }
     },
     "switch": {
@@ -274,16 +351,16 @@
         "name": "Control enabled"
       },
       "load_enabled": {
-        "name": "Enabled"
+        "name": "01. Enabled"
       },
       "use_time_window": {
-        "name": "Restrict to a time window"
+        "name": "13. Restrict to a time window"
       },
       "semi_continuous": {
-        "name": "Runs at full power only"
+        "name": "12. Runs at full power only"
       },
       "single_constant": {
-        "name": "Must run in one unbroken block"
+        "name": "11. Must run in one unbroken block"
       },
       "load_requested": {
         "name": "Requested"
@@ -300,19 +377,12 @@
           "idle": "Idle"
         }
       },
-      "load_mode": {
-        "name": "Mode",
-        "state": {
-          "auto": "Follow the plan",
-          "force_on": "Force on",
-          "force_off": "Force off"
-        }
-      },
       "recurrence": {
-        "name": "Recurrence",
+        "name": "10. Recurrence",
         "state": {
           "daily": "Every day",
-          "on_demand": "On demand"
+          "on_demand": "On demand",
+          "surplus": "On spare solar"
         }
       }
     },
@@ -325,31 +395,82 @@
       },
       "run_forecast_fit": {
         "name": "Train load forecaster"
+      },
+      "run_now": {
+        "name": "Run now"
       }
     },
     "number": {
       "nominal_power": {
-        "name": "Power when running"
+        "name": "03. Power when running"
       },
       "operating_hours": {
-        "name": "Hours needed per day"
+        "name": "02. Hours needed per day"
       },
       "minimum_power": {
-        "name": "Lowest power while running"
+        "name": "04. Lowest power while running"
       },
       "startup_penalty": {
-        "name": "Cost of starting"
+        "name": "09. Cost of starting"
       },
       "max_startups": {
-        "name": "Most starts per plan"
+        "name": "08. Most starts per plan"
+      },
+      "run_within": {
+        "name": "07. Run within"
+      },
+      "comfort_temperature": {
+        "name": "Comfort temperature"
+      },
+      "setback_temperature": {
+        "name": "Setback temperature"
+      },
+      "max_temperature": {
+        "name": "Maximum temperature"
+      },
+      "heating_rate": {
+        "name": "Heating rate"
+      },
+      "cooling_constant": {
+        "name": "Heat loss constant"
+      },
+      "thermal_inertia": {
+        "name": "Response delay"
+      },
+      "surplus_threshold": {
+        "name": "Spare solar threshold"
+      },
+      "mix_beta": {
+        "name": "Live value weight"
+      },
+      "energy_needed": {
+        "name": "14. Energy needed"
+      },
+      "surplus_headroom": {
+        "name": "15. Spare solar headroom"
+      },
+      "surplus_priority": {
+        "name": "16. Surplus priority"
+      },
+      "minimum_on_time": {
+        "name": "17. Minimum time on"
+      },
+      "minimum_off_time": {
+        "name": "18. Minimum time off"
       }
     },
     "time": {
       "earliest_start": {
-        "name": "Earliest start"
+        "name": "05. Earliest start"
       },
       "latest_end": {
-        "name": "Latest finish"
+        "name": "06. Latest finish"
+      },
+      "comfort_start": {
+        "name": "Comfort from"
+      },
+      "comfort_end": {
+        "name": "Comfort until"
       }
     }
   },
@@ -365,6 +486,18 @@
     "plan_schema_unsupported": {
       "title": "EMHASS plan format not understood",
       "description": "EMHASS returned an optimisation plan using schema version {found}, but this integration understands major version {supported}. A new major version means columns were renamed or removed, or a unit or sign convention changed, so the plan is being ignored rather than misread. Update EMHASS Companion, or report this if no update is available."
+    },
+    "thermal_comfort_unreachable": {
+      "title": "{name} cannot reach its comfort schedule",
+      "description": "At {heating_rate} °C/h, {name} cannot get from {current} °C to the {required} °C its schedule asks for by {time} -- the best it can do running flat out is {achievable} °C. This is checked with heat loss ignored, so the real shortfall is at least this big. Lower the comfort temperature, push the comfort window later, or raise the heating rate if it is set too conservatively for this load."
+    },
+    "optimization_infeasible": {
+      "title": "EMHASS could not find a feasible plan",
+      "description": "The last {action} run reported the optimisation problem as infeasible, even after EMHASS retried with relaxed constraints. The previous plan is being kept instead of an unusable one. This is almost always a deferrable load whose required run time does not fit inside the remaining horizon, or a comfort schedule a thermal load cannot reach -- check each load's duration and window against the plan horizon. This resolves automatically once a run solves successfully."
+    },
+    "run_failed": {
+      "title": "The last {action} run failed",
+      "description": "EMHASS did not produce a plan: {error}\n\nThe previous plan is being kept. This resolves automatically once a run succeeds again -- check the EMHASS add-on logs for the full error if it doesn't clear on its own."
     }
   },
   "services": {
@@ -393,6 +526,20 @@
           "description": "How many series entries to include in the response."
         }
       }
+    },
+    "typical_load_forecast": {
+      "name": "Typical household load forecast",
+      "description": "Backs the \"Typical household\" load profile. Returns one day's half-hourly load shape, scaled so its average matches the given power.",
+      "fields": {
+        "day": {
+          "name": "Day",
+          "description": "The calendar day to forecast, in the local timezone."
+        },
+        "average_w": {
+          "name": "Average power",
+          "description": "The household's typical average power draw, in watts."
+        }
+      }
     }
   },
   "config_subentries": {
@@ -400,33 +547,13 @@
       "step": {
         "user": {
           "title": "Add a deferrable load",
-          "description": "A load whose timing the optimiser may choose: a dishwasher, a car charger, a pool pump. These are the values the load starts with -- once it is added, each becomes a control on the load's own page that you can also change from an automation.",
+          "description": "A load whose timing the optimiser may choose: a dishwasher, a car charger, a pool pump. What makes it want to run decides which settings it has, so it is asked first.",
           "data": {
             "name": "Name",
-            "nominal_power_w": "Power when running",
-            "operating_hours": "Hours needed per day",
-            "earliest_start": "Earliest start",
-            "latest_end": "Latest finish",
-            "semi_continuous": "Runs at full power only",
-            "single_constant": "Must run in one unbroken block",
-            "startup_penalty": "Cost of starting",
-            "power_sensor": "Running sensor",
-            "control_entity": "Control entity",
-            "minimum_power_w": "Lowest power while running",
-            "max_startups": "Most starts per plan"
+            "recurrence": "Runs"
           },
           "data_description": {
-            "nominal_power_w": "Roughly what this load draws while it is on.",
-            "operating_hours": "How long it needs to run in total. The optimiser chooses when. EMHASS plans in {time_step}-minute steps, so this is rounded to the nearest whole step ({time_step_hours} h).",
-            "earliest_start": "Only used if you turn on the load's time window switch afterwards.",
-            "latest_end": "May be earlier than the start time, for an overnight window.",
-            "semi_continuous": "On for a dishwasher or pump, which are either on or off. Off for something whose power can be varied, such as a car charger.",
-            "single_constant": "On if interrupting it would be a problem, such as a wash cycle.",
-            "startup_penalty": "Discourages switching on and off repeatedly. Leave at zero unless that is a problem.",
-            "power_sensor": "Optional. The most reliable way to tell the optimiser whether this load is actually running -- catching a run that finished early, one that never happened despite being planned, or one started at a different time than scheduled. A power sensor gives the most detail (any unit -- W, kW, MW, ... -- is converted to watts automatically); a plain on/off binary_sensor works too, read the same way a control entity's state is. Without either and no control entity, the optimiser instead assumes the load followed its own last plan, which cannot see any of that.",
-            "control_entity": "Optional. If set, the integration switches this on and off to follow the plan, once you enable control -- and its state doubles as the running signal when there is no power sensor. Leave empty to keep control in your own automations. With neither this nor a power sensor set, the optimiser instead trusts its own previous plan -- assuming the load ran whenever it was scheduled to. That is only as accurate as your own follow-through, so a real sensor or control entity is worth adding when you can.",
-            "minimum_power_w": "Only used when \"Runs at full power only\" is off. A car charger that cannot go below 6 A, for instance -- the optimiser then either runs the load at this power or more, or leaves it off entirely. Zero means no floor.",
-            "max_startups": "A hard limit, unlike the cost of starting: too low and the requested run time cannot be reached at all. Zero means no limit."
+            "recurrence": "Every day -- it needs a set number of hours every day, and the optimiser picks when. On demand -- it runs only when something arms it, for a set number of hours. On spare solar -- it takes whatever solar the house, the other loads and the battery are not already using, for as long as it is armed. A load on spare solar has no hours and no time window; both come from the plan."
           }
         },
         "reconfigure": {
@@ -441,12 +568,151 @@
             "control_entity": "Optional. If set, the integration switches this on and off to follow the plan, once you enable control -- and its state doubles as the running signal when there is no power sensor. Leave empty to keep control in your own automations. With neither this nor a power sensor set, the optimiser instead trusts its own previous plan -- assuming the load ran whenever it was scheduled to. That is only as accurate as your own follow-through, so a real sensor or control entity is worth adding when you can."
           },
           "description": "Power, run time, the time window and the load model are controls on the load's own page, not settings here -- change them there or from an automation."
+        },
+        "settings": {
+          "title": "Load settings",
+          "description": "These are the values the load starts with -- once it is added, each becomes a control on the load's own page that you can also change from an automation.",
+          "data": {
+            "nominal_power_w": "Power when running",
+            "minimum_power_w": "Lowest power while running",
+            "semi_continuous": "Runs at full power only",
+            "startup_penalty": "Cost of starting",
+            "operating_hours": "Hours needed per day",
+            "earliest_start": "Earliest start",
+            "latest_end": "Latest finish",
+            "single_constant": "Must run in one unbroken block",
+            "max_startups": "Most starts per plan",
+            "minimum_on_time_minutes": "Minimum time on",
+            "minimum_off_time_minutes": "Minimum time off",
+            "energy_needed_kwh": "Energy needed",
+            "surplus_headroom_w": "Spare solar headroom",
+            "surplus_priority": "Surplus priority",
+            "power_sensor": "Running sensor",
+            "control_entity": "Control entity"
+          },
+          "data_description": {
+            "nominal_power_w": "Roughly what this load draws while it is on.",
+            "minimum_power_w": "Only used when \"Runs at full power only\" is off.",
+            "semi_continuous": "On for a dishwasher or pump, which are either on or off. Off for something whose power can be varied, such as a car charger.",
+            "startup_penalty": "Discourages switching on and off repeatedly. Leave at zero unless that is a problem. On spare solar this is the right way to keep a load from short-cycling -- it prices a restart rather than forbidding a break, so the load still runs in one block on a clear day but may split across two peaks on a cloudy one.",
+            "operating_hours": "How long it needs to run in total. The optimiser chooses when. EMHASS plans in {time_step}-minute steps, so this is rounded to the nearest whole step ({time_step_hours} h).",
+            "earliest_start": "Only used if you turn on the load's time window switch afterwards.",
+            "latest_end": "May be earlier than the start time, for an overnight window.",
+            "single_constant": "On if interrupting it would be a problem, such as a wash cycle.",
+            "minimum_on_time_minutes": "Once switched on, the load must stay on at least this long. Protects compressor-driven loads (heat pumps, freezers) from short-cycling. Zero means no minimum.",
+            "minimum_off_time_minutes": "Once switched off, the load must stay off at least this long. Zero means no minimum.",
+            "energy_needed_kwh": "Optional total: the load stops asking once it has had this much. Leave at zero to let it run on whatever solar is spare until you turn its Requested switch off.",
+            "surplus_headroom_w": "How much spare solar there must be beyond this load's own draw before a timestep counts. A margin against the solar forecast coming in light -- without it, a timestep counted at exactly this load's power imports as soon as a cloud arrives.",
+            "surplus_priority": "Only matters with more than one load on spare solar. The lowest number claims the shared surplus first; ties are broken by name. Leave at zero unless you have several and want one served before another."
+          }
         }
       },
       "entry_type": "Deferrable load",
       "initiate_flow": {
         "user": "Add deferrable load",
         "reconfigure": "Edit deferrable load"
+      }
+    },
+    "thermal_load": {
+      "entry_type": "Thermal load",
+      "initiate_flow": {
+        "user": "Add thermal load",
+        "reconfigure": "Edit thermal load"
+      },
+      "step": {
+        "user": {
+          "title": "Add a thermal load",
+          "description": "A load whose temperature the optimiser controls rather than its run time: a heat pump, direct electric heating, an air conditioner. Instead of \"run N hours\" you give a comfort band, and the optimiser finds the cheapest hours that keep the temperature inside it -- pre-heating into cheap electricity where the band allows.\n\nThese are the values the load starts with -- once it is added, each becomes a control on the load's own page that you can also change from an automation.\n\nThe model also needs an outdoor temperature forecast: set one under Configure > Outdoor temperature, or leave it to EMHASS if your solar forecast is EMHASS built-in (Open-Meteo).",
+          "data": {
+            "name": "Name",
+            "temperature_sensor": "Temperature sensor",
+            "sense": "Heats or cools",
+            "nominal_power_w": "Power when running",
+            "comfort_temperature": "Comfort temperature",
+            "setback_temperature": "Setback temperature",
+            "max_temperature": "Maximum temperature",
+            "comfort_start": "Comfort from",
+            "comfort_end": "Comfort until",
+            "heating_rate": "Heating rate",
+            "cooling_constant": "Heat loss constant",
+            "thermal_inertia": "Response delay",
+            "power_sensor": "Running sensor",
+            "control_entity": "Control entity"
+          },
+          "data_description": {
+            "temperature_sensor": "The room (or tank) the temperatures below apply to. Strongly recommended: without it, every plan starts from a guessed temperature instead of the actual one.",
+            "sense": "Whether running this load raises the temperature (a heat pump, a heater, hot water) or lowers it (an air conditioner).",
+            "nominal_power_w": "Roughly what this load draws while it is on.",
+            "comfort_temperature": "The temperature to hold while the comfort window is active. The optimiser may go above it when energy is cheap, never below.",
+            "setback_temperature": "The lowest acceptable temperature outside the comfort window.",
+            "max_temperature": "A hard ceiling that applies at all times. The gap between the comfort temperature and this ceiling is the storage the optimiser plays with -- heating a little extra while electricity is cheap.",
+            "comfort_start": "When the comfort temperature starts applying each day.",
+            "comfort_end": "When it stops and the setback takes over. May be earlier than the start time, for a window that crosses midnight.",
+            "heating_rate": "How fast the temperature changes with the load running at full power. Watch a cold morning: a house that climbs from 18 to 21 °C in two hours with the heating flat out has a rate of 1.5 °C/h. For cooling, how fast it drops.",
+            "cooling_constant": "How fast heat leaks to the outdoors: degrees lost per hour, per degree of difference to the outdoor temperature. Most homes land between 0.05 (well insulated) and 0.3 (draughty). If the planned heating comes too early, lower it; too late, raise it.",
+            "thermal_inertia": "How long after switching on before the temperature responds. Underfloor heating in concrete can take an hour or more; a radiator or fan is nearly immediate. Leave at 0 if unsure.",
+            "power_sensor": "Optional. Tells the optimiser whether this load is actually running. A power sensor gives the most detail (any unit is converted to watts automatically); a plain on/off binary_sensor works too.",
+            "control_entity": "Optional. If set, the integration switches this on and off to follow the plan, once you enable control -- and its state doubles as the running signal when there is no power sensor. Leave empty to keep control in your own automations."
+          }
+        },
+        "reconfigure": {
+          "title": "Edit thermal load",
+          "data": {
+            "name": "Name",
+            "temperature_sensor": "Temperature sensor",
+            "sense": "Heats or cools",
+            "power_sensor": "Running sensor",
+            "control_entity": "Control entity"
+          },
+          "data_description": {
+            "temperature_sensor": "The room (or tank) the temperatures below apply to. Strongly recommended: without it, every plan starts from a guessed temperature instead of the actual one.",
+            "sense": "Whether running this load raises the temperature (a heat pump, a heater, hot water) or lowers it (an air conditioner).",
+            "power_sensor": "Optional. Tells the optimiser whether this load is actually running. A power sensor gives the most detail (any unit is converted to watts automatically); a plain on/off binary_sensor works too.",
+            "control_entity": "Optional. If set, the integration switches this on and off to follow the plan, once you enable control -- and its state doubles as the running signal when there is no power sensor. Leave empty to keep control in your own automations."
+          }
+        }
+      }
+    },
+    "load_group": {
+      "entry_type": "Load group",
+      "initiate_flow": {
+        "user": "Add load group",
+        "reconfigure": "Edit load group"
+      },
+      "step": {
+        "user": {
+          "title": "Add a load group",
+          "description": "Group two or more existing deferrable loads that share a circuit -- a subpanel or fuse limit, or an EV charger and an immersion heater that must never run together.",
+          "data": {
+            "name": "Name",
+            "load_subentry_ids": "Loads in this group",
+            "mutual_exclusion": "Only one may run at a time",
+            "max_power_w": "Shared power budget"
+          },
+          "data_description": {
+            "load_subentry_ids": "At least two loads.",
+            "mutual_exclusion": "On if these loads must never run at the same time, such as two appliances on the same fuse.",
+            "max_power_w": "The combined power these loads may draw at once. Required unless \"Only one may run at a time\" is on."
+          }
+        },
+        "reconfigure": {
+          "title": "Edit load group",
+          "data": {
+            "name": "Name",
+            "load_subentry_ids": "Loads in this group",
+            "mutual_exclusion": "Only one may run at a time",
+            "max_power_w": "Shared power budget"
+          },
+          "data_description": {
+            "load_subentry_ids": "At least two loads.",
+            "mutual_exclusion": "On if these loads must never run at the same time, such as two appliances on the same fuse.",
+            "max_power_w": "The combined power these loads may draw at once. Required unless \"Only one may run at a time\" is on."
+          }
+        }
+      },
+      "error": {
+        "too_few_loads": "Choose at least two loads for the group.",
+        "max_power_required": "Set a shared power budget, or turn on \"Only one may run at a time\"."
       }
     }
   }

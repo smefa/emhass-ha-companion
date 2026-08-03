@@ -1,7 +1,9 @@
 [project]
 name = "emhass-companion"
-version = "0.1.0"
+version = "0.8.0"
 description = "Home Assistant integration that makes EMHASS usable without YAML"
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE"]
 # Home Assistant 2026.7 requires 3.14.2 or newer.
 requires-python = ">=3.14"
 

@@ -52,7 +52,7 @@ class EmhassLoadEntity(CoordinatorEntity[EmhassCoordinator]):
             identifiers={(DOMAIN, f"{entry.entry_id}_{load.subentry_id}")},
             name=load.name,
             manufacturer="EMHASS",
-            model="Deferrable load",
+            model="Thermal load" if load.is_thermal else "Deferrable load",
             via_device=(DOMAIN, entry.entry_id),
         )
 
@@ -68,11 +68,23 @@ class EmhassLoadEntity(CoordinatorEntity[EmhassCoordinator]):
 
     @property
     def plan_index(self) -> int | None:
-        """This load's position in EMHASS's ``P_deferrable{k}`` columns.
+        """Which column of *the current plan* belongs to this load.
 
-        Not a fixed number: it shifts as loads are enabled and disabled, so it
-        is resolved from the order recorded when the payload was built.
+        Resolved from the order recorded when that payload was built, which is
+        the only thing that can safely index into a plan already in hand -- a
+        load added or removed since would otherwise shift the reading of every
+        column after it.
         """
         if not self.coordinator.data:
             return None
         return self.coordinator.data.deferrable_index(self.load.subentry_id)
+
+    @property
+    def deferrable_number(self) -> int | None:
+        """This load's ``P_deferrable{k}`` number, for people to read.
+
+        Taken from the registry rather than from the last plan, so it is an
+        answer even before the first optimisation of a restart. The two agree,
+        because every configured load is sent on every run.
+        """
+        return self.coordinator.loads.index_of(self.load.subentry_id)

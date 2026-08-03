@@ -28,7 +28,9 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     coordinator: EmhassCoordinator = entry.runtime_data.coordinator
-    async_add_entities([EmhassPlanStaleBinarySensor(coordinator)])
+    async_add_entities(
+        [EmhassPlanStaleBinarySensor(coordinator), SolarSurplusBinarySensor(coordinator)]
+    )
 
     for load in entry.runtime_data.loads.all():
         async_add_entities(
@@ -70,6 +72,37 @@ class EmhassPlanStaleBinarySensor(EmhassEntity, BinarySensorEntity):
         }
 
 
+class SolarSurplusBinarySensor(EmhassEntity, BinarySensorEntity):
+    """Whether the plan expects spare solar right now.
+
+    The household-level answer, against the hub's reporting threshold -- not
+    the per-load one. A load's own question is "is there enough for *me*", and
+    that is its ``should_run``, which comes from the optimiser rather than from
+    here.
+    """
+
+    _attr_translation_key = "solar_surplus"
+
+    def __init__(self, coordinator: EmhassCoordinator) -> None:
+        super().__init__(coordinator, "solar_surplus")
+
+    @property
+    def is_on(self) -> bool | None:
+        value = self.coordinator.surplus_series().value_at(dt_util.utcnow())
+        if value is None:
+            # No plan, or one that does not reach now. "We do not know" and
+            # "there is definitely no spare sun" lead to different automations.
+            return None
+        return value >= self.coordinator.surplus_threshold_w
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {
+            "surplus_w": self.coordinator.surplus_series().value_at(dt_util.utcnow()),
+            "threshold": self.coordinator.surplus_threshold_w,
+        }
+
+
 class LoadShouldRunBinarySensor(EmhassLoadEntity, BinarySensorEntity):
     """Whether this load should be running right now.
 
@@ -77,6 +110,13 @@ class LoadShouldRunBinarySensor(EmhassLoadEntity, BinarySensorEntity):
     any manual override, and reports unknown rather than off when there is no
     usable plan -- "we do not know" and "definitely do not run" are different
     instructions, and conflating them silently keeps a load off.
+
+    A load that was deliberately left out of the optimisation is the third
+    case, and it is a definite *off*: the plan is perfectly good, this load
+    simply is not in it, because it is disabled or is an on-demand load
+    nobody has asked for. Reporting that as unknown leaves an automation
+    unable to tell "I turned this off" from "the integration is broken", and
+    leaves the load permanently unknown for as long as it stays off.
     """
 
     _attr_translation_key = "should_run"
@@ -88,9 +128,31 @@ class LoadShouldRunBinarySensor(EmhassLoadEntity, BinarySensorEntity):
     def is_on(self) -> bool | None:
         if self.load.mode != LOAD_MODE_AUTO:
             return resolve_should_run(self.load.mode, False)
+        if not self.load.enabled or not self.load.participates:
+            return False
         if (scheduled := self._scheduled_power()) is None:
             return None
         return resolve_should_run(self.load.mode, scheduled > self.load.running_threshold_w)
+
+    @property
+    def _reason(self) -> str:
+        """Why the state is what it is -- the question this sensor provokes."""
+        if self.load.mode != LOAD_MODE_AUTO:
+            return self.load.mode
+        if not self.load.enabled:
+            return "disabled"
+        if not self.load.participates:
+            return "not requested"
+        data = self.coordinator.data
+        if not data or data.plan is None:
+            return "no plan yet"
+        if self.coordinator.plan_is_stale:
+            return "plan is out of date"
+        if self.plan_index is None:
+            return "not in the last optimisation"
+        if self._scheduled_power() is None:
+            return "plan does not cover now"
+        return "following the plan"
 
     def _scheduled_power(self) -> float | None:
         data = self.coordinator.data
@@ -109,6 +171,8 @@ class LoadShouldRunBinarySensor(EmhassLoadEntity, BinarySensorEntity):
             "mode": self.load.mode,
             "scheduled_power": self._scheduled_power(),
             "currently_running": self.load.is_running,
+            "reason": self._reason,
+            "emhass_deferrable": self.deferrable_number,
         }
 
 

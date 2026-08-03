@@ -8,6 +8,7 @@ recorded so it can be compared against whatever is currently in charge.
 from __future__ import annotations
 
 from datetime import timedelta
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -32,9 +33,10 @@ from custom_components.emhass_companion.const import (
 )
 from custom_components.emhass_companion.coordinator import EmhassCoordinator, EmhassData
 from custom_components.emhass_companion.deferrable import DeferrableRegistry
-from custom_components.emhass_companion.executor import Executor
+from custom_components.emhass_companion.executor import AXIS_BATTERY, Executor
 from custom_components.emhass_companion.models import Plan
-from custom_components.emhass_companion.profiles import async_load_profiles
+from custom_components.emhass_companion.profiles import Profile, async_load_profiles
+from custom_components.emhass_companion.profiles.schema import validate_document
 
 MODE_SELECT = "select.inverter_mode"
 POWER_NUMBER = "number.inverter_power"
@@ -49,21 +51,106 @@ INVERTER_OPTIONS = {
     "idle_option": "Stop",
 }
 
+TEST_INVERTER_KEY = "inverter/test_mode_select_and_power"
 
-def _plan(p_batt: float, deferrable: float = 0.0, *, minutes_ago: int = 0) -> Plan:
+# Not a builtin -- the shape that `mode_select_and_power.yaml` used to cover,
+# kept here purely as executor test fixture data. Injected straight into
+# `coordinator.profiles` rather than written to disk and loaded, since nothing
+# here is exercising the loader.
+_TEST_INVERTER_DOCUMENT = {
+    "name": "Test inverter",
+    "kind": "inverter",
+    "version": 1,
+    "options": {
+        "mode_select": {"selector": {"entity": {"domain": "select"}}},
+        "power_number": {"selector": {"entity": {"domain": "number"}}},
+        "self_consume_option": {"default": "Self Consumption", "selector": {"text": {}}},
+        "force_charge_option": {"default": "Forced Charge", "selector": {"text": {}}},
+        "force_discharge_option": {"default": "Forced Discharge", "selector": {"text": {}}},
+        "idle_option": {"default": "Stop", "selector": {"text": {}}},
+    },
+    "actions": {
+        "self_consume": [
+            {
+                "service": "select.select_option",
+                "target": {"entity_id": "{{ options.mode_select }}"},
+                "data": {"option": "{{ options.self_consume_option }}"},
+            }
+        ],
+        "force_charge": [
+            {
+                "service": "number.set_value",
+                "target": {"entity_id": "{{ options.power_number }}"},
+                "data": {"value": "{{ power_w }}"},
+            },
+            {
+                "service": "select.select_option",
+                "target": {"entity_id": "{{ options.mode_select }}"},
+                "data": {"option": "{{ options.force_charge_option }}"},
+            },
+        ],
+        "force_discharge": [
+            {
+                "service": "number.set_value",
+                "target": {"entity_id": "{{ options.power_number }}"},
+                "data": {"value": "{{ power_w }}"},
+            },
+            {
+                "service": "select.select_option",
+                "target": {"entity_id": "{{ options.mode_select }}"},
+                "data": {"option": "{{ options.force_discharge_option }}"},
+            },
+        ],
+        "idle": [
+            {
+                "service": "select.select_option",
+                "target": {"entity_id": "{{ options.mode_select }}"},
+                "data": {"option": "{{ options.idle_option }}"},
+            }
+        ],
+    },
+}
+
+
+def _test_inverter_profile() -> Profile:
+    document = validate_document(_TEST_INVERTER_DOCUMENT)
+    return Profile(
+        key=TEST_INVERTER_KEY,
+        path="<test fixture>",
+        kind="inverter",
+        name=document["name"],
+        document=document,
+        is_builtin=False,
+    )
+
+
+def _plan(
+    p_batt: float,
+    deferrable: float = 0.0,
+    *,
+    minutes_ago: int = 0,
+    p_grid: float | None = None,
+    p_pv_curtailment: float | None = None,
+    unit_prod_price: float | None = None,
+) -> Plan:
     start = dt_util.utcnow() - timedelta(minutes=minutes_ago)
+    record: dict[str, Any] = {
+        "timestamp": (start - timedelta(minutes=5)).isoformat(),
+        "P_batt": p_batt,
+        "P_deferrable0": deferrable,
+    }
+    if p_grid is not None:
+        record["P_grid"] = p_grid
+    if p_pv_curtailment is not None:
+        record["P_PV_curtailment"] = p_pv_curtailment
+    if unit_prod_price is not None:
+        record["unit_prod_price"] = unit_prod_price
     return Plan.from_response(
         {
             "status": "ok",
             "generated_at": start.isoformat(),
             "emhass_schema_version": "1.0",
-            "plan": [
-                {
-                    "timestamp": (start - timedelta(minutes=5)).isoformat(),
-                    "P_batt": p_batt,
-                    "P_deferrable0": deferrable,
-                }
-            ],
+            "plan": [record],
         }
     )
 
@@ -95,7 +182,7 @@ async def _build(
     }
     if inverter:
         options[CONF_INVERTER] = {
-            CONF_PROFILE: "inverter/mode_select_and_power",
+            CONF_PROFILE: TEST_INVERTER_KEY,
             CONF_PROFILE_OPTIONS: INVERTER_OPTIONS,
         }
 
@@ -112,6 +199,7 @@ async def _build(
 
     coordinator = EmhassCoordinator(hass, entry, AsyncMock(spec=EmhassClient), loads)
     coordinator.profiles = (await async_load_profiles(hass)).profiles
+    coordinator.profiles[TEST_INVERTER_KEY] = _test_inverter_profile()
     coordinator.data = EmhassData(plan=_plan(0), last_success=dt_util.utcnow())
 
     hass.states.async_set(MODE_SELECT, "Self Consumption")
@@ -371,17 +459,67 @@ async def test_no_inverter_profile_means_no_battery_calls(
     assert calls == []
 
 
-async def test_a_missing_action_is_reported_not_raised(hass: HomeAssistant) -> None:
+async def test_idle_falls_back_to_self_consume_when_the_profile_defines_no_idle(
+    hass: HomeAssistant, calls: list[ServiceCall]
+) -> None:
+    """A profile is not required to define `idle` -- some hardware genuinely
+    has no standby. The plan's decision still says `idle` on the sensor; only
+    the *write* is substituted, so a decision the plan legitimately produced
+    is honoured instead of just failing."""
     executor, coordinator = await _build(hass)
     coordinator.control_enabled = True
-    coordinator.profiles["inverter/mode_select_and_power"].document["actions"].pop("idle")
+    coordinator.profiles[TEST_INVERTER_KEY].document["actions"].pop("idle")
     coordinator.data = EmhassData(plan=_plan(0), last_success=dt_util.utcnow())
 
     decision = await executor.async_apply()
+    await hass.async_block_till_done()
 
     assert decision.action == MODE_IDLE
+    assert decision.error is None
+    assert any("self_consume" in rule for rule in decision.rules)
+    assert calls[-1].data["option"] == "Self Consumption"
+
+
+async def test_idle_resolved_to_self_consume_is_not_reissued_by_a_later_self_consume(
+    hass: HomeAssistant, calls: list[ServiceCall]
+) -> None:
+    """Write suppression must key on the resolved action, not the decided
+    one -- otherwise a profile with no `idle` re-issues identical service
+    calls every time the decision alternates between `idle` and
+    `self_consume`."""
+    executor, coordinator = await _build(hass)
+    coordinator.control_enabled = True
+    coordinator.profiles[TEST_INVERTER_KEY].document["actions"].pop("idle")
+
+    coordinator.data = EmhassData(plan=_plan(0), last_success=dt_util.utcnow())
+    await executor.async_apply()
+    await hass.async_block_till_done()
+    first = len(calls)
+
+    coordinator.data = EmhassData(plan=_plan(0, p_grid=0), last_success=dt_util.utcnow())
+    decision = await executor.async_apply()
+    await hass.async_block_till_done()
+
+    assert decision.action == MODE_SELF_CONSUME
+    assert len(calls) == first
+
+
+async def test_a_missing_action_with_no_fallback_is_reported_not_raised(
+    hass: HomeAssistant,
+) -> None:
+    """force_discharge has no substitute -- forcing charge instead of
+    discharge is not a fallback, it is the opposite decision, so this must
+    still surface as an error rather than silently doing something else."""
+    executor, coordinator = await _build(hass)
+    coordinator.control_enabled = True
+    coordinator.profiles[TEST_INVERTER_KEY].document["actions"].pop("force_discharge")
+    coordinator.data = EmhassData(plan=_plan(3000), last_success=dt_util.utcnow())
+
+    decision = await executor.async_apply()
+
+    assert decision.action == MODE_FORCE_DISCHARGE
     assert decision.error is not None
-    assert "idle" in decision.error
+    assert "force_discharge" in decision.error
 
 
 async def test_a_failing_service_call_does_not_raise(
@@ -484,3 +622,384 @@ async def test_a_missing_schema_version_is_tolerated(hass: HomeAssistant) -> Non
     """Older EMHASS builds may not report one; refusing everything is worse."""
     _, coordinator = await _build(hass)
     assert coordinator._schema_supported(_plan_with_schema("")) is True
+
+
+# --- infeasible-run repair ----------------------------------------------------
+
+
+async def test_an_infeasible_run_raises_a_repair(hass: HomeAssistant) -> None:
+    from homeassistant.helpers import issue_registry as ir
+
+    from custom_components.emhass_companion.const import ISSUE_OPTIMIZATION_INFEASIBLE
+
+    _, coordinator = await _build(hass)
+    coordinator._track_infeasible_issue(True, "naive-mpc-optim")
+
+    registry = ir.async_get(hass)
+    assert registry.async_get_issue(DOMAIN, ISSUE_OPTIMIZATION_INFEASIBLE) is not None
+
+    # And clears once a run solves cleanly again.
+    coordinator._track_infeasible_issue(False, "naive-mpc-optim")
+    assert registry.async_get_issue(DOMAIN, ISSUE_OPTIMIZATION_INFEASIBLE) is None
+
+
+# --- run-failed repair ---------------------------------------------------------
+
+
+async def test_a_failed_run_raises_a_repair(hass: HomeAssistant) -> None:
+    from homeassistant.helpers import issue_registry as ir
+
+    from custom_components.emhass_companion.const import ISSUE_RUN_FAILED
+
+    _, coordinator = await _build(hass)
+    coordinator._track_run_failed_issue(True, "naive-mpc-optim", "boom")
+
+    registry = ir.async_get(hass)
+    assert registry.async_get_issue(DOMAIN, ISSUE_RUN_FAILED) is not None
+
+    # And clears once a run succeeds again.
+    coordinator._track_run_failed_issue(False, "naive-mpc-optim", "")
+    assert registry.async_get_issue(DOMAIN, ISSUE_RUN_FAILED) is None
+
+
+async def test_async_run_raises_a_repair_on_emhass_error(hass: HomeAssistant) -> None:
+    from homeassistant.helpers import issue_registry as ir
+    from homeassistant.helpers.update_coordinator import UpdateFailed
+    import pytest
+
+    from custom_components.emhass_companion.api import EmhassApiError
+    from custom_components.emhass_companion.const import ISSUE_RUN_FAILED
+
+    _, coordinator = await _build(hass)
+
+    async def _boom(action: str) -> None:
+        raise EmhassApiError("POST /action/naive-mpc-optim returned 500: boom")
+
+    coordinator._run = _boom  # type: ignore[method-assign]
+
+    with pytest.raises(UpdateFailed):
+        await coordinator.async_run("naive-mpc-optim", notify=False)
+
+    registry = ir.async_get(hass)
+    assert registry.async_get_issue(DOMAIN, ISSUE_RUN_FAILED) is not None
+
+
+# --- command lifetime --------------------------------------------------------
+#
+# An inverter whose forced mode carries its own duration reverts on its own.
+# Treating an unchanged command as "nothing to do" is how a battery quietly
+# stops following the plan halfway through the evening.
+
+EXPIRING_PROFILE = """
+name: Expiring command inverter
+kind: inverter
+version: 2
+control:
+  lifetime: expires
+  duration_min: 30
+actions:
+  prepare:
+    - service: select.select_option
+      target: {entity_id: select.inverter_mode}
+      data: {option: Remote Control}
+  self_consume:
+    - service: select.select_option
+      target: {entity_id: select.inverter_mode}
+      data: {option: Self Consumption}
+  restore:
+    - service: select.select_option
+      target: {entity_id: select.inverter_mode}
+      data: {option: Handed Back}
+  force_charge:
+    - service: number.set_value
+      target: {entity_id: number.inverter_power}
+      data: {value: "{{ power }}", duration: "{{ duration_min }}"}
+  force_discharge:
+    - service: number.set_value
+      target: {entity_id: number.inverter_power}
+      data: {value: "{{ power }}"}
+  idle:
+    - service: select.select_option
+      target: {entity_id: select.inverter_mode}
+      data: {option: Stop}
+"""
+
+
+async def _with_expiring_profile(hass: HomeAssistant) -> tuple[Executor, EmhassCoordinator]:
+    directory = Path(hass.config.path("emhass_companion/profiles/inverter"))
+    await hass.async_add_executor_job(lambda: directory.mkdir(parents=True, exist_ok=True))
+    await hass.async_add_executor_job(
+        (directory / "expiring.yaml").write_text, EXPIRING_PROFILE, "utf-8"
+    )
+
+    executor, coordinator = await _build(hass)
+    coordinator.profiles = (await async_load_profiles(hass)).profiles
+    coordinator.config.inverter.key = "inverter/expiring"
+    coordinator.control_enabled = True
+    return executor, coordinator
+
+
+async def test_an_expiring_command_is_reissued_before_it_lapses(
+    hass: HomeAssistant, calls: list[ServiceCall]
+) -> None:
+    executor, coordinator = await _with_expiring_profile(hass)
+    coordinator.data = EmhassData(plan=_plan(-3000), last_success=dt_util.utcnow())
+
+    await executor.async_apply()
+    await hass.async_block_till_done()
+    first = len(calls)
+
+    # Same command, but old enough that the inverter is about to revert.
+    executor._last_applied[AXIS_BATTERY].at = dt_util.utcnow() - timedelta(minutes=20)
+    coordinator.data = EmhassData(plan=_plan(-3000), last_success=dt_util.utcnow())
+    await executor.async_apply()
+    await hass.async_block_till_done()
+
+    assert len(calls) > first, "an expiring command was suppressed as unchanged"
+
+
+async def test_a_fresh_expiring_command_is_still_deadbanded(
+    hass: HomeAssistant, calls: list[ServiceCall]
+) -> None:
+    """Re-issuing early is waste; re-issuing late is a lost plan. Only late."""
+    executor, coordinator = await _with_expiring_profile(hass)
+    coordinator.data = EmhassData(plan=_plan(-3000), last_success=dt_util.utcnow())
+
+    await executor.async_apply()
+    await hass.async_block_till_done()
+    first = len(calls)
+
+    coordinator.data = EmhassData(plan=_plan(-3010), last_success=dt_util.utcnow())
+    await executor.async_apply()
+    await hass.async_block_till_done()
+
+    assert len(calls) == first
+
+
+async def test_prepare_runs_once_per_session_not_once_per_write(
+    hass: HomeAssistant, calls: list[ServiceCall]
+) -> None:
+    executor, coordinator = await _with_expiring_profile(hass)
+    coordinator.data = EmhassData(plan=_plan(-3000), last_success=dt_util.utcnow())
+
+    await executor.async_apply()
+    await hass.async_block_till_done()
+    coordinator.data = EmhassData(plan=_plan(3000), last_success=dt_util.utcnow())
+    await executor.async_apply()
+    await hass.async_block_till_done()
+
+    prepared = [call for call in calls if call.data.get("option") == "Remote Control"]
+    assert len(prepared) == 1
+
+
+# --- curtailment ---------------------------------------------------------
+#
+# A second, independent axis from the battery actions above: a plan can
+# curtail while idle, and force-charge while not curtailing.
+
+CURTAILING_PROFILE = """
+name: Curtailing inverter
+kind: inverter
+version: 2
+actions:
+  self_consume:
+    - service: select.select_option
+      target: {entity_id: select.inverter_mode}
+      data: {option: Self Consumption}
+  force_charge:
+    - service: number.set_value
+      target: {entity_id: number.inverter_power}
+      data: {value: "{{ power }}"}
+  force_discharge:
+    - service: number.set_value
+      target: {entity_id: number.inverter_power}
+      data: {value: "{{ power }}"}
+  idle:
+    - service: select.select_option
+      target: {entity_id: select.inverter_mode}
+      data: {option: Stop}
+  curtail:
+    - service: switch.turn_on
+      target: {entity_id: switch.export_limit}
+    - service: number.set_value
+      target: {entity_id: number.export_limit}
+      data: {value: "{{ curtail_w }}"}
+  uncurtail:
+    - service: switch.turn_off
+      target: {entity_id: switch.export_limit}
+"""
+
+
+async def _with_curtailing_profile(hass: HomeAssistant) -> tuple[Executor, EmhassCoordinator]:
+    directory = Path(hass.config.path("emhass_companion/profiles/inverter"))
+    await hass.async_add_executor_job(lambda: directory.mkdir(parents=True, exist_ok=True))
+    await hass.async_add_executor_job(
+        (directory / "curtailing.yaml").write_text, CURTAILING_PROFILE, "utf-8"
+    )
+
+    executor, coordinator = await _build(hass)
+    coordinator.profiles = (await async_load_profiles(hass)).profiles
+    coordinator.config.inverter.key = "inverter/curtailing"
+    coordinator.control_enabled = True
+    return executor, coordinator
+
+
+async def test_curtailment_is_applied_and_reported(
+    hass: HomeAssistant, calls: list[ServiceCall]
+) -> None:
+    executor, coordinator = await _with_curtailing_profile(hass)
+    coordinator.data = EmhassData(
+        plan=_plan(0, p_pv_curtailment=1200), last_success=dt_util.utcnow()
+    )
+
+    decision = await executor.async_apply()
+    await hass.async_block_till_done()
+
+    assert decision.curtail is True
+    assert decision.curtail_w == 1200
+    export_limit_calls = [
+        call for call in calls if call.data.get("entity_id") == "number.export_limit"
+    ]
+    assert export_limit_calls[-1].data["value"] == 1200
+    assert any(
+        call.service == "turn_on" and call.data.get("entity_id") == "switch.export_limit"
+        for call in calls
+    )
+
+
+async def test_no_curtailment_signal_reports_false_not_none(
+    hass: HomeAssistant, calls: list[ServiceCall]
+) -> None:
+    """None is reserved for "not applicable" (no capability) -- a profile that
+    can curtail but has no reason to right now must report False, not None."""
+    executor, coordinator = await _with_curtailing_profile(hass)
+    coordinator.data = EmhassData(plan=_plan(0), last_success=dt_util.utcnow())
+
+    decision = await executor.async_apply()
+
+    assert decision.curtail is False
+
+
+async def test_curtailment_write_suppression_is_independent_of_the_battery_deadband(
+    hass: HomeAssistant, calls: list[ServiceCall]
+) -> None:
+    executor, coordinator = await _with_curtailing_profile(hass)
+    coordinator.data = EmhassData(
+        plan=_plan(-3000, p_pv_curtailment=1000), last_success=dt_util.utcnow()
+    )
+    await executor.async_apply()
+    await hass.async_block_till_done()
+
+    def _calls_to(entity_id: str) -> int:
+        return sum(1 for call in calls if call.data.get("entity_id") == entity_id)
+
+    battery_calls_before = _calls_to("number.inverter_power")
+    curtail_calls_before = _calls_to("number.export_limit")
+
+    # Battery unchanged (still -3000 W); curtailment magnitude jumps well
+    # past the deadband. The battery write must be suppressed as unchanged
+    # while the curtailment write goes through -- neither axis's deadband may
+    # gate the other.
+    coordinator.data = EmhassData(
+        plan=_plan(-3000, p_pv_curtailment=3000), last_success=dt_util.utcnow()
+    )
+    await executor.async_apply()
+    await hass.async_block_till_done()
+
+    assert _calls_to("number.inverter_power") == battery_calls_before
+    assert _calls_to("number.export_limit") > curtail_calls_before
+
+
+# --- handing control back ----------------------------------------------------
+
+
+async def test_control_is_handed_back_when_the_gate_is_switched_off(
+    hass: HomeAssistant, calls: list[ServiceCall]
+) -> None:
+    """A persistent forced mode outlives the switch unless something undoes it."""
+    executor, coordinator = await _with_expiring_profile(hass)
+    coordinator.data = EmhassData(plan=_plan(-3000), last_success=dt_util.utcnow())
+
+    await executor.async_apply()
+    await hass.async_block_till_done()
+
+    coordinator.control_enabled = False
+    await executor.async_apply()
+    await hass.async_block_till_done()
+
+    assert any(call.data.get("option") == "Handed Back" for call in calls)
+
+
+async def test_restore_uncurtails_and_hands_back_the_battery(
+    hass: HomeAssistant, calls: list[ServiceCall]
+) -> None:
+    """An export limit left in place is the same failure mode as a battery
+    left force-charging -- silent and indefinite, and worse because it costs
+    money rather than just looking wrong. Both must be undone, independently,
+    on the same handover."""
+    executor, coordinator = await _with_curtailing_profile(hass)
+    coordinator.data = EmhassData(
+        plan=_plan(-3000, p_pv_curtailment=1000), last_success=dt_util.utcnow()
+    )
+
+    await executor.async_apply()
+    await hass.async_block_till_done()
+    calls.clear()
+
+    coordinator.control_enabled = False
+    await executor.async_apply()
+    await hass.async_block_till_done()
+
+    assert any(
+        call.service == "turn_off" and call.data.get("entity_id") == "switch.export_limit"
+        for call in calls
+    )
+    assert any(call.data.get("option") == "Self Consumption" for call in calls)
+
+
+async def test_restore_is_issued_even_when_the_last_command_looks_current(
+    hass: HomeAssistant, calls: list[ServiceCall]
+) -> None:
+    executor, coordinator = await _with_expiring_profile(hass)
+    coordinator.data = EmhassData(plan=_plan(-3000), last_success=dt_util.utcnow())
+
+    await executor.async_apply()
+    await hass.async_block_till_done()
+    before = len(calls)
+
+    await executor.async_restore("test")
+    await hass.async_block_till_done()
+
+    assert len(calls) > before
+
+
+async def test_restore_falls_back_to_self_consumption(
+    hass: HomeAssistant, calls: list[ServiceCall]
+) -> None:
+    """The shipped profiles define no `restore`; self-consumption is the answer."""
+    executor, coordinator = await _build(hass)
+    coordinator.control_enabled = True
+    coordinator.data = EmhassData(plan=_plan(-3000), last_success=dt_util.utcnow())
+
+    await executor.async_apply()
+    await hass.async_block_till_done()
+    calls.clear()
+
+    await executor.async_restore("test")
+    await hass.async_block_till_done()
+
+    assert any(call.data.get("option") == "Self Consumption" for call in calls)
+
+
+async def test_a_dry_run_never_reaches_for_the_hardware_on_shutdown(
+    hass: HomeAssistant, calls: list[ServiceCall]
+) -> None:
+    """Handing back an inverter we never took is someone else's automation."""
+    executor, coordinator = await _build(hass)
+    coordinator.data = EmhassData(plan=_plan(-3000), last_success=dt_util.utcnow())
+
+    await executor.async_apply()  # control gate off: decides, does not write
+    await executor.async_restore("Home Assistant stopping")
+    await hass.async_block_till_done()
+
+    assert not calls

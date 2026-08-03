@@ -19,7 +19,7 @@ from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.emhass_companion.api import EmhassClient
-from custom_components.emhass_companion.const import DOMAIN
+from custom_components.emhass_companion.const import CONF_LOAD, DOMAIN
 
 
 async def _setup_entry(hass: HomeAssistant) -> MockConfigEntry:
@@ -63,3 +63,29 @@ async def test_saving_tariff_options_does_not_raise_the_reload_conflict(
     )
 
     assert result["type"] == "create_entry"
+
+
+async def test_load_forecast_method_is_reachable_and_saves(hass: HomeAssistant) -> None:
+    """The load source (e.g. switching to mlforecaster) must be reconfigurable
+    without re-adding the integration -- it used to only be set once, at
+    initial setup, with no menu entry to revisit it.
+    """
+    entry = await _setup_entry(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "load"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"profile": "load/sensor"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {"entity": "sensor.house_load", "method": "mlforecaster"},
+    )
+
+    assert result["type"] == "create_entry"
+    assert entry.options[CONF_LOAD] == {
+        "profile": "load/sensor",
+        "profile_options": {"entity": "sensor.house_load", "method": "mlforecaster"},
+    }

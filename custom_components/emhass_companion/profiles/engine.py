@@ -18,6 +18,13 @@ from homeassistant.helpers import template as template_helper
 from homeassistant.util import dt as dt_util
 
 from ..const import (
+    ACTION_CURTAIL,
+    ACTION_UNCURTAIL,
+    MODE_FORCE_CHARGE,
+    MODE_FORCE_DISCHARGE,
+    PERCENT_UNITS,
+    POWER_UNIT_KW,
+    POWER_UNIT_PERCENT,
     SOURCE_TYPE_ATTRIBUTES,
     SOURCE_TYPE_SERVICE,
     SOURCE_TYPE_TEMPLATE,
@@ -257,6 +264,146 @@ def resolve_settings(
 # --- inverter actions --------------------------------------------------------
 
 
+def _rated_power_w(hass: HomeAssistant, profile: Profile, options: dict[str, Any]) -> float:
+    """The inverter's rating, needed to express a setpoint as a percentage."""
+    control = profile.control
+    raw = render(hass, control.get("rated_power_w"), _variables(profile, options))
+    try:
+        rated = float(raw)
+    except (TypeError, ValueError):
+        raise ProfileError(
+            f"Profile '{profile.key}' has power_unit '{control['power_unit']}' but "
+            f"rated_power_w resolved to {raw!r}, which is not a number"
+        ) from None
+    if rated <= 0:
+        raise ProfileError(
+            f"Profile '{profile.key}' resolved rated_power_w to {rated}; a "
+            "percentage of zero rated power is meaningless"
+        )
+    return rated
+
+
+def convert_power(
+    hass: HomeAssistant,
+    profile: Profile,
+    options: dict[str, Any],
+    action: str,
+    power_w: float,
+) -> float:
+    """Turn EMHASS's signed watts into the number this profile's action writes.
+
+    This lives in the engine rather than in every profile's templates on
+    purpose. A profile author hand-rolling ``{{ power_w / rated * 10000 }}`` is
+    how a hundred-fold error reaches somebody's battery, and the unit is
+    something the hardware has rather than something the author should compute.
+
+    EMHASS's convention on the way in is positive = discharge.
+    """
+    control = profile.control
+    magnitude = abs(float(power_w))
+
+    # Charging loses something between the meter and the cells; a profile can
+    # ask for proportionally more so that what arrives matches the plan.
+    if action == MODE_FORCE_CHARGE:
+        magnitude *= float(control["charge_boost"])
+
+    if control["signed"]:
+        if action == MODE_FORCE_CHARGE:
+            value = -magnitude
+        elif action == MODE_FORCE_DISCHARGE:
+            value = magnitude
+        else:
+            value = 0.0
+        if control["invert_sign"]:
+            value = -value
+    else:
+        # Direction is carried by a mode select or by which service is called,
+        # so the number is a magnitude and a negative one would be rejected.
+        value = magnitude
+
+    unit = control["power_unit"]
+    if unit == POWER_UNIT_KW:
+        value /= 1000.0
+    elif unit in PERCENT_UNITS:
+        rated = _rated_power_w(hass, profile, options)
+        span = 100.0 if unit == POWER_UNIT_PERCENT else 10000.0
+        value = value / rated * span
+        # Asking for more than the inverter is rated for is a rejected write at
+        # best; clamping keeps a plan that overshoots from failing outright.
+        value = max(-span, min(span, value))
+
+    step = float(control["round_to"])
+    if step > 0:
+        value = round(value / step) * step
+    return int(value) if step >= 1 and value == int(value) else value
+
+
+def convert_curtail_power(
+    hass: HomeAssistant,
+    profile: Profile,
+    options: dict[str, Any],
+    curtail_w: float,
+) -> float:
+    """Turn a curtailment target in watts into this profile's curtail_unit.
+
+    Mirrors convert_power's unit handling. No sign or charge_boost, though --
+    a curtailment target is always a plain non-negative magnitude, never a
+    direction.
+    """
+    control = profile.control
+    magnitude = abs(float(curtail_w))
+
+    unit = control["curtail_unit"]
+    if unit == POWER_UNIT_KW:
+        magnitude /= 1000.0
+    elif unit in PERCENT_UNITS:
+        rated = _rated_power_w(hass, profile, options)
+        span = 100.0 if unit == POWER_UNIT_PERCENT else 10000.0
+        magnitude = magnitude / rated * span
+        magnitude = max(0.0, min(span, magnitude))
+
+    step = float(control["round_to"])
+    if step > 0:
+        magnitude = round(magnitude / step) * step
+    return int(magnitude) if step >= 1 and magnitude == int(magnitude) else magnitude
+
+
+def action_variables(
+    hass: HomeAssistant,
+    profile: Profile,
+    options: dict[str, Any],
+    action: str,
+    *,
+    power_w: float = 0.0,
+    curtail_w: float = 0.0,
+    **extra: Any,
+) -> dict[str, Any]:
+    """The template scope one inverter action is rendered against."""
+    control = profile.control
+    return {
+        "action": action,
+        # Ready to write: converted to this profile's unit, signed if the
+        # hardware wants a signed value, boosted and rounded. Use this one.
+        "power": convert_power(hass, profile, options, action, power_w),
+        # The raw plan value, EMHASS's convention, always watts and always
+        # signed. For anything the conversion above cannot express.
+        "power_w": round(float(power_w)),
+        "magnitude_w": round(abs(float(power_w))),
+        # How long to ask for, when the command carries its own lifetime.
+        "duration_min": control["duration_min"],
+        # Ready to write, converted to curtail_unit -- only for the actions it
+        # means anything to. Computed unconditionally otherwise is how a
+        # curtailment profile's rated_power_w template failing would break
+        # rendering force_charge/force_discharge too.
+        "curtail_w": (
+            convert_curtail_power(hass, profile, options, curtail_w)
+            if action in (ACTION_CURTAIL, ACTION_UNCURTAIL)
+            else 0
+        ),
+        **extra,
+    }
+
+
 def render_action(
     hass: HomeAssistant,
     profile: Profile,
@@ -276,7 +423,11 @@ def render_action(
             f"Profile '{profile.key}' has no '{action}' action; it defines: "
             f"{', '.join(sorted(profile.actions)) or '(none)'}"
         )
-    scope = _variables(profile, options, **variables)
+    scope = _variables(
+        profile,
+        options,
+        **action_variables(hass, profile, options, action, **variables),
+    )
     return [render(hass, step, scope) for step in steps]
 
 

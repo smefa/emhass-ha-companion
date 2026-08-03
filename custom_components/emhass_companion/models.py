@@ -21,10 +21,12 @@ from .const import (
     CONF_INVERTER_EFFICIENCY_AC_DC,
     CONF_INVERTER_EFFICIENCY_DC_AC,
     DEFAULT_CHARGE_EFFICIENCY,
+    DEFAULT_CURTAIL_ON_NEGATIVE_PRICE,
     DEFAULT_DISCHARGE_EFFICIENCY,
     DEFAULT_GRID_EXPORT_MAX,
     DEFAULT_GRID_IMPORT_MAX,
     DEFAULT_INVERTER_EFFICIENCY,
+    DEFAULT_SELF_CONSUME_THRESHOLD_W,
     DEFAULT_SOC_MAX,
     DEFAULT_SOC_MIN,
     DEFAULT_SOC_TARGET,
@@ -120,6 +122,20 @@ class Series:
     def map_values(self, func) -> Series:
         return Series(Point(p.time, func(p.value)) for p in self._points)
 
+    def blend_first(self, live_value: float, beta: float) -> Series:
+        """Blend a live/measured value into the series' earliest point.
+
+        Mirrors EMHASS's own ``Forecast.get_mix_forecast`` correction
+        (``forecast.py``): ``beta`` weights the live value, ``1 - beta``
+        weights the forecast. Only the first point changes; an empty series
+        passes through untouched since there is nothing to correct.
+        """
+        if not self._points:
+            return self
+        first, *rest = self._points
+        blended = (1 - beta) * first.value + beta * live_value
+        return Series([Point(first.time, blended), *rest])
+
     def window(self, start: datetime, end: datetime) -> Series:
         start, end = start.astimezone(UTC), end.astimezone(UTC)
         return Series(p for p in self._points if start <= p.time < end)
@@ -195,6 +211,10 @@ class BatteryConfig:
     soc_target: float = DEFAULT_SOC_TARGET
     charge_efficiency: float = DEFAULT_CHARGE_EFFICIENCY
     discharge_efficiency: float = DEFAULT_DISCHARGE_EFFICIENCY
+    self_consume_threshold_w: float = DEFAULT_SELF_CONSUME_THRESHOLD_W
+    """Below this |P_grid|, the plan wants no grid exchange at all -- hand the
+    battery to the inverter's own self-consumption mode instead of forcing it.
+    See strategy.decide_battery."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> BatteryConfig:
@@ -211,6 +231,9 @@ class BatteryConfig:
             discharge_efficiency=float(
                 data.get("discharge_efficiency", DEFAULT_DISCHARGE_EFFICIENCY)
             ),
+            self_consume_threshold_w=float(
+                data.get("self_consume_threshold_w", DEFAULT_SELF_CONSUME_THRESHOLD_W)
+            ),
         )
 
 
@@ -220,6 +243,11 @@ class GridConfig:
 
     import_max_w: float = DEFAULT_GRID_IMPORT_MAX
     export_max_w: float = DEFAULT_GRID_EXPORT_MAX
+    curtail_on_negative_price: bool = DEFAULT_CURTAIL_ON_NEGATIVE_PRICE
+    """Curtail to zero export whenever the plan's sell price is negative and the
+    battery has no headroom left to absorb the surplus instead. Off by default:
+    it is a second optimiser competing with EMHASS's own curtailment cost
+    function. See strategy.decide_curtailment."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> GridConfig:
@@ -227,6 +255,9 @@ class GridConfig:
         return cls(
             import_max_w=float(data.get("grid_import_max_w", DEFAULT_GRID_IMPORT_MAX)),
             export_max_w=float(data.get("grid_export_max_w", DEFAULT_GRID_EXPORT_MAX)),
+            curtail_on_negative_price=bool(
+                data.get("curtail_on_negative_price", DEFAULT_CURTAIL_ON_NEGATIVE_PRICE)
+            ),
         )
 
 
@@ -285,6 +316,16 @@ class DeferrableLoad:
     they must be re-derived on every single request — see
     :func:`payload.window_to_timesteps`. Storing wall-clock here and converting
     late is what keeps a window from drifting as the day progresses.
+
+    ``deadline_at`` is the other kind of end constraint: an absolute instant,
+    already anchored to the moment the run was requested. The two are
+    independent and both may apply — see :func:`payload.resolve_load_window`.
+
+    ``start_at`` / ``end_at`` are a third: an absolute window derived for this
+    one request rather than configured, which is how a surplus load says "only
+    while the sun is actually spare" (see :mod:`surplus`). Unlike a deadline
+    they are not relaxed when the run no longer fits — running outside them is
+    the one thing such a load must never do.
     """
 
     subentry_id: str
@@ -294,21 +335,56 @@ class DeferrableLoad:
     minimum_power_w: float = 0.0
     earliest_start: time | None = None
     latest_end: time | None = None
+    deadline_at: datetime | None = None
+    start_at: datetime | None = None
+    end_at: datetime | None = None
     semi_continuous: bool = True
     single_constant: bool = False
     startup_penalty: float = 0.0
     max_startups: int = 0
-    enabled: bool = True
+    minimum_on_time_minutes: float = 0.0
+    minimum_off_time_minutes: float = 0.0
+
+    wants_to_run: bool = True
+    """Whether this load is asking for its hours on this run.
+
+    *Not* whether it is sent to EMHASS. Every configured load is always sent,
+    so that a load's ``P_deferrable{k}`` number is a fixed property of the
+    system rather than something that shifts as loads are switched off or
+    requests come and go. A load that wants nothing is sent parked at zero
+    operating hours instead of being left out — see ``payload._park``.
+    """
 
     # Runtime state fed back to EMHASS so it does not re-charge a startup penalty
     # for an already-running load, nor re-schedule work already completed today.
     current_state: bool = False
     current_power_w: float = 0.0
     completed_timesteps: int = 0
+    # How many whole timesteps this load has been continuously on/off,
+    # fed back to EMHASS alongside minimum_on/off_time so it can enforce the
+    # dwell time correctly across restarts (def_current_on/off_timesteps).
+    current_on_timesteps: int = 0
+    current_off_timesteps: int = 0
 
     thermal: ThermalConfig | None = None
     """Set only for a thermal load, whose temperature is optimised instead of
     its run time."""
+
+
+@dataclass(slots=True)
+class DeferrableLoadGroup:
+    """A cross-load relationship: a shared power budget or mutual exclusion.
+
+    Unlike :class:`DeferrableLoad`, a group is not itself sent as a load --
+    it references other loads by the ``load_order`` position EMHASS expects
+    (see :func:`payload._deferrable_load_group_settings`).
+    """
+
+    subentry_id: str
+    name: str
+    load_subentry_ids: tuple[str, ...]
+    max_power_w: float | None = None
+    mutual_exclusion: bool = False
 
 
 # --- Plan models -------------------------------------------------------------
@@ -329,12 +405,26 @@ class PlanRow:
     p_pv: float | None = None
     p_grid: float | None = None
     p_batt: float | None = None
+    p_pv_curtailment: float | None = None
+    """PV the optimiser chose not to produce, in W.
+
+    Only present when PV curtailment is enabled on the EMHASS side. Independent
+    of the battery decision: a plan can curtail while idle, and charge while not
+    curtailing.
+    """
     soc: float | None = None
     unit_load_cost: float | None = None
     unit_prod_price: float | None = None
     optim_status: str | None = None
     cost: float | None = None
     deferrables: tuple[float, ...] = ()
+
+    temperatures: dict[int, float] = field(default_factory=dict)
+    """Predicted temperature per *thermal* load, keyed by deferrable number.
+
+    A dict rather than a tuple because only thermal loads have the column
+    (``predicted_temp_heater{k}``); indexing a positional sequence would shift
+    every thermal load after an ordinary one."""
 
     @property
     def soc_percent(self) -> float | None:
@@ -354,6 +444,12 @@ class PlanRow:
             deferrables.append(_as_float(value) or 0.0)
             index += 1
 
+        temperatures = {
+            k: temperature
+            for k in range(index)
+            if (temperature := _as_float(record.get(f"predicted_temp_heater{k}"))) is not None
+        }
+
         # `costfun` decomposes into one or more cost_fun_<name> columns; the
         # meaningful figure for a plan total is their sum.
         cost_columns = [
@@ -367,12 +463,14 @@ class PlanRow:
             p_pv=_as_float(record.get("P_PV")),
             p_grid=_as_float(record.get("P_grid")),
             p_batt=_as_float(record.get("P_batt")),
+            p_pv_curtailment=_as_float(record.get("P_PV_curtailment")),
             soc=_as_float(record.get("SOC_opt")),
             unit_load_cost=_as_float(record.get("unit_load_cost")),
             unit_prod_price=_as_float(record.get("unit_prod_price")),
             optim_status=record.get("optim_status"),
             cost=sum(cost_values) if cost_values else None,
             deferrables=tuple(deferrables),
+            temperatures=temperatures,
         )
 
 
@@ -395,9 +493,37 @@ class Plan:
             rows=[PlanRow.from_record(record) for record in payload["plan"]],
         )
 
+    @property
+    def step(self) -> timedelta | None:
+        """The plan's own timestep, taken from its first two rows."""
+        if len(self.rows) < 2:
+            return None
+        return self.rows[1].timestamp - self.rows[0].timestamp
+
     def row_at(self, when: datetime) -> PlanRow | None:
-        """The row whose interval contains ``when`` (hold-last semantics)."""
+        """The row whose interval contains ``when`` (hold-last semantics).
+
+        A moment *just before* the plan starts counts as the first row. EMHASS
+        aligns its horizon to the next timestep boundary after the optimisation
+        is launched, so for the first minutes after every single run "now" sits
+        in front of row zero -- and reporting no plan there would blank every
+        plan-derived sensor on a regular cycle, for a plan that is in fact
+        perfectly fresh. The cost is acting on the first row up to one timestep
+        early, which is a far smaller error than having no answer at all.
+
+        Anything earlier than that really is uncovered and still returns None.
+        """
         when = when.astimezone(UTC)
+        if not self.rows:
+            return None
+
+        first = self.rows[0]
+        if when < first.timestamp:
+            step = self.step
+            if step is not None and when >= first.timestamp - step:
+                return first
+            return None
+
         found: PlanRow | None = None
         for row in self.rows:
             if row.timestamp > when:
@@ -417,6 +543,14 @@ class Plan:
             Point(row.timestamp, row.deferrables[index])
             for row in self.rows
             if index < len(row.deferrables)
+        )
+
+    def temperature_series(self, index: int) -> Series:
+        """Predicted temperature over the horizon for one thermal load."""
+        return Series(
+            Point(row.timestamp, value)
+            for row in self.rows
+            if (value := row.temperatures.get(index)) is not None
         )
 
     @property

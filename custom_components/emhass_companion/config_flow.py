@@ -28,9 +28,18 @@ import voluptuous as vol
 from .api import EmhassClient, EmhassError
 from .const import (
     CONF_ADDER,
+    CONF_COMFORT_END,
+    CONF_COMFORT_START,
+    CONF_COMFORT_TEMPERATURE,
     CONF_CONTROL_ENTITY,
+    CONF_COOLING_CONSTANT,
     CONF_DAYAHEAD_FALLBACK_TIME,
     CONF_EARLIEST_START,
+    CONF_ENERGY_NEEDED,
+    CONF_GROUP_LOAD_IDS,
+    CONF_GROUP_MAX_POWER,
+    CONF_GROUP_MUTUAL_EXCLUSION,
+    CONF_HEATING_RATE,
     CONF_HORIZON_HOURS,
     CONF_HYBRID_INVERTER,
     CONF_INVERTER,
@@ -41,6 +50,9 @@ from .const import (
     CONF_LATEST_END,
     CONF_LOAD,
     CONF_MAX_STARTUPS,
+    CONF_MAX_TEMPERATURE,
+    CONF_MINIMUM_OFF_TIME,
+    CONF_MINIMUM_ON_TIME,
     CONF_MINIMUM_POWER,
     CONF_MODE,
     CONF_MPC_INTERVAL,
@@ -53,31 +65,51 @@ from .const import (
     CONF_PROFILE,
     CONF_PROFILE_OPTIONS,
     CONF_PV,
+    CONF_PV_ENTITY,
+    CONF_RECURRENCE,
     CONF_SEMI_CONTINUOUS,
+    CONF_SENSE,
+    CONF_SETBACK_TEMPERATURE,
     CONF_SINGLE_CONSTANT,
     CONF_SOC_ENTITY,
     CONF_STARTUP_PENALTY,
+    CONF_SURPLUS_HEADROOM,
+    CONF_SURPLUS_PRIORITY,
+    CONF_TEMPERATURE,
+    CONF_TEMPERATURE_SENSOR,
     CONF_TEMPLATE,
+    CONF_THERMAL_INERTIA,
     CONF_TIME_STEP,
     CONF_URL,
+    DEFAULT_CURTAIL_ON_NEGATIVE_PRICE,
     DEFAULT_DAYAHEAD_FALLBACK_TIME,
     DEFAULT_GRID_EXPORT_MAX,
     DEFAULT_GRID_IMPORT_MAX,
     DEFAULT_HORIZON_HOURS,
     DEFAULT_INVERTER_EFFICIENCY,
     DEFAULT_MPC_INTERVAL,
+    DEFAULT_SELF_CONSUME_THRESHOLD_W,
     DEFAULT_SOC_MAX,
     DEFAULT_SOC_MIN,
     DEFAULT_SOC_TARGET,
+    DEFAULT_SURPLUS_HEADROOM_W,
+    DEFAULT_SURPLUS_PRIORITY,
     DEFAULT_TIME_STEP,
     DEFAULT_URL,
     DOMAIN,
+    LOAD_SUBENTRY_TYPES,
     MIN_EMHASS_VERSION,
     PROFILE_KIND_INVERTER,
     PROFILE_KIND_LOAD,
     PROFILE_KIND_PRICE,
     PROFILE_KIND_PV,
+    PROFILE_KIND_TEMPERATURE,
+    RECURRENCE_DAILY,
+    RECURRENCE_SURPLUS,
+    RECURRENCES,
     SUBENTRY_TYPE_DEFERRABLE,
+    SUBENTRY_TYPE_LOAD_GROUP,
+    SUBENTRY_TYPE_THERMAL,
 )
 from .profiles import (
     Profile,
@@ -87,6 +119,18 @@ from .profiles import (
     available_profiles,
 )
 from .tariff import MODE_LINEAR, MODE_PASSTHROUGH, MODE_TEMPLATE
+from .thermal import (
+    DEFAULT_COMFORT_END,
+    DEFAULT_COMFORT_START,
+    DEFAULT_COMFORT_TEMPERATURE,
+    DEFAULT_COOLING_CONSTANT,
+    DEFAULT_HEATING_RATE,
+    DEFAULT_MAX_TEMPERATURE,
+    DEFAULT_SETBACK_TEMPERATURE,
+    DEFAULT_THERMAL_INERTIA,
+    SENSE_HEAT,
+    SENSES,
+)
 from .util import version_at_least
 
 _LOGGER = logging.getLogger(__name__)
@@ -109,12 +153,18 @@ async def _async_validate_connection(hass: HomeAssistant, url: str) -> tuple[str
 
 
 async def _async_addon_url(hass: HomeAssistant) -> str | None:
-    """Best-effort discovery of a locally installed EMHASS add-on."""
+    """Best-effort discovery of a locally installed EMHASS add-on.
+
+    "localhost" only ever reaches Home Assistant's own container, never a
+    sibling add-on's -- so a fallback default has to be either this discovered
+    hostname or a URL the user types in themselves.
+    """
     try:
         from homeassistant.components.hassio import (
             AddonError,
             AddonManager,
             AddonState,
+            get_supervisor_client,
             is_hassio,
         )
     except ImportError:  # pragma: no cover - not a supervised install
@@ -123,9 +173,19 @@ async def _async_addon_url(hass: HomeAssistant) -> str | None:
     if not is_hassio(hass):
         return None
 
-    from .const import ADDON_SLUG, DEFAULT_PORT
+    from .const import ADDON_NAME, DEFAULT_PORT
 
-    manager = AddonManager(hass, _LOGGER, "EMHASS", ADDON_SLUG)
+    try:
+        installed = await get_supervisor_client(hass).addons.list()
+    except Exception as err:  # noqa: BLE001 - best-effort discovery only
+        _LOGGER.debug("Could not list installed add-ons: %s", err)
+        return None
+
+    slug = next((addon.slug for addon in installed if addon.name == ADDON_NAME), None)
+    if slug is None:
+        return None
+
+    manager = AddonManager(hass, _LOGGER, ADDON_NAME, slug)
     try:
         info = await manager.async_get_addon_info()
     except AddonError as err:
@@ -165,6 +225,23 @@ async def _async_detect_time_step(
         return None
     minutes = round(step.total_seconds() / 60)
     return minutes if minutes > 0 else None
+
+
+def _suggested_entities(hass: HomeAssistant, profile: Profile) -> dict[str, str]:
+    """Pre-fill each option with the first suggested entity that exists.
+
+    Deliberately not detection: this runs only after the user has already said
+    which inverter they own, so a wrong guess shows up as a visibly wrong
+    entity id in a form field rather than as a silently wrong control model.
+    An option whose suggestions all miss is simply left blank.
+    """
+    suggestions: dict[str, str] = {}
+    for key, option in profile.options.items():
+        for entity_id in option.get("suggest") or []:
+            if hass.states.get(entity_id) is not None:
+                suggestions[key] = entity_id
+                break
+    return suggestions
 
 
 def _profile_selector(profiles: list[Profile]) -> selector.SelectSelector:
@@ -371,11 +448,11 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         if user_input is not None:
-            self._options["battery"] = {
-                key: value for key, value in user_input.items() if key != CONF_SOC_ENTITY
-            }
+            self._options["battery"] = _battery_storage_from_input(user_input)
             if soc := user_input.get(CONF_SOC_ENTITY):
                 self._options[CONF_SOC_ENTITY] = soc
+            if pv_live := user_input.get(CONF_PV_ENTITY):
+                self._options[CONF_PV_ENTITY] = pv_live
             return await self.async_step_grid()
 
         return self.async_show_form(step_id="battery", data_schema=vol.Schema(battery_schema({})))
@@ -385,6 +462,7 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
             self._options["grid"] = {
                 "grid_import_max_w": user_input["grid_import_max_w"],
                 "grid_export_max_w": user_input["grid_export_max_w"],
+                "curtail_on_negative_price": user_input["curtail_on_negative_price"],
             }
             self._options.update(
                 {
@@ -492,9 +570,14 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
 
         Each load then gets its own device page, its own entities and
         independent removal -- none of which a "number of deferrable loads"
-        setting can offer.
+        setting can offer. Thermal loads are a type of their own so the UI
+        offers "Add thermal load" as its own button, with its own questions.
         """
-        return {SUBENTRY_TYPE_DEFERRABLE: DeferrableLoadSubentryFlow}
+        return {
+            SUBENTRY_TYPE_DEFERRABLE: DeferrableLoadSubentryFlow,
+            SUBENTRY_TYPE_THERMAL: ThermalLoadSubentryFlow,
+            SUBENTRY_TYPE_LOAD_GROUP: LoadGroupSubentryFlow,
+        }
 
 
 def _optional_blank(key: str, defaults: dict[str, Any]) -> vol.Optional:
@@ -515,8 +598,42 @@ def _optional_blank(key: str, defaults: dict[str, Any]) -> vol.Optional:
     return vol.Optional(key, description={"suggested_value": current})
 
 
+def deferrable_kind_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
+    """The two questions that decide what the rest of the form should ask.
+
+    A config flow cannot show or hide a field in reaction to another field in
+    the *same* form, so a load whose recurrence changes which settings even
+    apply has to be asked in two steps. Surplus is the case that forces it: a
+    load taking whatever solar is spare has no operating hours and no time
+    window at all -- both are derived from the plan (see docs/surplus_loads.md)
+    -- and offering boxes whose contents are never read is worse than asking
+    one extra question.
+    """
+    return {
+        # Length-checked because the name becomes the subentry title: an empty
+        # string passes TextSelector, then gets stripped by _clean_deferrable,
+        # and the title lookup raises KeyError instead of a form error.
+        vol.Required(CONF_NAME, default=defaults.get(CONF_NAME, "")): vol.All(
+            selector.TextSelector(), vol.Length(min=1)
+        ),
+        vol.Required(
+            CONF_RECURRENCE, default=defaults.get(CONF_RECURRENCE, RECURRENCE_DAILY)
+        ): selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                mode=selector.SelectSelectorMode.LIST,
+                translation_key="recurrence",
+                options=list(RECURRENCES),
+            )
+        ),
+    }
+
+
 def deferrable_schema(
-    defaults: dict[str, Any], step_minutes: int = DEFAULT_TIME_STEP, *, initial: bool = True
+    defaults: dict[str, Any],
+    step_minutes: int = DEFAULT_TIME_STEP,
+    *,
+    initial: bool = True,
+    recurrence: str = RECURRENCE_DAILY,
 ) -> dict[Any, Any]:
     """Fields for adding or reconfiguring a deferrable load.
 
@@ -527,15 +644,18 @@ def deferrable_schema(
     can change it without reloading the config entry; the fields here are the
     values a new load starts from, and re-offering them later would show an
     edit box whose contents the restored entity immediately overrides.
+
+    The name is asked in :func:`deferrable_kind_schema` when adding, alongside
+    the recurrence that decides which of the fields below are worth showing.
+    Reconfiguring still offers it here, since renaming a load is one of the few
+    things that step is for.
     """
-    schema: dict[Any, Any] = {
-        # Length-checked because the name becomes the subentry title: an empty
-        # string passes TextSelector, then gets stripped by _clean_deferrable,
-        # and the title lookup raises KeyError instead of a form error.
-        vol.Required(CONF_NAME, default=defaults.get(CONF_NAME, "")): vol.All(
+    schema: dict[Any, Any] = {}
+
+    if not initial:
+        schema[vol.Required(CONF_NAME, default=defaults.get(CONF_NAME, ""))] = vol.All(
             selector.TextSelector(), vol.Length(min=1)
-        ),
-    }
+        )
 
     if initial:
         schema.update(
@@ -559,6 +679,58 @@ def deferrable_schema(
                         min=0, max=100000, step=10, unit_of_measurement="W", mode="box"
                     )
                 ),
+                vol.Required(
+                    CONF_SEMI_CONTINUOUS, default=defaults.get(CONF_SEMI_CONTINUOUS, True)
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_STARTUP_PENALTY, default=defaults.get(CONF_STARTUP_PENALTY, 0)
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0, max=100, step="any", mode="box")
+                ),
+            }
+        )
+
+    if initial and recurrence == RECURRENCE_SURPLUS:
+        # No hours and no window: both are derived from the exported power in
+        # the plan on every run. What a surplus load takes instead is an
+        # optional total, and a margin against PV forecast error.
+        #
+        # "Must run in one unbroken block" and "Most starts per plan" are left
+        # out too. Both are hard constraints, and on a broken-cloud day they
+        # drive the load straight through the gap between two peaks and import
+        # to satisfy themselves; the startup penalty above buys the same
+        # unbroken run on the days it is actually free. Neither is gone -- both
+        # are still switches on the load, for anyone who wants them.
+        schema.update(
+            {
+                vol.Optional(
+                    CONF_ENERGY_NEEDED, default=defaults.get(CONF_ENERGY_NEEDED, 0)
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, max=500, step=0.5, unit_of_measurement="kWh", mode="box"
+                    )
+                ),
+                vol.Optional(
+                    CONF_SURPLUS_HEADROOM,
+                    default=defaults.get(CONF_SURPLUS_HEADROOM, DEFAULT_SURPLUS_HEADROOM_W),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, max=10000, step=50, unit_of_measurement="W", mode="box"
+                    )
+                ),
+                # Only matters with two or more surplus loads; harmless to ask
+                # unconditionally since it defaults to the existing name order.
+                vol.Optional(
+                    CONF_SURPLUS_PRIORITY,
+                    default=defaults.get(CONF_SURPLUS_PRIORITY, DEFAULT_SURPLUS_PRIORITY),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0, max=100, step=1, mode="box")
+                ),
+            }
+        )
+    elif initial:
+        schema.update(
+            {
                 # Stepped by the optimisation timestep, which is the only
                 # granularity EMHASS can honour for a load that is either fully
                 # on or fully off (see payload.operating_timesteps).
@@ -576,20 +748,31 @@ def deferrable_schema(
                 _optional_blank(CONF_EARLIEST_START, defaults): selector.TimeSelector(),
                 _optional_blank(CONF_LATEST_END, defaults): selector.TimeSelector(),
                 vol.Required(
-                    CONF_SEMI_CONTINUOUS, default=defaults.get(CONF_SEMI_CONTINUOUS, True)
-                ): selector.BooleanSelector(),
-                vol.Required(
                     CONF_SINGLE_CONSTANT, default=defaults.get(CONF_SINGLE_CONSTANT, False)
                 ): selector.BooleanSelector(),
-                vol.Optional(
-                    CONF_STARTUP_PENALTY, default=defaults.get(CONF_STARTUP_PENALTY, 0)
-                ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(min=0, max=100, step="any", mode="box")
-                ),
                 vol.Optional(
                     CONF_MAX_STARTUPS, default=defaults.get(CONF_MAX_STARTUPS, 0)
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=0, max=100, step=1, mode="box")
+                ),
+                # Minimum dwell time once the load switches on/off, protecting
+                # compressor-driven loads from short-cycling. Excluded for
+                # surplus loads for the same reason as max_startups above: both
+                # are hard timing constraints a broken-cloud day can make
+                # infeasible against a derived, not configured, run window.
+                vol.Optional(
+                    CONF_MINIMUM_ON_TIME, default=defaults.get(CONF_MINIMUM_ON_TIME, 0)
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, max=240, step=1, unit_of_measurement="min", mode="box"
+                    )
+                ),
+                vol.Optional(
+                    CONF_MINIMUM_OFF_TIME, default=defaults.get(CONF_MINIMUM_OFF_TIME, 0)
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, max=240, step=1, unit_of_measurement="min", mode="box"
+                    )
                 ),
             }
         )
@@ -618,6 +801,129 @@ def deferrable_schema(
     return schema
 
 
+def thermal_schema(
+    defaults: dict[str, Any], step_minutes: int = DEFAULT_TIME_STEP, *, initial: bool = True
+) -> dict[Any, Any]:
+    """Fields for adding or reconfiguring a thermal load.
+
+    A thermal load is one whose *temperature* the optimiser controls rather
+    than its run time: a heat pump, storage heating, an air conditioner. The
+    same ownership split as :func:`deferrable_schema` applies -- the subentry
+    owns what the load is (its name, its sensors, whether it heats or cools),
+    while everything the optimiser is told (comfort band, physics) becomes a
+    control on the load's page from the moment it exists.
+
+    ``step_minutes`` is accepted for signature parity with
+    :func:`deferrable_schema` -- nothing here is quantised by the timestep.
+    """
+    schema: dict[Any, Any] = {
+        vol.Required(CONF_NAME, default=defaults.get(CONF_NAME, "")): vol.All(
+            selector.TextSelector(), vol.Length(min=1)
+        ),
+        # The room (or tank) the comfort band applies to. Optional but strongly
+        # recommended: without it every plan starts from EMHASS's default
+        # start temperature instead of the actual room.
+        _optional_blank(CONF_TEMPERATURE_SENSOR, defaults): selector.EntitySelector(
+            selector.EntitySelectorConfig(
+                filter=[{"domain": "sensor", "device_class": "temperature"}]
+            )
+        ),
+        vol.Required(
+            CONF_SENSE, default=defaults.get(CONF_SENSE, SENSE_HEAT)
+        ): selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                mode=selector.SelectSelectorMode.DROPDOWN,
+                translation_key="sense",
+                options=list(SENSES),
+            )
+        ),
+    }
+
+    if initial:
+        schema.update(
+            {
+                vol.Required(
+                    CONF_NOMINAL_POWER, default=defaults.get(CONF_NOMINAL_POWER, 2000)
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1, max=100000, step=10, unit_of_measurement="W", mode="box"
+                    )
+                ),
+                vol.Required(
+                    CONF_COMFORT_TEMPERATURE,
+                    default=defaults.get(CONF_COMFORT_TEMPERATURE, DEFAULT_COMFORT_TEMPERATURE),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=5, max=35, step=0.5, unit_of_measurement="°C", mode="box"
+                    )
+                ),
+                vol.Required(
+                    CONF_SETBACK_TEMPERATURE,
+                    default=defaults.get(CONF_SETBACK_TEMPERATURE, DEFAULT_SETBACK_TEMPERATURE),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=5, max=35, step=0.5, unit_of_measurement="°C", mode="box"
+                    )
+                ),
+                vol.Required(
+                    CONF_MAX_TEMPERATURE,
+                    default=defaults.get(CONF_MAX_TEMPERATURE, DEFAULT_MAX_TEMPERATURE),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=5, max=40, step=0.5, unit_of_measurement="°C", mode="box"
+                    )
+                ),
+                vol.Required(
+                    CONF_COMFORT_START,
+                    default=defaults.get(CONF_COMFORT_START, str(DEFAULT_COMFORT_START)),
+                ): selector.TimeSelector(),
+                vol.Required(
+                    CONF_COMFORT_END,
+                    default=defaults.get(CONF_COMFORT_END, str(DEFAULT_COMFORT_END)),
+                ): selector.TimeSelector(),
+                vol.Required(
+                    CONF_HEATING_RATE,
+                    default=defaults.get(CONF_HEATING_RATE, DEFAULT_HEATING_RATE),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0.1, max=20, step="any", unit_of_measurement="°C/h", mode="box"
+                    )
+                ),
+                vol.Required(
+                    CONF_COOLING_CONSTANT,
+                    default=defaults.get(CONF_COOLING_CONSTANT, DEFAULT_COOLING_CONSTANT),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0, max=2, step="any", mode="box")
+                ),
+                vol.Optional(
+                    CONF_THERMAL_INERTIA,
+                    default=defaults.get(CONF_THERMAL_INERTIA, DEFAULT_THERMAL_INERTIA),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, max=6, step=0.25, unit_of_measurement="h", mode="box"
+                    )
+                ),
+            }
+        )
+
+    schema.update(
+        {
+            _optional_blank(CONF_POWER_SENSOR, defaults): selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    filter=[
+                        {"domain": "sensor", "device_class": "power"},
+                        {"domain": "binary_sensor"},
+                    ]
+                )
+            ),
+            _optional_blank(CONF_CONTROL_ENTITY, defaults): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain=["switch", "input_boolean", "script"])
+            ),
+        }
+    )
+    return schema
+
+
 def _clean_deferrable(user_input: dict[str, Any]) -> dict[str, Any]:
     """Drop empty optional fields so absent means "unset", not "midnight"."""
     return {key: value for key, value in user_input.items() if value not in (None, "")}
@@ -625,6 +931,20 @@ def _clean_deferrable(user_input: dict[str, Any]) -> dict[str, Any]:
 
 class DeferrableLoadSubentryFlow(ConfigSubentryFlow):
     """Add or reconfigure one deferrable load."""
+
+    _schema = staticmethod(deferrable_schema)
+    _kind_schema: Any = staticmethod(deferrable_kind_schema)
+    """The first step's fields, or None for a load type with only one step.
+    Set to None by the thermal flow, whose demand is a comfort band rather than
+    a run time and so has no recurrence to choose."""
+
+    _kind: dict[str, Any]
+    """What the first step answered, carried into the second."""
+
+    # Optional entity pickers that a reconfigure may clear: a blank field
+    # arrives as an absent key, and must *remove* the stored value rather than
+    # leave it behind.
+    _clearable_keys: tuple[str, ...] = (CONF_POWER_SENSOR, CONF_CONTROL_ENTITY)
 
     @property
     def _step_minutes(self) -> int:
@@ -640,23 +960,55 @@ class DeferrableLoadSubentryFlow(ConfigSubentryFlow):
         return {"time_step": str(step), "time_step_hours": f"{step / 60:g}"}
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
+        if self._kind_schema is None:
+            # One step: nothing asked here changes which fields follow.
+            if user_input is not None:
+                return self._create(_clean_deferrable(user_input))
+            return self.async_show_form(
+                step_id="user",
+                data_schema=vol.Schema(self._schema({}, self._step_minutes)),
+                description_placeholders=self._placeholders(),
+            )
+
         if user_input is not None:
-            data = _clean_deferrable(user_input)
-            # Entities for a load are built once, in async_setup_entry, from
-            # entry.runtime_data.loads.all() -- creating a subentry here does
-            # not by itself add anything. __init__.py's SIGNAL_CONFIG_ENTRY_CHANGED
-            # listener is what schedules the reload, and deliberately not this
-            # step: ConfigSubentryFlowManager.async_finish_flow only calls
-            # async_add_subentry *after* this step returns, so reloading from
-            # here would race it -- sometimes running before the subentry
-            # exists to be picked up.
-            return self.async_create_entry(title=data[CONF_NAME], data=data)
+            self._kind = _clean_deferrable(user_input)
+            return await self.async_step_settings()
 
         return self.async_show_form(
             step_id="user",
-            data_schema=vol.Schema(deferrable_schema({}, self._step_minutes)),
+            data_schema=vol.Schema(self._kind_schema({})),
             description_placeholders=self._placeholders(),
         )
+
+    async def async_step_settings(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        """The fields the recurrence chosen in the first step actually uses."""
+        if user_input is not None:
+            return self._create({**self._kind, **_clean_deferrable(user_input)})
+
+        return self.async_show_form(
+            step_id="settings",
+            data_schema=vol.Schema(
+                self._schema(
+                    {},
+                    self._step_minutes,
+                    recurrence=self._kind.get(CONF_RECURRENCE, RECURRENCE_DAILY),
+                )
+            ),
+            description_placeholders=self._placeholders(),
+        )
+
+    def _create(self, data: dict[str, Any]) -> SubentryFlowResult:
+        # Entities for a load are built once, in async_setup_entry, from
+        # entry.runtime_data.loads.all() -- creating a subentry here does
+        # not by itself add anything. __init__.py's SIGNAL_CONFIG_ENTRY_CHANGED
+        # listener is what schedules the reload, and deliberately not this
+        # step: ConfigSubentryFlowManager.async_finish_flow only calls
+        # async_add_subentry *after* this step returns, so reloading from
+        # here would race it -- sometimes running before the subentry
+        # exists to be picked up.
+        return self.async_create_entry(title=data[CONF_NAME], data=data)
 
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
@@ -668,7 +1020,7 @@ class DeferrableLoadSubentryFlow(ConfigSubentryFlow):
             # subentry -- they are what a load starts from, and dropping them
             # here would reset a load to the defaults on its next reload.
             data = {**subentry.data, **_clean_deferrable(user_input)}
-            for key in (CONF_POWER_SENSOR, CONF_CONTROL_ENTITY):
+            for key in self._clearable_keys:
                 if key not in user_input:
                     data.pop(key, None)
             return self.async_update_and_abort(
@@ -678,10 +1030,138 @@ class DeferrableLoadSubentryFlow(ConfigSubentryFlow):
         return self.async_show_form(
             step_id="reconfigure",
             data_schema=vol.Schema(
-                deferrable_schema(dict(subentry.data), self._step_minutes, initial=False)
+                self._schema(dict(subentry.data), self._step_minutes, initial=False)
             ),
             description_placeholders=self._placeholders(),
         )
+
+
+class ThermalLoadSubentryFlow(DeferrableLoadSubentryFlow):
+    """Add or reconfigure one thermal load.
+
+    The thermal questions instead of the deferrable ones, asked in a single
+    step: a thermal load's demand is its comfort band, which stands every day
+    by nature, so there is no recurrence to pick and nothing that would change
+    which fields follow. The temperature sensor joins the clearable keys so a
+    blanked picker actually forgets the sensor.
+    """
+
+    _schema = staticmethod(thermal_schema)
+    _kind_schema = None
+    _clearable_keys = (CONF_POWER_SENSOR, CONF_CONTROL_ENTITY, CONF_TEMPERATURE_SENSOR)
+
+
+def load_group_schema(
+    defaults: dict[str, Any], load_options: list[selector.SelectOptionDict]
+) -> dict[Any, Any]:
+    """Fields for adding or reconfiguring a load group.
+
+    A group is a relationship between existing deferrable-load subentries, not
+    a load of its own -- it has no power, no run time, nothing the registry
+    tracks. ``max_power_w`` is genuinely optional but only when mutual
+    exclusion is on; that dependency is checked in the flow's step handler,
+    not the schema, so the error can name the actual reason.
+    """
+    return {
+        vol.Required(CONF_NAME, default=defaults.get(CONF_NAME, "")): vol.All(
+            selector.TextSelector(), vol.Length(min=1)
+        ),
+        vol.Required(
+            CONF_GROUP_LOAD_IDS, default=defaults.get(CONF_GROUP_LOAD_IDS, [])
+        ): selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                mode=selector.SelectSelectorMode.LIST,
+                multiple=True,
+                options=load_options,
+            )
+        ),
+        vol.Required(
+            CONF_GROUP_MUTUAL_EXCLUSION,
+            default=defaults.get(CONF_GROUP_MUTUAL_EXCLUSION, False),
+        ): selector.BooleanSelector(),
+        _optional_blank(CONF_GROUP_MAX_POWER, defaults): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0, max=100000, step=10, unit_of_measurement="W", mode="box"
+            )
+        ),
+    }
+
+
+class LoadGroupSubentryFlow(ConfigSubentryFlow):
+    """Add or reconfigure one load group.
+
+    A group expresses a relationship between existing deferrable-load
+    subentries -- a shared power budget or mutual exclusion -- rather than
+    being a load itself, so it does not subclass DeferrableLoadSubentryFlow:
+    the field shape is unrelated. It needs no entities of its own; Home
+    Assistant already lists subentries under the integration's config entry.
+    """
+
+    def _load_options(self) -> list[selector.SelectOptionDict]:
+        return [
+            selector.SelectOptionDict(value=subentry_id, label=subentry.title)
+            for subentry_id, subentry in self._get_entry().subentries.items()
+            if subentry.subentry_type in LOAD_SUBENTRY_TYPES
+        ]
+
+    @staticmethod
+    def _errors(data: dict[str, Any]) -> dict[str, str]:
+        errors: dict[str, str] = {}
+        if len(data.get(CONF_GROUP_LOAD_IDS, [])) < 2:
+            errors[CONF_GROUP_LOAD_IDS] = "too_few_loads"
+        elif not data.get(CONF_GROUP_MUTUAL_EXCLUSION) and CONF_GROUP_MAX_POWER not in data:
+            errors[CONF_GROUP_MAX_POWER] = "max_power_required"
+        return errors
+
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            errors = self._errors(user_input)
+            if not errors:
+                return self.async_create_entry(title=user_input[CONF_NAME], data=user_input)
+
+        return self.async_show_form(
+            step_id="user",
+            data_schema=vol.Schema(load_group_schema(user_input or {}, self._load_options())),
+            errors=errors,
+        )
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        subentry = self._get_reconfigure_subentry()
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            errors = self._errors(user_input)
+            if not errors:
+                return self.async_update_and_abort(
+                    self._get_entry(), subentry, title=user_input[CONF_NAME], data=user_input
+                )
+
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=vol.Schema(
+                load_group_schema(user_input or dict(subentry.data), self._load_options())
+            ),
+            errors=errors,
+        )
+
+
+_SOC_PERCENT_FIELDS = ("soc_min", "soc_max", "soc_target")
+
+
+def _battery_storage_from_input(user_input: dict[str, Any]) -> dict[str, Any]:
+    """The battery step's form values, as stored in options (and sent to EMHASS).
+
+    ``soc_min``/``soc_max``/``soc_target`` are entered as percent in the form
+    but stored as a 0-1 fraction, matching what EMHASS's own API expects
+    (see payload.py) and what the rest of the integration assumes.
+    """
+    return {
+        key: value / 100 if key in _SOC_PERCENT_FIELDS else value
+        for key, value in user_input.items()
+        if key not in (CONF_SOC_ENTITY, CONF_PV_ENTITY)
+    }
 
 
 def battery_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
@@ -744,23 +1224,55 @@ def battery_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
         ): selector.NumberSelector(
             selector.NumberSelectorConfig(min=0.5, max=1.0, step=0.01, mode="slider")
         ),
+        # Stored, and sent to EMHASS, as a 0-1 fraction -- the form shows
+        # percent because a slider labelled "0.10" is not obviously "10%".
+        # See _battery_storage_from_input for the conversion back.
         vol.Optional(
-            "soc_min", default=defaults.get("soc_min", DEFAULT_SOC_MIN)
+            "soc_min", default=round(defaults.get("soc_min", DEFAULT_SOC_MIN) * 100)
         ): selector.NumberSelector(
-            selector.NumberSelectorConfig(min=0, max=1, step=0.01, mode="slider")
+            selector.NumberSelectorConfig(
+                min=0, max=100, step=1, unit_of_measurement="%", mode="slider"
+            )
         ),
         vol.Optional(
-            "soc_max", default=defaults.get("soc_max", DEFAULT_SOC_MAX)
+            "soc_max", default=round(defaults.get("soc_max", DEFAULT_SOC_MAX) * 100)
         ): selector.NumberSelector(
-            selector.NumberSelectorConfig(min=0, max=1, step=0.01, mode="slider")
+            selector.NumberSelectorConfig(
+                min=0, max=100, step=1, unit_of_measurement="%", mode="slider"
+            )
         ),
         vol.Optional(
-            "soc_target", default=defaults.get("soc_target", DEFAULT_SOC_TARGET)
+            "soc_target", default=round(defaults.get("soc_target", DEFAULT_SOC_TARGET) * 100)
         ): selector.NumberSelector(
-            selector.NumberSelectorConfig(min=0, max=1, step=0.01, mode="slider")
+            selector.NumberSelectorConfig(
+                min=0, max=100, step=1, unit_of_measurement="%", mode="slider"
+            )
+        ),
+        # Below this |P_grid|, the plan wants no grid exchange at all -- the
+        # battery is handed to the inverter's own self-consumption mode
+        # instead of being forced. Not the same knob as soc_min/soc_max above:
+        # those are what the optimiser may plan between, this is a real-time
+        # mode choice read from the plan's own grid-power column.
+        vol.Optional(
+            "self_consume_threshold_w",
+            default=defaults.get("self_consume_threshold_w", DEFAULT_SELF_CONSUME_THRESHOLD_W),
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0, max=5000, step=50, unit_of_measurement="W", mode="box"
+            )
         ),
         _optional_blank(CONF_SOC_ENTITY, defaults): selector.EntitySelector(
             selector.EntitySelectorConfig(domain="sensor", device_class="battery")
+        ),
+        # Not a battery setting -- there is no PV-specific step in either flow
+        # to put it in (the setup flow's PV step is profile selection only,
+        # and PV has no options-flow step at all), so it rides along with
+        # soc_entity as the form that already collects miscellaneous live
+        # sensor readings. Blended into the first naive-mpc-optim forecast
+        # step (payload.build_payload) when set; see number.MixBetaNumber for
+        # the blend weight.
+        _optional_blank(CONF_PV_ENTITY, defaults): selector.EntitySelector(
+            selector.EntitySelectorConfig(domain="sensor", device_class="power")
         ),
     }
 
@@ -800,6 +1312,15 @@ def grid_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
                 min=0, max=100000, step=100, unit_of_measurement="W", mode="box"
             )
         ),
+        # Opt-in: curtail to zero export whenever the plan's own sell price is
+        # negative and the battery has no headroom to absorb the surplus
+        # instead. Off by default -- it is a second optimiser competing with
+        # EMHASS's own curtailment cost function, and only does anything at
+        # all for an inverter profile whose control block defines curtail.
+        vol.Required(
+            "curtail_on_negative_price",
+            default=defaults.get("curtail_on_negative_price", DEFAULT_CURTAIL_ON_NEGATIVE_PRICE),
+        ): selector.BooleanSelector(),
         # A fixed list would leave anyone whose price source publishes at some
         # other resolution stuck rounding to the nearest preset; custom_value
         # lets them type the real number instead. Coerced and range-checked
@@ -851,11 +1372,127 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
     def __init__(self) -> None:
         self._inverter_key: str = ""
         self._inverter_profiles: dict[str, Profile] = {}
+        self._temperature_key: str = ""
+        self._temperature_profiles: dict[str, Profile] = {}
+        self._load_key: str = ""
+        self._load_profiles: dict[str, Profile] = {}
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         return self.async_show_menu(
             step_id="init",
-            menu_options=["battery", "grid", "tariff", "inverter"],
+            menu_options=["load", "battery", "grid", "tariff", "inverter", "temperature"],
+        )
+
+    async def async_step_load(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Change the load forecast source, e.g. switching to/from mlforecaster.
+
+        Unlike inverter/temperature, a load source is mandatory -- there is no
+        "leave it unset" branch here.
+        """
+        options = dict(self.config_entry.options)
+        profiles = (await async_load_profiles(self.hass)).profiles
+        choices = available_profiles(self.hass, profiles, PROFILE_KIND_LOAD)
+
+        if user_input is not None:
+            self._load_key = user_input[CONF_PROFILE]
+            self._load_profiles = profiles
+            return await self.async_step_load_options()
+
+        current = (options.get(CONF_LOAD) or {}).get(CONF_PROFILE)
+        return self.async_show_form(
+            step_id="load",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_PROFILE, description={"suggested_value": current}
+                    ): _profile_selector(choices)
+                }
+            ),
+        )
+
+    async def async_step_load_options(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        options = dict(self.config_entry.options)
+        profile = self._load_profiles[self._load_key]
+
+        if user_input is not None or not profile.options:
+            options[CONF_LOAD] = {
+                CONF_PROFILE: self._load_key,
+                CONF_PROFILE_OPTIONS: user_input or {},
+            }
+            return self.async_create_entry(data=options)
+
+        stored = (options.get(CONF_LOAD) or {}).get(CONF_PROFILE_OPTIONS) or {}
+        return self.async_show_form(
+            step_id="load_options",
+            data_schema=self.add_suggested_values_to_schema(
+                vol.Schema(profile.selector_schema()), stored
+            ),
+            description_placeholders={
+                "profile": profile.name,
+                "notes": profile.notes or "",
+            },
+        )
+
+    async def async_step_temperature(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Choose where the outdoor temperature forecast comes from.
+
+        Only consulted once a thermal load exists -- the forecast is what the
+        thermal model cools towards. Left unset, EMHASS falls back to its own
+        weather data, which is only right when the solar forecast is also
+        EMHASS built-in (Open-Meteo).
+        """
+        options = dict(self.config_entry.options)
+        profiles = (await async_load_profiles(self.hass)).profiles
+        choices = available_profiles(self.hass, profiles, PROFILE_KIND_TEMPERATURE)
+
+        if user_input is not None:
+            key = user_input.get(CONF_PROFILE)
+            if not key:
+                options[CONF_TEMPERATURE] = {}
+                return self.async_create_entry(data=options)
+            self._temperature_key = key
+            self._temperature_profiles = profiles
+            return await self.async_step_temperature_options()
+
+        current = (options.get(CONF_TEMPERATURE) or {}).get(CONF_PROFILE)
+        return self.async_show_form(
+            step_id="temperature",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(
+                        CONF_PROFILE, description={"suggested_value": current}
+                    ): _profile_selector(choices)
+                }
+            ),
+        )
+
+    async def async_step_temperature_options(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        options = dict(self.config_entry.options)
+        profile = self._temperature_profiles[self._temperature_key]
+
+        if user_input is not None or not profile.options:
+            options[CONF_TEMPERATURE] = {
+                CONF_PROFILE: self._temperature_key,
+                CONF_PROFILE_OPTIONS: user_input or {},
+            }
+            return self.async_create_entry(data=options)
+
+        stored = (options.get(CONF_TEMPERATURE) or {}).get(CONF_PROFILE_OPTIONS) or {}
+        return self.async_show_form(
+            step_id="temperature_options",
+            data_schema=self.add_suggested_values_to_schema(
+                vol.Schema(profile.selector_schema()), stored
+            ),
+            description_placeholders={
+                "profile": profile.name,
+                "notes": profile.notes or "",
+            },
         )
 
     async def async_step_inverter(
@@ -904,11 +1541,15 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
             }
             return self.async_create_entry(data=options)
 
+        # What the user already answered wins; the profile's own suggestions
+        # fill the rest. Having named their inverter, they should be reading a
+        # filled-in form rather than typing entity ids.
         stored = (options.get(CONF_INVERTER) or {}).get(CONF_PROFILE_OPTIONS) or {}
+        prefill = {**_suggested_entities(self.hass, profile), **stored}
         return self.async_show_form(
             step_id="inverter_options",
             data_schema=self.add_suggested_values_to_schema(
-                vol.Schema(profile.selector_schema()), stored
+                vol.Schema(profile.selector_schema()), prefill
             ),
             description_placeholders={
                 "profile": profile.name,
@@ -921,15 +1562,15 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
     ) -> ConfigFlowResult:
         options = dict(self.config_entry.options)
         if user_input is not None:
-            options["battery"] = {
-                key: value for key, value in user_input.items() if key != CONF_SOC_ENTITY
-            }
+            options["battery"] = _battery_storage_from_input(user_input)
             options[CONF_SOC_ENTITY] = user_input.get(CONF_SOC_ENTITY) or None
+            options[CONF_PV_ENTITY] = user_input.get(CONF_PV_ENTITY) or None
             return self.async_create_entry(data=options)
 
         defaults = {
             **options.get("battery", {}),
             CONF_SOC_ENTITY: options.get(CONF_SOC_ENTITY) or "",
+            CONF_PV_ENTITY: options.get(CONF_PV_ENTITY) or "",
         }
         return self.async_show_form(
             step_id="battery", data_schema=vol.Schema(battery_schema(defaults))
@@ -941,6 +1582,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
             options["grid"] = {
                 "grid_import_max_w": user_input["grid_import_max_w"],
                 "grid_export_max_w": user_input["grid_export_max_w"],
+                "curtail_on_negative_price": user_input["curtail_on_negative_price"],
             }
             options.update(
                 {

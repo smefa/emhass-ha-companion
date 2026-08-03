@@ -2,8 +2,8 @@ name: Typical household profile (no sensor needed)
 kind: load
 version: 1
 description: >-
-  Lets EMHASS assume a generic daily consumption profile. Needs no power
-  sensor at all.
+  Lets EMHASS assume a generic daily consumption profile, scaled to the
+  average power you enter. Needs no power sensor at all.
 notes: >-
   Choose this if you have no sensor measuring house consumption, or none that
   excludes your deferrable loads. It is the least accurate option -- the
@@ -11,8 +11,41 @@ notes: >-
   it makes prices, solar and battery scheduling usable immediately, and you
   can switch to a real sensor later.
 
+  The shape (when consumption tends to be higher or lower through the day)
+  comes from a real household's recorded year; only its overall average is
+  yours to set. A rough starting point: your last year's electricity bill in
+  kWh, divided by 8760 hours, times 1000 for watts.
+
 detect:
   always: true
 
-emhass:
-  load_forecast_method: typical
+options:
+  average_w:
+    name: Average power
+    description: >-
+      Your household's typical average power draw, in watts. The generic
+      shape is scaled so its own average matches this number.
+    default: 900
+    selector:
+      number:
+        min: 0
+        step: any
+        mode: box
+        unit_of_measurement: W
+
+source:
+  type: service
+  service: emhass_companion.typical_load_forecast
+  # Tomorrow's shape is just as available as today's -- unlike a real price
+  # or solar forecast, nothing here waits on a market or a weather model.
+  for_days: [0, 1]
+  data:
+    day: "{{ day }}"
+    average_w: "{{ options.average_w }}"
+  response_path: forecast
+
+series:
+  time: time
+  value: value
+
+unit: watts

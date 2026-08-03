@@ -22,3 +22,18 @@ test_profile:
           min: 1
           max: 500
           mode: box
+
+typical_load_forecast:
+  fields:
+    day:
+      required: true
+      example: "2026-08-07"
+      selector:
+        date:
+    average_w:
+      required: true
+      example: 1200
+      selector:
+        number:
+          min: 0
+          mode: box

@@ -85,20 +85,101 @@ class ThermalConfig:
         evaluated in local wall-clock time because that is what a comfort
         schedule means to the person who set it.
 
+        Outside the comfort window the floor ramps linearly from
+        ``setback_temperature`` up to ``comfort_temperature`` over the last
+        stretch before ``comfort_start``, sized to what ``heating_rate`` can
+        actually deliver: ``|comfort - setback| / heating_rate`` hours. Without
+        this, a plain step at ``comfort_start`` bets that the load always has
+        enough lead time to close whatever gap it woke up with -- a bet a
+        colder-than-usual morning loses, making the whole optimisation
+        infeasible even though the load is correctly sized. Ramping over the
+        same distance the load can be relied on to cover keeps the
+        requirement physically reachable regardless of the starting
+        temperature.
+
         Both lists are exactly ``horizon_steps`` long. EMHASS requires at least
         that many; sending more would be silently truncated, and sending fewer
         is an error there rather than a clamp.
         """
         local_start = dt_util.as_local(grid_start)
+        ramp_duration = (
+            timedelta(
+                hours=abs(self.comfort_temperature - self.setback_temperature) / self.heating_rate
+            )
+            if self.heating_rate > 0
+            else timedelta(0)
+        )
         minimums: list[float] = []
 
         for index in range(horizon_steps):
-            moment = (local_start + step * index).time()
+            moment_dt = local_start + step * index
+            moment = moment_dt.time()
             inside = _in_comfort(moment, self.comfort_start, self.comfort_end)
-            minimums.append(self.comfort_temperature if inside else self.setback_temperature)
+            if inside:
+                minimums.append(self.comfort_temperature)
+                continue
+
+            next_start_dt = datetime.combine(
+                moment_dt.date(), self.comfort_start, tzinfo=moment_dt.tzinfo
+            )
+            if next_start_dt <= moment_dt:
+                next_start_dt += timedelta(days=1)
+            time_until_start = next_start_dt - moment_dt
+
+            if ramp_duration > timedelta(0) and time_until_start <= ramp_duration:
+                fraction = 1 - (time_until_start / ramp_duration)
+                minimums.append(
+                    self.setback_temperature
+                    + fraction * (self.comfort_temperature - self.setback_temperature)
+                )
+            else:
+                minimums.append(self.setback_temperature)
 
         maximums = [self.max_temperature] * horizon_steps
         return minimums, maximums
+
+    def first_unreachable_step(
+        self, current_temperature: float, grid_start: datetime, step: timedelta, horizon_steps: int
+    ) -> tuple[datetime, float, float] | None:
+        """The first future moment this comfort schedule cannot possibly reach.
+
+        A cheap local sanity check, not a substitute for EMHASS's own solve.
+        It assumes the load runs flat out for the whole horizon and ignores
+        heat loss to the outdoors entirely, so it can only *under*-warn: if
+        this reports a gap, EMHASS's real solve -- which also fights heat
+        loss, other loads, and grid limits -- cannot do any better either. If
+        this reports nothing, EMHASS may still find the full problem
+        infeasible for reasons this never looks at (issue investigated
+        2026-08-01: a comfort target unreachable from the load's own rates was
+        the actual cause of a real infeasible day-ahead run).
+
+        Mirrors only the gain term of EMHASS's thermal model (see
+        docs/thermal_model.md and optimization.py's
+        ``_add_thermal_load_constraints``): at most ``heating_rate`` degrees
+        per hour, for however many hours are left until each timestep. If
+        EMHASS's formula for that term changes, this is the one line to
+        update to match it -- everything else here is scheduling, not
+        physics.
+
+        Only meaningful for a heating load: an active cooling load does not
+        help meet a *rising* floor by running harder, so this returns None
+        for ``sense == "cool"`` rather than guess at that direction.
+
+        Returns ``(moment, required, achievable)`` for the first violation,
+        or None if the schedule looks reachable.
+        """
+        if self.sense != SENSE_HEAT or self.heating_rate <= 0:
+            return None
+
+        minimums, _ = self.comfort_band(grid_start, step, horizon_steps)
+        local_start = dt_util.as_local(grid_start)
+
+        for index in range(1, horizon_steps):
+            elapsed_hours = (step * index) / timedelta(hours=1)
+            achievable = current_temperature + self.heating_rate * elapsed_hours
+            if achievable < minimums[index]:
+                return local_start + step * index, minimums[index], achievable
+        return None
 
     def to_emhass(
         self, grid_start: datetime, step: timedelta, horizon_steps: int

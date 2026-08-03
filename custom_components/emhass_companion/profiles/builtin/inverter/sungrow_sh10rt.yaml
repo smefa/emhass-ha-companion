@@ -1,0 +1,204 @@
+name: Sungrow SH-RT Hybrid (SHx Modbus)
+kind: inverter
+version: 2
+
+brand: Sungrow
+
+models:
+  - SH5.0RT
+  - SH6.0RT
+  - SH8.0RT
+  - SH10RT
+
+requires: Sungrow SHx Inverter Modbus (HACS, mkaiser) — not the core Sungrow integration
+
+docs: https://github.com/mkaiser/Sungrow-SHx-Inverter-Modbus-Home-Assistant
+
+description: >-
+  Sungrow SH-RT hybrid inverters via mkaiser's local Modbus TCP integration.
+
+notes: >-
+  Requires the mkaiser Sungrow SHx Modbus HACS package (modbus_sungrow.yaml)
+  talking to the inverter over local Modbus TCP — the cloud-based core
+  Sungrow integration cannot write these registers. Forced charge/discharge
+  only takes effect while the EMS mode select is on "Forced mode"; leaving it
+  on "Self-consumption mode (default)" makes the direction select and power
+  number inert -- this is also why `idle` (battery held, neither charging nor
+  discharging) sets EMS mode to Forced too, rather than only the direction
+  select: on this hardware idle *is* forced mode at 0 W, a real third state
+  distinct from self-consumption. The forced charge/discharge power register
+  (13052) is documented by Sungrow as 0-5000 W for SH*K-* models but 0-100 %
+  for SH*.0RT models — the package's own comment says the author's SH10RT
+  actually reports/accepts plain Watts, not percent, so this profile assumes
+  W. If your unit turns out to use percent, switch power_unit to
+  percent_of_rated and set rated_power_w. Entity ids below are the package's
+  defaults (no per-device prefix) — confirm against your own install if you
+  changed the object ids. The export limit switch and number are the same
+  package's curtailment entities; every install of this Modbus package ships
+  them alongside the battery entities above, so they are required here too
+  even if you never plan to curtail.
+
+control:
+  archetype: mode_and_magnitude
+  power_unit: w
+  signed: false
+  invert_sign: false
+  charge_boost: 1.0
+  round_to: 100
+  lifetime: persistent
+  duration_min: 30
+  deadband_w: 100
+  min_write_interval_s: 0
+  restore_required: true
+  # The export limit is a plain feed-in cap in watts -- PV still serves load
+  # and battery underneath it.
+  curtail_mode: export_limit
+  curtail_unit: w
+
+options:
+  ems_mode_select:
+    name: EMS mode
+    description: Arms forced mode. Must be "Forced mode" for the direction select and power number to take effect.
+    suggest:
+      - select.ems_mode
+    selector:
+      entity:
+        domain: select
+
+  direction_select:
+    name: Battery forced charge discharge
+    suggest:
+      - select.battery_forced_charge_discharge
+    selector:
+      entity:
+        domain: select
+
+  power_number:
+    name: Battery forced charge discharge power
+    suggest:
+      - number.battery_forced_charge_discharge_power
+    selector:
+      entity:
+        domain: number
+
+  ems_mode_self_consume:
+    name: EMS mode — self-consumption option name
+    default: Self-consumption mode (default)
+    selector:
+      text: {}
+
+  ems_mode_forced:
+    name: EMS mode — forced option name
+    default: Forced mode
+    selector:
+      text: {}
+
+  direction_stop:
+    name: Direction — stop option name
+    default: Stop (default)
+    selector:
+      text: {}
+
+  direction_charge:
+    name: Direction — forced charge option name
+    default: Forced charge
+    selector:
+      text: {}
+
+  direction_discharge:
+    name: Direction — forced discharge option name
+    default: Forced discharge
+    selector:
+      text: {}
+
+  export_limit_switch:
+    name: Export limit switch
+    description: Arms the export power limit set below. Part of the same Modbus package as the fields above.
+    suggest:
+      - switch.export_power_limit
+    selector:
+      entity:
+        domain: switch
+
+  export_limit_number:
+    name: Export limit power
+    suggest:
+      - number.export_power_limit
+    selector:
+      entity:
+        domain: number
+
+sensors:
+  battery_soc: sensor.battery_level
+  battery_power: sensor.battery_power        # negative = charging, positive = discharging — matches EMHASS
+  # grid_power: sensor.export_power          # clamped to 0 while importing — not a true signed figure
+  grid_power: sensor.total_active_power      # sign convention (import vs export) not confirmed from the package source — verify against your own meter before relying on it
+  pv_power: sensor.total_dc_power
+  load_power: sensor.load_power
+
+limits:
+  # battery_capacity_wh: depends on the LBWxxx pack fitted — let the user type it in
+  # charge_power_max_w: "{{ states('number.battery_max_charge_power') | float }}"
+  # discharge_power_max_w: "{{ states('number.battery_max_discharge_power') | float }}"
+  # ac_output_max_w: 10000
+
+actions:
+  force_charge:
+    - service: number.set_value
+      target: { entity_id: "{{ options.power_number }}" }
+      data: { value: "{{ power }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.ems_mode_select }}" }
+      data: { option: "{{ options.ems_mode_forced }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.direction_select }}" }
+      data: { option: "{{ options.direction_charge }}" }
+
+  force_discharge:
+    - service: number.set_value
+      target: { entity_id: "{{ options.power_number }}" }
+      data: { value: "{{ power }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.ems_mode_select }}" }
+      data: { option: "{{ options.ems_mode_forced }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.direction_select }}" }
+      data: { option: "{{ options.direction_discharge }}" }
+
+  idle:
+    # Idle on this hardware is Forced mode at 0 W, not self-consumption -- a
+    # real third state where the battery is held while PV and grid do
+    # whatever they do. Must set EMS mode itself: the direction select and
+    # power number are inert unless it is "Forced mode" (see notes above), so
+    # arriving here from a self_consume decision would otherwise be a no-op.
+    - service: number.set_value
+      target: { entity_id: "{{ options.power_number }}" }
+      data: { value: 0 }
+    - service: select.select_option
+      target: { entity_id: "{{ options.ems_mode_select }}" }
+      data: { option: "{{ options.ems_mode_forced }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.direction_select }}" }
+      data: { option: "{{ options.direction_stop }}" }
+
+  self_consume:
+    - service: select.select_option
+      target: { entity_id: "{{ options.ems_mode_select }}" }
+      data: { option: "{{ options.ems_mode_self_consume }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.direction_select }}" }
+      data: { option: "{{ options.direction_stop }}" }
+    - service: number.set_value
+      target: { entity_id: "{{ options.power_number }}" }
+      data: { value: 0 }
+
+  curtail:
+    - service: switch.turn_on
+      target: { entity_id: "{{ options.export_limit_switch }}" }
+    - service: number.set_value
+      target: { entity_id: "{{ options.export_limit_number }}" }
+      data: { value: "{{ curtail_w }}" }
+
+  uncurtail:
+    - service: switch.turn_off
+      target: { entity_id: "{{ options.export_limit_switch }}" }
