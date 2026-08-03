@@ -20,14 +20,14 @@ Home Assistant owns all state. EMHASS is treated as a **stateless calculator**.
 
 ```
                  Home Assistant                        EMHASS
-  ┌────────────────────────────────────────┐        ┌──────────────────┐
-  │ prices  ← your price integration       │        │                  │
-  │ solar   ← your forecast integration    │──────▶ │   optimiser      │
-  │ load    ← your power sensor            │ inputs │                  │
-  │ battery ← your inverter integration    │ +      │                  │
-  │                                        │settings│                  │
-  │ plan sensors, deferrable schedules     │◀────── │  /api/v1/plan    │
-  └────────────────────────────────────────┘  plan  └──────────────────┘
+  ┌──────────────────────────────────────────┐         ┌──────────────────┐
+  │ prices  ← your price integration         │         │                  │
+  │ solar   ← your forecast integration      │──────▶  │   optimiser      │
+  │ load    ← your power sensor              │ inputs  │                  │
+  │ battery ← your inverter integration      │ +       │                  │
+  │                                          │settings │                  │
+  │ plan sensors, deferrable schedules       │◀──────  │  /api/v1/plan    │
+  └──────────────────────────────────────────┘  plan   └──────────────────┘
 ```
 
 Three consequences worth knowing:
