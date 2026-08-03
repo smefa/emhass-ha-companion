@@ -610,6 +610,28 @@ def _describe(
     )
     warnings.extend(window.warnings)
 
+    # A single-constant load that is already running gets *pinned* by EMHASS
+    # the moment it has any operating requirement at all: an unbroken block
+    # can't be split, so EMHASS keeps a currently-on single-constant load
+    # running from t=0 for its full requested duration regardless of
+    # start_timestep, widening the window mask to make room for it. That is
+    # correct when the window still covers "now" -- the pin just continues
+    # the block the window already opened. It is wrong when the window has
+    # moved past now (this load's own surplus block ended and a later,
+    # unrelated one is what got computed): the load would be pinned to a
+    # fresh multi-hour run it has no business starting immediately. Asking
+    # for nothing this cycle avoids the pin entirely and leaves the load free
+    # to turn off; the later block gets asked for normally, on its own
+    # cycle, once "now" actually reaches it and current_state has caught up.
+    if load.current_state and load.single_constant and window.start_index > 0:
+        warnings.append(
+            f"{load.name}: still running from an earlier decision, but its window "
+            f"now starts at step {window.start_index}; asking for 0 hours this run "
+            f"instead of pinning it to the later block."
+        )
+        quantised = 0.0
+        steps = 0
+
     # A floor above the ceiling has no feasible power at all, and EMHASS
     # reports that as an infeasible problem with no hint as to which load
     # caused it.

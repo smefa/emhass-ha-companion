@@ -856,6 +856,103 @@ def test_a_parked_load_produces_no_warnings_about_its_window():
     assert build_payload(_inputs(loads=loads)).warnings == []
 
 
+# --- a currently-running single-constant load whose window moved on ----------
+
+
+def test_a_currently_running_single_constant_load_is_not_pinned_to_a_future_window():
+    """EMHASS pins a currently-on single-constant load to run from t=0 for its
+    full requested duration, widening the window mask to make room -- an
+    unbroken block can't be split. That is right when the window still covers
+    now, but wrong when it has moved on: the load would be pinned to a fresh
+    run it has no business starting immediately. Asking for 0 hours this cycle
+    avoids the pin; the later block gets asked for normally once "now" reaches
+    it.
+    """
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    loads = [
+        DeferrableLoad(
+            subentry_id="pool",
+            name="Pool",
+            nominal_power_w=850,
+            operating_hours=3,
+            single_constant=True,
+            current_state=True,
+            current_power_w=850.0,
+            start_at=now + timedelta(hours=2),
+        ),
+    ]
+    result = build_payload(_inputs(now=now, loads=loads))
+    payload = result.payload
+
+    assert payload["operating_hours_of_each_deferrable_load"] == [0.0]
+    assert payload["operating_timesteps_of_each_deferrable_load"] == [0]
+    assert any("asking for 0 hours" in warning for warning in result.warnings)
+
+
+def test_a_currently_running_single_constant_load_keeps_its_hours_when_the_window_covers_now():
+    """No change for the ordinary case: the window already covers now, so the
+    pin is simply continuing the block that opened it."""
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    loads = [
+        DeferrableLoad(
+            subentry_id="pool",
+            name="Pool",
+            nominal_power_w=850,
+            operating_hours=3,
+            single_constant=True,
+            current_state=True,
+            current_power_w=850.0,
+        ),
+    ]
+    result = build_payload(_inputs(now=now, loads=loads))
+
+    assert result.payload["operating_hours_of_each_deferrable_load"] == [3.0]
+    assert result.warnings == []
+
+
+def test_a_future_window_only_zeroes_hours_for_single_constant_loads():
+    """A non-single-constant load has no pin to avoid -- EMHASS's own
+    current-power mechanism only ever forces a single timestep for it, not a
+    fresh multi-hour block, so its hours are left alone."""
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    loads = [
+        DeferrableLoad(
+            subentry_id="car",
+            name="Car",
+            nominal_power_w=3000,
+            operating_hours=3,
+            single_constant=False,
+            current_state=True,
+            current_power_w=3000.0,
+            start_at=now + timedelta(hours=2),
+        ),
+    ]
+    payload = build_payload(_inputs(now=now, loads=loads)).payload
+
+    assert payload["operating_hours_of_each_deferrable_load"] == [3.0]
+
+
+def test_a_future_window_only_zeroes_hours_when_actually_running():
+    """A load that has not started yet has no pin to avoid either -- it is
+    not "currently on", so its future window is the ordinary, correct way to
+    ask for it."""
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    loads = [
+        DeferrableLoad(
+            subentry_id="pool",
+            name="Pool",
+            nominal_power_w=850,
+            operating_hours=3,
+            single_constant=True,
+            current_state=False,
+            start_at=now + timedelta(hours=2),
+        ),
+    ]
+    payload = build_payload(_inputs(now=now, loads=loads)).payload
+
+    assert payload["operating_hours_of_each_deferrable_load"] == [3.0]
+
+
 def test_profile_settings_can_override_defaults():
     """A "no solar" profile must be able to switch PV modelling off."""
     payload = build_payload(_inputs(extra_settings={"set_use_pv": False})).payload

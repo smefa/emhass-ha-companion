@@ -103,6 +103,36 @@ Sharing among multiple surplus loads (priority order, see above) still comes
 out of what is left *after* the reservation: the battery's claim is taken off
 the top before the highest-priority surplus load even sees the series.
 
+### A currently-running unbroken load whose window moved on
+
+*Must run in one unbroken block* (`single_constant`) and the surplus window
+interact badly if left alone. EMHASS pins a currently-on single-constant load
+to run from t=0 for its full requested duration and widens the window mask to
+fit — an unbroken block can't be split, so it just lets an in-progress one run
+to completion rather than interrupt it. That is correct when the window still
+covers now: the pin is simply continuing the block that opened it. It is wrong
+when the block that justified starting has ended and the window has moved to
+a later, unrelated one (this page's motivating case: dishwasher claims the
+last of today's sun, and the next real block is tomorrow) — the pin would
+still fire, off the *new* block's fresh multi-hour total, starting immediately
+on grid or battery power the load was never meant to draw.
+
+Because a surplus load always reports zero completed timesteps (see below),
+there is no "remaining" figure for EMHASS's own progress tracking to release
+it with, either — every cycle re-pins a full fresh block, so left alone this
+does not merely run once, it can keep re-arming indefinitely.
+
+The fix is in `payload._describe`: when a load is both `current_state` (really
+running) and `single_constant`, and its freshly-resolved window's start index
+is past zero, its hours are sent as 0 for that request instead of the later
+block's total. With no operating requirement, EMHASS has nothing to pin and is
+free to plan the load off starting now. The later block is asked for normally
+on its own cycle, once "now" actually reaches it and `current_state` has had
+the chance to catch up. A load that has not started yet is unaffected — its
+future window is the ordinary, correct way to ask for it — and so is a
+non-single-constant load, which only ever gets a one-timestep force-on from
+EMHASS's current-power pin, not a multi-hour one.
+
 ### Why the previous plan
 
 This is a lagged single pass. Solving twice per cycle — once to find the
