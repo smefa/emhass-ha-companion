@@ -82,23 +82,13 @@ See **[docs/handing_over_control.md](docs/handing_over_control.md)** for the mig
 
 ## Data sources
 
-Every source is a **YAML profile** — data, not code — so adding support for another integration means writing one file, no release required.
+Every source is a **YAML profile** — so adding support for another integration means writing one file, no release required.
 
 See **[docs/data_sources.md](docs/data_sources.md)** for what ships built in, and **[docs/profiles.md](docs/profiles.md)** to write or contribute your own.
 
 ## Troubleshooting
 
 See **[docs/troubleshooting.md](docs/troubleshooting.md)** — testing a data source in isolation, diagnosing a wrong-looking plan, and resolving an infeasible optimisation.
-
-## Roadmap
-
-| Phase | Status |
-|---|---|
-| 1 — Plan retrieval, profiles, scheduling, sensors | **done** |
-| 2 — Deferrable loads as config subentries | **done** |
-| 3 — Inverter profiles, executor, dry-run gate, watchdog | **done** |
-| 4 — Custom dashboard cards | **done** |
-| 5 — More source profiles, translations, docs | **done** |
 
 Control is implemented but ships off; see [Handing over control](docs/handing_over_control.md).
 
