@@ -821,8 +821,18 @@ class DeferrableRegistry:
         # Only what is still ahead of us. A timestep already elapsed cannot be
         # scheduled into, and counting it would inflate the budget by however
         # much sun has already been and gone.
-        series = Series(point for point in series if point.time >= now)
-        reserved = Series(point for point in reserved if point.time >= now)
+        #
+        # The cutoff is the row whose interval *contains* now, not the first
+        # row strictly after it. The previous plan's rows are timestamped
+        # against whatever instant *that* run captured as its own now, a few
+        # seconds to either side of this run's -- so a strict >= comparison
+        # drops the row that actually covers "now" on almost every cycle,
+        # pushing every surplus load's window a full step later than the plan
+        # itself says it should be, indefinitely (see surplus_loads.md).
+        points = list(series)
+        cutoff = next((point.time for point in reversed(points) if point.time <= now), now)
+        series = Series(point for point in points if point.time >= cutoff)
+        reserved = Series(point for point in reserved if point.time >= cutoff)
 
         specs = [
             SurplusSpec(

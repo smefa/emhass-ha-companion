@@ -540,6 +540,31 @@ def test_a_surplus_load_reaches_the_payload_as_hours_and_a_window():
     assert not result.warnings
 
 
+def test_clock_skew_against_the_previous_plan_does_not_push_the_window_out():
+    """A qualifying row must not be dropped just because ``now`` lands a touch
+    after its exact timestamp.
+
+    The previous plan's rows are timestamped against whatever instant *that*
+    run captured as its own now -- a few seconds to either side of this run's.
+    Requiring ``point.time >= now`` exactly drops the row that already covers
+    "now" every time this run's clock reads even a moment later, and pushes
+    the window out by a full step regardless of how much surplus is actually
+    on offer. Here the plan already exports at exactly 10:00 (this run's own
+    nominal start), but ``now`` is captured one second late, as it would be
+    after this run's own price/PV/load fetches -- the window must still open
+    at step 0, not step 1.
+    """
+    pool = _pool()
+    registry = _registry(pool)
+    now = START + timedelta(seconds=1)
+    registry.apply_surplus(_plan_with_surplus_between(10, 14), ["pool"], now, 15)
+
+    result = _payload(registry.to_loads(now, 15), now)
+    payload = result.payload
+
+    assert payload["start_timesteps_of_each_deferrable_load"] == [0]
+
+
 def test_progress_shrinks_the_budget_but_is_never_sent_as_completed():
     """The double-subtraction this feature would otherwise walk into.
 
