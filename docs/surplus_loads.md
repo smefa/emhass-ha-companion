@@ -59,9 +59,13 @@ Once per run, in `surplus.py`, from the **previous** run's plan:
    battery's own reservation is taken off (see below).
 4. **The window.** First to last *gross*-qualifying timestep *in the block*,
    sent as an absolute `start_at`/`end_at` pair rather than a wall-clock one.
-5. **The budget.** `hours = usable energy / nominal power`, where each
-   timestep's contribution is clipped at what the load can actually take —
-   this time from the *net* series, after the battery's reservation.
+5. **The budget.** `hours = credited energy / nominal power`, capped at the
+   qualifying span itself. Each net-qualifying timestep's *full* surplus is
+   credited (not clipped at what the load can draw in that one slot), so a
+   run of strong slots can cover for a few that only just clear the bar —
+   but the total can never ask for more hours than the span physically has
+   room for, which is the cap doing the same job the per-slot clip used to.
+   See [the budget cap](#the-budget-cap) below.
 
 The load is then sent to EMHASS as a completely ordinary deferrable with those
 hours and that window. The optimiser still decides *when* inside it — but only
@@ -80,6 +84,34 @@ cycle's budget, or it would switch itself off every time it switched on. An
 ordinary deferrable's consumption stays subtracted because it is a real claim
 on the house's energy — leaving it out too would promise the same
 kilowatt-hour to the pool as well, selling it twice.
+
+### The budget cap
+
+Each net-qualifying timestep's full surplus is credited toward `hours`, not
+just what the load could draw in that one slot — a 3 kW timestep credits an
+800 W pool the full 750 Wh, not 200 Wh. That lets a run of strong slots make
+up for a few that only just clear the bar, or for a slot the battery reserved
+most of, rather than every single timestep having to individually justify
+itself before it counts at all.
+
+The total is then capped at the qualifying span itself: the load can never be
+asked to run more hours than the span has timesteps for, because there would
+be nowhere left to place the rest — EMHASS would report the whole problem
+infeasible rather than just this one load. That cap is deliberately the
+*tight* span (the last qualifying timestep's own interval, one step wide),
+not the wider window sent to EMHASS — the window carries an extra step of
+padding to absorb rounding in `payload.resolve_load_window`, and letting the
+cap eat into that padding too would ask for a step nobody's surplus actually
+backed. A capped variable load's own ceiling (see below) is subject to the
+same cap, sized against `nominal_w` rather than against energy directly —
+exact for a semi-continuous load, an accepted approximation for one that
+modulates.
+
+On an abundant day this converges on "run for the whole window" — a small
+number of weak or reserved slots inside an otherwise strong block no longer
+shrink `hours` at all, they just get absorbed by it. On a thin day it still
+falls back to something close to the old per-slot count, because there is
+no surplus elsewhere in the span to borrow from.
 
 ### The battery reservation
 
@@ -183,14 +215,16 @@ The two power settings are the same pair every deferrable load has, and they
 interact the same way: with *Runs at full power only* on, the load is either off
 or at its nominal power, and *Lowest power while running* is not read.
 
-They also decide how the budget is counted, which is easy to get wrong:
+They also decide what `nominal_w` the budget is divided by (see
+[the budget cap](#the-budget-cap) above), which is easy to get wrong:
 
 - **Full power only** — the load draws exactly its nominal power whenever it
-  runs, so a timestep offering 3 kW still only feeds an 800 W pool 800 W. The
-  budget reduces to a slot count. Summing each slot's own energy instead would
-  over-commit the pool by nearly 2.5x, and EMHASS would import the difference.
-- **Variable** — the budget is the clipped energy sum. The clip matters as soon
-  as the load's own maximum is below the day's peak surplus.
+  runs, so `hours` is credited energy divided by that fixed figure, capped at
+  the qualifying span. A timestep offering 3 kW still only ever draws the
+  pool's 800 W once it's actually running — the 3 kW is credit *towards how
+  many hours it may run*, not power it will actually pull in that one slot.
+- **Variable** — the same division and cap, but against a ceiling that
+  adapts to the day (below) rather than a fixed one.
 
   The *ceiling* EMHASS is given for the run is not always the configured
   nominal power, either. It is clamped down to the best surplus actually seen

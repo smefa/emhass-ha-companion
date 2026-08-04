@@ -233,7 +233,18 @@ def allocate(
             if qualifying_peak > 0:
                 nominal_w = min(spec.nominal_w, qualifying_peak)
 
-        energy_wh = 0.0
+        # ``credit_wh`` is the *aggregate* surplus the block offers, uncapped
+        # by what this load can draw in any one slot -- a run of strong slots
+        # makes up for a few only-just-qualifying ones, instead of every slot
+        # having to individually clear the load's own floor before it counts
+        # at all. That is deliberately not the same total as what the load
+        # will physically draw: the shared series (``entry[2]``, what the
+        # next-priority load sees) and the energy-needed cap both have to be
+        # debited by the load's real, physically-limited draw -- crediting
+        # Pool with a slot's full 3 kW must not make that 3 kW invisible to
+        # whatever is queued behind it, or to a cap that means "delivered
+        # kWh".
+        credit_wh = 0.0
         steps = 0
 
         for entry in block:
@@ -245,18 +256,36 @@ def allocate(
             if draw <= 0:
                 continue
 
-            contribution = draw * step_hours
-            if spec.max_energy_wh is not None:
-                contribution = min(contribution, spec.max_energy_wh - energy_wh)
-                if contribution <= 0:
-                    break
-
-            energy_wh += contribution
+            credit_wh += net * step_hours
             steps += 1
             entry[2] = max(0.0, net - draw)
 
+        # However generous the block, this load can never be asked to run
+        # more hours than the qualifying span itself covers -- inclusive of
+        # the last qualifying timestep's own interval, one step wide. That is
+        # deliberately the *tight* span, not the wider window below: the
+        # window is padded by an extra step to absorb payload.py's later
+        # rounding against a different "now", and capping hours against that
+        # padding as well would ask this load to run one step nobody's
+        # surplus ever actually backed.
+        span_hours = (
+            0.0
+            if window_last is None
+            else (window_last - window_first).total_seconds() / 3600 + step_hours
+        )
+        hours = credit_wh / nominal_w if nominal_w > 0 else 0.0
+        hours = min(hours, span_hours)
+        if spec.max_energy_wh is not None:
+            # A hard cap on delivered energy, not on the aggregate credit --
+            # sizing it against nominal_w is exact for a semi-continuous load
+            # (it draws exactly that whenever it runs) and the same
+            # already-accepted approximation the rest of this budget makes
+            # for one that modulates.
+            hours = min(hours, spec.max_energy_wh / nominal_w)
+        energy_wh = hours * nominal_w
+
         budgets[spec.subentry_id] = SurplusBudget(
-            hours=energy_wh / nominal_w,
+            hours=hours,
             window_start=window_first,
             # Inclusive of the last qualifying timestep, plus one more. The
             # window is re-derived against "now" in payload.resolve_load_window,
@@ -265,7 +294,8 @@ def allocate(
             # narrow for the hours being requested, which it reports as an
             # infeasible *problem* rather than a narrow window. Erring wide
             # risks one timestep of running outside the surplus; erring narrow
-            # risks taking the battery and every other load down with it.
+            # risks taking the battery and every other load down with it. Wider
+            # than ``span_hours`` above on purpose -- see that comment.
             window_end=None if window_last is None else window_last + 2 * step,
             energy_wh=energy_wh,
             steps=steps,

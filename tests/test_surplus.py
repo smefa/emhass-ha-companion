@@ -143,15 +143,22 @@ def test_battery_reserved_series_skips_rows_without_a_figure():
     assert battery_reserved_series(plan).values == (500.0,)
 
 
-# --- semi-continuous: a slot count -------------------------------------------
+# --- semi-continuous: capped at the qualifying span --------------------------
 
 
-def test_semi_continuous_budget_counts_slots_not_energy():
-    """A 3 kW slot still only feeds an 800 W pool 800 W.
+def test_semi_continuous_budget_is_capped_at_the_qualifying_span_not_the_energy():
+    """A 3 kW slot still only feeds an 800 W pool 800 W -- eventually.
 
-    Summing the slots' own energy instead would credit the pool with nearly
-    2.5x the run time it can actually be given, and EMHASS would import the
-    difference to satisfy the hours it was handed.
+    The four qualifying slots are worth 1950 Wh of *credit*, nearly 2.5x what
+    an 800 W pool could draw across the 1 h they span (800 Wh). Sending that
+    inflated total as-is would ask EMHASS for run time the window has no room
+    for, which it answers by declaring the whole problem infeasible rather
+    than just importing the difference -- so ``hours`` is capped at the span
+    itself (1 h here) rather than at each slot's own 800 W ceiling. The two
+    land on the same number in this case only because every qualifying slot
+    here is contiguous with no weak spot in between for the strong ones to
+    cover for -- see the reservation and isolated-gap tests below for where
+    they diverge.
     """
     budget = allocate(_series(200, 900, 3000, 3000, 900, 400), [_spec()], STEP)["pool"]
 
@@ -197,6 +204,12 @@ def test_a_single_isolated_zero_does_not_end_the_block():
     going down unless something rides through it. Ending the block there (as
     a real night-sized gap correctly does) would badly understate a load's
     real remaining hours.
+
+    The five qualifying slots alone are worth 3.75 credited hours -- far more
+    than the load could ever draw in the 1.5 h the block actually spans, so
+    the surplus they offer covers the isolated zero too: the load is asked
+    for the full span, riding straight through the one slot that offered it
+    nothing, rather than 1.25 h that tiptoes around it.
     """
     series = _series(3000, 3000, 0, 3000, 3000, 3000)  # one battery-took-it-all slot
     budget = allocate(series, [_spec()], STEP)["pool"]
@@ -204,7 +217,7 @@ def test_a_single_isolated_zero_does_not_end_the_block():
     assert budget.window_start == START
     assert budget.window_end == START + 7 * STEP
     assert budget.steps == 5
-    assert budget.hours == 1.25
+    assert budget.hours == 1.5
 
 
 def test_a_gap_longer_than_the_tolerance_still_ends_the_block():
@@ -240,10 +253,12 @@ def test_headroom_excludes_marginal_slots():
 def test_variable_power_clips_each_slot_at_nominal():
     """A 2 kW charger cannot absorb a 3 kW slot.
 
-    Without the clip the budget over-commits by the difference -- the failure
-    mode a hand-written template avoids only by setting nominal power to the
-    day's peak surplus, which stops being true the moment the charger's own
-    limit is lower.
+    Both qualifying slots offer 3 kW, so the credit sum alone (1500 Wh) would
+    ask for 0.75 h against the 2 kW ceiling -- but the two slots only span
+    0.5 h, and that is what ``hours`` is capped at, the same span-cap that
+    bounds the semi-continuous case above. Physically the charger could never
+    have drawn more than 2 kW at any instant either way; the cap here just
+    happens to bind first.
     """
     spec = _spec(
         subentry_id="car",
@@ -342,7 +357,15 @@ def test_reservation_narrows_the_energy_but_not_the_window():
     Two of the four slots are almost entirely reserved for the battery and
     contribute nothing to the budget -- but they are still gross-qualifying,
     so the window sent to EMHASS still spans all four, exactly as it would
-    with no reservation at all. Only ``hours`` shrinks.
+    with no reservation at all.
+
+    ``hours`` still shrinks relative to a fully-unreserved day, but not down
+    to a literal count of the two clearing slots: at 800 W and headroom-free,
+    those two alone are worth 1.875 credited hours -- enough to cover the
+    other two slots' shortfall too, and the load is asked for the full 1 h
+    span rather than the 0.5 h a slot-by-slot count would have given it,
+    trusting the battery (or a moment of import) to make up whatever those
+    two reserved-heavy slots don't.
     """
     budget = allocate(
         _series(3000, 3000, 3000, 3000),
@@ -356,8 +379,8 @@ def test_reservation_narrows_the_energy_but_not_the_window():
     # Net available is 500, 500, 3000, 3000 -- only the last two clear the
     # 800 W floor.
     assert budget.steps == 2
-    assert budget.energy_wh == 400.0
-    assert budget.hours == 0.5
+    assert budget.energy_wh == 800.0
+    assert budget.hours == 1.0
 
 
 def test_full_reservation_empties_the_budget_but_keeps_the_window():
@@ -537,6 +560,36 @@ def test_a_surplus_load_reaches_the_payload_as_hours_and_a_window():
     # window it would report as an infeasible problem.
     assert payload["start_timesteps_of_each_deferrable_load"] == [4]
     assert payload["end_timesteps_of_each_deferrable_load"] == [21]
+    assert not result.warnings
+
+
+def test_a_dip_below_threshold_does_not_shrink_the_window_the_strong_slots_earned():
+    """Three of four slots clear the 1100 W bar (800 W floor + 300 W
+    headroom); one dips to 900 W, still above the floor but not the bar.
+
+    The three clearing slots alone are worth 900 Wh of credit -- more than
+    the 800 Wh an 800 W pool needs to run continuously for the full hour --
+    so the load is asked for the whole four-slot window, riding through the
+    one weak slot on the surplus the other three banked, rather than the
+    three-slot, 45-minute count a per-slot view would have given it.
+    """
+    pool = _pool()
+    registry = _registry(pool)
+    plan = Plan(
+        generated_at=START,
+        schema_version="1.0",
+        rows=[
+            PlanRow(timestamp=START + index * STEP, p_pv=watts, p_load=0.0, deferrables=(0.0,))
+            for index, watts in enumerate((1200.0, 1200.0, 900.0, 1200.0))
+        ],
+    )
+    registry.apply_surplus(plan, ["pool"], START, 15)
+
+    result = _payload(registry.to_loads(START, 15), START)
+    payload = result.payload
+
+    assert payload["operating_hours_of_each_deferrable_load"] == [1.0]
+    assert payload["start_timesteps_of_each_deferrable_load"] == [0]
     assert not result.warnings
 
 
