@@ -10,9 +10,9 @@ import logging
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import Event, EventStateChangedData, HomeAssistant, State, callback
 from homeassistant.helpers import issue_registry as ir
-from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.event import async_track_state_change_event, async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
@@ -60,6 +60,7 @@ from .profiles import (
     async_resolve_series,
     resolve_settings,
 )
+from .smoothing import TimeWeightedAverage
 from .terminal import (
     LOAD_SOURCE_LAST_PLAN,
     LOAD_SOURCE_PROFILE,
@@ -148,6 +149,13 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         self._end_soc: EndSocDecision | None = None
 
         self._unsub_tick: Callable[[], None] | None = None
+        # Smooths the live PV entity the same way NetHouseLoadSensor smooths
+        # its own reading: a single instantaneous sample at MPC-run time can
+        # catch the entity mid-swing (a cloud edge, a noisy inverter
+        # reading), which blend_at would then treat as the current state of
+        # the world for the whole first forecast step.
+        self._pv_live_average = TimeWeightedAverage()
+        self._unsub_pv_live: Callable[[], None] | None = None
 
     # -- surplus --------------------------------------------------------------
 
@@ -198,6 +206,48 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         if self._unsub_tick is not None:
             self._unsub_tick()
             self._unsub_tick = None
+
+    @callback
+    def async_start_pv_live_tracking(self) -> None:
+        """Start smoothing the live PV entity, if one is configured.
+
+        A single sample recorded now (rather than waiting for the entity's
+        next state change) means the average is never empty for want of a
+        first data point, the same reasoning as NetHouseLoadSensor seeding
+        itself in async_added_to_hass.
+        """
+        self.async_stop_pv_live_tracking()
+        entity_id = self.config.pv_live_entity
+        if not entity_id:
+            return
+        self._record_pv_live_sample()
+        self._unsub_pv_live = async_track_state_change_event(
+            self.hass, [entity_id], self._async_pv_live_changed
+        )
+
+    @callback
+    def async_stop_pv_live_tracking(self) -> None:
+        if self._unsub_pv_live is not None:
+            self._unsub_pv_live()
+            self._unsub_pv_live = None
+
+    @callback
+    def _async_pv_live_changed(self, event: Event[EventStateChangedData]) -> None:
+        self._record_pv_live_sample()
+
+    def _record_pv_live_sample(self) -> None:
+        entity_id = self.config.pv_live_entity
+        if not entity_id:
+            return
+        state = self.hass.states.get(entity_id)
+        value = (
+            None
+            if state is None or state.state in ("unknown", "unavailable", "")
+            else self._parse_live_power(state, entity_id, "Live PV power")
+        )
+        self._pv_live_average.record(
+            dt_util.utcnow(), value, timedelta(minutes=self.config.time_step_minutes)
+        )
 
     @callback
     def _async_tick(self, _now: datetime) -> None:
@@ -670,10 +720,27 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             return None
 
     def _read_pv_live(self) -> float | None:
-        """Current PV power, in watts, for blending into the MPC forecast."""
+        """PV power for blending into the MPC forecast, in watts.
+
+        Averaged over the trailing ``time_step_minutes`` (see
+        ``async_start_pv_live_tracking``) rather than read fresh here: a
+        single sample taken at MPC-run time can catch the entity mid-swing
+        (a cloud edge, a noisy inverter reading), which blend_at would then
+        treat as the current state of the world for the whole first forecast
+        step.
+        """
         if not self.config.pv_live_entity:
             return None
-        return self._read_live_power(self.config.pv_live_entity, "Live PV power")
+        average = self._pv_live_average.average(
+            dt_util.utcnow(), timedelta(minutes=self.config.time_step_minutes)
+        )
+        if average is None:
+            _LOGGER.warning(
+                "Live PV power entity %s is unavailable; the MPC forecast will "
+                "not be blended with a live value this run",
+                self.config.pv_live_entity,
+            )
+        return average
 
     def _read_load_live(self) -> float | None:
         """Current house load power, in watts, for blending into the MPC forecast.
@@ -702,6 +769,9 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
                 entity_id,
             )
             return None
+        return self._parse_live_power(state, entity_id, label)
+
+    def _parse_live_power(self, state: State, entity_id: str, label: str) -> float | None:
         try:
             return float(state.state)
         except ValueError:

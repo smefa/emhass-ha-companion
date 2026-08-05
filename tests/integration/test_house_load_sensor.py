@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock
 from homeassistant.const import STATE_ON, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
+from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.emhass_companion.api import EmhassClient
@@ -43,8 +44,15 @@ def _coordinator(hass: HomeAssistant) -> EmhassCoordinator:
 
 
 def _sensor(hass: HomeAssistant, loads: list[DeferrableRuntime]) -> NetHouseLoadSensor:
+    """A sensor with one sample already recorded, as async_added_to_hass would.
+
+    native_value averages over a trailing window rather than reading
+    instantaneously (see NetHouseLoadSensor) -- without an initial sample
+    there would be no history yet for these tests to read back out.
+    """
     sensor = NetHouseLoadSensor(_coordinator(hass), "sensor.total_house", loads)
     sensor.hass = hass
+    sensor._record_sample(dt_util.utcnow())
     return sensor
 
 

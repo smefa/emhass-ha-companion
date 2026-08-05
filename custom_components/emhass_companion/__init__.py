@@ -121,6 +121,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
     entry.async_on_unload(scheduler.async_stop)
     entry.async_on_unload(loads.async_stop)
     entry.async_on_unload(coordinator.async_stop_clock)
+    entry.async_on_unload(coordinator.async_stop_pv_live_tracking)
 
     async def _async_restore_on_unload() -> None:
         await executor.async_restore("integration unloaded")
@@ -196,6 +197,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
 
     loads.async_start()
     coordinator.async_start_clock()
+    coordinator.async_start_pv_live_tracking()
     scheduler.async_start()
     entry.async_create_background_task(hass, scheduler.async_run_initial(), "emhass_initial_run")
 

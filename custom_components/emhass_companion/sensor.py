@@ -34,6 +34,7 @@ from .coordinator import EmhassCoordinator, EmhassData
 from .deferrable import DeferrableRuntime, state_to_watts
 from .entity import EmhassEntity, EmhassLoadEntity
 from .models import Series
+from .smoothing import TimeWeightedAverage
 from .surplus import current_block, total_energy_wh, window_of
 
 PARALLEL_UPDATES = 0
@@ -302,6 +303,13 @@ class NetHouseLoadSensor(EmhassEntity, SensorEntity):
     rest of this device it therefore does not update from the coordinator
     (which only refreshes once per optimisation run), but from its own
     subscriptions to the total sensor and every load's running source.
+
+    Reports a time-weighted average over the trailing
+    ``config.time_step_minutes`` rather than the instantaneous reading: a raw
+    power sensor can swing wildly between two samples a load forecast never
+    sees, and averaging over the same resolution EMHASS plans and records
+    history at keeps this sensor's recorded state consistent with what a
+    forecast built from it actually means.
     """
 
     _attr_translation_key = "net_house_load"
@@ -318,9 +326,11 @@ class NetHouseLoadSensor(EmhassEntity, SensorEntity):
         super().__init__(coordinator, NET_HOUSE_LOAD_KEY)
         self._total_entity = total_entity
         self._loads = list(loads)
+        self._average = TimeWeightedAverage()
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
+        self._record_sample(dt_util.utcnow())
         sources = {self._total_entity}
         sources.update(source for load in self._loads if (source := load.running_source))
         self.async_on_remove(
@@ -329,19 +339,17 @@ class NetHouseLoadSensor(EmhassEntity, SensorEntity):
 
     @callback
     def _async_source_changed(self, event: Event[EventStateChangedData]) -> None:
+        self._record_sample(dt_util.utcnow())
         self.async_write_ha_state()
 
-    @property
-    def available(self) -> bool:
-        # Unlike the rest of this device (see EmhassEntity.available), this
-        # sensor's whole value is the total entity's reading -- with nothing
-        # to subtract from, reporting a number would just be the deferrables'
-        # draw counted as free, silently wrong rather than absent.
-        state = self.hass.states.get(self._total_entity)
-        return state is not None and state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE, "")
+    def _record_sample(self, now: datetime) -> None:
+        self._average.record(now, self._instantaneous_value(), self._window)
 
     @property
-    def native_value(self) -> float | None:
+    def _window(self) -> timedelta:
+        return timedelta(minutes=self.coordinator.config.time_step_minutes)
+
+    def _instantaneous_value(self) -> float | None:
         total_state = self.hass.states.get(self._total_entity)
         if total_state is None:
             return None
@@ -361,6 +369,20 @@ class NetHouseLoadSensor(EmhassEntity, SensorEntity):
         # deferrable's reading can momentarily lead the total's -- a real
         # negative net load is not a state this sensor can ever mean.
         return max(total - deferred, 0.0)
+
+    @property
+    def available(self) -> bool:
+        # Unlike the rest of this device (see EmhassEntity.available), this
+        # sensor's whole value is the total entity's reading -- with nothing
+        # to subtract from, reporting a number would just be the deferrables'
+        # draw counted as free, silently wrong rather than absent.
+        state = self.hass.states.get(self._total_entity)
+        return state is not None and state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE, "")
+
+    @property
+    def native_value(self) -> float | None:
+        now = dt_util.utcnow()
+        return self._average.average(now, self._window)
 
 
 class LoadDeferrableNumberSensor(EmhassLoadEntity, SensorEntity):

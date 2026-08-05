@@ -73,12 +73,16 @@
       },
       "load_create": {
         "title": "Create a house load sensor",
-        "description": "Pick the sensor that measures your total house power. EMHASS Companion will create a new sensor that keeps this reading minus whatever your deferrable loads are drawing at any moment, and use that for the load forecast.",
+        "description": "Pick the sensor that measures your total house power. It should exclude the battery's own charge/discharge power -- EMHASS plans the battery separately, and counting its power here would throw off the load forecast. EMHASS Companion will create a new sensor that keeps this reading minus whatever your deferrable loads are drawing at any moment, and use that for the load forecast.",
         "data": {
           "house_load_total_entity": "Total house power sensor"
         }
       },
       "load_options": {
+        "title": "Configure {profile}",
+        "description": "{notes}"
+      },
+      "load_create_options": {
         "title": "Configure {profile}",
         "description": "{notes}"
       },
@@ -164,12 +168,16 @@
       },
       "load_create": {
         "title": "Create a house load sensor",
-        "description": "Pick the sensor that measures your total house power. EMHASS Companion will create a new sensor that keeps this reading minus whatever your deferrable loads are drawing at any moment, and use that for the load forecast.",
+        "description": "Pick the sensor that measures your total house power. It should exclude the battery's own charge/discharge power -- EMHASS plans the battery separately, and counting its power here would throw off the load forecast. EMHASS Companion will create a new sensor that keeps this reading minus whatever your deferrable loads are drawing at any moment, and use that for the load forecast.",
         "data": {
           "house_load_total_entity": "Total house power sensor"
         }
       },
       "load_options": {
+        "title": "Configure {profile}",
+        "description": "{notes}"
+      },
+      "load_create_options": {
         "title": "Configure {profile}",
         "description": "{notes}"
       },

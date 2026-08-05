@@ -73,12 +73,16 @@
       },
       "load_create": {
         "title": "Skapa en sensor för husets last",
-        "description": "Välj sensorn som mäter husets totala eleffekt. EMHASS Companion skapar en ny sensor som håller detta värde minus vad dina styrbara laster drar för stunden, och använder den för förbrukningsprognosen.",
+        "description": "Välj sensorn som mäter husets totala eleffekt. Den bör inte inkludera batteriets egen laddnings-/urladdningseffekt -- EMHASS planerar batteriet separat, och om dess effekt räknas med här blir förbrukningsprognosen missvisande. EMHASS Companion skapar en ny sensor som håller detta värde minus vad dina styrbara laster drar för stunden, och använder den för förbrukningsprognosen.",
         "data": {
           "house_load_total_entity": "Sensor för husets totala eleffekt"
         }
       },
       "load_options": {
+        "title": "Konfigurera {profile}",
+        "description": "{notes}"
+      },
+      "load_create_options": {
         "title": "Konfigurera {profile}",
         "description": "{notes}"
       },
@@ -164,12 +168,16 @@
       },
       "load_create": {
         "title": "Skapa en sensor för husets last",
-        "description": "Välj sensorn som mäter husets totala eleffekt. EMHASS Companion skapar en ny sensor som håller detta värde minus vad dina styrbara laster drar för stunden, och använder den för förbrukningsprognosen.",
+        "description": "Välj sensorn som mäter husets totala eleffekt. Den bör inte inkludera batteriets egen laddnings-/urladdningseffekt -- EMHASS planerar batteriet separat, och om dess effekt räknas med här blir förbrukningsprognosen missvisande. EMHASS Companion skapar en ny sensor som håller detta värde minus vad dina styrbara laster drar för stunden, och använder den för förbrukningsprognosen.",
         "data": {
           "house_load_total_entity": "Sensor för husets totala eleffekt"
         }
       },
       "load_options": {
+        "title": "Konfigurera {profile}",
+        "description": "{notes}"
+      },
+      "load_create_options": {
         "title": "Konfigurera {profile}",
         "description": "{notes}"
       },

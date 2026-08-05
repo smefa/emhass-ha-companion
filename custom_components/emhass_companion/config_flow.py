@@ -510,22 +510,17 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         """Build "load/sensor" against a sensor this integration creates.
 
-        Skips straight to :meth:`async_step_battery` rather than through
+        Goes on to :meth:`async_step_load_create_options` rather than
         :meth:`async_step_load_options`: the profile it configures is fixed,
         and its own "entity" option is resolved dynamically at runtime
         (EmhassConfig._resolve_net_house_load_entity) rather than stored here,
         since the sensor's own entity id does not exist yet at this point in
-        the flow.
+        the flow -- so that one option is left out of the form the next step
+        shows.
         """
         if user_input is not None:
             self._options[CONF_HOUSE_LOAD_TOTAL_ENTITY] = user_input[CONF_HOUSE_LOAD_TOTAL_ENTITY]
-            self._options[CONF_LOAD] = {
-                CONF_PROFILE: PROFILE_KEY_LOAD_SENSOR,
-                CONF_PROFILE_OPTIONS: _default_profile_options(
-                    self._profiles[PROFILE_KEY_LOAD_SENSOR], skip={"entity"}
-                ),
-            }
-            return await self.async_step_battery()
+            return await self.async_step_load_create_options()
 
         return self.async_show_form(
             step_id="load_create",
@@ -536,6 +531,29 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
                     )
                 }
             ),
+        )
+
+    async def async_step_load_create_options(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        profile = self._profiles[PROFILE_KEY_LOAD_SENSOR]
+        schema = profile.selector_schema(skip={"entity"})
+
+        if user_input is not None or not schema:
+            self._options[CONF_LOAD] = {
+                CONF_PROFILE: PROFILE_KEY_LOAD_SENSOR,
+                CONF_PROFILE_OPTIONS: user_input
+                or _default_profile_options(profile, skip={"entity"}),
+            }
+            return await self.async_step_battery()
+
+        return self.async_show_form(
+            step_id="load_create_options",
+            data_schema=vol.Schema(schema),
+            description_placeholders={
+                "profile": profile.name,
+                "notes": profile.notes or "",
+            },
         )
 
     async def async_step_load_options(
@@ -1490,6 +1508,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
         self._temperature_profiles: dict[str, Profile] = {}
         self._load_key: str = ""
         self._load_profiles: dict[str, Profile] = {}
+        self._house_load_total_entity: str = ""
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         return self.async_show_menu(
@@ -1515,7 +1534,17 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
             self._load_profiles = profiles
             return await self.async_step_load_options()
 
-        current = (options.get(CONF_LOAD) or {}).get(CONF_PROFILE)
+        load = options.get(CONF_LOAD) or {}
+        current = load.get(CONF_PROFILE)
+        if current == PROFILE_KEY_LOAD_SENSOR and "entity" not in (
+            load.get(CONF_PROFILE_OPTIONS) or {}
+        ):
+            # "Create a house load sensor" also stores profile "load/sensor" (its
+            # "entity" is resolved dynamically instead, see async_step_load_create),
+            # so profile alone can't tell the two apart -- without this, this step
+            # would always preselect "House load sensor (without deferrables)" even
+            # when the entry was actually built through the create flow.
+            current = LOAD_PROFILE_CREATE_SENTINEL
         return self.async_show_form(
             step_id="load",
             data_schema=vol.Schema(
@@ -1532,19 +1561,13 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
     ) -> ConfigFlowResult:
         """Build "load/sensor" against a sensor this integration creates.
 
-        See the matching step on the setup flow for why "entity" is left out
-        of what gets stored here.
+        Goes on to :meth:`async_step_load_create_options` rather than
+        :meth:`async_step_load_options` -- see the matching step on the setup
+        flow for why "entity" is left out of the form that shows.
         """
         if user_input is not None:
-            options = dict(self.config_entry.options)
-            options[CONF_HOUSE_LOAD_TOTAL_ENTITY] = user_input[CONF_HOUSE_LOAD_TOTAL_ENTITY]
-            options[CONF_LOAD] = {
-                CONF_PROFILE: PROFILE_KEY_LOAD_SENSOR,
-                CONF_PROFILE_OPTIONS: _default_profile_options(
-                    self._load_profiles[PROFILE_KEY_LOAD_SENSOR], skip={"entity"}
-                ),
-            }
-            return self.async_create_entry(data=options)
+            self._house_load_total_entity = user_input[CONF_HOUSE_LOAD_TOTAL_ENTITY]
+            return await self.async_step_load_create_options()
 
         current = self.config_entry.options.get(CONF_HOUSE_LOAD_TOTAL_ENTITY)
         return self.async_show_form(
@@ -1558,6 +1581,33 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
                     )
                 }
             ),
+        )
+
+    async def async_step_load_create_options(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        profile = self._load_profiles[PROFILE_KEY_LOAD_SENSOR]
+        schema = profile.selector_schema(skip={"entity"})
+
+        options = dict(self.config_entry.options)
+        options[CONF_HOUSE_LOAD_TOTAL_ENTITY] = self._house_load_total_entity
+
+        if user_input is not None or not schema:
+            options[CONF_LOAD] = {
+                CONF_PROFILE: PROFILE_KEY_LOAD_SENSOR,
+                CONF_PROFILE_OPTIONS: user_input
+                or _default_profile_options(profile, skip={"entity"}),
+            }
+            return self.async_create_entry(data=options)
+
+        stored = (options.get(CONF_LOAD) or {}).get(CONF_PROFILE_OPTIONS) or {}
+        return self.async_show_form(
+            step_id="load_create_options",
+            data_schema=self.add_suggested_values_to_schema(vol.Schema(schema), stored),
+            description_placeholders={
+                "profile": profile.name,
+                "notes": profile.notes or "",
+            },
         )
 
     async def async_step_load_options(

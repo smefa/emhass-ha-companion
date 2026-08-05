@@ -26,11 +26,20 @@ from custom_components.emhass_companion.deferrable import DeferrableRegistry
 
 
 def _coordinator(hass: HomeAssistant, options: dict) -> EmhassCoordinator:
+    """A coordinator with live-PV tracking already started.
+
+    _read_pv_live averages over the trailing window rather than reading the
+    entity fresh (see EmhassCoordinator); starting tracking here seeds that
+    average from whatever state was set before this call, the same way
+    async_setup_entry does at startup.
+    """
     entry = MockConfigEntry(domain=DOMAIN, data={"url": "http://localhost:5000"}, options=options)
     entry.add_to_hass(hass)
     loads = DeferrableRegistry(hass, entry)
     loads.sync()
-    return EmhassCoordinator(hass, entry, AsyncMock(spec=EmhassClient), loads)
+    coordinator = EmhassCoordinator(hass, entry, AsyncMock(spec=EmhassClient), loads)
+    coordinator.async_start_pv_live_tracking()
+    return coordinator
 
 
 # --- live PV -------------------------------------------------------------------

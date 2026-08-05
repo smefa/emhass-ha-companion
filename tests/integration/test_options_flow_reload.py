@@ -89,3 +89,65 @@ async def test_load_forecast_method_is_reachable_and_saves(hass: HomeAssistant) 
         "profile": "load/sensor",
         "profile_options": {"entity": "sensor.house_load", "method": "mlforecaster"},
     }
+
+
+async def test_load_step_preselects_create_a_sensor_when_that_is_how_it_was_set_up(
+    hass: HomeAssistant,
+) -> None:
+    """"House load sensor (without deferrables)" and "Create a house load sensor"
+    both persist as profile "load/sensor" -- the latter just skips storing
+    "entity" (it's resolved dynamically, see async_step_load_create). Without
+    accounting for that, this step always preselected the plain profile, even
+    for an entry actually built through the create flow.
+    """
+    entry = await _setup_entry(hass)
+    hass.config_entries.async_update_entry(
+        entry,
+        options={
+            **entry.options,
+            CONF_LOAD: {"profile": "load/sensor", "profile_options": {"method": "typical"}},
+            "house_load_total_entity": "sensor.load_power",
+        },
+    )
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "load"}
+    )
+
+    (marker,) = (key for key in result["data_schema"].schema if key == "profile")
+    assert marker.description["suggested_value"] == "__create__"
+
+
+async def test_create_a_house_load_sensor_lets_you_pick_the_forecast_method(
+    hass: HomeAssistant,
+) -> None:
+    """"Create a house load sensor" used to jump straight from picking the
+    total-power sensor to saving, silently defaulting "method" to "typical"
+    with no form shown -- the same forecast-method choice the plain "House
+    load sensor" profile gets was unreachable through this path.
+    """
+    entry = await _setup_entry(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "load"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"profile": "__create__"}
+    )
+    assert result["step_id"] == "load_create"
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"house_load_total_entity": "sensor.total_house_power"}
+    )
+    assert result["step_id"] == "load_create_options"
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"method": "mlforecaster"}
+    )
+
+    assert result["type"] == "create_entry"
+    assert entry.options[CONF_LOAD] == {
+        "profile": "load/sensor",
+        "profile_options": {"method": "mlforecaster"},
+    }
+    assert entry.options["house_load_total_entity"] == "sensor.total_house_power"

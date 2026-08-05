@@ -426,10 +426,17 @@ class Profile:
     def produces_series(self) -> bool:
         return self.source is not None
 
-    def selector_schema(self) -> dict[Any, Any]:
-        """Build a voluptuous schema fragment for this profile's options."""
+    def selector_schema(self, *, skip: set[str] = frozenset()) -> dict[Any, Any]:
+        """Build a voluptuous schema fragment for this profile's options.
+
+        ``skip`` omits options resolved elsewhere in the flow -- for example a
+        "load/sensor" entity that a create-a-sensor flow builds dynamically
+        rather than asking the user to pick directly.
+        """
         schema: dict[Any, Any] = {}
         for key, option in self.options.items():
+            if key in skip:
+                continue
             marker = vol.Required if option.get("required", True) else vol.Optional
             if "default" in option:
                 field_key = marker(key, default=option["default"])
