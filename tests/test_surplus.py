@@ -15,6 +15,7 @@ from custom_components.emhass_companion.surplus import (
     SurplusSpec,
     allocate,
     battery_reserved_series,
+    current_block,
     surplus_series,
     total_energy_wh,
     window_of,
@@ -460,18 +461,59 @@ def test_a_load_with_no_nominal_power_gets_nothing():
 def test_window_spans_dips_rather_than_stopping_at_the_first():
     """ "Spare sun until 15:30" is the useful answer; the gaps are the
     optimiser's problem, not the user's."""
-    start, end = window_of(_series(100, 600, 200, 900, 50), 500.0)
+    start, end = window_of(_series(100, 600, 200, 900, 50), 500.0, STEP)
 
     assert start == START + STEP
     assert end == START + 3 * STEP
 
 
 def test_no_window_when_nothing_clears_the_threshold():
-    assert window_of(_series(100, 200), 500.0) == (None, None)
+    assert window_of(_series(100, 200), 500.0, STEP) == (None, None)
 
 
 def test_total_energy():
     assert total_energy_wh(_series(1000, 1000), STEP) == 500.0
+
+
+def test_current_block_cuts_before_a_real_night():
+    """Six zero-value steps -- well past ``BLOCK_GAP_TOLERANCE`` at a 15
+    minute step -- end the block, same as a load's own run floor would in
+    ``allocate``. The first three zeros are still inside the tolerance and
+    ride through with the block; the fourth is where the gap itself has
+    lasted a full hour, and nothing from there on is included."""
+    series = _series(600, 900, 0, 0, 0, 0, 0, 700)
+
+    block = current_block(series, STEP)
+
+    assert [point.value for point in block] == [600, 900, 0, 0, 0]
+
+
+def test_current_block_rides_through_a_short_dip():
+    """A dip shorter than ``BLOCK_GAP_TOLERANCE`` -- a passing cloud -- does
+    not end the block."""
+    series = _series(600, 0, 0, 900)
+
+    block = current_block(series, STEP)
+
+    assert [point.value for point in block] == [600, 0, 0, 900]
+
+
+def test_window_of_does_not_reach_past_a_night_into_tomorrow():
+    """A horizon that starts mid-afternoon and reaches past sunset into
+    tomorrow's sunrise must not report a window spanning the night in
+    between -- that used to be exactly what ``window_of``'s "spans any dips"
+    behaviour did, with nothing to tell a cloud apart from an actual night."""
+    series = _series(600, 900, 0, 0, 0, 0, 0, 700)
+
+    assert window_of(series, 500.0, STEP) == (START, START + STEP)
+
+
+def test_energy_ahead_does_not_reach_past_a_night_into_tomorrow():
+    series = _series(600, 900, 0, 0, 0, 0, 0, 700)
+
+    energy = total_energy_wh(current_block(series, STEP), STEP)
+
+    assert energy == (600 + 900) * STEP.total_seconds() / 3600
 
 
 # --- end to end: registry -> payload -----------------------------------------

@@ -325,16 +325,60 @@ def battery_reserved_series(plan: Plan) -> Series:
     return Series(points)
 
 
-def window_of(series: Series, threshold_w: float) -> tuple[datetime | None, datetime | None]:
+# Below this, there is effectively no PV at all -- used only to tell a real
+# night apart from a passing cloud when cutting the *block* a reporting
+# sensor describes. Deliberately not ``surplus_threshold_w``: that number is
+# the user's "what counts as spare" setting (see the number's own docstring,
+# it's display-only), and a cloud dipping below a high threshold for a couple
+# of hours is still broad daylight, not a reason to end the block.
+NIGHT_FLOOR_W = 1.0
+
+
+def current_block(series: Series, step: timedelta) -> Series:
+    """The series' current stretch, cut before it reaches a real gap.
+
+    Mirrors the block ``allocate`` cuts per load (see its docstring): a
+    horizon that starts mid-afternoon also reaches past sunset into
+    tomorrow's sunrise, and without this cut the hub's reporting sensors --
+    from/until and the energy total -- would describe that whole stretch as
+    still ahead, tomorrow's forecast included. A short dip rides through
+    inside ``BLOCK_GAP_TOLERANCE``; a real night does not.
+    """
+    if step <= timedelta(0):
+        return series
+    gap_steps = max(1, int(BLOCK_GAP_TOLERANCE / step))
+    block: list[Point] = []
+    started = False
+    gap_run = 0
+    for point in series:
+        if point.value < NIGHT_FLOOR_W:
+            if not started:
+                continue
+            gap_run += 1
+            if gap_run >= gap_steps:
+                break
+            block.append(point)
+            continue
+        gap_run = 0
+        started = True
+        block.append(point)
+    return Series(block)
+
+
+def window_of(
+    series: Series, threshold_w: float, step: timedelta
+) -> tuple[datetime | None, datetime | None]:
     """First and last moment the surplus is at or above ``threshold_w``.
 
     Reporting only -- this is what the hub's start/end sensors publish, and it
     deliberately spans any dips in between rather than returning the first
     contiguous run. "Surplus from 10:15 to 15:30" is the useful answer for
     deciding whether to arm something; the gaps inside it are the optimiser's
-    problem, not the user's.
+    problem, not the user's. Restricted to ``current_block`` first, though --
+    without that, "spans any dips" also spans the night, and the window
+    reaches into tomorrow's forecast whenever it happens to qualify too.
     """
-    above = [point.time for point in series if point.value >= threshold_w]
+    above = [point.time for point in current_block(series, step) if point.value >= threshold_w]
     if not above:
         return None, None
     return above[0], above[-1]

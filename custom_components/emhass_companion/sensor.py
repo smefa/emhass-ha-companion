@@ -34,7 +34,7 @@ from .coordinator import EmhassCoordinator, EmhassData
 from .deferrable import DeferrableRuntime, state_to_watts
 from .entity import EmhassEntity, EmhassLoadEntity
 from .models import Series
-from .surplus import total_energy_wh, window_of
+from .surplus import current_block, total_energy_wh, window_of
 
 PARALLEL_UPDATES = 0
 
@@ -558,8 +558,12 @@ class SolarSurplusBase(EmhassEntity):
     def _series(self) -> Series:
         return self.coordinator.surplus_series()
 
+    def _step(self, series: Series) -> timedelta:
+        return series.step() or timedelta(minutes=self.coordinator.config.time_step_minutes)
+
     def _window(self) -> tuple[datetime | None, datetime | None]:
-        return window_of(self._series(), self.coordinator.surplus_threshold_w)
+        series = self._series()
+        return window_of(series, self.coordinator.surplus_threshold_w, self._step(series))
 
 
 class SolarSurplusSensor(SolarSurplusBase, SensorEntity):
@@ -600,11 +604,13 @@ class SolarSurplusSensor(SolarSurplusBase, SensorEntity):
 
 
 class SolarSurplusEnergySensor(SolarSurplusBase, SensorEntity):
-    """How much spare solar is left in the plan's horizon.
+    """How much spare solar is left in the current block.
 
     Usually the more useful trigger of the two: whether to start heating a pool
     or charge a car is a question about kilowatt-hours coming, not about the
-    watts available at this instant.
+    watts available at this instant. Cut at the same night gap ``window_of``
+    is (see ``current_block``) -- otherwise, on a plan whose horizon reaches
+    past midnight, this would count tomorrow's forecast too.
     """
 
     _attr_translation_key = "solar_surplus_energy"
@@ -623,8 +629,8 @@ class SolarSurplusEnergySensor(SolarSurplusBase, SensorEntity):
         series = Series(point for point in self._series() if point.time >= now)
         if not series:
             return 0.0
-        step = series.step() or timedelta(minutes=self.coordinator.config.time_step_minutes)
-        return total_energy_wh(series, step) / 1000
+        step = self._step(series)
+        return total_energy_wh(current_block(series, step), step) / 1000
 
 
 class SolarSurplusStartSensor(SolarSurplusBase, SensorEntity):
