@@ -159,11 +159,24 @@ def test_near_zero_battery_power_is_idle(p_batt):
 
 
 def test_plan_curtailment_column_takes_priority():
-    row = _row(p_grid=0, p_pv_curtailment=1200, unit_prod_price=0.10)
+    """curtail_w is the allowed *export* (max(0, -p_grid)), not the shed
+    amount -- an export_limit profile writes it straight to hardware as a
+    feed-in cap, and those are not the same number."""
+    row = _row(p_grid=-1200, p_pv_curtailment=1900, unit_prod_price=0.10)
     curtail, curtail_w, rules = decide_curtailment(row, _config(), soc_percent=50)
     assert curtail is True
     assert curtail_w == 1200
     assert rules
+
+
+def test_plan_curtailment_is_skipped_without_p_grid():
+    """Translating a shed amount into an export cap without P_grid means
+    reconstructing the PV/load/battery balance by hand -- exactly the
+    misclassification this module's docstring warns about avoiding."""
+    row = _row(p_grid=None, p_pv_curtailment=1200, unit_prod_price=0.10)
+    curtail, curtail_w, rules = decide_curtailment(row, _config(), soc_percent=50)
+    assert curtail is False
+    assert curtail_w == 0.0
 
 
 def test_no_curtailment_signal_means_uncurtail():

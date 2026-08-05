@@ -13,10 +13,13 @@ import math
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 
 from .const import (
     CONF_DAYAHEAD_FALLBACK_TIME,
     CONF_HORIZON_HOURS,
+    CONF_HOUSE_LOAD_TOTAL_ENTITY,
     CONF_INVERTER,
     CONF_LOAD,
     CONF_MPC_INTERVAL,
@@ -33,6 +36,9 @@ from .const import (
     DEFAULT_HORIZON_HOURS,
     DEFAULT_MPC_INTERVAL,
     DEFAULT_TIME_STEP,
+    DOMAIN,
+    NET_HOUSE_LOAD_KEY,
+    PROFILE_KEY_LOAD_SENSOR,
     STALE_PLAN_FACTOR,
 )
 from .models import BatteryConfig, GridConfig, HybridInverterConfig
@@ -58,6 +64,26 @@ class ProfileSelection:
         return self.key is not None
 
 
+def _resolve_net_house_load_entity(
+    hass: HomeAssistant, entry: ConfigEntry, load: ProfileSelection
+) -> None:
+    """Point the load/sensor profile at the sensor the "create one" flow built.
+
+    Its entity id is never stored in options: with ``has_entity_name`` naming,
+    it isn't known until Home Assistant actually assigns it (and could change
+    if the object id it wants collides with something else), so it is
+    resolved fresh from the registry on every load instead of trusted from a
+    string written once during setup. Left untouched if the entity has not
+    been registered yet -- the moment this integration's own sensor platform
+    has run once, which everything that reads ``load.options["entity"]``
+    tolerates the same as any other momentarily-missing entity.
+    """
+    unique_id = f"{entry.entry_id}_{NET_HOUSE_LOAD_KEY}"
+    entity_id = er.async_get(hass).async_get_entity_id("sensor", DOMAIN, unique_id)
+    if entity_id:
+        load.options = {**load.options, "entity": entity_id}
+
+
 @dataclass(slots=True)
 class EmhassConfig:
     """The full user configuration for one EMHASS Companion entry."""
@@ -81,11 +107,16 @@ class EmhassConfig:
     hybrid_inverter: HybridInverterConfig = field(default_factory=HybridInverterConfig)
     soc_entity: str | None = None
     pv_live_entity: str | None = None
+    house_load_total_entity: str | None = None
 
     @classmethod
-    def from_entry(cls, entry: ConfigEntry) -> EmhassConfig:
+    def from_entry(cls, hass: HomeAssistant, entry: ConfigEntry) -> EmhassConfig:
         options = entry.options or {}
         raw_time = options.get(CONF_DAYAHEAD_FALLBACK_TIME, DEFAULT_DAYAHEAD_FALLBACK_TIME)
+        load = ProfileSelection.from_dict(options.get(CONF_LOAD))
+        house_load_total_entity = options.get(CONF_HOUSE_LOAD_TOTAL_ENTITY)
+        if house_load_total_entity and load.key == PROFILE_KEY_LOAD_SENSOR:
+            _resolve_net_house_load_entity(hass, entry, load)
         return cls(
             url=entry.data[CONF_URL],
             time_step_minutes=int(options.get(CONF_TIME_STEP, DEFAULT_TIME_STEP)),
@@ -94,7 +125,7 @@ class EmhassConfig:
             dayahead_fallback_time=time.fromisoformat(str(raw_time)),
             price=ProfileSelection.from_dict(options.get(CONF_PRICE)),
             pv=ProfileSelection.from_dict(options.get(CONF_PV)),
-            load=ProfileSelection.from_dict(options.get(CONF_LOAD)),
+            load=load,
             inverter=ProfileSelection.from_dict(options.get(CONF_INVERTER)),
             temperature=ProfileSelection.from_dict(options.get(CONF_TEMPERATURE)),
             tariff=Tariff.from_dict(options.get("tariff")),
@@ -105,6 +136,7 @@ class EmhassConfig:
             # to share it with.
             hybrid_inverter=HybridInverterConfig.from_dict(options.get("battery")),
             soc_entity=options.get(CONF_SOC_ENTITY),
+            house_load_total_entity=house_load_total_entity,
             pv_live_entity=options.get(CONF_PV_ENTITY),
         )
 

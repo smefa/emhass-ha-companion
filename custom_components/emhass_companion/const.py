@@ -111,6 +111,11 @@ CONF_LOAD_ENTITY: Final = "load_entity"
 # profile exposes a raw current-power sensor on its own -- they are all
 # forecast sources -- so this is asked for separately.
 CONF_PV_ENTITY: Final = "pv_entity"
+# The whole-house sensor picked in the "Create a house load sensor" step. Set
+# only when that flow was used; its presence is what tells EmhassConfig to
+# resolve the auto-created net-load sensor's entity id into the load/sensor
+# profile's `entity` option rather than trusting whatever is stored there.
+CONF_HOUSE_LOAD_TOTAL_ENTITY: Final = "house_load_total_entity"
 
 # Deferrable load subentry keys
 CONF_NAME: Final = "name"
@@ -363,6 +368,34 @@ PROFILE_KINDS: Final = (
 # coordinator._read_load_live reads it directly rather than asking for a
 # second, separate live-load entity.
 PROFILE_KEY_LOAD_SENSOR: Final = "load/sensor"
+
+# Not a real profile: a config-flow-only choice offered alongside the load
+# profiles that instead walks through creating one (picking a whole-house
+# sensor, then auto-configuring PROFILE_KEY_LOAD_SENSOR against a sensor this
+# integration creates and keeps net of every deferrable/thermal load). Kept
+# out of profiles/builtin entirely since nothing about it is declarative.
+LOAD_PROFILE_CREATE_SENTINEL: Final = "__create__"
+
+# Explicit display order for the load-profile picker. available_profiles()
+# otherwise returns profiles in the alphabetical file-load order from
+# profiles/__init__.py (emhass_native, forecast_entity, sensor), which buries
+# "point me at a sensor" -- the option most users with a whole-house meter
+# want -- under two others. Renaming the underlying files would change their
+# profile keys and break every existing config entry, so the reorder happens
+# here instead. Any profile not listed (a user-authored one) sorts after
+# these, in whatever order it was loaded.
+LOAD_PROFILE_ORDER: Final = (
+    LOAD_PROFILE_CREATE_SENTINEL,
+    PROFILE_KEY_LOAD_SENSOR,
+    "load/emhass_native",
+    "load/forecast_entity",
+)
+
+# Unique-id suffix for the sensor created by the "Create a house load sensor"
+# flow (full unique_id is f"{entry.entry_id}_{NET_HOUSE_LOAD_KEY}"). Shared
+# between sensor.py (creates the entity) and configuration.py (resolves its
+# entity id back out of the registry) so the two can never drift apart.
+NET_HOUSE_LOAD_KEY: Final = "net_house_load"
 
 # The profile schema is a public API for contributors and for users writing local
 # profiles. Bump only with a documented migration.

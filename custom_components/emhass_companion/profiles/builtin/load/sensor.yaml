@@ -1,4 +1,4 @@
-name: House load sensor
+name: Select a house load sensor (without deferrables)
 kind: load
 version: 1
 description: >-
@@ -7,8 +7,9 @@ description: >-
 notes: >-
   The sensor should exclude your deferrable loads. If it includes them, the
   optimiser sees their consumption twice -- once in the baseline forecast and
-  once in the load it is scheduling -- and will under-schedule them. A template
-  sensor subtracting the deferrables from total consumption is the usual fix.
+  once in the load it is scheduling -- and will under-schedule them. Pick
+  "Create a house load sensor" instead of this profile if you only have a
+  total sensor -- it builds one that excludes them for you.
 
   Choosing "ML forecaster" adds a "Train load forecaster" button to the EMHASS
   Companion device. Press it once after setup, and again whenever you want the

@@ -21,18 +21,21 @@ from homeassistant.config_entries import (
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP, Platform
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 from .api import EmhassClient, EmhassError
 from .const import (
+    CONF_HOUSE_LOAD_TOTAL_ENTITY,
     CONF_URL,
     DOMAIN,
     ISSUE_BAD_PROFILE,
     ISSUE_EMHASS_VERSION,
     LOAD_SUBENTRY_TYPES,
     MIN_EMHASS_VERSION,
+    NET_HOUSE_LOAD_KEY,
 )
 from .coordinator import EmhassCoordinator
 from .deferrable import DeferrableRegistry
@@ -87,6 +90,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
 
     loads = DeferrableRegistry(hass, entry)
     loads.sync()
+
+    if entry.options.get(CONF_HOUSE_LOAD_TOTAL_ENTITY):
+        # Registered here, ahead of both the config sync below and the sensor
+        # platform forwarded later, so EmhassConfig.from_entry can resolve
+        # this entity's id on the very first setup -- not just from the
+        # second one onward, once the sensor platform has run at least once.
+        er.async_get(hass).async_get_or_create(
+            "sensor",
+            DOMAIN,
+            f"{entry.entry_id}_{NET_HOUSE_LOAD_KEY}",
+            config_entry=entry,
+            suggested_object_id=NET_HOUSE_LOAD_KEY,
+        )
 
     coordinator = EmhassCoordinator(hass, entry, client, loads)
     await coordinator.async_load_profiles()

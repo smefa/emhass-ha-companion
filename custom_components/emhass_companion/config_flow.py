@@ -41,6 +41,7 @@ from .const import (
     CONF_GROUP_MUTUAL_EXCLUSION,
     CONF_HEATING_RATE,
     CONF_HORIZON_HOURS,
+    CONF_HOUSE_LOAD_TOTAL_ENTITY,
     CONF_HYBRID_INVERTER,
     CONF_INVERTER,
     CONF_INVERTER_AC_INPUT_MAX,
@@ -97,8 +98,11 @@ from .const import (
     DEFAULT_TIME_STEP,
     DEFAULT_URL,
     DOMAIN,
+    LOAD_PROFILE_CREATE_SENTINEL,
+    LOAD_PROFILE_ORDER,
     LOAD_SUBENTRY_TYPES,
     MIN_EMHASS_VERSION,
+    PROFILE_KEY_LOAD_SENSOR,
     PROFILE_KIND_INVERTER,
     PROFILE_KIND_LOAD,
     PROFILE_KIND_PRICE,
@@ -253,6 +257,45 @@ def _profile_selector(profiles: list[Profile]) -> selector.SelectSelector:
                 for profile in profiles
             ],
         )
+    )
+
+
+def _default_profile_options(profile: Profile, *, skip: set[str] = frozenset()) -> dict[str, Any]:
+    """A profile's declared option defaults, for a flow that skips its options form.
+
+    Every other path into ``CONF_PROFILE_OPTIONS`` goes through that profile's
+    own form, whose voluptuous schema bakes each option's ``default:`` in at
+    submission -- so the stored dict always has every key populated, and nothing
+    downstream (the ``emhass:``/``source:`` template rendering) expects otherwise.
+    A flow that never shows that form has to fill it in the same way, or a
+    profile option with no default resolves to an undefined Jinja value at
+    render time instead of the string the profile author actually intended.
+    """
+    return {
+        key: option["default"]
+        for key, option in profile.options.items()
+        if key not in skip and "default" in option
+    }
+
+
+def _load_profile_selector(profiles: list[Profile]) -> selector.SelectSelector:
+    """The load-profile picker, with "Create a house load sensor" first.
+
+    Also reorders the real profiles per LOAD_PROFILE_ORDER: available_profiles
+    otherwise returns them in alphabetical file-load order (emhass_native,
+    forecast_entity, sensor), which buries "point me at a sensor" -- the
+    option most users with a whole-house meter want -- under two others.
+    """
+    order = {key: index for index, key in enumerate(LOAD_PROFILE_ORDER)}
+    ranked = sorted(profiles, key=lambda profile: order.get(profile.key, len(order)))
+    options = [
+        selector.SelectOptionDict(
+            value=LOAD_PROFILE_CREATE_SENTINEL, label="Create a house load sensor"
+        ),
+        *(selector.SelectOptionDict(value=profile.key, label=profile.name) for profile in ranked),
+    ]
+    return selector.SelectSelector(
+        selector.SelectSelectorConfig(mode=selector.SelectSelectorMode.LIST, options=options)
     )
 
 
@@ -435,7 +478,62 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
     # -- load -----------------------------------------------------------------
 
     async def async_step_load(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        return await self._async_profile_step(PROFILE_KIND_LOAD, CONF_LOAD, "load", user_input)
+        choices = available_profiles(self.hass, self._profiles, PROFILE_KIND_LOAD)
+        if not choices:
+            # Should not happen: every kind ships an always-available profile.
+            return self.async_abort(reason="no_profiles")
+
+        if user_input is not None:
+            if user_input[CONF_PROFILE] == LOAD_PROFILE_CREATE_SENTINEL:
+                return await self.async_step_load_create()
+            self._options[CONF_LOAD] = {
+                CONF_PROFILE: user_input[CONF_PROFILE],
+                CONF_PROFILE_OPTIONS: {},
+            }
+            return await self.async_step_load_options()
+
+        return self.async_show_form(
+            step_id="load",
+            data_schema=vol.Schema({vol.Required(CONF_PROFILE): _load_profile_selector(choices)}),
+            description_placeholders={
+                "profiles": "\n".join(
+                    f"- **{profile.name}** — {profile.description or ''}" for profile in choices
+                )
+            },
+        )
+
+    async def async_step_load_create(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Build "load/sensor" against a sensor this integration creates.
+
+        Skips straight to :meth:`async_step_battery` rather than through
+        :meth:`async_step_load_options`: the profile it configures is fixed,
+        and its own "entity" option is resolved dynamically at runtime
+        (EmhassConfig._resolve_net_house_load_entity) rather than stored here,
+        since the sensor's own entity id does not exist yet at this point in
+        the flow.
+        """
+        if user_input is not None:
+            self._options[CONF_HOUSE_LOAD_TOTAL_ENTITY] = user_input[CONF_HOUSE_LOAD_TOTAL_ENTITY]
+            self._options[CONF_LOAD] = {
+                CONF_PROFILE: PROFILE_KEY_LOAD_SENSOR,
+                CONF_PROFILE_OPTIONS: _default_profile_options(
+                    self._profiles[PROFILE_KEY_LOAD_SENSOR], skip={"entity"}
+                ),
+            }
+            return await self.async_step_battery()
+
+        return self.async_show_form(
+            step_id="load_create",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_HOUSE_LOAD_TOTAL_ENTITY): selector.EntitySelector(
+                        selector.EntitySelectorConfig(domain="sensor", device_class="power")
+                    )
+                }
+            ),
+        )
 
     async def async_step_load_options(
         self, user_input: dict[str, Any] | None = None
@@ -1394,6 +1492,9 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
         choices = available_profiles(self.hass, profiles, PROFILE_KIND_LOAD)
 
         if user_input is not None:
+            if user_input[CONF_PROFILE] == LOAD_PROFILE_CREATE_SENTINEL:
+                self._load_profiles = profiles
+                return await self.async_step_load_create()
             self._load_key = user_input[CONF_PROFILE]
             self._load_profiles = profiles
             return await self.async_step_load_options()
@@ -1405,7 +1506,40 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
                 {
                     vol.Required(
                         CONF_PROFILE, description={"suggested_value": current}
-                    ): _profile_selector(choices)
+                    ): _load_profile_selector(choices)
+                }
+            ),
+        )
+
+    async def async_step_load_create(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Build "load/sensor" against a sensor this integration creates.
+
+        See the matching step on the setup flow for why "entity" is left out
+        of what gets stored here.
+        """
+        if user_input is not None:
+            options = dict(self.config_entry.options)
+            options[CONF_HOUSE_LOAD_TOTAL_ENTITY] = user_input[CONF_HOUSE_LOAD_TOTAL_ENTITY]
+            options[CONF_LOAD] = {
+                CONF_PROFILE: PROFILE_KEY_LOAD_SENSOR,
+                CONF_PROFILE_OPTIONS: _default_profile_options(
+                    self._load_profiles[PROFILE_KEY_LOAD_SENSOR], skip={"entity"}
+                ),
+            }
+            return self.async_create_entry(data=options)
+
+        current = self.config_entry.options.get(CONF_HOUSE_LOAD_TOTAL_ENTITY)
+        return self.async_show_form(
+            step_id="load_create",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_HOUSE_LOAD_TOTAL_ENTITY, description={"suggested_value": current}
+                    ): selector.EntitySelector(
+                        selector.EntitySelectorConfig(domain="sensor", device_class="power")
+                    )
                 }
             ),
         )

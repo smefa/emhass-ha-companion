@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
@@ -16,19 +16,22 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
+    STATE_UNAVAILABLE,
+    STATE_UNKNOWN,
     EntityCategory,
     UnitOfEnergy,
     UnitOfPower,
     UnitOfTemperature,
     UnitOfTime,
 )
-from homeassistant.core import HomeAssistant
+from homeassistant.core import Event, EventStateChangedData, HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.util import dt as dt_util
 
-from .const import BATTERY_ACTIONS
+from .const import BATTERY_ACTIONS, NET_HOUSE_LOAD_KEY
 from .coordinator import EmhassCoordinator, EmhassData
-from .deferrable import DeferrableRuntime
+from .deferrable import DeferrableRuntime, state_to_watts
 from .entity import EmhassEntity, EmhassLoadEntity
 from .models import Series
 from .surplus import total_energy_wh, window_of
@@ -209,6 +212,13 @@ async def async_setup_entry(
         ]
     )
 
+    # Only present for an entry set up through "Create a house load sensor" --
+    # every other load profile has nothing for it to subtract into.
+    if total_entity := coordinator.config.house_load_total_entity:
+        async_add_entities(
+            [NetHouseLoadSensor(coordinator, total_entity, entry.runtime_data.loads.all())]
+        )
+
     # These three were written, translated and unit-tested, but never actually
     # added to Home Assistant, so no load ever had them -- which is also why
     # the deferrable card had no schedule to draw.
@@ -259,6 +269,79 @@ class EmhassSensor(EmhassEntity, SensorEntity):
             attributes.update(self.entity_description.attrs_fn(data))
 
         return attributes or None
+
+
+class NetHouseLoadSensor(EmhassEntity, SensorEntity):
+    """Whole-house power with every deferrable/thermal load's current draw subtracted.
+
+    Backs the "Select a house load sensor (without deferrables)" profile when
+    it was auto-configured by the "Create a house load sensor" setup step,
+    which points that profile's ``entity`` option at this sensor rather than
+    asking the user to build their own subtracting template sensor. EMHASS
+    pulls its load-forecast history straight from this entity's own recorded
+    state, so it needs real, frequent state changes of its own -- unlike the
+    rest of this device it therefore does not update from the coordinator
+    (which only refreshes once per optimisation run), but from its own
+    subscriptions to the total sensor and every load's running source.
+    """
+
+    _attr_translation_key = "net_house_load"
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(
+        self,
+        coordinator: EmhassCoordinator,
+        total_entity: str,
+        loads: Iterable[DeferrableRuntime],
+    ) -> None:
+        super().__init__(coordinator, NET_HOUSE_LOAD_KEY)
+        self._total_entity = total_entity
+        self._loads = list(loads)
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        sources = {self._total_entity}
+        sources.update(source for load in self._loads if (source := load.running_source))
+        self.async_on_remove(
+            async_track_state_change_event(self.hass, list(sources), self._async_source_changed)
+        )
+
+    @callback
+    def _async_source_changed(self, event: Event[EventStateChangedData]) -> None:
+        self.async_write_ha_state()
+
+    @property
+    def available(self) -> bool:
+        # Unlike the rest of this device (see EmhassEntity.available), this
+        # sensor's whole value is the total entity's reading -- with nothing
+        # to subtract from, reporting a number would just be the deferrables'
+        # draw counted as free, silently wrong rather than absent.
+        state = self.hass.states.get(self._total_entity)
+        return state is not None and state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE, "")
+
+    @property
+    def native_value(self) -> float | None:
+        total_state = self.hass.states.get(self._total_entity)
+        if total_state is None:
+            return None
+        total = state_to_watts(total_state)
+        if total is None:
+            return None
+
+        deferred = 0.0
+        for load in self._loads:
+            source = load.running_source
+            if source is None:
+                continue
+            deferred += load.state_to_power(self.hass.states.get(source)) or 0.0
+
+        # Clamped rather than left negative: the total and each deferrable's
+        # power sensor update on their own schedules, not in lockstep, so a
+        # deferrable's reading can momentarily lead the total's -- a real
+        # negative net load is not a state this sensor can ever mean.
+        return max(total - deferred, 0.0)
 
 
 class LoadDeferrableNumberSensor(EmhassLoadEntity, SensorEntity):

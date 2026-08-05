@@ -100,6 +100,29 @@ RUNNING_FRACTION = 0.10
 RUNNING_FLOOR_W = 10.0
 
 
+def state_to_watts(state: State) -> float | None:
+    """Parse a state's numeric value as watts, converting from other power units.
+
+    Shared by every reader of a raw power sensor (deferrable and otherwise):
+    a `power` device class is not guaranteed to be W -- kW is just as common
+    on a whole-appliance meter -- so a reading in another unit would otherwise
+    come out 1000x wrong rather than merely absent.
+    """
+    try:
+        value = float(state.state)
+    except (TypeError, ValueError):
+        return None
+
+    unit = state.attributes.get(ATTR_UNIT_OF_MEASUREMENT)
+    if unit and unit != UnitOfPower.WATT:
+        # Not a power unit HA recognises -- nothing sensible to convert
+        # from, so fall through and use the raw number rather than
+        # discarding a reading entirely.
+        with suppress(HomeAssistantError):
+            value = PowerConverter.convert(value, unit, UnitOfPower.WATT)
+    return value
+
+
 @dataclass(slots=True)
 class DeferrableRuntime:
     """One deferrable load's live state."""
@@ -329,24 +352,7 @@ class DeferrableRuntime:
             # semi-continuous model makes, and clears running_threshold_w by
             # construction rather than by luck.
             return self.nominal_power_w if state.state == STATE_ON else 0.0
-        try:
-            value = float(state.state)
-        except (TypeError, ValueError):
-            return None
-
-        # nominal_power_w, minimum_power_w and running_threshold_w are all
-        # watts; a sensor reporting kW (a `power` device class is not
-        # guaranteed to be W -- kW is just as common on a whole-appliance
-        # meter) would otherwise be read 1000x too small, and every load would
-        # look permanently idle.
-        unit = state.attributes.get(ATTR_UNIT_OF_MEASUREMENT)
-        if unit and unit != UnitOfPower.WATT:
-            # Not a power unit HA recognises -- nothing sensible to convert
-            # from, so fall through and use the raw number rather than
-            # discarding a reading entirely.
-            with suppress(HomeAssistantError):
-                value = PowerConverter.convert(value, unit, UnitOfPower.WATT)
-        return value
+        return state_to_watts(state)
 
     def assume_from_plan(self, rows: Iterable[PlanRow], index: int, now: datetime) -> None:
         """Trust our own last plan in place of a reading nothing can provide.

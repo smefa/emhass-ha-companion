@@ -110,7 +110,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         )
         self.client = client
         self.loads = loads
-        self.config = EmhassConfig.from_entry(entry)
+        self.config = EmhassConfig.from_entry(hass, entry)
         self.profiles: dict[str, Profile] = {}
         self.profile_errors: dict[str, str] = {}
         self.data = EmhassData()
@@ -193,7 +193,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         self.profile_errors = result.errors
 
     def reload_config(self) -> None:
-        self.config = EmhassConfig.from_entry(self.config_entry)
+        self.config = EmhassConfig.from_entry(self.hass, self.config_entry)
 
     def load_forecast_settings(self) -> dict[str, Any]:
         """The ``emhass:`` settings the configured load profile contributes.

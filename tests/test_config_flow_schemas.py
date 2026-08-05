@@ -15,13 +15,19 @@ import voluptuous as vol
 from custom_components.emhass_companion.config_flow import (
     STANDARD_TIME_STEPS,
     _collect_tariff,
+    _default_profile_options,
+    _load_profile_selector,
     _profile_selector,
     _tariff_side_schema,
     _time_step_options,
     battery_schema,
     grid_schema,
 )
-from custom_components.emhass_companion.const import CONF_MULTIPLIER, CONF_TIME_STEP
+from custom_components.emhass_companion.const import (
+    CONF_MULTIPLIER,
+    CONF_TIME_STEP,
+    LOAD_PROFILE_CREATE_SENTINEL,
+)
 from custom_components.emhass_companion.profiles import BUILTIN_ROOT
 from custom_components.emhass_companion.profiles.schema import Profile, validate_document
 
@@ -179,6 +185,54 @@ def test_profile_selector_builds():
         Profile(key="price/b", path="b.yaml", kind="price", name="B", document={}),
     ]
     assert _profile_selector(profiles)
+
+
+def test_load_profile_selector_puts_create_first_then_the_fixed_order():
+    """See LOAD_PROFILE_ORDER: file-load order is alphabetical, not this."""
+    profiles = [
+        Profile(
+            key="load/forecast_entity", path="a.yaml", kind="load", name="Forecast", document={}
+        ),
+        Profile(key="load/emhass_native", path="b.yaml", kind="load", name="Typical", document={}),
+        Profile(key="load/sensor", path="c.yaml", kind="load", name="Sensor", document={}),
+    ]
+    options = _load_profile_selector(profiles).config["options"]
+    assert [option["value"] for option in options] == [
+        LOAD_PROFILE_CREATE_SENTINEL,
+        "load/sensor",
+        "load/emhass_native",
+        "load/forecast_entity",
+    ]
+
+
+def test_load_profile_selector_sorts_unknown_profiles_after_the_fixed_ones():
+    """A user-authored load profile has no place in LOAD_PROFILE_ORDER."""
+    profiles = [
+        Profile(key="load/sensor", path="a.yaml", kind="load", name="Sensor", document={}),
+        Profile(key="load/custom", path="b.yaml", kind="load", name="Custom", document={}),
+    ]
+    options = _load_profile_selector(profiles).config["options"]
+    assert [option["value"] for option in options] == [
+        LOAD_PROFILE_CREATE_SENTINEL,
+        "load/sensor",
+        "load/custom",
+    ]
+
+
+def test_default_profile_options_uses_each_options_declared_default():
+    profile = Profile(
+        key="load/sensor",
+        path="sensor.yaml",
+        kind="load",
+        name="Sensor",
+        document={
+            "options": {
+                "entity": {"name": "Entity", "selector": {"entity": {}}},
+                "method": {"name": "Method", "default": "typical", "selector": {"select": {}}},
+            }
+        },
+    )
+    assert _default_profile_options(profile, skip={"entity"}) == {"method": "typical"}
 
 
 @pytest.mark.parametrize(

@@ -849,7 +849,7 @@ async def test_curtailment_is_applied_and_reported(
 ) -> None:
     executor, coordinator = await _with_curtailing_profile(hass)
     coordinator.data = EmhassData(
-        plan=_plan(0, p_pv_curtailment=1200), last_success=dt_util.utcnow()
+        plan=_plan(0, p_grid=-1200, p_pv_curtailment=1900), last_success=dt_util.utcnow()
     )
 
     decision = await executor.async_apply()
@@ -885,7 +885,7 @@ async def test_curtailment_write_suppression_is_independent_of_the_battery_deadb
 ) -> None:
     executor, coordinator = await _with_curtailing_profile(hass)
     coordinator.data = EmhassData(
-        plan=_plan(-3000, p_pv_curtailment=1000), last_success=dt_util.utcnow()
+        plan=_plan(-3000, p_grid=-1000, p_pv_curtailment=1000), last_success=dt_util.utcnow()
     )
     await executor.async_apply()
     await hass.async_block_till_done()
@@ -901,7 +901,7 @@ async def test_curtailment_write_suppression_is_independent_of_the_battery_deadb
     # while the curtailment write goes through -- neither axis's deadband may
     # gate the other.
     coordinator.data = EmhassData(
-        plan=_plan(-3000, p_pv_curtailment=3000), last_success=dt_util.utcnow()
+        plan=_plan(-3000, p_grid=-3000, p_pv_curtailment=3000), last_success=dt_util.utcnow()
     )
     await executor.async_apply()
     await hass.async_block_till_done()
@@ -939,7 +939,7 @@ async def test_restore_uncurtails_and_hands_back_the_battery(
     on the same handover."""
     executor, coordinator = await _with_curtailing_profile(hass)
     coordinator.data = EmhassData(
-        plan=_plan(-3000, p_pv_curtailment=1000), last_success=dt_util.utcnow()
+        plan=_plan(-3000, p_grid=-1000, p_pv_curtailment=1000), last_success=dt_util.utcnow()
     )
 
     await executor.async_apply()

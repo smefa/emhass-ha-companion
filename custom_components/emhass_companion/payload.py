@@ -176,9 +176,10 @@ def resolve_load_window(
         # load unable to run at all, and a request that silently does nothing
         # for hours is worse than one that breaks quiet hours audibly.
         if opens_at is not None and deadline <= opens_at:
+            local_opens_at = dt_util.as_local(opens_at)
             warnings.append(
                 f"{name}: the requested deadline falls before its time window opens "
-                f"({earliest:%H:%M}); running as soon as possible instead."
+                f"({local_opens_at:%H:%M}); running as soon as possible instead."
             )
             opens_at = None
             ends_at = deadline
