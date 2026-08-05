@@ -9,6 +9,7 @@
 | `sensor.*_planned_grid_power` | Positive = import, negative = export |
 | `sensor.*_planned_battery_power` | Positive = discharge, negative = charge |
 | `sensor.*_planned_battery_level` | Percent |
+| `sensor.*_end_soc_target` | The battery level the plan aims for at the horizon's end, with the why in its attributes (`reason`, `next_replenishment`, `bridge_energy_wh`, …) — see [End SOC](end_soc_plan.md) |
 | `sensor.*_import_price` / `*_export_price` | Composed prices |
 | `sensor.*_optimisation_status` | Result of the last solve |
 | `sensor.*_planned_cost` | Cost of the current plan |

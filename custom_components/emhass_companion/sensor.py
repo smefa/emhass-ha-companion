@@ -118,7 +118,26 @@ BATTERY_SENSORS: tuple[EmhassSensorDescription, ...] = (
         value_fn=_plan_value("soc_percent"),
         series_fn=lambda data: data.plan.series("soc_percent") if data.plan else Series.empty(),
     ),
+    EmhassSensorDescription(
+        key="end_soc_target",
+        translation_key="end_soc_target",
+        device_class=SensorDeviceClass.BATTERY,
+        native_unit_of_measurement="%",
+        suggested_display_precision=0,
+        # A setpoint, not a measurement -- long-term statistics on it would be
+        # noise, so deliberately no state_class.
+        value_fn=lambda data, now: round(data.end_soc.soc * 100, 1) if data.end_soc else None,
+        attrs_fn=lambda data: _end_soc_attributes(data),
+    ),
 )
+
+
+def _end_soc_attributes(data: EmhassData) -> dict[str, Any]:
+    """The explanation the target needs to be trusted -- see terminal.py."""
+    if data.end_soc is None:
+        return {}
+    return {"reason": data.end_soc.reason, **data.end_soc.details}
+
 
 PRICE_SENSORS: tuple[EmhassSensorDescription, ...] = (
     EmhassSensorDescription(

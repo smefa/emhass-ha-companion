@@ -98,6 +98,7 @@
           "soc_min": "Lägsta laddningsnivå",
           "soc_max": "Högsta laddningsnivå",
           "soc_target": "Önskad laddningsnivå",
+          "end_soc_mode": "Slutladdningsnivå",
           "self_consume_threshold_w": "Tröskel för övergång till egenanvändning",
           "soc_entity": "Sensor för batteriets laddningsnivå",
           "pv_entity": "Sensor för aktuell soleffekt"
@@ -105,10 +106,11 @@
         "data_description": {
           "hybrid_inverter": "På om solpanelerna och batteriet delar en och samma växelriktares AC-effektgräns, vilket gäller de flesta hembatterisystem. Av om det är två separata växelriktare med varsin gräns.",
           "soc_min": "Optimeringen planerar aldrig batteriet under denna nivå.",
-          "soc_target": "Där optimeringen siktar på att lämna batteriet vid horisontens slut.",
+          "soc_target": "Där optimeringen siktar på att lämna batteriet vid horisontens slut. Med slutladdningsnivå \"Optimerad\" är detta i stället reservgolvet som det beräknade målet aldrig planerar under.",
           "self_consume_threshold_w": "När planens näteffekt ligger inom detta antal watt från noll lämnas batteriet till växelriktarens egen egenanvändningsläge istället för planens tvingade laddning/urladdning -- även en stor planerad laddning eller urladdning åsidosätts, eftersom egenanvändning följer verklig sol- och lastdata bättre än en prognos vid små obalanser. När läget väl har lämnats över måste näteffekten överstiga dubbla detta värde innan planen kan tvinga batteriet igen, så att läget inte växlar fram och tillbaka vid varje omräkning. Inte samma sak som laddningsnivåerna ovan, som bara begränsar vad optimeringen får planera mellan.",
           "soc_entity": "Läses vid varje körning så att planen utgår från verkligheten.",
-          "pv_entity": "Valfritt. Blandas in i det första steget av varje MPC-prognos, viktat av reglaget \"Live-värdets vikt\". Last blandas in på samma sätt automatiskt, med sensorn vald under Husets förbrukning > Sensor för husets last -- ingen separat sensor behövs där."
+          "pv_entity": "Valfritt. Blandas in i det första steget av varje MPC-prognos, viktat av reglaget \"Live-värdets vikt\". Last blandas in på samma sätt automatiskt, med sensorn vald under Husets förbrukning > Sensor för husets last -- ingen separat sensor behövs där.",
+          "end_soc_mode": "Hur batterinivån som planen siktar på vid horisontens slut väljs. \"Optimerad\" beräknas varje körning ur sol-, pris- och lastprognoserna bortom horisonten; \"Samma som start\" planerar alltid tillbaka till nuvarande nivå; \"Fast 50 %\" siktar alltid på hälften. Kräver EMHASS 0.18 eller nyare."
         }
       },
       "grid": {
@@ -186,6 +188,7 @@
           "soc_min": "Lägsta laddningsnivå",
           "soc_max": "Högsta laddningsnivå",
           "soc_target": "Önskad laddningsnivå",
+          "end_soc_mode": "Slutladdningsnivå",
           "self_consume_threshold_w": "Tröskel för övergång till egenanvändning",
           "soc_entity": "Sensor för batteriets laddningsnivå",
           "pv_entity": "Sensor för aktuell soleffekt"
@@ -193,7 +196,9 @@
         "data_description": {
           "hybrid_inverter": "På om solpanelerna och batteriet delar en och samma växelriktares AC-effektgräns, vilket gäller de flesta hembatterisystem. Av om det är två separata växelriktare med varsin gräns.",
           "self_consume_threshold_w": "När planens näteffekt ligger inom detta antal watt från noll lämnas batteriet till växelriktarens egen egenanvändningsläge istället för planens tvingade laddning/urladdning -- även en stor planerad laddning eller urladdning åsidosätts, eftersom egenanvändning följer verklig sol- och lastdata bättre än en prognos vid små obalanser. När läget väl har lämnats över måste näteffekten överstiga dubbla detta värde innan planen kan tvinga batteriet igen, så att läget inte växlar fram och tillbaka vid varje omräkning. Inte samma sak som laddningsnivåerna ovan, som bara begränsar vad optimeringen får planera mellan.",
-          "pv_entity": "Valfritt. Blandas in i det första steget av varje MPC-prognos, viktat av reglaget \"Live-värdets vikt\". Last blandas in på samma sätt automatiskt, med sensorn vald under Husets förbrukning > Sensor för husets last -- ingen separat sensor behövs där."
+          "pv_entity": "Valfritt. Blandas in i det första steget av varje MPC-prognos, viktat av reglaget \"Live-värdets vikt\". Last blandas in på samma sätt automatiskt, med sensorn vald under Husets förbrukning > Sensor för husets last -- ingen separat sensor behövs där.",
+          "soc_target": "Där optimeringen siktar på att lämna batteriet vid horisontens slut. Med slutladdningsnivå \"Optimerad\" är detta i stället reservgolvet som det beräknade målet aldrig planerar under.",
+          "end_soc_mode": "Hur batterinivån som planen siktar på vid horisontens slut väljs. \"Optimerad\" beräknas varje körning ur sol-, pris- och lastprognoserna bortom horisonten; \"Samma som start\" planerar alltid tillbaka till nuvarande nivå; \"Fast 50 %\" siktar alltid på hälften. Kräver EMHASS 0.18 eller nyare."
         }
       },
       "grid": {
@@ -272,6 +277,13 @@
         "on_demand": "Vid behov",
         "surplus": "På solöverskott"
       }
+    },
+    "end_soc_mode": {
+      "options": {
+        "optimized": "Optimerad",
+        "same_as_start": "Samma som start",
+        "fixed_50": "Fast 50 %"
+      }
     }
   },
   "entity": {
@@ -347,6 +359,9 @@
       },
       "net_house_load": {
         "name": "Husets last (utan styrbara laster)"
+      },
+      "end_soc_target": {
+        "name": "Mål för slutladdningsnivå"
       }
     },
     "binary_sensor": {
@@ -515,6 +530,10 @@
     "run_failed": {
       "title": "Den senaste körningen av {action} misslyckades",
       "description": "EMHASS producerade ingen plan: {error}\n\nDen tidigare planen behålls. Detta löser sig automatiskt så snart en körning lyckas igen -- kontrollera EMHASS-tilläggets loggar för hela felet om det inte löser sig av sig själv."
+    },
+    "pv_tail_short": {
+      "title": "Solprognosen tar slut för nära horisonten",
+      "description": "Optimerad slutladdningsnivå har liten eller ingen solprognos bortom optimeringshorisonten, så den antar mörker där och håller ett försiktigt högt batterimål.\n\nDin Solcast-profil kan se en dag längre: öppna integrationens alternativ, gå till solprognossteget och lägg till `{entity}` bland de valda prognossensorerna."
     }
   },
   "services": {

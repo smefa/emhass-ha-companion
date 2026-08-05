@@ -304,6 +304,9 @@ class PayloadInputs:
     sell_price: Series | None = None
     outdoor_temperature: Series | None = None
     soc_init: float | None = None
+    soc_final: float | None = None
+    """End-of-horizon SOC target chosen by terminal.decide_end_soc. None keeps
+    the old pin-to-start behaviour (see build_payload)."""
     pv_live_w: float | None = None
     load_live_w: float | None = None
     mix_beta: float = 0.5
@@ -408,13 +411,18 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
     if inputs.soc_init is not None:
         # A fraction in [0, 1]; the percentage form belongs only to display.
         payload["soc_init"] = round(inputs.soc_init, 4)
-        # EMHASS enforces total battery throughput over the horizon as a hard
-        # equality against (soc_init - soc_final). Leaving soc_final unset
-        # makes EMHASS default it to soc_init anyway, so this is a no-op for
-        # the solver -- but it's sent explicitly rather than left to that
-        # silent fallback, since a future default change on EMHASS's side
-        # would otherwise change plans here without warning.
-        payload["soc_final"] = payload["soc_init"]
+        # EMHASS pins net battery throughput over the horizon to
+        # (soc_init - soc_final) -- a hard equality up to 0.17.x, softly
+        # penalised far above the dearest import slot from 0.18, so the target
+        # is honoured whenever physics allows either way. The value comes from
+        # terminal.decide_end_soc; without one, fall back to pinning the end
+        # to the start. The fallback is sent explicitly rather than left to
+        # EMHASS's own soc_final default, since a default change on EMHASS's
+        # side would otherwise change plans here without warning.
+        if inputs.soc_final is not None:
+            payload["soc_final"] = round(inputs.soc_final, 4)
+        else:
+            payload["soc_final"] = payload["soc_init"]
 
     # -- settings -------------------------------------------------------------
     payload.update(_battery_settings(inputs.battery))

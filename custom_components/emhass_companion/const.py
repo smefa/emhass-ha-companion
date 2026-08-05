@@ -91,6 +91,15 @@ CONF_SOC_MAX: Final = "soc_max"
 CONF_SOC_TARGET: Final = "soc_target"
 CONF_CHARGE_EFFICIENCY: Final = "charge_efficiency"
 CONF_DISCHARGE_EFFICIENCY: Final = "discharge_efficiency"
+# How the end-of-horizon SOC target (EMHASS's `soc_final`) is chosen. Optimized
+# computes it each run from the forecast tails past the horizon (terminal.py);
+# same_as_start pins it to the live SOC (the pre-0.9 behaviour); fixed_50
+# always asks for half. See docs/end_soc_plan.md.
+CONF_END_SOC_MODE: Final = "end_soc_mode"
+END_SOC_OPTIMIZED: Final = "optimized"
+END_SOC_SAME_AS_START: Final = "same_as_start"
+END_SOC_FIXED_50: Final = "fixed_50"
+END_SOC_MODES: Final = (END_SOC_OPTIMIZED, END_SOC_SAME_AS_START, END_SOC_FIXED_50)
 
 # A hybrid inverter shares one AC-side throughput limit between PV and
 # battery; a "two separate inverters" plant has no such shared cap. Lives
@@ -218,6 +227,7 @@ DEFAULT_DAYAHEAD_FALLBACK_TIME: Final = "13:30:00"
 DEFAULT_SOC_MIN: Final = 0.10
 DEFAULT_SOC_MAX: Final = 0.95
 DEFAULT_SOC_TARGET: Final = 0.50
+DEFAULT_END_SOC_MODE: Final = END_SOC_OPTIMIZED
 DEFAULT_CHARGE_EFFICIENCY: Final = 0.95
 DEFAULT_DISCHARGE_EFFICIENCY: Final = 0.95
 # EMHASS's own default for both AC/DC conversion directions -- no assumed loss
@@ -531,3 +541,14 @@ ISSUE_OPTIMIZATION_INFEASIBLE: Final = "optimization_infeasible"
 # A run that errored outright (EMHASS unreachable, rejected the request, or
 # raised internally) rather than merely failing to find a feasible plan.
 ISSUE_RUN_FAILED: Final = "run_failed"
+# End SOC's Optimized mode has little or no PV forecast past the horizon, but
+# the selected Solcast profile could provide one more day by adding its day-3
+# sensor. A nudge with a one-click fix, not an error -- the heuristic already
+# degrades safely by assuming zero PV where the forecast ends.
+ISSUE_PV_TAIL_SHORT: Final = "pv_tail_short"
+
+# Solcast's day sensors are named today / tomorrow / day_3..day_7 -- "tomorrow"
+# *is* day 2, there is no forecast_day_2. Day 3 is the first sensor past the
+# profile's old today+tomorrow default.
+PROFILE_KEY_PV_SOLCAST: Final = "pv/solcast"
+SOLCAST_DAY3_ENTITY: Final = "sensor.solcast_pv_forecast_forecast_day_3"

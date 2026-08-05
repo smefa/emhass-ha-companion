@@ -57,6 +57,15 @@ async def async_get_config_entry_diagnostics(
                 ("load_forecast", data.load_forecast),
             )
         },
+        "end_soc": (
+            {
+                "soc": data.end_soc.soc,
+                "reason": data.end_soc.reason,
+                "details": data.end_soc.details,
+            }
+            if data.end_soc
+            else None
+        ),
         # The exact request is the single most useful artefact when a plan looks
         # wrong, since EMHASS's own configuration screen does not reflect it.
         "last_payload": data.payload,

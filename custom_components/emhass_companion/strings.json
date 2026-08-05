@@ -98,6 +98,7 @@
           "soc_min": "Minimum charge level",
           "soc_max": "Maximum charge level",
           "soc_target": "Target charge level",
+          "end_soc_mode": "End SOC",
           "self_consume_threshold_w": "Self-consumption handoff threshold",
           "soc_entity": "Battery SOC sensor",
           "pv_entity": "Live PV power sensor"
@@ -105,10 +106,11 @@
         "data_description": {
           "hybrid_inverter": "On if PV and the battery share one inverter's AC-side power limit, which is most home battery systems. Off if they are two independent inverters, each with its own limit.",
           "soc_min": "The optimiser will not plan the battery below this level.",
-          "soc_target": "Where the optimiser aims to leave the battery at the end of the horizon.",
+          "soc_target": "Where the optimiser aims to leave the battery at the end of the horizon. With End SOC set to \"Optimized\" this is instead the reserve floor the computed target never plans below.",
           "self_consume_threshold_w": "When the plan's grid power is within this many watts of zero, the battery is handed to the inverter's own self-consumption mode instead of the plan's forced charge/discharge -- even a large planned charge or discharge is overridden, because self-consumption tracks real-time PV and load better than a forecast can at small imbalances. Once handed over, grid power must exceed twice this value before the plan can force the battery again, so it doesn't flip modes every recalculation. Not the same as the charge-level limits above, which only bound what the optimiser may plan between.",
           "soc_entity": "Read at the start of every run so the plan starts from reality.",
-          "pv_entity": "Optional. Blended into the first step of every MPC forecast, weighted by the \"Live value weight\" number entity. Load is blended the same way automatically, using the sensor picked under House consumption > House load sensor -- no separate entity needed there."
+          "pv_entity": "Optional. Blended into the first step of every MPC forecast, weighted by the \"Live value weight\" number entity. Load is blended the same way automatically, using the sensor picked under House consumption > House load sensor -- no separate entity needed there.",
+          "end_soc_mode": "How the battery level the plan aims for at the end of the horizon is chosen. \"Optimized\" computes it each run from the solar, price and load forecasts beyond the horizon; \"Same as start\" always plans back to the current level; \"Fixed 50 %\" always aims for half. Requires EMHASS 0.18 or newer."
         }
       },
       "grid": {
@@ -186,6 +188,7 @@
           "soc_min": "Minimum charge level",
           "soc_max": "Maximum charge level",
           "soc_target": "Target charge level",
+          "end_soc_mode": "End SOC",
           "self_consume_threshold_w": "Self-consumption handoff threshold",
           "soc_entity": "Battery SOC sensor",
           "pv_entity": "Live PV power sensor"
@@ -193,7 +196,9 @@
         "data_description": {
           "hybrid_inverter": "On if PV and the battery share one inverter's AC-side power limit, which is most home battery systems. Off if they are two independent inverters, each with its own limit.",
           "self_consume_threshold_w": "When the plan's grid power is within this many watts of zero, the battery is handed to the inverter's own self-consumption mode instead of the plan's forced charge/discharge -- even a large planned charge or discharge is overridden, because self-consumption tracks real-time PV and load better than a forecast can at small imbalances. Once handed over, grid power must exceed twice this value before the plan can force the battery again, so it doesn't flip modes every recalculation. Not the same as the charge-level limits above, which only bound what the optimiser may plan between.",
-          "pv_entity": "Optional. Blended into the first step of every MPC forecast, weighted by the \"Live value weight\" number entity. Load is blended the same way automatically, using the sensor picked under House consumption > House load sensor -- no separate entity needed there."
+          "pv_entity": "Optional. Blended into the first step of every MPC forecast, weighted by the \"Live value weight\" number entity. Load is blended the same way automatically, using the sensor picked under House consumption > House load sensor -- no separate entity needed there.",
+          "soc_target": "Where the optimiser aims to leave the battery at the end of the horizon. With End SOC set to \"Optimized\" this is instead the reserve floor the computed target never plans below.",
+          "end_soc_mode": "How the battery level the plan aims for at the end of the horizon is chosen. \"Optimized\" computes it each run from the solar, price and load forecasts beyond the horizon; \"Same as start\" always plans back to the current level; \"Fixed 50 %\" always aims for half. Requires EMHASS 0.18 or newer."
         }
       },
       "grid": {
@@ -272,6 +277,13 @@
         "on_demand": "On demand",
         "surplus": "On spare solar"
       }
+    },
+    "end_soc_mode": {
+      "options": {
+        "optimized": "Optimized",
+        "same_as_start": "Same as start",
+        "fixed_50": "Fixed 50 %"
+      }
     }
   },
   "entity": {
@@ -347,6 +359,9 @@
       },
       "net_house_load": {
         "name": "House load (without deferrables)"
+      },
+      "end_soc_target": {
+        "name": "End SOC target"
       }
     },
     "binary_sensor": {
@@ -515,6 +530,10 @@
     "run_failed": {
       "title": "The last {action} run failed",
       "description": "EMHASS did not produce a plan: {error}\n\nThe previous plan is being kept. This resolves automatically once a run succeeds again -- check the EMHASS add-on logs for the full error if it doesn't clear on its own."
+    },
+    "pv_tail_short": {
+      "title": "Solar forecast ends too close to the horizon",
+      "description": "End SOC's Optimized mode has little or no solar forecast beyond the optimisation horizon, so it assumes darkness there and holds a conservatively high battery target.\n\nYour Solcast profile can see one day further: open the integration's options, go to the solar forecast step, and add `{entity}` to the selected forecast sensors."
     }
   },
   "services": {

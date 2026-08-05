@@ -33,16 +33,20 @@ from .const import (
     EMHASS_CONF_SENSOR_LOAD,
     EMHASS_CONF_TIME_STEP,
     EMHASS_CONF_VAR_MODEL,
+    END_SOC_OPTIMIZED,
     ISSUE_OPTIMIZATION_INFEASIBLE,
     ISSUE_PLAN_SCHEMA,
+    ISSUE_PV_TAIL_SHORT,
     ISSUE_RUN_FAILED,
     LOAD_FORECAST_METHOD_MLFORECASTER,
     MODE_AUTO,
     PROFILE_KEY_LOAD_SENSOR,
+    PROFILE_KEY_PV_SOLCAST,
     PROFILE_KIND_LOAD,
     PROFILE_KIND_PRICE,
     PROFILE_KIND_PV,
     PROFILE_KIND_TEMPERATURE,
+    SOLCAST_DAY3_ENTITY,
     SUBENTRY_TYPE_LOAD_GROUP,
     SUPPORTED_PLAN_SCHEMA_MAJOR,
 )
@@ -55,6 +59,12 @@ from .profiles import (
     async_load_profiles,
     async_resolve_series,
     resolve_settings,
+)
+from .terminal import (
+    LOAD_SOURCE_LAST_PLAN,
+    LOAD_SOURCE_PROFILE,
+    EndSocDecision,
+    decide_end_soc,
 )
 from .util import schema_major
 
@@ -74,6 +84,7 @@ class EmhassData:
     payload: dict[str, Any] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     load_order: list[str] = field(default_factory=list)
+    end_soc: EndSocDecision | None = None
     last_action: str | None = None
     last_success: datetime | None = None
 
@@ -131,6 +142,10 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         # correction (fired server-side, independently of blend_at) uses the
         # same weight instead of its hard-coded 50/50 default.
         self.mix_beta = DEFAULT_MIX_BETA
+        # The last end-SOC decision, fed back into terminal.decide_end_soc as
+        # the hysteresis anchor. In-memory only: after a restart the first run
+        # simply computes fresh.
+        self._end_soc: EndSocDecision | None = None
 
         self._unsub_tick: Callable[[], None] | None = None
 
@@ -363,6 +378,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             payload=built.payload,
             warnings=built.warnings,
             load_order=built.load_order,
+            end_soc=self._end_soc,
             last_action=action,
             # Only a genuinely successful solve counts. "no-run" and infeasible
             # both leave the staleness watchdog tripped, which is what stops an
@@ -448,6 +464,68 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             translation_placeholders={"action": action, "error": message},
         )
 
+    def _track_pv_tail_issue(
+        self, end_soc: EndSocDecision, pv: Series | None, horizon_end: datetime
+    ) -> None:
+        """Raise or clear the "add Solcast day 3" nudge.
+
+        Only when the fix is genuinely one click away: Optimized mode is on,
+        the PV forecast runs out within half a day past the horizon, the
+        selected PV profile is Solcast, and its day-3 sensor exists but is not
+        in the profile's entity list. Everything else -- other profiles, no
+        such sensor -- just gets the honest ``pv_tail: assumed zero``
+        annotation on the End SOC target sensor. Never a substitute for the
+        heuristic's own degradation, which is safe (darkness is assumed, so
+        the target only errs high).
+        """
+        selection = self.config.pv
+        actionable = (
+            end_soc.details.get("mode") == END_SOC_OPTIMIZED
+            and "fallback" not in end_soc.details
+            and (pv is None or not pv.covers(horizon_end + timedelta(hours=12)))
+            and selection.key == PROFILE_KEY_PV_SOLCAST
+            and self.hass.states.get(SOLCAST_DAY3_ENTITY) is not None
+            and SOLCAST_DAY3_ENTITY not in (selection.options.get("entities") or [])
+        )
+        if not actionable:
+            ir.async_delete_issue(self.hass, DOMAIN, ISSUE_PV_TAIL_SHORT)
+            return
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            ISSUE_PV_TAIL_SHORT,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=ISSUE_PV_TAIL_SHORT,
+            translation_placeholders={"entity": SOLCAST_DAY3_ENTITY},
+        )
+
+    def _load_for_terminal(self, load: Series) -> tuple[Series | None, str]:
+        """The load series terminal.decide_end_soc should reason about.
+
+        Most load profiles hand the companion a real forecast, used as-is.
+        Settings-only ones ("House load sensor" among them) hand EMHASS the
+        forecasting job instead and return nothing here -- EMHASS still
+        computes a real forecast, it just never reaches the companion,
+        except baked into the ``p_load`` column of whatever it last actually
+        solved. Borrowing that column from the previous plan gives Optimized
+        mode a genuine (if one-cycle-stale) household shape to work with,
+        instead of falling back to same-as-start on every single run.
+
+        The borrowed series' own timestamps land within the *current* run's
+        horizon (last cycle's horizon, shifted by roughly one MPC interval),
+        not in the tail past it -- but that is exactly what
+        ``_optimized``'s existing "look 24h back" fallback already expects,
+        so no further handling is needed once a series reaches it.
+        """
+        if load:
+            return load, LOAD_SOURCE_PROFILE
+        if self.data is not None and self.data.plan is not None:
+            borrowed = self.data.plan.series("p_load")
+            if borrowed:
+                return borrowed, LOAD_SOURCE_LAST_PLAN
+        return None, LOAD_SOURCE_PROFILE
+
     async def _build(self, action: str) -> tuple[PayloadInputs, PayloadResult]:
         config = self.config
         spot, pv, load = await asyncio.gather(
@@ -488,6 +566,28 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             self.loads.apply_surplus(
                 self.data.plan, self.data.load_order, now, config.time_step_minutes
             )
+        soc_init = self._read_soc()
+        end_soc: EndSocDecision | None = None
+        if config.battery.enabled and soc_init is not None:
+            step = timedelta(minutes=config.time_step_minutes)
+            horizon_end = now + step * config.horizon_steps
+            load_for_terminal, load_source = self._load_for_terminal(load)
+            end_soc = decide_end_soc(
+                mode=config.battery.end_soc_mode,
+                soc_init=soc_init,
+                battery=config.battery,
+                now=now,
+                horizon_end=horizon_end,
+                step=step,
+                pv=pv or None,
+                load=load_for_terminal,
+                load_source=load_source,
+                buy_price=buy,
+                previous=self._end_soc,
+            )
+            self._track_pv_tail_issue(end_soc, pv or None, horizon_end)
+        self._end_soc = end_soc
+
         inputs = PayloadInputs(
             action=action,
             now=now,
@@ -503,7 +603,8 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             buy_price=buy,
             sell_price=sell,
             outdoor_temperature=outdoor or None,
-            soc_init=self._read_soc(),
+            soc_init=soc_init,
+            soc_final=end_soc.soc if end_soc else None,
             pv_live_w=self._read_pv_live(),
             load_live_w=self._read_load_live(),
             mix_beta=self.mix_beta,

@@ -35,6 +35,7 @@ from .const import (
     CONF_COOLING_CONSTANT,
     CONF_DAYAHEAD_FALLBACK_TIME,
     CONF_EARLIEST_START,
+    CONF_END_SOC_MODE,
     CONF_ENERGY_NEEDED,
     CONF_GROUP_LOAD_IDS,
     CONF_GROUP_MAX_POWER,
@@ -84,6 +85,7 @@ from .const import (
     CONF_URL,
     DEFAULT_CURTAIL_ON_NEGATIVE_PRICE,
     DEFAULT_DAYAHEAD_FALLBACK_TIME,
+    DEFAULT_END_SOC_MODE,
     DEFAULT_GRID_EXPORT_MAX,
     DEFAULT_GRID_IMPORT_MAX,
     DEFAULT_HORIZON_HOURS,
@@ -98,6 +100,7 @@ from .const import (
     DEFAULT_TIME_STEP,
     DEFAULT_URL,
     DOMAIN,
+    END_SOC_MODES,
     LOAD_PROFILE_CREATE_SENTINEL,
     LOAD_PROFILE_ORDER,
     LOAD_SUBENTRY_TYPES,
@@ -1344,6 +1347,19 @@ def battery_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
         ): selector.NumberSelector(
             selector.NumberSelectorConfig(
                 min=0, max=100, step=1, unit_of_measurement="%", mode="slider"
+            )
+        ),
+        # How the end-of-horizon SOC target is chosen (terminal.py). Sits next
+        # to soc_target because in Optimized mode that slider is the reserve
+        # floor the computed target never plans below.
+        vol.Optional(
+            CONF_END_SOC_MODE,
+            default=defaults.get(CONF_END_SOC_MODE, DEFAULT_END_SOC_MODE),
+        ): selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                mode=selector.SelectSelectorMode.DROPDOWN,
+                options=list(END_SOC_MODES),
+                translation_key="end_soc_mode",
             )
         ),
         # Below this |P_grid|, the plan wants no grid exchange at all -- the

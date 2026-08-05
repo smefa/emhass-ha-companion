@@ -1,6 +1,10 @@
 # End SOC (planned)
 
-*Status: planned — nothing here is implemented yet.*
+*Status: implemented (2026-08-05) — the selector, `terminal.py`, the End SOC
+target sensor, the Solcast day-3 default, the engine relaxation and the
+`p_load`-borrowing fallback for settings-only load profiles are all in.
+Still open: the candidate-sweep v2 and the upstream EMHASS terminal-value
+objective under Future work.*
 
 *Backend requirement: EMHASS **≥ v0.18.0**. From 0.18 the `soc_final`
 constraint is soft (deviation penalised in currency, ~100× the dearest
@@ -99,12 +103,26 @@ matching reason. For `optimized`:
 
 1. **Collect the tails** — the slice of each series past `horizon_end`.
    The load profile is statistical (typical daily curve), so it extends
-   as far as asked; PV extends as far as the source forecasts (Solcast
-   and friends give 2+ days); the **price tail is the binding one**.
-   Before ~13:00 tomorrow's Nordpool prices don't exist, so when the
-   price tail is shorter than ~2 h, substitute today's known curve
-   shifted 24 h as a statistical proxy, and mark the decision
-   `price_tail: "assumed from today"` so the sensor shows it.
+   as far as asked; PV extends as far as the selected profile provides
+   (see *PV coverage past the horizon* below). Two per-input fallbacks
+   when a tail is missing or short:
+   - **Price** — before ~13:00 tomorrow's Nordpool prices don't exist,
+     so when the price tail is shorter than ~2 h, substitute today's
+     known curve shifted 24 h as a statistical proxy (the daily *shape*
+     is structural), and mark the decision
+     `price_tail: "assumed from today"`.
+   - **PV** — where the PV series ends, assume **zero PV** for the
+     uncovered stretch and mark `pv_tail: "assumed zero"`. Deliberately
+     *not* a shifted-24 h proxy: unlike prices, PV has huge day-to-day
+     weather variance, and promising sun that never arrives strands the
+     battery low — assuming darkness only makes the target
+     conservatively high, which is the safe direction. With no PV tail
+     the solar-bias step simply never engages.
+   - **Load** — a slot the fetched series doesn't cover falls back to the
+     same slot 24 h earlier, which for the default 24 h horizon lands
+     inside the horizon itself: this quietly duplicates day 1's load
+     shape into the tail with no extra code (see *Load coverage* below
+     for where the series itself comes from).
 2. **Find the next replenishment event** after `horizon_end` — the
    earlier of:
    - *solar*: the first PV-surplus block (`pv − load > 0`) whose
@@ -153,6 +171,106 @@ The `previous` decision lives on the coordinator in memory only; after a
 restart the first run simply computes fresh (hysteresis needs no
 persistence).
 
+## PV coverage past the horizon
+
+Optimized mode is only as good as its view of tomorrow's sun. With the
+Solcast profile's current default of *today + tomorrow*, coverage past
+a 24 h horizon shrinks from ~24 h just after midnight to roughly zero
+by late evening — exactly when the next day's end SOC is being decided.
+
+Naming note: Solcast has **no `forecast_day_2` sensor** — *tomorrow*
+is day 2. The consecutive extra day is
+`sensor.solcast_pv_forecast_forecast_day_3` (then `day_4`, …), each
+carrying the same half-hourly `detailedForecast` attribute (verified on
+this HA: today/tomorrow/day_3/day_4 are consecutive days, 48 entries
+each).
+
+Three changes:
+
+1. **Solcast profile template** (`profiles/builtin/pv/solcast.yaml`):
+   add `sensor.solcast_pv_forecast_forecast_day_3` to the default
+   `entities` list and reword the option description: today + tomorrow
+   covers the horizon; one more day lets End SOC's Optimized mode see
+   past it. Costs nothing — the profile reads the integration's local
+   cache, no extra Solcast API calls.
+2. **Engine: missing entities stop being fatal**
+   (`profiles/engine.py::_read_attributes`): today a single missing
+   entity raises `ProfileError` and kills the whole run. Relax to: warn
+   and skip missing entities, raise only when *no* requested entity
+   resolves (or no records result). A day-3 sensor that is briefly
+   unavailable (integration reload, user disabled it) then just
+   shortens the series instead of failing the optimisation — and short
+   coverage already has a safety net, `build_payload`'s
+   horizon-coverage warning. The unavailable-state case (entity exists,
+   attributes stripped) already degrades gracefully via the
+   attribute-`None` skip.
+3. **Actionable hint instead of silent migration**: changed template
+   defaults only affect *new* profile selections — existing installs
+   (like this one) keep `[today, tomorrow]` in their stored options.
+   Don't mutate stored options behind the user's back. Instead, when
+   Optimized mode finds the PV tail shorter than ~12 h past the horizon
+   *and* the selected profile is Solcast *and* an unselected
+   `forecast_day_3` entity exists, raise a repair issue (the
+   codebase's established pattern) suggesting adding day 3 to the PV
+   profile. Other profiles just get the honest
+   `pv_tail: "assumed zero"` annotation on the sensor.
+
+Non-Solcast sources: `forecast_solar_api` extends as far as that API
+returns; `emhass_native` contributes settings rather than a series, so
+Optimized mode there always runs with `pv_tail: "assumed zero"`;
+`generic_attribute` depends on whatever the user points it at.
+
+## Load coverage
+
+Most PV/price sources are calendar-day-shaped (Solcast, Nordpool), so the
+tail's main risk is running out of *real* data. Load is the opposite
+problem for one common profile: **"House load sensor"** (`load/sensor`,
+likely the most-picked load profile for anyone with a whole-house meter)
+sets `sensor_power_load_no_var_loads`/`load_forecast_method` and lets
+EMHASS compute the load forecast itself, server-side. It has no
+`source:` block, so `profile.produces_series` is `False` and the
+coordinator's own `load` is *always* `Series.empty()` for it — not
+short, genuinely absent. Without a fix, every Optimized decision on that
+profile hits the "missing inputs" fallback (this module's `missing`
+check, above) and quietly behaves as same-as-start on every single run.
+
+EMHASS still computes a real load forecast for that profile every run —
+it just never sends it back to the companion as its own artifact. It is,
+however, sitting in the `p_load` column of whatever plan EMHASS last
+actually solved. `coordinator._load_for_terminal` borrows it:
+
+```python
+def _load_for_terminal(self, load: Series) -> tuple[Series | None, str]:
+    if load:
+        return load, LOAD_SOURCE_PROFILE
+    if self.data is not None and self.data.plan is not None:
+        borrowed = self.data.plan.series("p_load")
+        if borrowed:
+            return borrowed, LOAD_SOURCE_LAST_PLAN
+    return None, LOAD_SOURCE_PROFILE
+```
+
+The borrowed series' timestamps land within the *previous* run's own
+horizon (last cycle's horizon, shifted by roughly one MPC interval) —
+not in the tail. That is exactly what the load fallback above already
+expects (`when - 24h` lands inside the horizon for a 24 h default), so
+the borrowed series slots in with no further changes: one cycle stale
+at worst, the same kind of imperfect-but-reasonable proxy the price
+tail already relies on. `decide_end_soc` records which happened —
+`load_source` (`LOAD_SOURCE_PROFILE` / `LOAD_SOURCE_LAST_PLAN`) rides
+through into the Optimized decision's `details["load_tail"]` — the
+module cannot tell a borrowed series from a real one on its own, so the
+caller has to say.
+
+**Scan scope, settled**: the replenishment search stays anchored at
+`horizon_end`, not `now`. `soc_final` only takes effect at
+`horizon_end` — EMHASS already optimises everything before that on its
+own, regardless of what pattern this module notices there, so widening
+the search to include it couldn't produce a better target. What
+actually matters is good *data* for the part EMHASS can't see, which
+the load-borrowing fix above delivers without needing to touch the
+search window itself.
+
 ## Wiring
 
 - `PayloadInputs` gains `soc_final: float | None = None`.
@@ -190,6 +308,7 @@ device, description-based like the existing plan sensors.
     what charge/discharge power can deliver within the horizon (EMHASS
     will aim for it and fall short, softly)
   - `price_tail` — `known` / `assumed from today`
+  - `load_tail` — `own forecast` / `borrowed from last plan`
   - `fallback` — present with the cause when the heuristic could not run
 - Unavailable while the battery is disabled; in the non-optimized modes
   the sensor still reports (state + `mode` + `reason`), so the dropdown
@@ -210,11 +329,20 @@ device, description-based like the existing plan sensors.
     *not* clamped;
   - ±2 pp jitter → hysteresis holds the previous value;
   - no tails at all → same-as-start fallback with explanatory reason;
-  - `same_as_start` and `fixed_50` passthroughs.
+  - `same_as_start` and `fixed_50` passthroughs;
+  - `load_source` defaults to `own forecast`, rides through verbatim to
+    `details["load_tail"]` when the caller passes `borrowed from last
+    plan`.
 - `tests/test_payload.py` — `soc_final` passthrough when set; existing
   pin-to-`soc_init` behaviour preserved when unset.
 - Config-flow test: `end_soc_mode` stored, default `optimized`,
   round-trips through the options flow.
+- Engine test: one missing entity out of three → warn + skip, records
+  from the remaining two; all entities missing → `ProfileError` as
+  before.
+- PV-tail tests: series ending at horizon → `pv_tail: "assumed zero"`,
+  no solar bias; Solcast profile selected without day 3 while the
+  entity exists → repair issue raised.
 
 ## Appendix: EMHASS end-SOC mechanics (≥ 0.18, verified 2026-08-04)
 

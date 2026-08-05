@@ -17,11 +17,14 @@ options:
   entities:
     name: Forecast sensors
     description: >-
-      Select enough days to cover your optimisation horizon. Today and tomorrow
-      is normally right.
+      Today and tomorrow cover the optimisation horizon; day 3 lets the End
+      SOC "Optimized" mode see one day past it. (Solcast's "tomorrow" is day
+      2 -- there is no day-2 sensor.) A selected sensor that is missing is
+      skipped with a warning rather than failing the run.
     default:
       - sensor.solcast_pv_forecast_forecast_today
       - sensor.solcast_pv_forecast_forecast_tomorrow
+      - sensor.solcast_pv_forecast_forecast_day_3
     selector:
       entity:
         integration: solcast_solar

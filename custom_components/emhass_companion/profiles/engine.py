@@ -107,6 +107,7 @@ def _read_attributes(
 
     records: list[dict[str, Any]] = []
     missing: list[str] = []
+    found = 0
     for entity_id in entity_ids:
         if not entity_id:
             continue
@@ -114,6 +115,7 @@ def _read_attributes(
         if state is None:
             missing.append(entity_id)
             continue
+        found += 1
         for attribute in attributes:
             value = state.attributes.get(attribute)
             if value is None:
@@ -129,7 +131,18 @@ def _read_attributes(
             records.extend(value)
 
     if missing:
-        raise ProfileError(f"Entity not found: {', '.join(missing)}")
+        # A partially-missing selection shortens the series instead of
+        # failing the whole run: an extra forecast-day sensor that is briefly
+        # unavailable must not cost the optimisation. Short coverage has its
+        # own safety net -- build_payload warns whenever a series stops
+        # before the horizon. Only a selection where *nothing* resolves is a
+        # configuration error worth stopping for.
+        if not found:
+            raise ProfileError(f"Entity not found: {', '.join(missing)}")
+        _LOGGER.warning(
+            "Entity not found: %s; continuing with the remaining sources",
+            ", ".join(missing),
+        )
     return records
 
 

@@ -97,6 +97,31 @@ async def test_solcast_profile_sums_multiple_entities(hass: HomeAssistant) -> No
     assert series.values[0] == pytest.approx(7374.9)
 
 
+async def test_partially_missing_entities_shorten_instead_of_failing(
+    hass: HomeAssistant,
+) -> None:
+    """One absent sensor out of several must not cost the whole optimisation.
+
+    The Solcast default now includes the day-3 sensor for End SOC's tail
+    analysis; a user who disables it (or an integration mid-reload) should get
+    a shorter series and a warning, not a dead run. Only a selection where
+    nothing resolves stays a hard error (covered above).
+    """
+    records = _fixture("solcast.json")["detailedForecast"]
+    hass.states.async_set("sensor.today", "50", {"detailedForecast": records})
+
+    series = await async_resolve_series(
+        hass,
+        _builtin("pv/solcast"),
+        {
+            "entities": ["sensor.today", "sensor.day3_gone"],
+            "estimate": "pv_estimate",
+        },
+    )
+
+    assert len(series) == len(records)
+
+
 async def test_solcast_estimate_option_selects_the_field(hass: HomeAssistant) -> None:
     records = _fixture("solcast.json")["detailedForecast"]
     hass.states.async_set("sensor.today", "50", {"detailedForecast": records})

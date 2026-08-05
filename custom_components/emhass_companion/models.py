@@ -15,6 +15,7 @@ import math
 from typing import Any, Self
 
 from .const import (
+    CONF_END_SOC_MODE,
     CONF_HYBRID_INVERTER,
     CONF_INVERTER_AC_INPUT_MAX,
     CONF_INVERTER_AC_OUTPUT_MAX,
@@ -23,6 +24,7 @@ from .const import (
     DEFAULT_CHARGE_EFFICIENCY,
     DEFAULT_CURTAIL_ON_NEGATIVE_PRICE,
     DEFAULT_DISCHARGE_EFFICIENCY,
+    DEFAULT_END_SOC_MODE,
     DEFAULT_GRID_EXPORT_MAX,
     DEFAULT_GRID_IMPORT_MAX,
     DEFAULT_INVERTER_EFFICIENCY,
@@ -226,6 +228,10 @@ class BatteryConfig:
     soc_min: float = DEFAULT_SOC_MIN
     soc_max: float = DEFAULT_SOC_MAX
     soc_target: float = DEFAULT_SOC_TARGET
+    end_soc_mode: str = DEFAULT_END_SOC_MODE
+    """How the end-of-horizon SOC target is chosen -- see terminal.py. In
+    Optimized mode ``soc_target`` doubles as the reserve floor the computed
+    target never plans below."""
     charge_efficiency: float = DEFAULT_CHARGE_EFFICIENCY
     discharge_efficiency: float = DEFAULT_DISCHARGE_EFFICIENCY
     self_consume_threshold_w: float = DEFAULT_SELF_CONSUME_THRESHOLD_W
@@ -244,6 +250,7 @@ class BatteryConfig:
             soc_min=float(data.get("soc_min", DEFAULT_SOC_MIN)),
             soc_max=float(data.get("soc_max", DEFAULT_SOC_MAX)),
             soc_target=float(data.get("soc_target", DEFAULT_SOC_TARGET)),
+            end_soc_mode=str(data.get(CONF_END_SOC_MODE, DEFAULT_END_SOC_MODE)),
             charge_efficiency=float(data.get("charge_efficiency", DEFAULT_CHARGE_EFFICIENCY)),
             discharge_efficiency=float(
                 data.get("discharge_efficiency", DEFAULT_DISCHARGE_EFFICIENCY)

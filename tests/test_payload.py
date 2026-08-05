@@ -424,9 +424,17 @@ def test_battery_enabled_sends_every_limit():
     assert payload["battery_minimum_state_of_charge"] == 0.05
     # A fraction, matching EMHASS -- not the percentage Home Assistant reports.
     assert payload["soc_init"] == 0.098
-    # Sent explicitly so the horizon's net-throughput equality targets the
-    # current SOC rather than relying on EMHASS's own soc_init fallback.
+    # Sent explicitly so the horizon's net-throughput pin targets the current
+    # SOC rather than relying on EMHASS's own soc_init fallback.
     assert payload["soc_final"] == 0.098
+
+
+def test_a_chosen_end_soc_replaces_the_pin_to_start():
+    """terminal.decide_end_soc's target rides through as soc_final."""
+    battery = BatteryConfig(enabled=True, capacity_wh=25600)
+    payload = build_payload(_inputs(battery=battery, soc_init=0.098, soc_final=0.42)).payload
+    assert payload["soc_init"] == 0.098
+    assert payload["soc_final"] == 0.42
 
 
 # --- hybrid inverter -----------------------------------------------------------
