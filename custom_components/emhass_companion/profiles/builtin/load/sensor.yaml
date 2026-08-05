@@ -1,4 +1,4 @@
-name: Select a house load sensor (without deferrables)
+name: House load sensor (without deferrables)
 kind: load
 version: 1
 description: >-

@@ -274,7 +274,7 @@ class EmhassSensor(EmhassEntity, SensorEntity):
 class NetHouseLoadSensor(EmhassEntity, SensorEntity):
     """Whole-house power with every deferrable/thermal load's current draw subtracted.
 
-    Backs the "Select a house load sensor (without deferrables)" profile when
+    Backs the "House load sensor (without deferrables)" profile when
     it was auto-configured by the "Create a house load sensor" setup step,
     which points that profile's ``entity`` option at this sensor rather than
     asking the user to build their own subtracting template sensor. EMHASS

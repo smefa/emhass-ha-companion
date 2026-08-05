@@ -108,7 +108,7 @@
           "soc_target": "Where the optimiser aims to leave the battery at the end of the horizon.",
           "self_consume_threshold_w": "When the plan's grid power is within this many watts of zero, the battery is handed to the inverter's own self-consumption mode instead of the plan's forced charge/discharge -- even a large planned charge or discharge is overridden, because self-consumption tracks real-time PV and load better than a forecast can at small imbalances. Once handed over, grid power must exceed twice this value before the plan can force the battery again, so it doesn't flip modes every recalculation. Not the same as the charge-level limits above, which only bound what the optimiser may plan between.",
           "soc_entity": "Read at the start of every run so the plan starts from reality.",
-          "pv_entity": "Optional. Blended into the first step of every MPC forecast, weighted by the \"Live value weight\" number entity. Load is blended the same way automatically, using the sensor picked under House consumption > Select a house load sensor -- no separate entity needed there."
+          "pv_entity": "Optional. Blended into the first step of every MPC forecast, weighted by the \"Live value weight\" number entity. Load is blended the same way automatically, using the sensor picked under House consumption > House load sensor -- no separate entity needed there."
         }
       },
       "grid": {
@@ -193,7 +193,7 @@
         "data_description": {
           "hybrid_inverter": "On if PV and the battery share one inverter's AC-side power limit, which is most home battery systems. Off if they are two independent inverters, each with its own limit.",
           "self_consume_threshold_w": "When the plan's grid power is within this many watts of zero, the battery is handed to the inverter's own self-consumption mode instead of the plan's forced charge/discharge -- even a large planned charge or discharge is overridden, because self-consumption tracks real-time PV and load better than a forecast can at small imbalances. Once handed over, grid power must exceed twice this value before the plan can force the battery again, so it doesn't flip modes every recalculation. Not the same as the charge-level limits above, which only bound what the optimiser may plan between.",
-          "pv_entity": "Optional. Blended into the first step of every MPC forecast, weighted by the \"Live value weight\" number entity. Load is blended the same way automatically, using the sensor picked under House consumption > Select a house load sensor -- no separate entity needed there."
+          "pv_entity": "Optional. Blended into the first step of every MPC forecast, weighted by the \"Live value weight\" number entity. Load is blended the same way automatically, using the sensor picked under House consumption > House load sensor -- no separate entity needed there."
         }
       },
       "grid": {
