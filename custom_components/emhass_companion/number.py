@@ -443,10 +443,13 @@ class MixBetaNumber(EmhassEntity, RestoreNumber):
     """How much an MPC run trusts the live PV/load reading over the forecast.
 
     One slider rather than an independent alpha/beta pair: the two always sum
-    to 1 in practice (see payload.build_payload, models.Series.blend_at),
-    and a pair invites confusing combinations like 0.3/0.3 that don't mean
-    what they look like. 0 is pure forecast, 1 is pure live reading, 0.5 is
-    EMHASS's own default split for the same correction.
+    to 1 in practice (see payload.build_payload, models.Series.blend_at), and
+    a pair invites confusing combinations like 0.3/0.3 that don't mean what
+    they look like. 0 is pure forecast, 1 is pure live reading, 0.5 is
+    EMHASS's own default split for the same correction -- also sent as
+    alpha/beta on every MPC run, since EMHASS applies its own version of this
+    correction to the load forecast automatically and would otherwise use
+    that hard-coded default regardless of this slider.
     """
 
     _attr_translation_key = "mix_beta"

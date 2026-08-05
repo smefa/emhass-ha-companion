@@ -385,6 +385,26 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
                 "will hold the last value for the remainder."
             )
 
+    if inputs.action == ACTION_MPC:
+        # The load side of this is not the blend_at() call above -- none of
+        # the built-in load profiles other than "Load forecast from an
+        # entity" and "Native EMHASS forecaster" hand the companion a series
+        # to blend into, since the point of "House load sensor" is to let
+        # EMHASS compute the forecast itself (typical/naive/mlforecaster).
+        # But EMHASS's own naive-mpc-optim already fetches that sensor's live
+        # reading and blends it into its own first forecast step whenever the
+        # load method isn't "list" -- unconditionally, on every MPC run,
+        # whether or not a companion live-value profile is even configured.
+        # Left unset, alpha/beta there default to a hard-coded 50/50 split
+        # inside EMHASS, entirely disconnected from number.MixBetaNumber.
+        # Pinning them here to the same weight makes that automatic
+        # correction mean what the slider says. Harmless for the profiles
+        # that do supply their own list (EMHASS's own correction is skipped
+        # there, since both series are already "list" methods) and inert for
+        # a day-ahead run (EMHASS never applies it outside naive-mpc-optim).
+        payload["alpha"] = round(1 - inputs.mix_beta, 4)
+        payload["beta"] = round(inputs.mix_beta, 4)
+
     if inputs.soc_init is not None:
         # A fraction in [0, 1]; the percentage form belongs only to display.
         payload["soc_init"] = round(inputs.soc_init, 4)

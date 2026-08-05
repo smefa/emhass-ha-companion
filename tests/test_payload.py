@@ -360,6 +360,30 @@ def test_mix_beta_controls_how_much_the_live_value_wins():
     assert next(iter(result.payload["pv_power_forecast"].values())) == 7000.0
 
 
+def test_mpc_sends_alpha_beta_matching_mix_beta():
+    """EMHASS applies its own live-value correction to the load forecast
+    automatically on every naive-mpc-optim run, for any load profile that
+    doesn't hand EMHASS an explicit list (i.e. every built-in profile except
+    "Load forecast from an entity" and "Native EMHASS forecaster"). Left
+    unset, alpha/beta default to a hard-coded 50/50 split inside EMHASS,
+    completely disconnected from the mix_beta number entity -- so these must
+    be sent explicitly, matching mix_beta, or the slider does nothing for
+    that profile.
+    """
+    result = build_payload(_inputs(mix_beta=0.8))
+    assert result.payload["alpha"] == pytest.approx(0.2)
+    assert result.payload["beta"] == pytest.approx(0.8)
+
+
+def test_dayahead_does_not_send_alpha_beta():
+    """EMHASS never applies this correction outside naive-mpc-optim, so a
+    day-ahead request has nothing to pin.
+    """
+    result = build_payload(_inputs(action=ACTION_DAYAHEAD, mix_beta=0.8))
+    assert "alpha" not in result.payload
+    assert "beta" not in result.payload
+
+
 def test_short_forecast_produces_a_warning():
     """A short series is silently forward-filled by EMHASS, so we must warn.
 

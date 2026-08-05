@@ -126,7 +126,10 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         self.surplus_threshold_w = DEFAULT_SURPLUS_THRESHOLD_W
         # Owned by the mix beta number. Weight given to the live PV/load
         # reading when it is blended into the current naive-mpc-optim forecast
-        # step; see payload.build_payload and models.Series.blend_at.
+        # step; see payload.build_payload and models.Series.blend_at. Also
+        # sent as alpha/beta so EMHASS's own automatic load-forecast
+        # correction (fired server-side, independently of blend_at) uses the
+        # same weight instead of its hard-coded 50/50 default.
         self.mix_beta = DEFAULT_MIX_BETA
 
         self._unsub_tick: Callable[[], None] | None = None
