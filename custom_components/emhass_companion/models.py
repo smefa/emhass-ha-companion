@@ -122,19 +122,36 @@ class Series:
     def map_values(self, func) -> Series:
         return Series(Point(p.time, func(p.value)) for p in self._points)
 
-    def blend_first(self, live_value: float, beta: float) -> Series:
-        """Blend a live/measured value into the series' earliest point.
+    def blend_at(self, when: datetime, live_value: float, beta: float) -> Series:
+        """Blend a live/measured value into the point covering ``when``.
 
         Mirrors EMHASS's own ``Forecast.get_mix_forecast`` correction
         (``forecast.py``): ``beta`` weights the live value, ``1 - beta``
-        weights the forecast. Only the first point changes; an empty series
-        passes through untouched since there is nothing to correct.
+        weights the forecast. Only that one point changes -- deliberately
+        *not* ``self._points[0]``: a series fetched from a real profile (e.g.
+        a PV forecast starting at local midnight) commonly starts well before
+        ``when``, and EMHASS's MPC solver only looks at rows from ``when``
+        onward, so correcting index 0 would blend a live reading into a
+        timestep nobody uses. Hold-last semantics, matching ``value_at``: the
+        point that changes is the last one at or before ``when``. A series
+        with no such point (``when`` is before every point, or the series is
+        empty) passes through untouched since there is nothing to correct.
         """
         if not self._points:
             return self
-        first, *rest = self._points
-        blended = (1 - beta) * first.value + beta * live_value
-        return Series([Point(first.time, blended), *rest])
+        when = when.astimezone(UTC)
+        index = None
+        for i, point in enumerate(self._points):
+            if point.time > when:
+                break
+            index = i
+        if index is None:
+            return self
+        target = self._points[index]
+        blended = (1 - beta) * target.value + beta * live_value
+        points = list(self._points)
+        points[index] = Point(target.time, blended)
+        return Series(points)
 
     def window(self, start: datetime, end: datetime) -> Series:
         start, end = start.astimezone(UTC), end.astimezone(UTC)

@@ -297,7 +297,7 @@ def test_forecasts_are_sent_as_timestamp_maps_with_explicit_offsets():
     assert "weather_forecast_method" not in result.payload
 
 
-def test_mpc_blends_live_pv_into_the_first_forecast_step_only():
+def test_mpc_blends_live_pv_into_the_current_forecast_step_only():
     now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
     result = build_payload(_inputs(pv=_series(now, 24, 5000.0), pv_live_w=7000.0))
 
@@ -307,7 +307,7 @@ def test_mpc_blends_live_pv_into_the_first_forecast_step_only():
     assert values[1] == 5000.0
 
 
-def test_mpc_blends_live_load_into_the_first_forecast_step_only():
+def test_mpc_blends_live_load_into_the_current_forecast_step_only():
     now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
     result = build_payload(_inputs(load=_series(now, 24, 1000.0), load_live_w=2000.0))
 
@@ -315,6 +315,24 @@ def test_mpc_blends_live_load_into_the_first_forecast_step_only():
     values = list(forecast.values())
     assert values[0] == 1500.0  # 0.5 * 1000 + 0.5 * 2000, the default mix_beta
     assert values[1] == 1000.0
+
+
+def test_mpc_blends_live_pv_into_now_even_when_the_series_starts_earlier():
+    """Regression test for a real bug: a PV forecast fetched from a live
+    profile commonly starts well before "now" (e.g. Solcast's "today" series
+    starts at local midnight). Blending must correct the step covering
+    "now", not the series' chronologically-first step, or the live reading
+    corrects a timestep the MPC solver never looks at again.
+    """
+    series_start = datetime(2026, 7, 28, 0, 0, tzinfo=UTC)
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    result = build_payload(
+        _inputs(now=now, pv=_series(series_start, 24, 5000.0), pv_live_w=7000.0)
+    )
+
+    forecast = result.payload["pv_power_forecast"]
+    assert forecast[series_start.isoformat()] == 5000.0  # untouched: it's in the past
+    assert forecast[now.isoformat()] == 6000.0  # 0.5 * 5000 + 0.5 * 7000
 
 
 def test_mpc_without_a_live_value_leaves_the_forecast_untouched():

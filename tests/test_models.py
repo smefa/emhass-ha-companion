@@ -154,31 +154,48 @@ def test_scaled_applies_factor_then_offset():
     assert _series(2.0).scaled(10, 1).values == (21.0,)
 
 
-def test_blend_first_at_beta_zero_keeps_the_forecast():
+def test_blend_at_beta_zero_keeps_the_forecast():
     series = _series(100.0, 200.0)
-    assert series.blend_first(9000.0, beta=0).values == (100.0, 200.0)
+    assert series.blend_at(T0, 9000.0, beta=0).values == (100.0, 200.0)
 
 
-def test_blend_first_at_beta_one_uses_only_the_live_value():
+def test_blend_at_beta_one_uses_only_the_live_value():
     series = _series(100.0, 200.0)
-    assert series.blend_first(9000.0, beta=1).values == (9000.0, 200.0)
+    assert series.blend_at(T0, 9000.0, beta=1).values == (9000.0, 200.0)
 
 
-def test_blend_first_at_beta_half_splits_evenly():
+def test_blend_at_beta_half_splits_evenly():
     series = _series(100.0, 200.0)
-    assert series.blend_first(300.0, beta=0.5).values == (200.0, 200.0)
+    assert series.blend_at(T0, 300.0, beta=0.5).values == (200.0, 200.0)
 
 
-def test_blend_first_only_touches_the_earliest_point():
+def test_blend_at_touches_only_the_point_covering_when():
     series = _series(100.0, 200.0, 300.0)
-    blended = series.blend_first(0.0, beta=1)
+    blended = series.blend_at(T0, 0.0, beta=1)
     assert blended.values == (0.0, 200.0, 300.0)
     assert blended.start == series.start
     assert blended.end == series.end
 
 
-def test_blend_first_on_an_empty_series_is_a_no_op():
-    blended = Series.empty().blend_first(9000.0, beta=1)
+def test_blend_at_touches_the_current_point_not_the_series_start():
+    """The bug this guards: a series starting well before ``when`` (e.g. a PV
+    forecast starting at local midnight, blended hours later) must have its
+    *current* point corrected, not its earliest one.
+    """
+    series = _series(100.0, 200.0, 300.0)
+    when = T0 + timedelta(minutes=30)  # covers the second point, not the first
+    blended = series.blend_at(when, 0.0, beta=1)
+    assert blended.values == (100.0, 0.0, 300.0)
+
+
+def test_blend_at_before_every_point_is_a_no_op():
+    series = _series(100.0, 200.0)
+    when = T0 - timedelta(minutes=30)
+    assert series.blend_at(when, 9000.0, beta=1).values == (100.0, 200.0)
+
+
+def test_blend_at_on_an_empty_series_is_a_no_op():
+    blended = Series.empty().blend_at(T0, 9000.0, beta=1)
     assert not blended
     assert blended.values == ()
 

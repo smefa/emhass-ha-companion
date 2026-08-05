@@ -341,8 +341,8 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
     # -- inputs ---------------------------------------------------------------
     # Supplying a forecast key makes EMHASS switch that forecast's method to
     # "list" by itself, so the method is deliberately not set here.
-    # Live values to blend into the first step of the matching forecast, MPC
-    # only -- see models.Series.blend_first. A day-ahead run's first step is
+    # Live values to blend into the current step of the matching forecast, MPC
+    # only -- see models.Series.blend_at. A day-ahead run's first step is
     # tomorrow, not now, so there is nothing live to blend there.
     live_values = {
         "pv_power_forecast": inputs.pv_live_w,
@@ -371,7 +371,7 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
             # a per-kWh price; round rather than lose currency precision.
             series = series.map_values(lambda v: round(v, 4))
         if inputs.action == ACTION_MPC and (live_value := live_values.get(key)) is not None:
-            series = series.blend_first(live_value, inputs.mix_beta)
+            series = series.blend_at(inputs.now, live_value, inputs.mix_beta)
         payload[key] = series.to_payload()
         if not series.covers(horizon_end):
             # EMHASS forward-fills a timestamped forecast onto its grid, so a
