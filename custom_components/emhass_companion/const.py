@@ -55,6 +55,14 @@ EMHASS_CONF_LOAD_FORECAST_METHOD: Final = "load_forecast_method"
 EMHASS_CONF_TIME_STEP: Final = "optimization_time_step"
 LOAD_FORECAST_METHOD_MLFORECASTER: Final = "mlforecaster"
 
+# Minimum days of recorder history EMHASS's own forecast-model-fit requires --
+# utils.py forces `historic_days_to_retrieve` up to this floor itself and
+# warns below it ("this could cause an error with the fit"). Checked
+# proactively before ever auto-triggering a fit, so a freshly created "Create
+# a house load sensor" entity (no history of its own yet) is never handed a
+# guaranteed-failing request.
+ML_MIN_HISTORY_DAYS: Final = 9
+
 # --- Config entry keys -------------------------------------------------------
 
 CONF_URL: Final = "url"
@@ -546,6 +554,10 @@ ISSUE_RUN_FAILED: Final = "run_failed"
 # sensor. A nudge with a one-click fix, not an error -- the heuristic already
 # degrades safely by assuming zero PV where the forecast ends.
 ISSUE_PV_TAIL_SHORT: Final = "pv_tail_short"
+# The load profile wants mlforecaster but it has not been confirmed trained
+# for the currently configured sensor yet -- runs use "typical" meanwhile.
+# Clears once an auto- or button-triggered fit against that sensor succeeds.
+ISSUE_ML_FORECASTER_NOT_READY: Final = "ml_forecaster_not_ready"
 
 # Solcast's day sensors are named today / tomorrow / day_3..day_7 -- "tomorrow"
 # *is* day 2, there is no forecast_day_2. Day 3 is the first sensor past the

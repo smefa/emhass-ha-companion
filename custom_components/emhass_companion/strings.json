@@ -542,6 +542,10 @@
     "pv_tail_short": {
       "title": "Solar forecast ends too close to the horizon",
       "description": "End SOC's Optimized mode has little or no solar forecast beyond the optimisation horizon, so it assumes darkness there and holds a conservatively high battery target.\n\nYour Solcast profile can see one day further: open the integration's options, go to the solar forecast step, and add `{entity}` to the selected forecast sensors."
+    },
+    "ml_forecaster_not_ready": {
+      "title": "Machine-learning load forecaster is not trained yet",
+      "description": "The load profile is set to \"Machine-learning forecaster\", but it has not been confirmed trained for the currently configured sensor. Optimisation runs are using the \"Typical\" method meanwhile so they keep succeeding.\n\nIf the sensor has at least {days} days of history, a training run is triggered automatically -- no action needed. A brand new sensor (for example one just built by \"Create a house load sensor\") needs {days} days of real history to accumulate first. You can also press \"Train load forecaster\" yourself once it does. This resolves automatically once a fit succeeds."
     }
   },
   "services": {

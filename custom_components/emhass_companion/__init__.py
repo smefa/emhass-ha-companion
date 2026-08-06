@@ -106,6 +106,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
 
     coordinator = EmhassCoordinator(hass, entry, client, loads)
     await coordinator.async_load_profiles()
+    await coordinator.async_load_ml_state()
     _report_profile_errors(hass, coordinator)
     await coordinator.async_sync_emhass_config()
 

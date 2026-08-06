@@ -9,10 +9,12 @@ from datetime import datetime, timedelta
 import logging
 from typing import Any
 
+from homeassistant.components.recorder import get_instance, history
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import Event, EventStateChangedData, HomeAssistant, State, callback
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.event import async_track_state_change_event, async_track_time_interval
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
@@ -34,11 +36,13 @@ from .const import (
     EMHASS_CONF_TIME_STEP,
     EMHASS_CONF_VAR_MODEL,
     END_SOC_OPTIMIZED,
+    ISSUE_ML_FORECASTER_NOT_READY,
     ISSUE_OPTIMIZATION_INFEASIBLE,
     ISSUE_PLAN_SCHEMA,
     ISSUE_PV_TAIL_SHORT,
     ISSUE_RUN_FAILED,
     LOAD_FORECAST_METHOD_MLFORECASTER,
+    ML_MIN_HISTORY_DAYS,
     MODE_AUTO,
     PROFILE_KEY_LOAD_SENSOR,
     PROFILE_KEY_PV_SOLCAST,
@@ -70,6 +74,13 @@ from .terminal import (
 from .util import schema_major
 
 _LOGGER = logging.getLogger(__name__)
+
+# How long an auto-triggered fit failure (or a not-enough-history verdict) is
+# trusted before checking again -- long enough that a persistently-down EMHASS
+# isn't hammered with an expensive fit request every MPC cycle, short enough
+# that recorder history crossing ML_MIN_HISTORY_DAYS is noticed the same day.
+_ML_FIT_RETRY_COOLDOWN = timedelta(hours=1)
+_ML_STORE_VERSION = 1
 
 
 @dataclass(slots=True)
@@ -156,6 +167,18 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         # the world for the whole first forecast step.
         self._pv_live_average = TimeWeightedAverage()
         self._unsub_pv_live: Callable[[], None] | None = None
+
+        # Sensor mlforecaster has actually been confirmed trained against,
+        # persisted so a restart does not throw away a working model and
+        # retrain for nothing. None until a fit succeeds or async_load_ml_state
+        # restores it; a mismatch against the currently configured sensor is
+        # exactly what triggers an auto-fit -- see _resolve_load_forecast_method.
+        self._ml_trained_sensor: str | None = None
+        self._ml_last_attempt: datetime | None = None
+        self._ml_fit_lock = asyncio.Lock()
+        self._ml_store: Store[dict[str, Any]] = Store(
+            hass, _ML_STORE_VERSION, f"{DOMAIN}_{entry.entry_id}_ml_fit"
+        )
 
     # -- surplus --------------------------------------------------------------
 
@@ -259,6 +282,15 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         result = await async_load_profiles(self.hass)
         self.profiles = result.profiles
         self.profile_errors = result.errors
+
+    async def async_load_ml_state(self) -> None:
+        """Restore which sensor mlforecaster was last confirmed trained against."""
+        stored = await self._ml_store.async_load()
+        if stored:
+            self._ml_trained_sensor = stored.get("trained_sensor")
+
+    async def _async_save_ml_state(self) -> None:
+        await self._ml_store.async_save({"trained_sensor": self._ml_trained_sensor})
 
     def reload_config(self) -> None:
         self.config = EmhassConfig.from_entry(self.hass, self.config_entry)
@@ -601,6 +633,10 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             # A temperature profile may contribute settings instead of a series
             # (EMHASS built-in lets EMHASS fetch Open-Meteo itself).
             settings.update(self._settings(config.temperature))
+        if EMHASS_CONF_LOAD_FORECAST_METHOD in settings:
+            settings[EMHASS_CONF_LOAD_FORECAST_METHOD] = await self._resolve_load_forecast_method(
+                settings
+            )
 
         now = dt_util.utcnow()
         # Sourceless loads (no power sensor, no control entity) get their
@@ -805,9 +841,123 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         runtime_params: dict[str, Any] = {
             EMHASS_CONF_LOAD_FORECAST_METHOD: LOAD_FORECAST_METHOD_MLFORECASTER,
         }
-        if sensor := settings.get(EMHASS_CONF_SENSOR_LOAD):
+        sensor = settings.get(EMHASS_CONF_SENSOR_LOAD)
+        if sensor:
             runtime_params[EMHASS_CONF_SENSOR_LOAD] = sensor
         await self.client.async_run_action(ACTION_FORECAST_FIT, runtime_params)
+        if sensor:
+            self._ml_trained_sensor = sensor
+            await self._async_save_ml_state()
+        self._track_ml_not_ready_issue(False)
+
+    async def _has_enough_history(self, entity_id: str) -> bool:
+        """Whether ``entity_id``'s recorder history reaches back :data:`ML_MIN_HISTORY_DAYS`.
+
+        Mirrors exactly what EMHASS's own forecast-model-fit would see when it
+        pulls the same sensor's history through this same Home Assistant's
+        history API -- so this never judges "ready" when a fit would not be,
+        or vice versa (a purge policy shorter than the fit's own lookback
+        would make a fit fail the same way regardless of what this reports).
+        """
+        try:
+            instance = get_instance(self.hass)
+        except (KeyError, RuntimeError):
+            return False
+        cutoff = dt_util.utcnow() - timedelta(days=ML_MIN_HISTORY_DAYS)
+        try:
+            states = await instance.async_add_executor_job(
+                history.state_changes_during_period,
+                self.hass,
+                cutoff,
+                cutoff + timedelta(minutes=1),
+                entity_id,
+                True,  # no_attributes
+                False,  # descending
+                1,  # limit
+                True,  # include_start_time_state
+            )
+        except Exception:  # noqa: BLE001 - a history probe must never break a run
+            _LOGGER.debug("Could not check recorder history for %s", entity_id, exc_info=True)
+            return False
+        return bool(states.get(entity_id))
+
+    async def _resolve_load_forecast_method(self, settings: dict[str, Any]) -> str:
+        """The load forecast method to actually send this run.
+
+        Passes ``settings[EMHASS_CONF_LOAD_FORECAST_METHOD]`` through unchanged
+        unless it asks for mlforecaster and that has not been confirmed trained
+        for the *currently* configured sensor. Enabling mlforecaster for the
+        first time, or changing which sensor feeds it, otherwise means the very
+        next optimisation is a guaranteed-failing predict against a stale or
+        entirely missing model file (EMHASS's ``_get_ml_param()`` falls back to
+        whatever ``var_model`` its last fit used, regardless of what this run
+        asks for -- see :meth:`async_sync_emhass_config`).
+
+        Falls back to "typical" until a fit against the current sensor actually
+        succeeds, auto-triggering that fit itself the first time enough
+        recorder history exists rather than waiting on the "Train load
+        forecaster" button to be pressed by hand. A sensor with less than
+        :data:`ML_MIN_HISTORY_DAYS` of history (most commonly a sensor "Create
+        a house load sensor" only just built) is left alone until it has
+        enough -- there is nothing to train on yet.
+        """
+        method = settings.get(EMHASS_CONF_LOAD_FORECAST_METHOD)
+        if method != LOAD_FORECAST_METHOD_MLFORECASTER:
+            return method
+
+        sensor = settings.get(EMHASS_CONF_SENSOR_LOAD)
+        if sensor and sensor == self._ml_trained_sensor:
+            self._track_ml_not_ready_issue(False)
+            return method
+        if not sensor:
+            return "typical"
+
+        now = dt_util.utcnow()
+        if (
+            self._ml_fit_lock.locked()
+            or self._ml_last_attempt is not None
+            and now - self._ml_last_attempt < _ML_FIT_RETRY_COOLDOWN
+        ):
+            return "typical"
+
+        async with self._ml_fit_lock:
+            if not await self._has_enough_history(sensor):
+                self._track_ml_not_ready_issue(True)
+                return "typical"
+
+            self._ml_last_attempt = now
+            try:
+                await self.async_run_forecast_fit()
+            except EmhassError as err:
+                _LOGGER.warning(
+                    "Auto-training the load forecaster for %s failed (%s); "
+                    "using the typical method for this run instead",
+                    sensor,
+                    err,
+                )
+                return "typical"
+
+        return method
+
+    def _track_ml_not_ready_issue(self, not_ready: bool) -> None:
+        """Raise or clear the "mlforecaster not trained yet" repair.
+
+        Informational, not an error: runs keep succeeding on the "typical"
+        fallback in the meantime, and this clears itself the moment a fit
+        (auto- or button-triggered) against the current sensor succeeds.
+        """
+        if not not_ready:
+            ir.async_delete_issue(self.hass, DOMAIN, ISSUE_ML_FORECASTER_NOT_READY)
+            return
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            ISSUE_ML_FORECASTER_NOT_READY,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=ISSUE_ML_FORECASTER_NOT_READY,
+            translation_placeholders={"days": str(ML_MIN_HISTORY_DAYS)},
+        )
 
     @property
     def plan_is_stale(self) -> bool:

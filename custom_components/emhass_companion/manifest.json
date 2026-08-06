@@ -3,7 +3,8 @@
   "name": "EMHASS Companion",
   "after_dependencies": [
     "hassio",
-    "lovelace"
+    "lovelace",
+    "recorder"
   ],
   "codeowners": [
     "@smefa"
@@ -18,5 +19,5 @@
   "issue_tracker": "https://github.com/smefa/emhass-ha-companion/issues",
   "requirements": [],
   "single_config_entry": true,
-  "version": "0.8.3.2"
+  "version": "0.8.3.3"
 }
