@@ -57,13 +57,19 @@ It also gets one extra sensor:
 
 Once you have at least one thermal load, **Configure → Outdoor
 temperature** appears, asking where the outdoor temperature forecast comes
-from — it's what the room drifts towards while the load is off:
+from — it's what the room drifts towards while the load is off. A source is
+required:
 
-- **EMHASS built-in (Open-Meteo)**
-- **Temperature forecast from an entity attribute**
-- **Home Assistant weather entity**
-
-Leave it unset and EMHASS uses its own weather data instead.
+- **Home Assistant weather entity** — hourly forecast via
+  `weather.get_forecasts`. Pick one that actually offers hourly data; daily or
+  twice-daily forecasts are too coarse to schedule heating against.
+- **Temperature forecast from an entity attribute** — for a weather
+  integration that exposes its forecast as a list-valued attribute instead of
+  through an action, or a template sensor you build yourself.
+- **EMHASS built-in (Open-Meteo)** — no weather integration or API key
+  needed, but requires your home's location to be set correctly under Home
+  Assistant's Settings → System → Home information, and is only correct when
+  the solar forecast is also EMHASS built-in.
 
 ## Getting the numbers right
 

@@ -266,7 +266,7 @@
       },
       "temperature": {
         "title": "Outdoor temperature",
-        "description": "Where the outdoor temperature forecast comes from. Only used once a thermal load exists: it is what the thermal model drifts towards while the load is off.\n\nLeave unset to let EMHASS fetch its own weather data -- which is only right when the solar forecast is also EMHASS built-in (Open-Meteo). With any other solar source, pick a weather entity here.",
+        "description": "Where the outdoor temperature forecast comes from. Only used once a thermal load exists: it is what the thermal model drifts towards while the load is off.\n\n{profiles}",
         "data": {
           "profile": "Temperature source"
         }
@@ -427,6 +427,14 @@
           "force_charge": "Force charge",
           "force_discharge": "Force discharge",
           "idle": "Idle"
+        }
+      },
+      "cost_fun": {
+        "name": "Cost function",
+        "state": {
+          "profit": "Maximize profit",
+          "cost": "Minimize cost",
+          "self-consumption": "Maximize self-consumption"
         }
       },
       "recurrence": {

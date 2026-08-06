@@ -9,7 +9,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
-from .const import MODE_AUTO, RECURRENCES, SYSTEM_MODES
+from .const import COST_FUNS, DEFAULT_COST_FUN, MODE_AUTO, RECURRENCES, SYSTEM_MODES
 from .coordinator import EmhassCoordinator
 from .deferrable import DeferrableRuntime
 from .entity import EmhassEntity, EmhassLoadEntity
@@ -23,7 +23,7 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     coordinator: EmhassCoordinator = entry.runtime_data.coordinator
-    async_add_entities([EmhassModeSelect(coordinator)])
+    async_add_entities([EmhassModeSelect(coordinator), EmhassCostFunSelect(coordinator)])
 
     for load in entry.runtime_data.loads.all():
         # A thermal load's demand is its comfort band, which stands every day
@@ -64,6 +64,39 @@ class EmhassModeSelect(EmhassEntity, SelectEntity, RestoreEntity):
     async def async_select_option(self, option: str) -> None:
         self._current = option
         self.coordinator.system_mode = option
+        self.async_write_ha_state()
+
+
+class EmhassCostFunSelect(EmhassEntity, SelectEntity, RestoreEntity):
+    """EMHASS's optimisation objective: profit, cost, or self-consumption.
+
+    Sent as the ``costfun`` runtime parameter on every request (see
+    payload.build_payload), so a change here takes effect on the next
+    optimisation run without touching EMHASS's own stored config.
+    """
+
+    _attr_translation_key = "cost_fun"
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_options = list(COST_FUNS)
+
+    def __init__(self, coordinator: EmhassCoordinator) -> None:
+        super().__init__(coordinator, "cost_fun")
+        self._current = DEFAULT_COST_FUN
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state is not None and last_state.state in COST_FUNS:
+            self._current = last_state.state
+        self.coordinator.cost_fun = self._current
+
+    @property
+    def current_option(self) -> str:
+        return self._current
+
+    async def async_select_option(self, option: str) -> None:
+        self._current = option
+        self.coordinator.cost_fun = option
         self.async_write_ha_state()
 
 

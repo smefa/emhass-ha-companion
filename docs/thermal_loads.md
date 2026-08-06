@@ -65,20 +65,22 @@ run-time window, startup penalty and max starts all still apply.
 
 ## Outdoor temperature
 
-![The Outdoor temperature step, choosing between EMHASS built-in, an entity attribute, or a Home Assistant weather entity](assets/thermal-outdoor-temperature.png)
+![The Outdoor temperature step, choosing between a Home Assistant weather entity, an entity attribute, or EMHASS built-in](assets/thermal-outdoor-temperature.png)
 
 The model needs an outdoor temperature forecast — it is what the room drifts
 towards while the load is off. Configure → **Outdoor temperature** offers the
-same profile engine as every other input (`profiles/builtin/temperature/`):
+same profile engine as every other input (`profiles/builtin/temperature/`),
+and a source is required once a thermal load exists:
 
 - **Home Assistant weather entity** — hourly forecast via
   `weather.get_forecasts`.
 - **Entity attribute** — a list-valued attribute on any entity.
 - **EMHASS built-in (Open-Meteo)** — no series; sets
-  `weather_forecast_method: open-meteo` so EMHASS fetches it itself. Only
-  correct when the solar forecast is also EMHASS built-in.
+  `weather_forecast_method: open-meteo` so EMHASS fetches it itself. Requires
+  your home's location to be set correctly under Home Assistant's Settings →
+  System → Home information (that pin is what EMHASS fetches from), and is
+  only correct when the solar forecast is also EMHASS built-in.
 
-Left unset, nothing is sent and EMHASS falls back to its own weather data.
 The series and settings are only fetched/sent once a thermal load actually
 exists (`DeferrableRegistry.has_thermal`).
 

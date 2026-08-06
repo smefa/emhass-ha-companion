@@ -13,11 +13,11 @@
   "dependencies": [
     "http"
   ],
-  "documentation": "https://github.com/smefa/emhass-ha-companion",
+  "documentation": "https://smefa.github.io/emhass-ha-companion/guide/setup/",
   "integration_type": "hub",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/smefa/emhass-ha-companion/issues",
   "requirements": [],
   "single_config_entry": true,
-  "version": "0.8.3.6"
+  "version": "0.8.3.9"
 }

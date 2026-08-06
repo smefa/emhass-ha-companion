@@ -27,6 +27,7 @@ from .const import (
     CONF_GROUP_LOAD_IDS,
     CONF_GROUP_MAX_POWER,
     CONF_GROUP_MUTUAL_EXCLUSION,
+    DEFAULT_COST_FUN,
     DEFAULT_MIX_BETA,
     DEFAULT_SURPLUS_THRESHOLD_W,
     DOMAIN,
@@ -154,6 +155,9 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         # correction (fired server-side, independently of blend_at) uses the
         # same weight instead of its hard-coded 50/50 default.
         self.mix_beta = DEFAULT_MIX_BETA
+        # Owned by the cost function select. EMHASS's optimisation objective:
+        # profit, cost, or self-consumption; see payload.build_payload.
+        self.cost_fun = DEFAULT_COST_FUN
         # The last end-SOC decision, fed back into terminal.decide_end_soc as
         # the hysteresis anchor. In-memory only: after a restart the first run
         # simply computes fresh.
@@ -694,6 +698,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             pv_live_w=self._read_pv_live(),
             load_live_w=self._read_load_live(),
             mix_beta=self.mix_beta,
+            cost_fun=self.cost_fun,
             extra_settings=settings,
         )
         return inputs, build_payload(inputs)

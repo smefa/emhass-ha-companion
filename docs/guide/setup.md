@@ -51,7 +51,6 @@ actually pay or get paid, for import and export separately:
 - **Solcast PV Forecast**
 - **EMHASS built-in forecast (Open-Meteo)** — no API key, no forecast
   integration needed.
-- **Forecast.Solar (fetched by EMHASS)** — no API key on the free tier.
 - **Solar forecast from an entity attribute**
 - **No solar** — if you have no PV array.
 
@@ -126,6 +125,10 @@ Most of these can be revisited any time from **Settings → Devices &
 Services → EMHASS Companion → Configure**:
 
 ![The Configure menu](../assets/setup-configure-menu.png)
+
+**Inverter control** and **Outdoor temperature** only show up once they're
+relevant — a battery for the former, a thermal load for the latter. See
+**[Inverter control](inverter_control.md)** and **[Thermal loads](thermal_loads.md)**.
 
 Electricity price and solar forecast sources are the exception — changing
 which *source* you use means removing and re-adding the integration.

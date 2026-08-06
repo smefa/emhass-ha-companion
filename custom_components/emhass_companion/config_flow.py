@@ -119,6 +119,7 @@ from .const import (
     SUBENTRY_TYPE_DEFERRABLE,
     SUBENTRY_TYPE_LOAD_GROUP,
     SUBENTRY_TYPE_THERMAL,
+    TEMPERATURE_PROFILE_ORDER,
 )
 from .profiles import (
     Profile,
@@ -1736,33 +1737,33 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
         """Choose where the outdoor temperature forecast comes from.
 
         Only consulted once a thermal load exists -- the forecast is what the
-        thermal model cools towards. Left unset, EMHASS falls back to its own
-        weather data, which is only right when the solar forecast is also
-        EMHASS built-in (Open-Meteo).
+        thermal model cools towards.
         """
         options = dict(self.config_entry.options)
         profiles = (await async_load_profiles(self.hass)).profiles
         choices = available_profiles(self.hass, profiles, PROFILE_KIND_TEMPERATURE)
 
         if user_input is not None:
-            key = user_input.get(CONF_PROFILE)
-            if not key:
-                options[CONF_TEMPERATURE] = {}
-                return self.async_create_entry(data=options)
-            self._temperature_key = key
+            self._temperature_key = user_input[CONF_PROFILE]
             self._temperature_profiles = profiles
             return await self.async_step_temperature_options()
 
         current = (options.get(CONF_TEMPERATURE) or {}).get(CONF_PROFILE)
+        ranked = _rank_profiles(choices, TEMPERATURE_PROFILE_ORDER)
         return self.async_show_form(
             step_id="temperature",
             data_schema=vol.Schema(
                 {
-                    vol.Optional(
+                    vol.Required(
                         CONF_PROFILE, description={"suggested_value": current}
-                    ): _profile_selector(choices)
+                    ): _profile_selector(choices, TEMPERATURE_PROFILE_ORDER)
                 }
             ),
+            description_placeholders={
+                "profiles": "\n".join(
+                    f"- **{profile.name}** — {profile.description or ''}" for profile in ranked
+                )
+            },
         )
 
     async def async_step_temperature_options(

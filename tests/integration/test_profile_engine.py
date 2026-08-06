@@ -442,13 +442,22 @@ async def test_settings_only_profiles_contribute_no_series(hass: HomeAssistant) 
     """Profiles that delegate to EMHASS must not pretend to fetch anything."""
     from custom_components.emhass_companion.profiles import resolve_settings
 
-    profile = _builtin("pv/forecast_solar_api")
+    profile = _builtin("pv/emhass_native")
     assert profile.produces_series is False
 
-    settings = resolve_settings(hass, profile, {"peak_power_kw": 9.5})
-    assert settings["weather_forecast_method"] == "solar.forecast"
-    # Rendered as a number, not the string "9.5".
-    assert settings["solar_forecast_kwp"] == 9.5
+    settings = resolve_settings(
+        hass,
+        profile,
+        {
+            "peak_power_w": 9500,
+            "inverter_power_w": 8000,
+            "surface_tilt": 30,
+            "surface_azimuth": 180,
+        },
+    )
+    assert settings["weather_forecast_method"] == "open-meteo"
+    # Rendered as a number, not the string "9500".
+    assert settings["pv_module_model"] == [9500]
 
 
 # --- template errors are normalised, not raw exceptions ----------------------

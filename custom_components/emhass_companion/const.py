@@ -295,6 +295,17 @@ BATTERY_ACTIONS: Final = (
 )
 SYSTEM_MODES: Final = (MODE_AUTO, *BATTERY_ACTIONS)
 
+# --- Cost function -------------------------------------------------------------
+# EMHASS's own optimisation.py objective-function branches; sent verbatim as
+# the "costfun" runtime parameter (payload.build_payload), so these must match
+# its literal strings exactly, hyphen included.
+
+COST_FUN_PROFIT: Final = "profit"
+COST_FUN_COST: Final = "cost"
+COST_FUN_SELF_CONSUMPTION: Final = "self-consumption"
+COST_FUNS: Final = (COST_FUN_PROFIT, COST_FUN_COST, COST_FUN_SELF_CONSUMPTION)
+DEFAULT_COST_FUN: Final = COST_FUN_PROFIT
+
 # --- Inverter actions --------------------------------------------------------
 #
 # The four battery actions above are what a plan resolves to. These are the
@@ -419,6 +430,17 @@ PRICE_PROFILE_ORDER: Final = (
     "price/nordpool_custom",
 )
 PV_PROFILE_ORDER: Final = ("pv/solcast",)
+
+# The temperature picker: a Home Assistant weather entity is the option most
+# users with a weather integration already have, followed by the generic
+# attribute escape hatch, with EMHASS's own Open-Meteo fetch last since it
+# only works while the solar forecast is also Open-Meteo. Alphabetical
+# file-load order would otherwise put Open-Meteo first.
+TEMPERATURE_PROFILE_ORDER: Final = (
+    "temperature/weather_entity",
+    "temperature/generic_attribute",
+    "temperature/emhass_native",
+)
 
 # Unique-id suffix for the sensor created by the "Create a house load sensor"
 # flow (full unique_id is f"{entry.entry_id}_{NET_HOUSE_LOAD_KEY}"). Shared

@@ -237,8 +237,9 @@ The fixture is required. It is what lets maintainers verify a profile for an int
 Not every integration exposes one. Home Assistant's core `forecast_solar`, for
 example, has only single-value sensors — production now, next hour, today's
 total — with no list attribute and no action returning a series. A profile
-reading from it could not work, so the shipped Forecast.Solar profile has
-EMHASS query the service directly instead, via an `emhass:` block.
+reading from it could not work. The way around that is to have EMHASS query
+the underlying service directly instead, via an `emhass:` block, rather than
+going through the Home Assistant integration at all.
 
 Look for one of these before starting:
 

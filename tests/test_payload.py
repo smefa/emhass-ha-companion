@@ -282,6 +282,15 @@ def test_dayahead_sends_delta_forecast_in_days():
     assert "prediction_horizon" not in payload
 
 
+def test_cost_fun_defaults_to_profit():
+    assert build_payload(_inputs()).payload["costfun"] == "profit"
+
+
+def test_cost_fun_is_sent_verbatim():
+    payload = build_payload(_inputs(cost_fun="self-consumption")).payload
+    assert payload["costfun"] == "self-consumption"
+
+
 def test_forecasts_are_sent_as_timestamp_maps_with_explicit_offsets():
     """Never bare lists: a mapping is resampled and aligned by EMHASS itself."""
     now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)

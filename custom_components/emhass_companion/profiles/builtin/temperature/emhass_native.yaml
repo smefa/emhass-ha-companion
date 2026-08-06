@@ -2,8 +2,12 @@ name: EMHASS built-in (Open-Meteo)
 kind: temperature
 version: 1
 description: >-
-  Lets EMHASS fetch the outdoor temperature from Open-Meteo itself, using your
-  Home Assistant location. Needs no weather integration and no API key.
+  Lets EMHASS fetch the outdoor temperature from Open-Meteo itself. Needs no
+  weather integration and no API key, but requires your home's location to be
+  set correctly under Home Assistant's Settings → System → Home information --
+  that pin is what EMHASS fetches from. Only works when the solar forecast is
+  also set to EMHASS built-in (Open-Meteo); with any other solar source,
+  choose a weather entity instead.
 notes: >-
   This only works when the solar forecast is also set to EMHASS built-in
   (Open-Meteo), because the outdoor temperature comes from the same weather

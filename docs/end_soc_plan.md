@@ -297,10 +297,10 @@ Three changes:
    profile. Other profiles just get the honest
    `pv_tail: "assumed zero"` annotation on the sensor.
 
-Non-Solcast sources: `forecast_solar_api` extends as far as that API
-returns; `emhass_native` contributes settings rather than a series, so
-Optimized mode there always runs with `pv_tail: "assumed zero"`;
-`generic_attribute` depends on whatever the user points it at.
+Non-Solcast sources: `emhass_native` contributes settings rather than a
+series, so Optimized mode there always runs with
+`pv_tail: "assumed zero"`; `generic_attribute` depends on whatever the
+user points it at.
 
 ## Load coverage
 

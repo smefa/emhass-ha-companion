@@ -17,7 +17,7 @@ from typing import Any
 
 from homeassistant.util import dt as dt_util
 
-from .const import ACTION_MPC
+from .const import ACTION_MPC, DEFAULT_COST_FUN
 from .models import (
     BatteryConfig,
     DeferrableLoad,
@@ -312,6 +312,7 @@ class PayloadInputs:
     pv_live_w: float | None = None
     load_live_w: float | None = None
     mix_beta: float = 0.5
+    cost_fun: str = DEFAULT_COST_FUN
     extra_settings: dict[str, Any] = field(default_factory=dict)
 
 
@@ -333,6 +334,7 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
 
     payload: dict[str, Any] = {
         "optimization_time_step": inputs.time_step_minutes,
+        "costfun": inputs.cost_fun,
     }
 
     if inputs.action == ACTION_MPC:

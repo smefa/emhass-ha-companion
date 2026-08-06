@@ -18,6 +18,11 @@ Most of these can be revisited any time from **Settings → Devices & Services
 
 ![The Configure menu, listing House consumption, Battery, Grid and schedule, Buy and sell prices, Inverter control and Outdoor temperature](assets/setup-configure-menu.png)
 
+**Inverter control** and **Outdoor temperature** only appear once they're
+relevant — a battery for the former, a thermal load for the latter — and are
+covered in [Inverter control](inverter_control.md) and
+[Thermal loads](thermal_loads.md) rather than here.
+
 Electricity price and solar forecast sources are asked only during initial
 setup — changing which *source* you use means removing and re-adding the
 integration, since it decides which other questions even apply.

@@ -266,7 +266,7 @@
       },
       "temperature": {
         "title": "Utetemperatur",
-        "description": "Var utetemperaturprognosen kommer ifrån. Används först när en termisk last finns: det är vad den termiska modellen driver mot när lasten är av.\n\nLämna tomt så hämtar EMHASS sitt eget väder -- vilket bara blir rätt när solprognosen också är EMHASS inbyggd (Open-Meteo). Med någon annan solkälla, välj en väderentitet här.",
+        "description": "Var utetemperaturprognosen kommer ifrån. Används först när en termisk last finns: det är vad den termiska modellen driver mot när lasten är av.\n\n{profiles}",
         "data": {
           "profile": "Temperaturkälla"
         }
@@ -427,6 +427,14 @@
           "force_charge": "Tvinga laddning",
           "force_discharge": "Tvinga urladdning",
           "idle": "Vila"
+        }
+      },
+      "cost_fun": {
+        "name": "Kostnadsfunktion",
+        "state": {
+          "profit": "Maximera vinst",
+          "cost": "Minimera kostnad",
+          "self-consumption": "Maximera egenförbrukning"
         }
       },
       "recurrence": {

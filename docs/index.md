@@ -33,7 +33,7 @@ Home Assistant owns all state. EMHASS is treated as a **stateless calculator**.
 
 Three consequences worth knowing:
 
-**Your existing integrations are the data sources.** This integration ships no API clients. Prices come from your Nord Pool / ENTSO-E / Tibber integration, solar from Solcast or Forecast.Solar, hardware from whatever inverter integration you already run. Reading Solcast's cached forecast attribute costs **zero** API calls, so re-optimising every few minutes never touches your daily quota. See [Data sources](data_sources.md).
+**Your existing integrations are the data sources.** This integration ships no API clients. Prices come from your Nord Pool / ENTSO-E / Tibber integration, solar from Solcast, hardware from whatever inverter integration you already run. Reading Solcast's cached forecast attribute costs **zero** API calls, so re-optimising every few minutes never touches your daily quota. See [Data sources](data_sources.md).
 
 **Configuration cannot drift.** Every optimisation request carries the full set of settings as runtime parameters. EMHASS's own `config.json` is written once at setup and never consulted for those values afterwards. (A consequence: EMHASS's own web UI will show stale values. The *Last request to EMHASS* diagnostic sensor is the authoritative record.)
 

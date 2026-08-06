@@ -170,7 +170,7 @@ EXPECTED_ENTITY_KEYS = {
         "single_constant",
         "load_requested",
     },
-    "select": {"system_mode", "recurrence"},
+    "select": {"system_mode", "recurrence", "cost_fun"},
     "button": {"run_dayahead", "run_mpc", "run_forecast_fit", "run_now"},
     "number": {
         "nominal_power",
@@ -197,11 +197,12 @@ def test_every_entity_has_a_translated_name(strings, platform, keys):
 
 
 def test_select_options_are_translated(strings):
-    from custom_components.emhass_companion.const import RECURRENCES, SYSTEM_MODES
+    from custom_components.emhass_companion.const import COST_FUNS, RECURRENCES, SYSTEM_MODES
 
     for key, modes in (
         ("system_mode", SYSTEM_MODES),
         ("recurrence", RECURRENCES),
+        ("cost_fun", COST_FUNS),
     ):
         states = strings["entity"]["select"][key]["state"]
         for mode in modes:
