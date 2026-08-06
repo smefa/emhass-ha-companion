@@ -25,7 +25,7 @@ def _time_weighted_average(
     average is just taken over whatever history is actually available, which
     is shorter than the full window right after startup or a reload.
     """
-    weighted_sum = 0.0
+    mean = 0.0
     total_weight = 0.0
     for index, (timestamp, value) in enumerate(samples):
         segment_start = max(timestamp, window_start)
@@ -34,12 +34,22 @@ def _time_weighted_average(
         if segment_end <= segment_start:
             continue
         weight = (segment_end - segment_start).total_seconds()
-        weighted_sum += value * weight
         total_weight += weight
+        # Accumulate the mean itself rather than sum/total. The naive form
+        # evaluates (value * weight) / weight for a single segment, and that
+        # is not exactly `value` for every float weight: a signal sitting
+        # still at 3000 W reads back as 3000.0000000000005 when the segment
+        # happens to be ~12 microseconds long. Since segments are wall-clock
+        # gaps, which weight lands on a lossy pair is pure chance -- so the
+        # error surfaced as an intermittent, ordering-dependent failure
+        # rather than a reproducible one. This form keeps a constant signal
+        # exactly constant whatever the weights, and is the same value
+        # mathematically.
+        mean += (value - mean) * (weight / total_weight)
 
     if total_weight <= 0:
         return samples[-1][1] if samples else None
-    return weighted_sum / total_weight
+    return mean
 
 
 class TimeWeightedAverage:

@@ -83,3 +83,28 @@ def test_history_far_outside_the_window_is_pruned_down_to_one_carry_sample() -> 
     # matches what an unpruned history would have computed here too.
     now = far_future + timedelta(minutes=10)
     assert average.average(now, WINDOW) == (1200.0 * 5 + 3000.0 * 10) / 15
+
+
+def test_a_signal_that_has_not_moved_averages_to_exactly_its_value() -> None:
+    """No float drift from the weighting itself.
+
+    Segments are wall-clock gaps, so the weight can be any float at all. The
+    naive weighted_sum / total_weight form evaluates (value * weight) /
+    weight, which for a lone segment is not exactly `value` at every weight --
+    3000 W over ~12 microseconds came back as 3000.0000000000005. Whether a
+    given run hit a lossy weight was pure timing, so this showed up as an
+    intermittent failure in the sensor tests that read the average back.
+    """
+    for micros in (1, 12, 37, 500, 4_999, 123_456):
+        average = TimeWeightedAverage()
+        average.record(T0, 3000.0, WINDOW)
+        now = T0 + timedelta(microseconds=micros)
+        assert average.average(now, WINDOW) == 3000.0, f"{micros} us"
+
+    # And with several segments all sitting at the same value.
+    average = TimeWeightedAverage()
+    for step, micros in enumerate((0, 12, 37, 500, 4_999)):
+        average.record(T0 + timedelta(microseconds=micros), 3000.0, WINDOW)
+        assert average.average(T0 + timedelta(microseconds=micros + 7), WINDOW) == 3000.0, (
+            f"sample {step}"
+        )
