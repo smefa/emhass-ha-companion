@@ -59,6 +59,13 @@ actually pay or get paid, for import and export separately:
 > **[Template additions](../template_additions.md)** to add your own solar
 > source.
 
+Changeable later under **Configure → Solar forecast**. Worth revisiting after
+an update: a source's default entity list can gain entries, and those are
+offered there rather than applied for you. Solcast users should add
+`sensor.solcast_pv_forecast_forecast_day_3`, which lets
+[End SOC](../end_soc_plan.md)'s *Optimized* mode see the next solar day past
+the horizon instead of inferring it from the previous day.
+
 ## 5. House consumption
 
 ![The House consumption step](../assets/setup-house-consumption.png)

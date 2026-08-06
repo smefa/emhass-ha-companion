@@ -152,6 +152,7 @@
         "title": "EMHASS Companion",
         "menu_options": {
           "load": "Husets förbrukning",
+          "pv": "Solprognos",
           "battery": "Batteri",
           "grid": "Nät och schema",
           "tariff": "Köp- och säljpriser",
@@ -178,6 +179,17 @@
         "description": "{notes}"
       },
       "load_create_options": {
+        "title": "Konfigurera {profile}",
+        "description": "{notes}"
+      },
+      "pv": {
+        "title": "Solprognos",
+        "description": "Ändra varifrån prognosen för solproduktion kommer, eller justera bara den källa du redan använder.\n\nVärt att titta på efter en uppdatering: en profils standardval kan ha fått fler poster (Solcasts day 3-sensor, som End SOC-läget \"Optimerad\" använder för att se nästa soldygn bortom horisonten), och de erbjuds här i stället för att sättas åt dig.\n\n{profiles}",
+        "data": {
+          "profile": "Källa för solprognos"
+        }
+      },
+      "pv_options": {
         "title": "Konfigurera {profile}",
         "description": "{notes}"
       },

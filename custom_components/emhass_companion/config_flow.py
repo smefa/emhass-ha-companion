@@ -1508,12 +1508,14 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
         self._temperature_profiles: dict[str, Profile] = {}
         self._load_key: str = ""
         self._load_profiles: dict[str, Profile] = {}
+        self._pv_key: str = ""
+        self._pv_profiles: dict[str, Profile] = {}
         self._house_load_total_entity: str = ""
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         return self.async_show_menu(
             step_id="init",
-            menu_options=["load", "battery", "grid", "tariff", "inverter", "temperature"],
+            menu_options=["load", "pv", "battery", "grid", "tariff", "inverter", "temperature"],
         )
 
     async def async_step_load(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -1626,6 +1628,74 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
         stored = (options.get(CONF_LOAD) or {}).get(CONF_PROFILE_OPTIONS) or {}
         return self.async_show_form(
             step_id="load_options",
+            data_schema=self.add_suggested_values_to_schema(
+                vol.Schema(profile.selector_schema()), stored
+            ),
+            description_placeholders={
+                "profile": profile.name,
+                "notes": profile.notes or "",
+            },
+        )
+
+    async def async_step_pv(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Change the solar forecast source, or just retune the current one.
+
+        Set once at setup until now, which left an existing install with no
+        way to pick up a profile template's newer defaults -- Solcast's day-3
+        sensor among them, which End SOC's Optimized mode wants so it can see
+        the next solar day past the horizon (see terminal.py).
+        """
+        options = dict(self.config_entry.options)
+        profiles = (await async_load_profiles(self.hass)).profiles
+        choices = available_profiles(self.hass, profiles, PROFILE_KIND_PV)
+        if not choices:
+            # Should not happen: every kind ships an always-available profile.
+            return self.async_abort(reason="no_profiles")
+
+        if user_input is not None:
+            self._pv_key = user_input[CONF_PROFILE]
+            self._pv_profiles = profiles
+            return await self.async_step_pv_options()
+
+        current = (options.get(CONF_PV) or {}).get(CONF_PROFILE)
+        return self.async_show_form(
+            step_id="pv",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_PROFILE, description={"suggested_value": current}
+                    ): _profile_selector(choices)
+                }
+            ),
+            description_placeholders={
+                "profiles": "\n".join(
+                    f"- **{profile.name}** — {profile.description or ''}" for profile in choices
+                )
+            },
+        )
+
+    async def async_step_pv_options(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        options = dict(self.config_entry.options)
+        profile = self._pv_profiles[self._pv_key]
+
+        if user_input is not None or not profile.options:
+            options[CONF_PV] = {
+                CONF_PROFILE: self._pv_key,
+                CONF_PROFILE_OPTIONS: user_input or {},
+            }
+            return self.async_create_entry(data=options)
+
+        # Suggest what is stored, not the template's defaults: a changed
+        # default (day 3 arriving in the Solcast profile) is an offer, not
+        # something to apply behind the user's back. Switching to a different
+        # profile has nothing to carry over, so that starts from its defaults.
+        stored = (options.get(CONF_PV) or {}).get(CONF_PROFILE_OPTIONS) or {}
+        if (options.get(CONF_PV) or {}).get(CONF_PROFILE) != self._pv_key:
+            stored = {}
+        return self.async_show_form(
+            step_id="pv_options",
             data_schema=self.add_suggested_values_to_schema(
                 vol.Schema(profile.selector_schema()), stored
             ),

@@ -152,6 +152,7 @@
         "title": "EMHASS Companion",
         "menu_options": {
           "load": "House consumption",
+          "pv": "Solar forecast",
           "battery": "Battery",
           "grid": "Grid and schedule",
           "tariff": "Buy and sell prices",
@@ -178,6 +179,17 @@
         "description": "{notes}"
       },
       "load_create_options": {
+        "title": "Configure {profile}",
+        "description": "{notes}"
+      },
+      "pv": {
+        "title": "Solar forecast",
+        "description": "Change where the PV production forecast comes from, or just retune the source you already use.\n\nWorth revisiting after an update: a profile's default options can gain entries (Solcast's day-3 sensor, which the End SOC \"Optimized\" mode uses to see the next solar day past the horizon), and those are offered here rather than applied for you.\n\n{profiles}",
+        "data": {
+          "profile": "Solar forecast source"
+        }
+      },
+      "pv_options": {
         "title": "Configure {profile}",
         "description": "{notes}"
       },

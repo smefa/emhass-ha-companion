@@ -19,7 +19,7 @@ from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.emhass_companion.api import EmhassClient
-from custom_components.emhass_companion.const import CONF_LOAD, DOMAIN
+from custom_components.emhass_companion.const import CONF_LOAD, CONF_PV, DOMAIN
 
 
 async def _setup_entry(hass: HomeAssistant) -> MockConfigEntry:
@@ -151,3 +151,77 @@ async def test_create_a_house_load_sensor_lets_you_pick_the_forecast_method(
         "profile_options": {"method": "mlforecaster"},
     }
     assert entry.options["house_load_total_entity"] == "sensor.total_house_power"
+
+
+async def test_the_pv_profile_is_reachable_and_saves(hass: HomeAssistant) -> None:
+    """Same set-once bug as the load source, in the solar forecast.
+
+    Nothing but the initial wizard could touch it, so an install could never
+    pick up an entity a profile template gained later -- Solcast's day-3
+    sensor, which End SOC's Optimized mode needs to see the next solar day
+    past the horizon.
+    """
+    entry = await _setup_entry(hass)
+    # The Solcast profile only appears once its integration is detected.
+    hass.config.components.add("solcast_solar")
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert "pv" in result["menu_options"]
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "pv"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"profile": "pv/solcast"}
+    )
+    assert result["step_id"] == "pv_options"
+
+    entities = [
+        "sensor.solcast_pv_forecast_forecast_today",
+        "sensor.solcast_pv_forecast_forecast_tomorrow",
+        "sensor.solcast_pv_forecast_forecast_day_3",
+    ]
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"entities": entities, "estimate": "pv_estimate"}
+    )
+
+    assert result["type"] == "create_entry"
+    assert entry.options[CONF_PV] == {
+        "profile": "pv/solcast",
+        "profile_options": {"entities": entities, "estimate": "pv_estimate"},
+    }
+
+
+async def test_the_pv_step_suggests_what_is_stored_not_the_template_default(
+    hass: HomeAssistant,
+) -> None:
+    """A changed template default is an offer, not a silent migration."""
+    entry = await _setup_entry(hass)
+    hass.config.components.add("solcast_solar")
+    stored = [
+        "sensor.solcast_pv_forecast_forecast_today",
+        "sensor.solcast_pv_forecast_forecast_tomorrow",
+    ]
+    hass.config_entries.async_update_entry(
+        entry,
+        options={
+            **entry.options,
+            CONF_PV: {
+                "profile": "pv/solcast",
+                "profile_options": {"entities": stored, "estimate": "pv_estimate"},
+            },
+        },
+    )
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "pv"}
+    )
+    (marker,) = (key for key in result["data_schema"].schema if key == "profile")
+    assert marker.description["suggested_value"] == "pv/solcast"
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"profile": "pv/solcast"}
+    )
+    (marker,) = (key for key in result["data_schema"].schema if key == "entities")
+    assert marker.description["suggested_value"] == stored

@@ -17,14 +17,17 @@ options:
   entities:
     name: Forecast sensors
     description: >-
-      Today and tomorrow cover the optimisation horizon; day 3 lets the End
-      SOC "Optimized" mode see one day past it. (Solcast's "tomorrow" is day
-      2 -- there is no day-2 sensor.) A selected sensor that is missing is
-      skipped with a warning rather than failing the run.
+      Today and tomorrow cover the optimisation horizon; the later days let
+      the End SOC "Optimized" mode see past it. (Solcast's "tomorrow" is day
+      2 -- there is no day-2 sensor.) Selecting more than you need costs
+      nothing: reading is local, forecast points past the horizon are ignored
+      by EMHASS, and a sensor that is missing is skipped with a warning
+      rather than failing the run.
     default:
       - sensor.solcast_pv_forecast_forecast_today
       - sensor.solcast_pv_forecast_forecast_tomorrow
       - sensor.solcast_pv_forecast_forecast_day_3
+      - sensor.solcast_pv_forecast_forecast_day_4
     selector:
       entity:
         integration: solcast_solar
