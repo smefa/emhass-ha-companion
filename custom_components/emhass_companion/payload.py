@@ -102,6 +102,7 @@ class LoadWindow:
     start_index: int
     end_index: int
     warnings: list[str] = field(default_factory=list)
+    opens_beyond_horizon: bool = False
 
 
 def resolve_load_window(
@@ -161,8 +162,10 @@ def resolve_load_window(
     # so the intersection is the only safe reading. Deliberately folded in
     # before the deadline logic below, so a deadline still measures itself
     # against whatever the two windows leave.
+    opens_at_is_hard = False
     if start_at is not None and (opens_at is None or start_at > opens_at):
         opens_at = start_at
+        opens_at_is_hard = True
     if end_at is not None and (closes_at is None or end_at < closes_at):
         closes_at = end_at
 
@@ -176,8 +179,15 @@ def resolve_load_window(
         # An explicit, dated request beats a standing preference: a deadline
         # that expires before the window even opens would otherwise leave the
         # load unable to run at all, and a request that silently does nothing
-        # for hours is worse than one that breaks quiet hours audibly.
-        if opens_at is not None and deadline <= opens_at:
+        # for hours is worse than one that breaks quiet hours audibly. But a
+        # window opened by start_at is not a preference -- it is a surplus
+        # load's "only while the sun is actually spare" (see
+        # DeferrableLoad.start_at), and running outside it means importing
+        # grid power, the one thing such a load must never do. So only the
+        # soft, wall-clock case gets relaxed; a hard start stays put and the
+        # deadline is simply missed, same as any other window too narrow to
+        # meet it.
+        if opens_at is not None and deadline <= opens_at and not opens_at_is_hard:
             local_opens_at = dt_util.as_local(opens_at)
             warnings.append(
                 f"{name}: the requested deadline falls before its time window opens "
@@ -199,12 +209,20 @@ def resolve_load_window(
     # step than this one, which is the case an index is coarse enough to
     # actually get wrong.
     start_index = 0 if opens_at is None else max(round(elapsed_steps(opens_at)), 0)
+    opens_beyond_horizon = False
     if start_index >= horizon_steps:
+        # EMHASS has no index meaning "not this cycle" -- 0 is "may begin
+        # immediately", the opposite of what a window that hasn't opened yet
+        # needs to say. Clamping to 0 would tell EMHASS the load is free to
+        # run right now, e.g. scheduling a quiet-hours-only load mid-day on a
+        # short-horizon MPC run that can't see as far as its window. The flag
+        # lets the caller park the load's hours instead of trusting this index.
         warnings.append(
             f"{name}: its time window opens beyond the {horizon_steps}-step horizon, "
-            f"so the earliest start is being ignored for this run."
+            f"so it will not be scheduled to run this cycle."
         )
         start_index = 0
+        opens_beyond_horizon = True
 
     if ends_at is None:
         end_index = 0
@@ -241,7 +259,8 @@ def resolve_load_window(
             end_index = max(soonest, 0)
 
     if (
-        operating_steps > 0
+        not opens_beyond_horizon
+        and operating_steps > 0
         and end_index > 0
         and not end_is_deadline
         and end_index - start_index < operating_steps
@@ -252,12 +271,15 @@ def resolve_load_window(
         # breach the user's quiet hours every night without them ever finding
         # out why. EMHASS reports it as an infeasible *problem* with no hint
         # which load caused it, so naming the load is the whole value here.
+        # Skipped when the window opens beyond the horizon: the caller parks
+        # the load's hours entirely in that case, so there is no run for this
+        # window to be too narrow for.
         warnings.append(
             f"{name}: its allowed window is {end_index - start_index} timesteps but it "
             f"needs {operating_steps}; EMHASS may report the problem as infeasible."
         )
 
-    return LoadWindow(start_index, max(end_index, 0), warnings)
+    return LoadWindow(start_index, max(end_index, 0), warnings, opens_beyond_horizon)
 
 
 def window_to_timesteps(
@@ -659,6 +681,16 @@ def _describe(
         end_at=load.end_at,
     )
     warnings.extend(window.warnings)
+
+    # EMHASS's own sentinel for "unconstrained start" is 0, the same index a
+    # beyond-horizon window gets clamped to -- so passing hours through here
+    # would tell EMHASS the load may start right now, which is exactly what
+    # its window (quiet hours, a surplus block, ...) says it may not do yet.
+    # Zeroing the target is the only way to say "not this cycle": the window
+    # comes back around and asks properly once the horizon reaches it.
+    if window.opens_beyond_horizon:
+        quantised = 0.0
+        steps = 0
 
     # A single-constant load that is already running gets *pinned* by EMHASS
     # the moment it has any operating requirement at all: an unbroken block

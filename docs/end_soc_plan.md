@@ -63,7 +63,7 @@ flow) gains one `SelectSelector`:
 |---|---|---|
 | **Optimized** *(default)* | `optimized` | Computed each run from PV, price and load forecasts — see below |
 | **Same as start** | `same_as_start` | Today's behaviour: `soc_final = soc_init` |
-| **Fixed (50%)** | `fixed_50` | `soc_final = 0.5`, feasibility-clamped |
+| **Fixed % slider** | `fixed_50` | `soc_final = soc_target` (the Target charge level slider), feasibility-clamped |
 
 - Stored under the existing `battery` options dict as `end_soc_mode`.
 - `BatteryConfig` gains `end_soc_mode: str = DEFAULT_END_SOC_MODE`

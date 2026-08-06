@@ -20,6 +20,13 @@ Configure → Inverter control**.
       Sungrow SH-RT inverters via the mkaiser Modbus package.
     - Leave it unset and the integration only ever reads — nothing is ever
       written to your hardware.
+    - Don't see your inverter? **Scripts** already covers any inverter you
+      can control from Home Assistant. If you'd rather have a dedicated
+      picker entry for it, you can write your own profile — a YAML file that
+      maps roles to your entities and actions to service calls, with no
+      Python involved. It lives outside the integration directory, so a
+      HACS update never touches it. See [Writing a profile](../profiles.md)
+      for the format and a starter template.
 
 You'll then be asked to confirm a handful of entities the chosen profile
 needs (a select, a number, a script — whatever that profile's hardware

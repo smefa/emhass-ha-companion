@@ -58,7 +58,7 @@ emhass:
   load_offpeak_hours_cost: "{{ options.offpeak_cost }}"
   load_peak_hour_periods:
     period_hp_1:
-      - peak_start: "{{ options.peak_start }}"
-      - peak_end: "{{ options.peak_end }}"
+      - start: "{{ options.peak_start }}"
+      - end: "{{ options.peak_end }}"
   production_price_forecast_method: constant
   photovoltaic_production_sell_price: "{{ options.sell_price }}"

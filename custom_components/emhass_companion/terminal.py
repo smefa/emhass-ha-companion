@@ -254,13 +254,14 @@ def decide_end_soc(
     for the sensor; callers that always supply a real forecast can ignore it.
     """
     if mode == END_SOC_FIXED_50:
-        soc = min(max(0.5, battery.soc_min), battery.soc_max)
+        target = battery.soc_target
+        soc = min(max(target, battery.soc_min), battery.soc_max)
         details: dict[str, Any] = {"mode": mode}
-        if soc != 0.5:
+        if soc != target:
             details["clamped_by"] = BOUND_RANGE
         return EndSocDecision(
             soc=soc,
-            reason="Fixed at 50% by the End SOC setting.",
+            reason=f"Fixed at {target:.0%} by the End SOC setting.",
             details=details,
         )
 

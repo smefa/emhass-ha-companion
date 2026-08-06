@@ -110,11 +110,11 @@
         "data_description": {
           "hybrid_inverter": "On if PV and the battery share one inverter's AC-side power limit, which is most home battery systems. Off if they are two independent inverters, each with its own limit.",
           "soc_min": "The optimiser will not plan the battery below this level.",
-          "soc_target": "Where the optimiser aims to leave the battery at the end of the horizon. With End SOC set to \"Optimized\" this is instead the reserve floor the computed target never plans below.",
+          "soc_target": "Where the optimiser aims to leave the battery at the end of the horizon. With End SOC set to \"Optimized\" this is instead the reserve floor the computed target never plans below; with \"Fixed % slider\" this is the exact level it aims for.",
           "self_consume_threshold_w": "When the plan's grid power is within this many watts of zero, the battery is handed to the inverter's own self-consumption mode instead of the plan's forced charge/discharge -- even a large planned charge or discharge is overridden, because self-consumption tracks real-time PV and load better than a forecast can at small imbalances. Once handed over, grid power must exceed twice this value before the plan can force the battery again, so it doesn't flip modes every recalculation. Not the same as the charge-level limits above, which only bound what the optimiser may plan between.",
           "soc_entity": "Read at the start of every run so the plan starts from reality.",
           "pv_entity": "Optional. Blended into the first step of every MPC forecast, weighted by the \"Live value weight\" number entity. Load is blended the same way automatically, using the sensor picked under House consumption > House load sensor -- no separate entity needed there.",
-          "end_soc_mode": "How the battery level the plan aims for at the end of the horizon is chosen. \"Optimized\" computes it each run from the solar, price and load forecasts beyond the horizon; \"Same as start\" always plans back to the current level; \"Fixed 50 %\" always aims for half. Requires EMHASS 0.18 or newer."
+          "end_soc_mode": "How the battery level the plan aims for at the end of the horizon is chosen. \"Optimized\" computes it each run from the solar, price and load forecasts beyond the horizon; \"Same as start\" always plans back to the current level; \"Fixed % slider\" always aims for the Target charge level above. Requires EMHASS 0.18 or newer."
         }
       },
       "grid": {
@@ -184,7 +184,7 @@
       },
       "pv": {
         "title": "Solar forecast",
-        "description": "Change where the PV production forecast comes from, or just retune the source you already use.\n\nWorth revisiting after an update: a profile's default options can gain entries (Solcast's day-3 sensor, which the End SOC \"Optimized\" mode uses to see the next solar day past the horizon), and those are offered here rather than applied for you.\n\n{profiles}",
+        "description": "Change where the PV production forecast comes from, or just retune the source you already use.\n\nSolcast PV Forecast prefered\n\n{profiles}",
         "data": {
           "profile": "Solar forecast source"
         }
@@ -217,8 +217,8 @@
           "hybrid_inverter": "On if PV and the battery share one inverter's AC-side power limit, which is most home battery systems. Off if they are two independent inverters, each with its own limit.",
           "self_consume_threshold_w": "When the plan's grid power is within this many watts of zero, the battery is handed to the inverter's own self-consumption mode instead of the plan's forced charge/discharge -- even a large planned charge or discharge is overridden, because self-consumption tracks real-time PV and load better than a forecast can at small imbalances. Once handed over, grid power must exceed twice this value before the plan can force the battery again, so it doesn't flip modes every recalculation. Not the same as the charge-level limits above, which only bound what the optimiser may plan between.",
           "pv_entity": "Optional. Blended into the first step of every MPC forecast, weighted by the \"Live value weight\" number entity. Load is blended the same way automatically, using the sensor picked under House consumption > House load sensor -- no separate entity needed there.",
-          "soc_target": "Where the optimiser aims to leave the battery at the end of the horizon. With End SOC set to \"Optimized\" this is instead the reserve floor the computed target never plans below.",
-          "end_soc_mode": "How the battery level the plan aims for at the end of the horizon is chosen. \"Optimized\" computes it each run from the solar, price and load forecasts beyond the horizon; \"Same as start\" always plans back to the current level; \"Fixed 50 %\" always aims for half. Requires EMHASS 0.18 or newer."
+          "soc_target": "Where the optimiser aims to leave the battery at the end of the horizon. With End SOC set to \"Optimized\" this is instead the reserve floor the computed target never plans below; with \"Fixed % slider\" this is the exact level it aims for.",
+          "end_soc_mode": "How the battery level the plan aims for at the end of the horizon is chosen. \"Optimized\" computes it each run from the solar, price and load forecasts beyond the horizon; \"Same as start\" always plans back to the current level; \"Fixed % slider\" always aims for the Target charge level above. Requires EMHASS 0.18 or newer."
         }
       },
       "grid": {
@@ -251,7 +251,7 @@
       },
       "inverter": {
         "title": "Inverter control",
-        "description": "How the battery is actually commanded. Leave this unset and the integration only ever reads — the plan is yours to act on however you like.\n\nNothing is written to your hardware until you also turn on the Control enabled switch.",
+        "description": "How the battery is actually commanded. Leave this unset and the integration only ever reads — the plan is yours to act on however you like.\n\nDon't see your inverter? **Scripts** works with any inverter you can already control from Home Assistant, and advanced users can write their own YAML profile for a dedicated entry — see the profiles guide in the documentation.\n\nNothing is written to your hardware until you also turn on the Control enabled switch.",
         "data": {
           "profile": "Inverter profile"
         }
@@ -302,7 +302,7 @@
       "options": {
         "optimized": "Optimized",
         "same_as_start": "Same as start",
-        "fixed_50": "Fixed 50 %"
+        "fixed_50": "Fixed % slider"
       }
     }
   },

@@ -92,12 +92,14 @@ def test_an_unknown_mode_behaves_as_same_as_start():
     assert decision.details["mode"] == END_SOC_SAME_AS_START
 
 
-def test_fixed_50_is_half():
-    assert _decide(mode=END_SOC_FIXED_50).soc == 0.5
+def test_fixed_50_uses_the_soc_target_slider():
+    decision = _decide(mode=END_SOC_FIXED_50, battery=_battery(soc_target=0.42))
+    assert decision.soc == 0.42
+    assert "clamped_by" not in decision.details
 
 
 def test_fixed_50_respects_the_soc_range():
-    decision = _decide(mode=END_SOC_FIXED_50, battery=_battery(soc_min=0.60))
+    decision = _decide(mode=END_SOC_FIXED_50, battery=_battery(soc_target=0.30, soc_min=0.60))
     assert decision.soc == 0.60
     assert decision.details["clamped_by"] == "range"
 

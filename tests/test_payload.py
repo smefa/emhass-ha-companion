@@ -335,9 +335,7 @@ def test_mpc_blends_live_pv_into_now_even_when_the_series_starts_earlier():
     """
     series_start = datetime(2026, 7, 28, 0, 0, tzinfo=UTC)
     now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
-    result = build_payload(
-        _inputs(now=now, pv=_series(series_start, 24, 5000.0), pv_live_w=7000.0)
-    )
+    result = build_payload(_inputs(now=now, pv=_series(series_start, 24, 5000.0), pv_live_w=7000.0))
 
     forecast = result.payload["pv_power_forecast"]
     assert forecast[series_start.isoformat()] == 5000.0  # untouched: it's in the past
@@ -1010,6 +1008,31 @@ def test_a_future_window_only_zeroes_hours_when_actually_running():
     payload = build_payload(_inputs(now=now, loads=loads)).payload
 
     assert payload["operating_hours_of_each_deferrable_load"] == [3.0]
+
+
+def test_a_window_opening_beyond_the_horizon_parks_the_load_instead_of_freeing_it():
+    """0 is EMHASS's sentinel for "may start immediately", the same index a
+    beyond-horizon window gets clamped to. Passing hours through with that
+    index would let a quiet-hours load run mid-day on a short MPC horizon
+    that can't see as far as its window -- it must be parked instead."""
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    loads = [
+        DeferrableLoad(
+            subentry_id="dishwasher",
+            name="Dishwasher",
+            nominal_power_w=1500,
+            operating_hours=2,
+            earliest_start=time(22, 0),
+            latest_end=time(6, 0),
+        ),
+    ]
+    # 4 steps of 30 minutes reaches 12:00 -- nowhere near tonight's 22:00.
+    result = build_payload(_inputs(now=now, loads=loads, horizon_steps=4))
+    payload = result.payload
+
+    assert payload["operating_hours_of_each_deferrable_load"] == [0.0]
+    assert payload["operating_timesteps_of_each_deferrable_load"] == [0]
+    assert any("will not be scheduled to run this cycle" in warning for warning in result.warnings)
 
 
 def test_profile_settings_can_override_defaults():

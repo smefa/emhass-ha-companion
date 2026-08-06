@@ -118,7 +118,9 @@ CONF_DISCHARGE_EFFICIENCY: Final = "discharge_efficiency"
 # How the end-of-horizon SOC target (EMHASS's `soc_final`) is chosen. Optimized
 # computes it each run from the forecast tails past the horizon (terminal.py);
 # same_as_start pins it to the live SOC (the pre-0.9 behaviour); fixed_50
-# always asks for half. See docs/end_soc_plan.md.
+# always asks for the soc_target slider's value (the value key is unchanged
+# for backwards compatibility with stored config entries, even though the
+# behaviour and label moved off a hardcoded 50%). See docs/end_soc_plan.md.
 CONF_END_SOC_MODE: Final = "end_soc_mode"
 END_SOC_OPTIMIZED: Final = "optimized"
 END_SOC_SAME_AS_START: Final = "same_as_start"
