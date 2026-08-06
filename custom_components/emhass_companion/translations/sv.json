@@ -565,7 +565,7 @@
     },
     "ml_forecaster_not_ready": {
       "title": "Maskininlärningsprognosen för förbrukning är inte tränad än",
-      "description": "Lastprofilen är satt till \"Maskininlärningsprognos\", men den är inte bekräftat tränad för den just nu konfigurerade sensorn. Optimeringskörningar använder metoden \"Typisk\" under tiden så att de fortsätter lyckas.\n\nOm sensorn har minst {days} dagars historik triggas en träningskörning automatiskt -- inget behöver göras. En helt ny sensor (till exempel en som just skapats av \"Skapa en hushållslastsensor\") behöver {days} dagars verklig historik först. Du kan även trycka på \"Träna lastprognos\" själv när den har det. Detta löser sig automatiskt när en träning lyckas."
+      "description": "Lastprofilen är satt till \"Maskininlärningsprognos\", men den är inte bekräftat tränad för den just nu konfigurerade sensorn. Optimeringskörningar använder sensorns egna verkliga senaste mätvärden under tiden (föregående dygn i verkligheten när det finns, annars dess aktuella värde upprepat) så att de fortsätter lyckas och ligger nära ditt hushålls faktiska förbrukning.\n\nOm sensorn har minst {days} dagars historik triggas en träningskörning automatiskt -- inget behöver göras. En helt ny sensor (till exempel en som just skapats av \"Skapa en hushållslastsensor\") behöver {days} dagars verklig historik först. Du kan även trycka på \"Träna lastprognos\" själv när den har det. Detta löser sig automatiskt när en träning lyckas."
     }
   },
   "services": {

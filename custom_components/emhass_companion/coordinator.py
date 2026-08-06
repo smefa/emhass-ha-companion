@@ -42,9 +42,14 @@ from .const import (
     ISSUE_PLAN_SCHEMA,
     ISSUE_PV_TAIL_SHORT,
     ISSUE_RUN_FAILED,
+    LOAD_BOOTSTRAP_LOOKBACK,
+    LOAD_FORECAST_METHOD_LIST,
     LOAD_FORECAST_METHOD_MLFORECASTER,
+    LOAD_FORECAST_METHOD_NAIVE,
+    LOAD_FORECAST_METHOD_TYPICAL,
     ML_MIN_HISTORY_DAYS,
     MODE_AUTO,
+    NAIVE_FALLBACK_MIN_HISTORY,
     PROFILE_KEY_LOAD_SENSOR,
     PROFILE_KEY_PV_SOLCAST,
     PROFILE_KIND_LOAD,
@@ -55,8 +60,8 @@ from .const import (
     SUBENTRY_TYPE_LOAD_GROUP,
     SUPPORTED_PLAN_SCHEMA_MAJOR,
 )
-from .deferrable import DeferrableRegistry
-from .models import DeferrableLoad, DeferrableLoadGroup, LastRun, Plan, Series
+from .deferrable import DeferrableRegistry, state_to_watts
+from .models import DeferrableLoad, DeferrableLoadGroup, LastRun, Plan, Point, Series
 from .payload import PayloadInputs, PayloadResult, build_payload
 from .profiles import (
     Profile,
@@ -614,6 +619,9 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
 
     async def _build(self, action: str) -> tuple[PayloadInputs, PayloadResult]:
         config = self.config
+        now = dt_util.utcnow()
+        step = timedelta(minutes=config.time_step_minutes)
+        horizon_end = now + step * config.horizon_steps
         spot, pv, load = await asyncio.gather(
             self._series(config.price, PROFILE_KIND_PRICE),
             self._series(config.pv, PROFILE_KIND_PV),
@@ -638,11 +646,13 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             # (EMHASS built-in lets EMHASS fetch Open-Meteo itself).
             settings.update(self._settings(config.temperature))
         if EMHASS_CONF_LOAD_FORECAST_METHOD in settings:
-            settings[EMHASS_CONF_LOAD_FORECAST_METHOD] = await self._resolve_load_forecast_method(
-                settings
+            method, load_bootstrap = await self._resolve_load_forecast_method(
+                settings, now, horizon_end
             )
+            settings[EMHASS_CONF_LOAD_FORECAST_METHOD] = method
+            if load_bootstrap is not None:
+                load = load_bootstrap
 
-        now = dt_util.utcnow()
         # Sourceless loads (no power sensor, no control entity) get their
         # accumulator advanced from the *previous* run's plan before it is
         # replaced -- the only chance to see it, and the reason this must run
@@ -659,8 +669,6 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         soc_init = self._read_soc()
         end_soc: EndSocDecision | None = None
         if config.battery.enabled and soc_init is not None:
-            step = timedelta(minutes=config.time_step_minutes)
-            horizon_end = now + step * config.horizon_steps
             load_for_terminal, load_source = self._load_for_terminal(load)
             end_soc = decide_end_soc(
                 mode=config.battery.end_soc_mode,
@@ -855,20 +863,22 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             await self._async_save_ml_state()
         self._track_ml_not_ready_issue(False)
 
-    async def _has_enough_history(self, entity_id: str) -> bool:
-        """Whether ``entity_id``'s recorder history reaches back :data:`ML_MIN_HISTORY_DAYS`.
+    async def _has_history_since(self, entity_id: str, lookback: timedelta) -> bool:
+        """Whether ``entity_id``'s recorder history reaches back ``lookback``.
 
-        Mirrors exactly what EMHASS's own forecast-model-fit would see when it
-        pulls the same sensor's history through this same Home Assistant's
-        history API -- so this never judges "ready" when a fit would not be,
-        or vice versa (a purge policy shorter than the fit's own lookback
-        would make a fit fail the same way regardless of what this reports).
+        Mirrors exactly what EMHASS's own forecast-model-fit (for
+        :data:`ML_MIN_HISTORY_DAYS`) or "naive" method (for
+        :data:`NAIVE_FALLBACK_MIN_HISTORY`) would see when it pulls the same
+        sensor's history through this same Home Assistant's history API -- so
+        this never judges "ready" when either would not be, or vice versa (a
+        purge policy shorter than the lookback would make them fail the same
+        way regardless of what this reports).
         """
         try:
             instance = get_instance(self.hass)
         except (KeyError, RuntimeError):
             return False
-        cutoff = dt_util.utcnow() - timedelta(days=ML_MIN_HISTORY_DAYS)
+        cutoff = dt_util.utcnow() - lookback
         try:
             states = await instance.async_add_executor_job(
                 history.state_changes_during_period,
@@ -886,49 +896,126 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             return False
         return bool(states.get(entity_id))
 
-    async def _resolve_load_forecast_method(self, settings: dict[str, Any]) -> str:
-        """The load forecast method to actually send this run.
+    async def _has_enough_history(self, entity_id: str) -> bool:
+        """Whether ``entity_id`` has :data:`ML_MIN_HISTORY_DAYS` of recorder history."""
+        return await self._has_history_since(entity_id, timedelta(days=ML_MIN_HISTORY_DAYS))
+
+    async def _recent_load_series(self, entity_id: str, now: datetime) -> Series:
+        """``entity_id``'s own recorded power over the last :data:`LOAD_BOOTSTRAP_LOOKBACK`.
+
+        Real measured watts, however little of it exists -- the raw material
+        :meth:`_load_forecast_fallback` repeats forward to bootstrap a load
+        forecast before there is enough history for EMHASS's "naive" method
+        to use directly.
+        """
+        try:
+            instance = get_instance(self.hass)
+        except (KeyError, RuntimeError):
+            return Series.empty()
+        cutoff = now - LOAD_BOOTSTRAP_LOOKBACK
+        try:
+            states = await instance.async_add_executor_job(
+                history.state_changes_during_period,
+                self.hass,
+                cutoff,
+                now,
+                entity_id,
+                False,  # no_attributes -- state_to_watts needs the unit
+                False,  # descending
+                None,  # limit
+                True,  # include_start_time_state
+            )
+        except Exception:  # noqa: BLE001 - a history probe must never break a run
+            _LOGGER.debug("Could not fetch recorder history for %s", entity_id, exc_info=True)
+            return Series.empty()
+        points = [
+            Point(state.last_changed, watts)
+            for state in states.get(entity_id, [])
+            if (watts := state_to_watts(state)) is not None
+        ]
+        return Series(points)
+
+    async def _load_forecast_fallback(
+        self, sensor: str | None, now: datetime, horizon_end: datetime
+    ) -> tuple[str, Series | None]:
+        """What to actually send instead of "mlforecaster" for this run.
+
+        EMHASS's own "naive" method (repeats the sensor's actual last day) is
+        used once the sensor has :data:`NAIVE_FALLBACK_MIN_HISTORY` of real
+        history -- below that it hard-errors rather than degrading (see
+        :data:`NAIVE_FALLBACK_MIN_HISTORY`'s definition), so this builds an
+        equivalent series itself instead: whatever real readings the sensor
+        already has, repeated a day at a time (:meth:`Series.
+        extended_with_previous_day`) to cover the horizon, or -- for a sensor
+        with no history at all yet -- its single current live reading held
+        flat across the whole horizon. Supplying a load series at all makes
+        EMHASS use it verbatim regardless of the method named here (see
+        payload.build_payload), so the method returned in that case is
+        informational only.
+
+        Falls all the way back to EMHASS's own "typical" only when there is
+        no sensor configured, or the sensor has never reported a usable
+        reading at all.
+        """
+        if not sensor:
+            return LOAD_FORECAST_METHOD_TYPICAL, None
+        if await self._has_history_since(sensor, NAIVE_FALLBACK_MIN_HISTORY):
+            return LOAD_FORECAST_METHOD_NAIVE, None
+
+        recent = await self._recent_load_series(sensor, now)
+        if not recent:
+            state = self.hass.states.get(sensor)
+            live = state_to_watts(state) if state else None
+            if live is None:
+                return LOAD_FORECAST_METHOD_TYPICAL, None
+            recent = Series([Point(now, live)])
+        return LOAD_FORECAST_METHOD_LIST, recent.extended_with_previous_day(horizon_end)
+
+    async def _resolve_load_forecast_method(
+        self, settings: dict[str, Any], now: datetime, horizon_end: datetime
+    ) -> tuple[str, Series | None]:
+        """The load forecast method (and optional bootstrap series) to send this run.
 
         Passes ``settings[EMHASS_CONF_LOAD_FORECAST_METHOD]`` through unchanged
-        unless it asks for mlforecaster and that has not been confirmed trained
-        for the *currently* configured sensor. Enabling mlforecaster for the
-        first time, or changing which sensor feeds it, otherwise means the very
-        next optimisation is a guaranteed-failing predict against a stale or
-        entirely missing model file (EMHASS's ``_get_ml_param()`` falls back to
-        whatever ``var_model`` its last fit used, regardless of what this run
-        asks for -- see :meth:`async_sync_emhass_config`).
+        (with no bootstrap series) unless it asks for mlforecaster and that has
+        not been confirmed trained for the *currently* configured sensor.
+        Enabling mlforecaster for the first time, or changing which sensor
+        feeds it, otherwise means the very next optimisation is a
+        guaranteed-failing predict against a stale or entirely missing model
+        file (EMHASS's ``_get_ml_param()`` falls back to whatever
+        ``var_model`` its last fit used, regardless of what this run asks for
+        -- see :meth:`async_sync_emhass_config`).
 
-        Falls back to "typical" until a fit against the current sensor actually
-        succeeds, auto-triggering that fit itself the first time enough
-        recorder history exists rather than waiting on the "Train load
-        forecaster" button to be pressed by hand. A sensor with less than
-        :data:`ML_MIN_HISTORY_DAYS` of history (most commonly a sensor "Create
-        a house load sensor" only just built) is left alone until it has
-        enough -- there is nothing to train on yet.
+        Falls back to :meth:`_load_forecast_fallback` until a fit against the
+        current sensor actually succeeds, auto-triggering that fit itself the
+        first time enough recorder history exists rather than waiting on the
+        "Train load forecaster" button to be pressed by hand. A sensor with
+        less than :data:`ML_MIN_HISTORY_DAYS` of history (most commonly a
+        sensor "Create a house load sensor" only just built) is left alone
+        until it has enough -- there is nothing to train on yet.
         """
         method = settings.get(EMHASS_CONF_LOAD_FORECAST_METHOD)
         if method != LOAD_FORECAST_METHOD_MLFORECASTER:
-            return method
+            return method, None
 
         sensor = settings.get(EMHASS_CONF_SENSOR_LOAD)
         if sensor and sensor == self._ml_trained_sensor:
             self._track_ml_not_ready_issue(False)
-            return method
+            return method, None
         if not sensor:
-            return "typical"
+            return await self._load_forecast_fallback(sensor, now, horizon_end)
 
-        now = dt_util.utcnow()
         if (
             self._ml_fit_lock.locked()
             or self._ml_last_attempt is not None
             and now - self._ml_last_attempt < _ML_FIT_RETRY_COOLDOWN
         ):
-            return "typical"
+            return await self._load_forecast_fallback(sensor, now, horizon_end)
 
         async with self._ml_fit_lock:
             if not await self._has_enough_history(sensor):
                 self._track_ml_not_ready_issue(True)
-                return "typical"
+                return await self._load_forecast_fallback(sensor, now, horizon_end)
 
             self._ml_last_attempt = now
             try:
@@ -936,20 +1023,21 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             except EmhassError as err:
                 _LOGGER.warning(
                     "Auto-training the load forecaster for %s failed (%s); "
-                    "using the typical method for this run instead",
+                    "falling back for this run instead",
                     sensor,
                     err,
                 )
-                return "typical"
+                return await self._load_forecast_fallback(sensor, now, horizon_end)
 
-        return method
+        return method, None
 
     def _track_ml_not_ready_issue(self, not_ready: bool) -> None:
         """Raise or clear the "mlforecaster not trained yet" repair.
 
-        Informational, not an error: runs keep succeeding on the "typical"
-        fallback in the meantime, and this clears itself the moment a fit
-        (auto- or button-triggered) against the current sensor succeeds.
+        Informational, not an error: runs keep succeeding on the "naive"/
+        bootstrap fallback in the meantime (see _load_forecast_fallback), and
+        this clears itself the moment a fit (auto- or button-triggered)
+        against the current sensor succeeds.
         """
         if not not_ready:
             ir.async_delete_issue(self.hass, DOMAIN, ISSUE_ML_FORECASTER_NOT_READY)
