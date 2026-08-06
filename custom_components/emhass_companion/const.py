@@ -409,6 +409,17 @@ LOAD_PROFILE_ORDER: Final = (
     "load/forecast_entity",
 )
 
+# Same idea for the price and PV pickers: Nord Pool and Solcast are the
+# integrations most users in EMHASS's core markets (Nordics/Europe) already
+# have, so they lead the list instead of sorting alphabetically behind
+# ENTSO-E/fixed-tariff/Tibber or forecast.solar/generic-attribute. Anything
+# not listed here sorts after these, in load order, same as LOAD_PROFILE_ORDER.
+PRICE_PROFILE_ORDER: Final = (
+    "price/nordpool_core",
+    "price/nordpool_custom",
+)
+PV_PROFILE_ORDER: Final = ("pv/solcast",)
+
 # Unique-id suffix for the sensor created by the "Create a house load sensor"
 # flow (full unique_id is f"{entry.entry_id}_{NET_HOUSE_LOAD_KEY}"). Shared
 # between sensor.py (creates the entity) and configuration.py (resolves its

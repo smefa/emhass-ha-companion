@@ -105,12 +105,14 @@ from .const import (
     LOAD_PROFILE_ORDER,
     LOAD_SUBENTRY_TYPES,
     MIN_EMHASS_VERSION,
+    PRICE_PROFILE_ORDER,
     PROFILE_KEY_LOAD_SENSOR,
     PROFILE_KIND_INVERTER,
     PROFILE_KIND_LOAD,
     PROFILE_KIND_PRICE,
     PROFILE_KIND_PV,
     PROFILE_KIND_TEMPERATURE,
+    PV_PROFILE_ORDER,
     RECURRENCE_DAILY,
     RECURRENCE_SURPLUS,
     RECURRENCES,
@@ -251,13 +253,33 @@ def _suggested_entities(hass: HomeAssistant, profile: Profile) -> dict[str, str]
     return suggestions
 
 
-def _profile_selector(profiles: list[Profile]) -> selector.SelectSelector:
+_PROFILE_ORDER_BY_KIND: dict[str, tuple[str, ...]] = {
+    PROFILE_KIND_PRICE: PRICE_PROFILE_ORDER,
+    PROFILE_KIND_PV: PV_PROFILE_ORDER,
+}
+
+
+def _rank_profiles(profiles: list[Profile], order: tuple[str, ...]) -> list[Profile]:
+    """``profiles``, with anything named in ``order`` moved to the front.
+
+    Used to put Nord Pool/Solcast (PRICE_PROFILE_ORDER/PV_PROFILE_ORDER) ahead
+    of available_profiles()'s alphabetical file-load order, the same
+    convention LOAD_PROFILE_ORDER already uses for the load picker. A profile
+    not named in ``order`` sorts after these, in whatever order it was loaded.
+    """
+    rank = {key: index for index, key in enumerate(order)}
+    return sorted(profiles, key=lambda profile: rank.get(profile.key, len(rank)))
+
+
+def _profile_selector(
+    profiles: list[Profile], order: tuple[str, ...] = ()
+) -> selector.SelectSelector:
     return selector.SelectSelector(
         selector.SelectSelectorConfig(
             mode=selector.SelectSelectorMode.LIST,
             options=[
                 selector.SelectOptionDict(value=profile.key, label=profile.name)
-                for profile in profiles
+                for profile in _rank_profiles(profiles, order)
             ],
         )
     )
@@ -637,12 +659,14 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
             }
             return await getattr(self, f"async_step_{step_id}_options")()
 
+        order = _PROFILE_ORDER_BY_KIND.get(kind, ())
+        ranked = _rank_profiles(choices, order)
         return self.async_show_form(
             step_id=step_id,
-            data_schema=vol.Schema({vol.Required(CONF_PROFILE): _profile_selector(choices)}),
+            data_schema=vol.Schema({vol.Required(CONF_PROFILE): _profile_selector(choices, order)}),
             description_placeholders={
                 "profiles": "\n".join(
-                    f"- **{profile.name}** — {profile.description or ''}" for profile in choices
+                    f"- **{profile.name}** — {profile.description or ''}" for profile in ranked
                 )
             },
         )
@@ -1658,18 +1682,19 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
             return await self.async_step_pv_options()
 
         current = (options.get(CONF_PV) or {}).get(CONF_PROFILE)
+        ranked = _rank_profiles(choices, PV_PROFILE_ORDER)
         return self.async_show_form(
             step_id="pv",
             data_schema=vol.Schema(
                 {
                     vol.Required(
                         CONF_PROFILE, description={"suggested_value": current}
-                    ): _profile_selector(choices)
+                    ): _profile_selector(choices, PV_PROFILE_ORDER)
                 }
             ),
             description_placeholders={
                 "profiles": "\n".join(
-                    f"- **{profile.name}** — {profile.description or ''}" for profile in choices
+                    f"- **{profile.name}** — {profile.description or ''}" for profile in ranked
                 )
             },
         )

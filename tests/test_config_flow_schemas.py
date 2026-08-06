@@ -27,6 +27,7 @@ from custom_components.emhass_companion.const import (
     CONF_MULTIPLIER,
     CONF_TIME_STEP,
     LOAD_PROFILE_CREATE_SENTINEL,
+    PRICE_PROFILE_ORDER,
 )
 from custom_components.emhass_companion.profiles import BUILTIN_ROOT
 from custom_components.emhass_companion.profiles.schema import Profile, validate_document
@@ -185,6 +186,44 @@ def test_profile_selector_builds():
         Profile(key="price/b", path="b.yaml", kind="price", name="B", document={}),
     ]
     assert _profile_selector(profiles)
+
+
+def test_profile_selector_ranks_preferred_profiles_first():
+    """See PRICE_PROFILE_ORDER/PV_PROFILE_ORDER: Nord Pool and Solcast lead
+    the list rather than sorting alphabetically behind ENTSO-E/Tibber or
+    forecast.solar."""
+    profiles = [
+        Profile(key="price/entsoe", path="a.yaml", kind="price", name="ENTSO-E", document={}),
+        Profile(
+            key="price/nordpool_custom",
+            path="b.yaml",
+            kind="price",
+            name="Nord Pool (custom)",
+            document={},
+        ),
+        Profile(
+            key="price/nordpool_core",
+            path="c.yaml",
+            kind="price",
+            name="Nord Pool (core)",
+            document={},
+        ),
+    ]
+    options = _profile_selector(profiles, PRICE_PROFILE_ORDER).config["options"]
+    assert [option["value"] for option in options] == [
+        "price/nordpool_core",
+        "price/nordpool_custom",
+        "price/entsoe",
+    ]
+
+
+def test_profile_selector_with_no_order_keeps_the_given_order():
+    profiles = [
+        Profile(key="price/b", path="a.yaml", kind="price", name="B", document={}),
+        Profile(key="price/a", path="b.yaml", kind="price", name="A", document={}),
+    ]
+    options = _profile_selector(profiles).config["options"]
+    assert [option["value"] for option in options] == ["price/b", "price/a"]
 
 
 def test_load_profile_selector_puts_create_first_then_the_fixed_order():
