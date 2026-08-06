@@ -111,30 +111,46 @@ matching reason. For `optimized`:
      known curve shifted 24 h as a statistical proxy (the daily *shape*
      is structural), and mark the decision
      `price_tail: "assumed from today"`.
-   - **PV** — where the PV series ends, assume **zero PV** for the
-     uncovered stretch and mark `pv_tail: "assumed zero"`. Deliberately
-     *not* a shifted-24 h proxy: unlike prices, PV has huge day-to-day
-     weather variance, and promising sun that never arrives strands the
-     battery low — assuming darkness only makes the target
-     conservatively high, which is the safe direction. With no PV tail
-     the solar-bias step simply never engages.
+   - **PV** — where the PV series ends, reuse the previous day's shape at
+     `PV_PROXY_CONFIDENCE` (50%) weight and mark
+     `pv_tail: "assumed from the previous day"`; with no previous day
+     either, assume **zero** and mark `pv_tail: "assumed zero"`.
+     (2026-08-06: originally zero-only. Unlike prices, PV has huge
+     day-to-day weather variance, and promising sun that never arrives
+     strands the battery low — so the proxy is **one-sided**. It may
+     lower the solar ceiling, where being wrong costs a partial charge
+     and the next MPC cycle corrects it; it may never shorten the bridge,
+     where being wrong costs an empty battery at dawn, and a guessed
+     block may only push the refill event *later* than the price trough,
+     never earlier. Without it the ceiling was dead on every evening run
+     — with a 24 h horizon a today+tomorrow forecast runs out within
+     hours of `horizon_end` — which is exactly when the overnight
+     strategy is decided.)
    - **Load** — a slot the fetched series doesn't cover falls back to the
      same slot 24 h earlier, which for the default 24 h horizon lands
      inside the horizon itself: this quietly duplicates day 1's load
      shape into the tail with no extra code (see *Load coverage* below
      for where the series itself comes from).
-2. **Find the next replenishment event** after `horizon_end` — the
-   earlier of:
+2. **Find the next replenishment event** after `horizon_end` — solar
+   outranks price outright, not whichever comes first chronologically:
    - *solar*: the first PV-surplus block (`pv − load > 0`) whose
      cumulative surplus reaches a material fraction of capacity
-     (~10%), timestamped at the block's start;
+     (~10%), timestamped at the block's start. If found anywhere in the
+     lookahead, it wins even when a cheap grid moment occurs earlier —
+     paying anything, even at the cheap end of the tariff, to skip a
+     short wait for free PV is a bad trade.
    - *cheap grid*: the first price at or below the 25th percentile of
-     the full known buy-price series.
+     the full known buy-price series, used only when the lookahead has
+     no material solar block at all (winter's short, weak days).
+   (2026-08-06: originally "whichever comes first"; a live Nordpool
+   night trough almost always falls within a couple of hours of any
+   horizon end, which made the reserve dominate nearly every decision —
+   see the session note below.)
 3. **Bridge energy**: `E = Σ max(0, load − pv) · step` over
    `[horizon_end, replenishment)`, divided by discharge efficiency —
    the energy the house needs from the battery before it can be
    refilled cheaply or for free.
-4. **Raw target**: `reserve + E / capacity`, where `reserve` is the
+4. **The floor** — `reserve + E / capacity`, where `reserve` is the
    existing `soc_target` setting, repurposed to its natural meaning of
    "comfort/backup floor the plan should always end with". `soc_target`
    is still sent to EMHASS as `battery_target_state_of_charge`,
@@ -144,14 +160,38 @@ matching reason. For `optimized`:
    every request so EMHASS's persisted config never silently decides,
    and "default end SOC" stays semantically compatible with the floor
    reading if that fallback ever fired.
-5. **Solar bias**: if the tail shows tomorrow's surplus refilling the
-   battery from the raw target to `soc_max` before the first expensive
-   block, do not round the target up further — leftover SOC at sunrise
-   is only worth the export price, so holding extra costs the
-   buy/sell spread.
-6. **Clamps, in order** (each recorded in `details["clamped_by"]`):
-   - range: `[soc_min, soc_max]`;
-   - **hysteresis**: if `previous` exists and the new target is within
+5. **The ceiling** — `soc_max − max(0, S − E) / capacity`, where `S` is
+   the absorbable energy of the next material surplus block (its
+   integral × charge efficiency). This is the term that makes the
+   feature about *self-consumption* rather than arbitrage: every kWh
+   held past what the house needs is a kWh of tomorrow's sun that gets
+   exported at the sell price and bought back at the buy price. The
+   `− E` matters — the constraint binds at the moment the surplus
+   *starts*, by which time the bridge has already been drawn down, so
+   the target may sit that much higher than the raw surplus suggests.
+
+   Ceiling ≥ floor reduces to `soc_max − reserve ≥ S / capacity`: the
+   ceiling binds **only** when the coming sun genuinely exceeds the
+   usable span above the reserve, so it is inert all winter and needs no
+   seasonal switch. Unlike the floor, the ceiling accepts a *proxied*
+   surplus block, at its already-discounted weight.
+
+   (2026-08-06: replaces the original "solar bias" step, which only said
+   "do not round the target up further" and was therefore a no-op. With
+   nothing but the floor, the heuristic was one-directional — it could
+   only ever add to the reserve — so it returned the reserve itself on
+   any day whose next refill was close, and looked inert.)
+6. **Bounds, in order** (the last one to bite is recorded in
+   `details["clamped_by"]`, with the untouched floor kept as
+   `raw_target`):
+   - `solar_headroom`: the ceiling, when it sits below the floor;
+   - `reserve`: the user's comfort floor. Solar headroom may push the
+     target down *to* it but never through it. When this is what a
+     summer day reports every time, the answer is to lower `soc_target`
+     — it is the one setting that widens the band the computation can
+     move in;
+   - `range`: `[soc_min, soc_max]`;
+   - `hysteresis`: if `previous` exists and the new target is within
      ±2 percentage points, keep the previous value — a pinned target
      that jitters run-to-run makes plans thrash.
 
@@ -170,6 +210,48 @@ matching reason. For `optimized`:
 The `previous` decision lives on the coordinator in memory only; after a
 restart the first run simply computes fresh (hysteresis needs no
 persistence).
+
+## Candidates (added 2026-08-06)
+
+There is no ground truth for a terminal-value heuristic short of running
+one against a real house for a season. So `terminal.py` computes
+*several* on every run, against one shared view of the world (`_Tail`),
+and reports them all:
+
+| Key | Label | What it is |
+|---|---|---|
+| `bridge_only` | Test 1 — bridge to the next refill | The calculation as it shipped: `reserve + E / capacity`, no ceiling, no PV proxy |
+| `solar_headroom` | Test 2 — bridge floor, solar ceiling | The design above. **Active** |
+| `daily_ratio` | Test 3 — daily-yield template | The Jinja template this feature replaced, ported: drift the live SOC by tomorrow-minus-today's forecast yield, on a sliding floor |
+
+`ACTIVE_CANDIDATE` names the one whose number actually reaches EMHASS;
+the rest ride along in the End SOC sensor's `tests` attribute:
+
+```yaml
+active_test: solar_headroom
+tests:
+  bridge_only:     {label: "Test 1 — …", soc: 0.70, reason: "Holding 4.0 kWh …"}
+  solar_headroom:  {label: "Test 2 — …", soc: 0.30, reason: "Leaving room for 22.5 kWh …"}
+  daily_ratio:     {label: "Test 3 — …", soc: 0.58, reason: "Template drift: 12 kWh …"}
+```
+
+Recorded over a month, that attribute says which one *should* have been
+driving. The active candidate's entry is repeated in `tests` on purpose,
+and holds the value the candidate computed **before** hysteresis, so a
+recorded history compares like with like.
+
+Test 3 carries `TEMPLATE_REFERENCE_YIELD_KWH = 40.0` — the plant-scale
+constant from the original template. Hard-coding it is only acceptable
+because the candidate is a shadow calculation; promoting it means
+turning that into a setting first.
+
+**Adding another is three lines**: write
+`_my_idea(tail: _Tail) -> EndSocDecision`, add
+`_Candidate("my_idea", "Test 4 — my idea", _my_idea)` to `CANDIDATES`,
+and it appears in the sensor on the next run. `_Tail` already exposes
+`reserve`, `clamp()`, `first_block()`, `first_cheap()` and
+`deficit_until()`, so a new idea is usually a few lines of arithmetic
+over data that has already been gathered.
 
 ## PV coverage past the horizon
 
