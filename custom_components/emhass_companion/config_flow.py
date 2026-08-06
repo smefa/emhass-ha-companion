@@ -455,10 +455,15 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
             if error:
                 errors["base"] = error
             else:
-                self.hass.config_entries.async_update_entry(
-                    entry, data={**entry.data, CONF_URL: url, "emhass_version": version}
+                # Reload, not just update: the EmhassClient built in
+                # async_setup_entry captured the old address and keeps using
+                # it. Updating the entry alone leaves every request going to
+                # the previous host until Home Assistant restarts -- which is
+                # exactly the situation someone reaches this step to fix.
+                return self.async_update_reload_and_abort(
+                    entry,
+                    data_updates={CONF_URL: url, "emhass_version": version},
                 )
-                return self.async_abort(reason="reconfigure_successful")
             suggested = url
 
         return self.async_show_form(
@@ -1393,8 +1398,9 @@ def battery_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
             )
         ),
         # How the end-of-horizon SOC target is chosen (terminal.py). Sits next
-        # to soc_target because in Optimized mode that slider is the reserve
-        # floor the computed target never plans below.
+        # to soc_target because that slider feeds both non-"Same as start"
+        # modes: it is the reserve floor Optimized never plans below, and the
+        # exact value "Fixed %" asks for.
         vol.Optional(
             CONF_END_SOC_MODE,
             default=defaults.get(CONF_END_SOC_MODE, DEFAULT_END_SOC_MODE),
@@ -1797,7 +1803,9 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
         """Choose how the battery is actually commanded.
 
         Optional. Without a profile the integration only ever reads, and the
-        plan is yours to act on however you like.
+        plan is yours to act on however you like. Advanced users can add a
+        YAML profile of their own for an inverter that has no built-in
+        profile, rather than being limited to the shipped choices.
         """
         options = dict(self.config_entry.options)
         profiles = (await async_load_profiles(self.hass)).profiles

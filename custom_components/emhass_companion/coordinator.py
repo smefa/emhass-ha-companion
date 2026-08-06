@@ -185,6 +185,16 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         self._ml_trained_sensor: str | None = None
         self._ml_last_attempt: datetime | None = None
         self._ml_fit_lock = asyncio.Lock()
+        # One optimisation at a time. Runs arrive from four independent places
+        # -- the MPC tick (via async_request_refresh), the day-ahead trigger,
+        # the buttons and the services -- and a run is not a pure read: it
+        # advances each load's accumulator from the plan currently in hand
+        # (assume_from_plan), re-derives the surplus budgets from it, and
+        # anchors the end-SOC hysteresis on the previous decision. Two runs
+        # overlapping therefore both consume the same previous plan and both
+        # mutate the shared registry state, and whichever finishes last
+        # publishes over the other regardless of which started first.
+        self._run_lock = asyncio.Lock()
         self._ml_store: Store[dict[str, Any]] = Store(
             hass, _ML_STORE_VERSION, f"{DOMAIN}_{entry.entry_id}_ml_fit"
         )
@@ -412,7 +422,18 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         return await self.async_run(ACTION_MPC, notify=False)
 
     async def async_run(self, action: str, *, notify: bool = True) -> EmhassData:
-        """Gather inputs, run one EMHASS action, and store the result."""
+        """Gather inputs, run one EMHASS action, and store the result.
+
+        Serialised against every other run through ``_run_lock``: a second
+        caller waits for the one in flight rather than racing it. The publish
+        is inside the lock as well, so the plan that is announced is always
+        the one from the run that finished last, not whichever run's
+        ``async_set_updated_data`` happened to be scheduled last.
+        """
+        async with self._run_lock:
+            return await self._async_run(action, notify=notify)
+
+    async def _async_run(self, action: str, *, notify: bool) -> EmhassData:
         try:
             data = await self._run(action)
         except ProfileError as err:

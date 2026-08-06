@@ -127,11 +127,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
     async def _async_restore_on_unload() -> None:
         await executor.async_restore("integration unloaded")
 
-    @callback
-    def _async_restore_on_stop(_event: Event) -> None:
-        entry.async_create_background_task(
-            hass, executor.async_restore("Home Assistant stopping"), "emhass_restore"
-        )
+    async def _async_restore_on_stop(_event: Event) -> None:
+        """Hand the inverter back before Home Assistant finishes stopping.
+
+        Deliberately an awaited coroutine listener rather than a background
+        task. ``hass.async_stop`` cancels every background task *before* it
+        fires this event and never waits for one created afterwards, so a
+        restore scheduled that way is racing the interpreter -- a restart
+        during a forced charge would leave the battery charging, the exact
+        case this exists to prevent. A coroutine listener is dispatched
+        through ``async_run_hass_job`` into ``hass._tasks``, which the stop
+        sequence's own ``async_block_till_done`` does await.
+        """
+        await executor.async_restore("Home Assistant stopping")
 
     # An inverter whose registers persist until changed has no idea Home
     # Assistant went away. Without these two, a restart during a forced charge

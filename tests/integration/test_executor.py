@@ -7,6 +7,7 @@ recorded so it can be compared against whatever is currently in charge.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -1003,3 +1004,86 @@ async def test_a_dry_run_never_reaches_for_the_hardware_on_shutdown(
     await hass.async_block_till_done()
 
     assert not calls
+
+
+# --- serialisation -----------------------------------------------------------
+
+
+def _gate_the_power_write(hass: HomeAssistant, calls: list[ServiceCall]) -> asyncio.Event:
+    """Hold the inverter's power write open until the returned event is set.
+
+    Applies only race when one is actually suspended mid-write, which a
+    service handler that returns without awaiting anything never is -- with
+    eager task execution the loop would simply run them back to back, and the
+    bug would be untestable rather than absent.
+    """
+    gate = asyncio.Event()
+
+    async def _held(call: ServiceCall) -> None:
+        calls.append(call)
+        await gate.wait()
+
+    hass.services.async_register("number", "set_value", _held)
+    return gate
+
+
+async def test_concurrent_applies_do_not_double_write(
+    hass: HomeAssistant, calls: list[ServiceCall]
+) -> None:
+    """Two applies racing must not both decide the same write is needed.
+
+    Applies are fired from two independent sources -- every coordinator update
+    and every clock tick -- so overlapping is normal, not exotic. Unserialised,
+    both read the same empty ``_last_applied``, both conclude the command is
+    new, and the inverter is commanded twice.
+    """
+    executor, coordinator = await _build(hass)
+    coordinator.control_enabled = True
+    coordinator.data = EmhassData(plan=_plan(-3000), last_success=dt_util.utcnow())
+    gate = _gate_the_power_write(hass, calls)
+
+    first = hass.async_create_task(executor.async_apply())
+    await asyncio.sleep(0.05)
+    second = hass.async_create_task(executor.async_apply())
+    await asyncio.sleep(0.05)
+    gate.set()
+    await asyncio.gather(first, second)
+    await hass.async_block_till_done()
+
+    assert len([call for call in calls if call.service == "set_value"]) == 1
+
+
+async def test_restore_does_not_interleave_with_an_apply(
+    hass: HomeAssistant, calls: list[ServiceCall]
+) -> None:
+    """A handover the apply around it finishes writing over is not a handover.
+
+    Serialised, the restore's self-consumption write is the last thing to
+    reach the inverter. Unserialised it lands in the middle of the apply, and
+    the apply's own remaining write follows it -- leaving the inverter in the
+    forced mode the handover exists to release.
+    """
+    executor, coordinator = await _build(hass)
+    coordinator.control_enabled = True
+    coordinator.data = EmhassData(plan=_plan(-3000), last_success=dt_util.utcnow())
+    await executor.async_apply()
+    await hass.async_block_till_done()
+    calls.clear()
+
+    # A different action, so the second apply is not suppressed as unchanged.
+    coordinator.data = EmhassData(plan=_plan(4000), last_success=dt_util.utcnow())
+    gate = _gate_the_power_write(hass, calls)
+
+    applying = hass.async_create_task(executor.async_apply())
+    await asyncio.sleep(0.05)
+    restoring = hass.async_create_task(executor.async_restore("test"))
+    await asyncio.sleep(0.05)
+    gate.set()
+    await asyncio.gather(applying, restoring)
+    await hass.async_block_till_done()
+
+    handover = max(
+        index for index, call in enumerate(calls) if call.data.get("option") == "Self Consumption"
+    )
+    last_write = max(index for index, call in enumerate(calls))
+    assert handover == last_write

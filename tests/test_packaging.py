@@ -484,3 +484,33 @@ def test_brand_icon_has_a_transparent_background():
 
     with Image.open(COMPONENT / "brand" / "icon.png") as img:
         assert img.getpixel((0, 0))[3] == 0, "top-left corner is not transparent"
+
+
+def test_cards_match_load_entities_by_unique_id_not_entity_id():
+    """Entity ids are translated and renameable; unique_id keys are neither.
+
+    Both cards used to locate a load's entities by English substrings of the
+    entity id (`id.includes("should_run")`). An entity id is built from the
+    entity's translated name, so on a Swedish install -- a translation this
+    repo ships itself -- `should_run` is `binary_sensor.<load>_ska_kora` and
+    the match found nothing at all, leaving every per-load card empty. A
+    rename broke it the same way. `findEntities` already keyed on unique_id
+    for exactly this reason; `findLoads` now does too.
+    """
+    source = (COMPONENT / "frontend" / "emhass-cards.js").read_text(encoding="utf-8")
+    assert "id.includes(" not in source, "entity ids are not a stable key"
+    assert '"should_run" in load.entities' in source
+
+
+def test_cards_attach_their_shadow_root_at_most_once():
+    """`setConfig` runs repeatedly on one element, `attachShadow` may not.
+
+    The card editor calls `setConfig` on the same element for every option
+    the user changes, and `setConfig` clears `_root` so the markup is rebuilt.
+    An unguarded `attachShadow` in that rebuild throws `NotSupportedError`,
+    which red-cards the element the moment anyone edits the card.
+    """
+    source = (COMPONENT / "frontend" / "emhass-cards.js").read_text(encoding="utf-8")
+    assert source.count("this.attachShadow(") == source.count(
+        "if (!this.shadowRoot) this.attachShadow("
+    )

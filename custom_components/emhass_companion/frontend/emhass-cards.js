@@ -132,7 +132,18 @@ function findEntities(hass) {
   return found;
 }
 
-/** Entities of this integration grouped by their device (one per load). */
+/**
+ * Entities of this integration grouped by their device (one per load).
+ *
+ * Each load's `entities` is a map of unique_id key -> entity id, for the same
+ * reason findEntities keys on unique_id: a load entity's unique_id is
+ * `{entry_id}_{subentry_id}_{key}`, and only that trailing key is stable.
+ * The entity *id* is built from the entity's translated name, so on a Swedish
+ * install `should_run` is `binary_sensor.<load>_ska_kora` -- matching English
+ * fragments of it found nothing at all, and a user renaming an entity broke it
+ * the same way. Neither entry_id nor subentry_id is a ULID containing an
+ * underscore, so the key is everything from the third segment on.
+ */
 function findLoads(hass) {
   const devices = hass.devices || {};
   const registry = hass.entities || {};
@@ -143,21 +154,19 @@ function findLoads(hass) {
     const device = devices[entry.device_id];
     if (!device) continue;
     const name = device.name_by_user || device.name || "";
-    // The hub device holds the plan sensors; only per-load devices carry a
-    // should_run entity, which is what distinguishes them. The hub also has
-    // its own binary_sensor (plan_stale), so matching on the domain alone
-    // would wrongly count it as a load too -- and then surface its
-    // control_enabled switch and system_mode select (entity ids containing
-    // "enabled"/"mode") inside a per-load card.
     if (!loads.has(entry.device_id)) {
-      loads.set(entry.device_id, { id: entry.device_id, name, entities: [] });
+      loads.set(entry.device_id, { id: entry.device_id, name, entities: {} });
     }
-    loads.get(entry.device_id).entities.push(entityId);
+    const key = (entry.unique_id || "").split("_").slice(2).join("_");
+    if (key) loads.get(entry.device_id).entities[key] = entityId;
   }
 
-  return [...loads.values()].filter((load) =>
-    load.entities.some((id) => id.includes("should_run")),
-  );
+  // The hub device holds the plan sensors; only per-load devices carry a
+  // should_run entity, which is what distinguishes them. The hub also has its
+  // own binary_sensor (plan_stale), so matching on the domain alone would
+  // wrongly count it as a load too -- and then surface its control_enabled
+  // switch and system_mode select inside a per-load card.
+  return [...loads.values()].filter((load) => "should_run" in load.entities);
 }
 
 function pick(hass, entities, suffix) {
@@ -191,7 +200,11 @@ class EmhassPlanCard extends HTMLElement {
     if (!hass) return;
 
     if (!this._root) {
-      this.attachShadow({ mode: "open" });
+      // Attached at most once per element: setConfig clears _root so the
+      // markup below is rebuilt, and the card editor calls setConfig again on
+      // the *same* element every time an option changes. A second attachShadow
+      // throws NotSupportedError, which red-cards the whole card.
+      if (!this.shadowRoot) this.attachShadow({ mode: "open" });
       this.shadowRoot.innerHTML = `
         <style>
           ha-card { padding: 12px 8px 4px 8px; }
@@ -242,9 +255,7 @@ class EmhassPlanCard extends HTMLElement {
     const loads = findLoads(hass).map((entry) => ({
       name: entry.name,
       points: series(
-        hass.states[
-          entry.entities.find((id) => id.includes("scheduled_power")) || ""
-        ],
+        hass.states[entry.entities.scheduled_power || ""],
         "schedule",
       ),
     }));
@@ -445,6 +456,12 @@ class EmhassDeferrableCard extends HTMLElement {
   setConfig(config) {
     this._config = config || {};
     this._root = null;
+    // The markup -- and with it the .controls container -- is rebuilt on the
+    // next render, so the embedded entities card is about to be detached.
+    // Forgetting it here is what makes _controls rebuild it rather than skip
+    // the work as unchanged and then push hass into an orphan.
+    this._controlsKey = null;
+    this._entitiesCard = null;
   }
 
   getCardSize() {
@@ -474,7 +491,11 @@ class EmhassDeferrableCard extends HTMLElement {
     if (!hass) return;
 
     if (!this._root) {
-      this.attachShadow({ mode: "open" });
+      // Attached at most once per element: setConfig clears _root so the
+      // markup below is rebuilt, and the card editor calls setConfig again on
+      // the *same* element every time an option changes. A second attachShadow
+      // throws NotSupportedError, which red-cards the whole card.
+      if (!this.shadowRoot) this.attachShadow({ mode: "open" });
       this.shadowRoot.innerHTML = `
         <style>
           ha-card { padding: 12px 16px 16px 16px; }
@@ -519,8 +540,7 @@ class EmhassDeferrableCard extends HTMLElement {
       return;
     }
 
-    const find = (fragment) =>
-      hass.states[load.entities.find((id) => id.includes(fragment)) || ""];
+    const find = (key) => hass.states[load.entities[key] || ""];
 
     const shouldRun = find("should_run");
     const scheduled = find("scheduled_power");
@@ -665,9 +685,9 @@ class EmhassDeferrableCard extends HTMLElement {
     } else if (onSurplus) {
       wanted = ["run_now", "enabled", "requested", "energy_needed"];
     }
-    const ids = load.entities.filter((id) =>
-      wanted.some((suffix) => id.includes(suffix)),
-    );
+    // Listed in `wanted` order rather than registry order, so the controls
+    // sit in the same places on every load's card.
+    const ids = wanted.map((key) => load.entities[key]).filter(Boolean);
     const config = ids.map((entity) => ({ entity }));
 
     if (!config.length) {

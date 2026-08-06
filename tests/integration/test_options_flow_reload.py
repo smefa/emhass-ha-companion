@@ -94,7 +94,7 @@ async def test_load_forecast_method_is_reachable_and_saves(hass: HomeAssistant) 
 async def test_load_step_preselects_create_a_sensor_when_that_is_how_it_was_set_up(
     hass: HomeAssistant,
 ) -> None:
-    """"House load sensor (without deferrables)" and "Create a house load sensor"
+    """ "House load sensor (without deferrables)" and "Create a house load sensor"
     both persist as profile "load/sensor" -- the latter just skips storing
     "entity" (it's resolved dynamically, see async_step_load_create). Without
     accounting for that, this step always preselected the plain profile, even
@@ -122,7 +122,7 @@ async def test_load_step_preselects_create_a_sensor_when_that_is_how_it_was_set_
 async def test_create_a_house_load_sensor_lets_you_pick_the_forecast_method(
     hass: HomeAssistant,
 ) -> None:
-    """"Create a house load sensor" used to jump straight from picking the
+    """ "Create a house load sensor" used to jump straight from picking the
     total-power sensor to saving, silently defaulting "method" to "typical"
     with no form shown -- the same forecast-method choice the plain "House
     load sensor" profile gets was unreachable through this path.
@@ -225,3 +225,39 @@ async def test_the_pv_step_suggests_what_is_stored_not_the_template_default(
     )
     (marker,) = (key for key in result["data_schema"].schema if key == "entities")
     assert marker.description["suggested_value"] == stored
+
+
+async def test_reconfigure_reloads_so_the_new_address_takes_effect(
+    hass: HomeAssistant,
+) -> None:
+    """Updating the URL without a reload leaves the old client in charge.
+
+    `EmhassClient` is built once, in `async_setup_entry`, from the address
+    stored at that moment. A reconfigure that only wrote the entry back sent
+    every subsequent request to the previous host until Home Assistant
+    restarted -- which is exactly the state someone opens this step to escape.
+    """
+    entry = await _setup_entry(hass)
+    old_client = entry.runtime_data.coordinator.client
+
+    result = await entry.start_reconfigure_flow(hass)
+    with (
+        patch("custom_components.emhass_companion.EmhassClient") as client_cls,
+        patch(
+            "custom_components.emhass_companion.config_flow._async_validate_connection",
+            AsyncMock(return_value=("0.17.9", None)),
+        ),
+    ):
+        client_cls.return_value = AsyncMock(spec=EmhassClient)
+        client_cls.return_value.async_get_version = AsyncMock(return_value="0.17.9")
+        client_cls.return_value.base_url = "http://elsewhere:5000"
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"url": "http://elsewhere:5000"}
+        )
+        await hass.async_block_till_done()
+
+    assert result["type"] == "abort"
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data["url"] == "http://elsewhere:5000"
+    # The reload is the point: a fresh client, built from the new address.
+    assert entry.runtime_data.coordinator.client is not old_client

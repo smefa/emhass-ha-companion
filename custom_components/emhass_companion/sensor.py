@@ -563,9 +563,19 @@ class LoadRuntimeTodaySensor(EmhassLoadEntity, RestoreSensor):
             return
         # Only restore within the same local day; a restart tomorrow morning
         # must not carry yesterday's hours into today's schedule.
-        restored_at = self.coordinator.hass.states.get(self.entity_id)
+        #
+        # The timestamp has to come from the *restored* state, not from
+        # `hass.states.get(self.entity_id)`. At this point the state machine
+        # holds either nothing or the placeholder the entity registry writes
+        # for a not-yet-added entity, whose `last_updated` is this boot -- so
+        # reading it there compared today against today and the guard never
+        # fired once, which is what let yesterday's hours through as today's
+        # and under-scheduled the load for the rest of the day.
+        restored = await self.async_get_last_state()
+        if restored is None:
+            return
         today = dt_util.as_local(dt_util.utcnow()).date()
-        if restored_at is not None and dt_util.as_local(restored_at.last_updated).date() != today:
+        if dt_util.as_local(restored.last_updated).date() != today:
             return
         try:
             self.load.runtime_today = timedelta(hours=float(last.native_value))

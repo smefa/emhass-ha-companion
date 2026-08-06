@@ -13,6 +13,7 @@ setup, compare the decisions, then hand over.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime
 import logging
@@ -131,6 +132,17 @@ class Executor:
         # Used to notice the control gate being switched *off*, which is one of
         # the moments an inverter has to be given back.
         self._control_was_enabled = False
+        # Every write to the inverter goes through here, one at a time. Applies
+        # are fired from two independent sources -- every coordinator update
+        # and every clock tick -- and a restore can be triggered from a third
+        # (shutdown, unload, the control gate). Without this, two overlapping
+        # applies interleave their reads and writes of `_last_applied`: both
+        # see the same "last command", both decide the write is worth sending,
+        # and the inverter gets the same command twice; worse, a restore
+        # landing mid-apply hands control back and is then immediately undone
+        # by the apply's own write, which is the state this executor is meant
+        # to be incapable of leaving behind.
+        self._lock = asyncio.Lock()
 
     # -- gates ----------------------------------------------------------------
 
@@ -146,7 +158,17 @@ class Executor:
     # -- main entry point -----------------------------------------------------
 
     async def async_apply(self) -> Decision:
-        """Decide what should happen now, and do it if permitted."""
+        """Decide what should happen now, and do it if permitted.
+
+        Serialised against every other apply and against ``async_restore``:
+        see ``_lock``. The decision itself is made inside the lock too, not
+        just the writes -- deciding against a ``_last_applied`` that another
+        apply is about to change is how the same command ends up sent twice.
+        """
+        async with self._lock:
+            return await self._async_apply()
+
+    async def _async_apply(self) -> Decision:
         decision = self._decide()
         decision.at = dt_util.utcnow()
 
@@ -209,7 +231,8 @@ class Executor:
             # forced mode the last command left it in, indefinitely.
             if self._control_was_enabled:
                 self._control_was_enabled = False
-                await self.async_restore("control switch turned off")
+                # Already holding _lock, so the unlocked body directly.
+                await self._async_restore("control switch turned off")
             decision.reason = f"{decision.reason} (control disabled, not applied)"
             self.last_decision = decision
             _LOGGER.debug("Would apply %s: %s", decision.action, decision.reason)
@@ -245,7 +268,15 @@ class Executor:
         to an inverter we have never written to would mean a dry run reaching
         for the hardware on shutdown, and fighting whatever automation is
         actually in charge.
+
+        Serialised against ``async_apply`` (see ``_lock``): a handover that
+        interleaves with an in-flight apply is a handover the apply's own
+        write immediately undoes.
         """
+        async with self._lock:
+            await self._async_restore(reason)
+
+    async def _async_restore(self, reason: str) -> None:
         profile = self._inverter_profile()
         if profile is None or (not self._last_applied and not self._prepared):
             return
