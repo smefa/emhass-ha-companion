@@ -144,6 +144,41 @@ def test_step_finds_the_dominant_spacing():
     assert Series.empty().step() is None
 
 
+def test_extended_with_previous_day_is_a_no_op_when_already_covering():
+    series = _series(1.0, 2.0)
+    extended = series.extended_with_previous_day(T0 + timedelta(minutes=30))
+    assert extended is series
+
+
+def test_extended_with_previous_day_is_a_no_op_on_an_empty_series():
+    assert not Series.empty().extended_with_previous_day(T0)
+
+
+def test_extended_with_previous_day_repeats_yesterdays_shape():
+    """A 24h series ending at local midnight (today's Nord Pool prices, no
+    tomorrow yet) should have tomorrow filled with today's own price shape,
+    hour-for-hour, not flat-lined at the last (typically cheap, late-night)
+    price."""
+    today = [10.0, 20.0, 30.0] + [0.1] * 21  # last hour of the day is cheap
+    series = _series(*today, step_minutes=60)
+    until = T0 + timedelta(hours=27)  # 3h into tomorrow
+    extended = series.extended_with_previous_day(until)
+    assert extended.covers(until)
+    # Tomorrow's first three hours repeat today's first three hours, not
+    # today's flat, cheap tail.
+    assert extended.values[24:27] == (10.0, 20.0, 30.0)
+
+
+def test_extended_with_previous_day_falls_back_to_hold_last_without_history():
+    """Less than a day of data to begin with -- nothing 24h back to copy, so
+    it degrades to the old hold-last behaviour instead of guessing."""
+    series = _series(1.0, 2.0, step_minutes=60)  # only 1h of history
+    until = T0 + timedelta(hours=3)
+    extended = series.extended_with_previous_day(until)
+    assert extended.covers(until)
+    assert extended.values == (1.0, 2.0, 2.0, 2.0)
+
+
 def test_to_payload_uses_explicit_offsets():
     """EMHASS reads a timestamp without an offset as its own local time."""
     payload = _series(1.0).to_payload()

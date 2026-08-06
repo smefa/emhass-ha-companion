@@ -30,6 +30,8 @@ from .thermal import build_def_load_config
 
 _LOGGER = logging.getLogger(__name__)
 
+_PRICE_KEYS = ("load_cost_forecast", "prod_price_forecast")
+
 
 class PayloadError(ValueError):
     """The payload could not be built."""
@@ -369,12 +371,29 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
             # float noise like 210.10000000000002 W; round to whole watts
             # since sub-watt PV precision is meaningless anyway.
             series = series.map_values(round)
-        elif key == "load_cost_forecast":
+        elif key in _PRICE_KEYS:
             # Tariff math (multiplier/adder) leaves the same float noise on
             # a per-kWh price; round rather than lose currency precision.
             series = series.map_values(lambda v: round(v, 4))
         if inputs.action == ACTION_MPC and (live_value := live_values.get(key)) is not None:
             series = series.blend_at(inputs.now, live_value, inputs.mix_beta)
+        if key in _PRICE_KEYS and not series.covers(horizon_end):
+            # A day-ahead price source (e.g. Nord Pool before its ~13:00
+            # publication) often does not yet cover tomorrow. Left alone,
+            # EMHASS's own fallback holds the last known price flat for the
+            # rest of the horizon -- which for a series ending at local
+            # midnight is usually one of the cheapest hours of the day (last
+            # night), flat-lined across all of tomorrow. Repeating
+            # yesterday's shape is a far better guess.
+            short_until = series.end
+            series = series.extended_with_previous_day(horizon_end)
+            if series.covers(horizon_end):
+                warnings.append(
+                    f"{label} only covered until "
+                    f"{dt_util.as_local(short_until):%Y-%m-%d %H:%M}; the "
+                    "remainder was filled in by repeating the previous day's "
+                    "prices."
+                )
         payload[key] = series.to_payload()
         if not series.covers(horizon_end):
             # EMHASS forward-fills a timestamped forecast onto its grid, so a

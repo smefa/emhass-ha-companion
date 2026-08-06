@@ -185,6 +185,40 @@ class Series:
         """
         return bool(self._points) and self.end >= until.astimezone(UTC)
 
+    def extended_with_previous_day(self, until: datetime) -> Series:
+        """Fill the gap beyond the last known point by repeating the day before.
+
+        For a day-ahead price source (e.g. Nord Pool before its ~13:00
+        publication) that does not yet cover the full horizon, this is a much
+        better guess than plain hold-last: EMHASS's own fallback flat-lines
+        the horizon at whatever the final known price happens to be, which for
+        a series that stops at local midnight is usually one of the cheapest
+        hours of the day (last night) -- held across the whole of tomorrow.
+        Repeating yesterday's shape at least preserves the peak/off-peak
+        pattern.
+
+        Falls back to hold-last (via :meth:`value_at`'s own behaviour) once
+        there is no 24h-earlier point left to copy, e.g. more than a day past
+        the original coverage, or when the series holds less than a day of
+        history to begin with.
+        """
+        if not self._points or self.covers(until):
+            return self
+        until = until.astimezone(UTC)
+        step = self.step() or timedelta(hours=1)
+        day = timedelta(days=1)
+        points = list(self._points)
+        cursor = self.end + step
+        while cursor <= until:
+            value = self.value_at(cursor - day)
+            if value is None:
+                # Before the series even started a day ago -- nothing to
+                # copy, so hold the last known value instead of guessing.
+                value = points[-1].value
+            points.append(Point(cursor, value))
+            cursor += step
+        return Series(points)
+
     def step(self) -> timedelta | None:
         """The most common spacing between points, or None if indeterminate."""
         if len(self._points) < 2:
