@@ -912,7 +912,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
                 1,  # limit
                 True,  # include_start_time_state
             )
-        except Exception:  # noqa: BLE001 - a history probe must never break a run
+        except Exception:  # a history probe must never break a run
             _LOGGER.debug("Could not check recorder history for %s", entity_id, exc_info=True)
             return False
         return bool(states.get(entity_id))
@@ -946,7 +946,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
                 None,  # limit
                 True,  # include_start_time_state
             )
-        except Exception:  # noqa: BLE001 - a history probe must never break a run
+        except Exception:  # a history probe must never break a run
             _LOGGER.debug("Could not fetch recorder history for %s", entity_id, exc_info=True)
             return Series.empty()
         points = [
@@ -1026,9 +1026,8 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         if not sensor:
             return await self._load_forecast_fallback(sensor, now, horizon_end)
 
-        if (
-            self._ml_fit_lock.locked()
-            or self._ml_last_attempt is not None
+        if self._ml_fit_lock.locked() or (
+            self._ml_last_attempt is not None
             and now - self._ml_last_attempt < _ML_FIT_RETRY_COOLDOWN
         ):
             return await self._load_forecast_fallback(sensor, now, horizon_end)

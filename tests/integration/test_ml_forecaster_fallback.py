@@ -140,7 +140,9 @@ async def test_falls_back_and_cools_down_when_the_fit_itself_fails(hass: HomeAss
     coordinator.client.async_run_action = AsyncMock(side_effect=EmhassConnectionError("boom"))
 
     with (
-        patch.object(coordinator, "_has_enough_history", AsyncMock(return_value=True)) as history_check,
+        patch.object(
+            coordinator, "_has_enough_history", AsyncMock(return_value=True)
+        ) as history_check,
         patch.object(
             coordinator, "_load_forecast_fallback", AsyncMock(return_value=_FALLBACK_SENTINEL)
         ) as fallback,

@@ -79,9 +79,12 @@ async def test_no_sensor_falls_all_the_way_back_to_typical(hass: HomeAssistant) 
 async def test_a_full_day_of_history_prefers_naive(hass: HomeAssistant) -> None:
     coordinator = await _coordinator(hass)
 
-    with patch.object(
-        coordinator, "_has_history_since", AsyncMock(return_value=True)
-    ) as has_history, patch.object(coordinator, "_recent_load_series") as recent:
+    with (
+        patch.object(
+            coordinator, "_has_history_since", AsyncMock(return_value=True)
+        ) as has_history,
+        patch.object(coordinator, "_recent_load_series") as recent,
+    ):
         method, bootstrap = await coordinator._load_forecast_fallback(
             LOAD_SENSOR, _NOW, _HORIZON_END
         )

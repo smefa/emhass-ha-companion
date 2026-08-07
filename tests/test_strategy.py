@@ -174,7 +174,7 @@ def test_plan_curtailment_is_skipped_without_p_grid():
     reconstructing the PV/load/battery balance by hand -- exactly the
     misclassification this module's docstring warns about avoiding."""
     row = _row(p_grid=None, p_pv_curtailment=1200, unit_prod_price=0.10)
-    curtail, curtail_w, rules = decide_curtailment(row, _config(), soc_percent=50)
+    curtail, curtail_w, _rules = decide_curtailment(row, _config(), soc_percent=50)
     assert curtail is False
     assert curtail_w == 0.0
 
