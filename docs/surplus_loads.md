@@ -140,16 +140,44 @@ from, and there are three ordinary ways to open one:
 Whenever `hours` is short of the span, EMHASS picks where they go — and its
 cost function has **no reason to prefer early**. On flat prices, which end of
 the block a thin day's run lands on comes down to solver tie-break, not to
-anything about the sun. With the switch on, the window is clamped to exactly
-as many timesteps as the run needs (rounded up, plus the usual one step of
-padding), so there is only one place it fits.
+anything about the sun. With the switch on, the window is pulled in to the
+earliest stretch that can still deliver the budget, leaving as little room to
+drift late as the day allows.
 
-**It is usually the worse choice for self-consumption**, and that is the point
-of leaving it off by default. Thin morning sun means running a 6 kW charger
-against 1.5 kW of surplus and importing the difference, where EMHASS would
-have waited for midday. Turn it on when you want the energy *early* more than
-you want it *cheap* — a car leaving at noon, or a forecast you don't trust —
-not as a general improvement.
+### How wide is "as early as possible"
+
+Not simply the hours asked for. The power ceiling handed to EMHASS is the
+block's **peak** surplus, and the front of a block is its weakest end — so a
+window clamped to the bare hours would ask a load to hold midday power through
+morning slots that never offered it. EMHASS treats the energy total as an
+equality, so it has no choice but to import the difference.
+
+The fix is width rather than a lower ceiling. EMHASS pays the buy price for
+imports and gives up the sell price on exports, so the cost of one more watt
+in a timestep steps up sharply the moment that timestep stops exporting. That
+kink is what makes the solver *modulate* — spreading a run down the morning
+ramp and tracking the surplus curve, rather than running flat out in the
+fewest possible slots. It can only spread into window it has been given.
+
+So the window grows until the surplus inside it actually covers the energy
+being asked for, and stops at the first timestep where it does. That keeps it
+the earliest window that can deliver the budget without importing, and it
+stays self-tightening: a window that only just covers the target leaves no
+slack to drift late with. On a block flat enough that every timestep can
+deliver the ceiling, the cover is reached at exactly the hours asked for and
+nothing is widened at all.
+
+**It is still usually the worse choice for self-consumption**, and that is the
+point of leaving it off by default. Widening buys the run somewhere to spread,
+but it cannot conjure sun that isn't up yet: a car asked for 20 kWh at first
+light will still be started into a morning that cannot fill it, where EMHASS
+left alone would have waited for midday. Turn it on when you want the energy
+*early* more than you want it *cheap* — a car leaving at noon, or a forecast
+you don't trust — not as a general improvement.
+
+A widened window is logged at debug level, naming the load and how many
+timesteps it grew by; a run that starts later than expected on a peaked day
+is usually this.
 
 This is also why **Run now** is unavailable on a surplus load. That button
 forces the load on regardless of the plan, which here means charging off the

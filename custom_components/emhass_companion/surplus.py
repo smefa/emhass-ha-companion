@@ -20,9 +20,18 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+import logging
 import math
 
 from .models import Plan, Point, Series
+
+_LOGGER = logging.getLogger(__name__)
+
+# Relative slack when testing whether a window's surplus covers the energy
+# asked of it. Both sides are sums of the same floats in a different order, so
+# an exact ``>=`` can miss the slot that genuinely closes the gap and hand back
+# a window one step wider than it needs to be.
+COVER_TOLERANCE = 1e-9
 
 # How long a stretch of "can't even feed the floor" has to persist before
 # allocate() treats it as the block actually ending, rather than noise. A
@@ -89,10 +98,10 @@ class SurplusSpec:
 
     start_asap: bool = False
     """Whether this load wants the *front* of the block rather than anywhere in
-    it. See ``allocate``: it narrows the window to exactly the hours being
-    asked for, leaving EMHASS nowhere later in the day to place them. Changes
-    only the window -- never the hours, the energy or which slots were
-    credited."""
+    it. See ``allocate``: it narrows the window to the earliest stretch that
+    can actually deliver the budget, leaving EMHASS as little room as possible
+    to place the run later. Changes only the window -- never the hours, the
+    energy or which slots were credited."""
 
 
 @dataclass(slots=True)
@@ -254,6 +263,13 @@ def allocate(
         # kWh".
         credit_wh = 0.0
         steps = 0
+        # What each qualifying slot can hand *this* load, in order: the draw
+        # already computed below, which is the slot's own net clipped to the
+        # load's ceiling. Kept separately from ``credit_wh`` because that is
+        # the aggregate credit, deliberately uncapped by what any one slot can
+        # deliver (see above) -- the start-asap rule needs the physical figure,
+        # and needs it before ``entry[2]`` is debited.
+        deliverable: list[tuple[datetime, float]] = []
 
         for entry in block:
             when, _, net = entry
@@ -266,6 +282,7 @@ def allocate(
 
             credit_wh += net * step_hours
             steps += 1
+            deliverable.append((when, draw * step_hours))
             entry[2] = max(0.0, net - draw)
 
         # However generous the block, this load can never be asked to run
@@ -312,7 +329,60 @@ def allocate(
             # can only remove placement freedom and never make the window too
             # narrow for the hours -- which EMHASS answers by declaring the
             # whole problem infeasible rather than just this one load.
-            window_last = min(window_last, window_first + (run_steps - 1) * step)
+            tight_end = window_first + (run_steps - 1) * step
+
+            # ...but the hours alone are the wrong measure of how much window
+            # the run needs, because ``nominal_w`` is the block's *peak* and
+            # the front of the block is its weakest end. EMHASS holds the
+            # energy total as an equality, so a window clamped to the bare
+            # hours forces the load to hold peak power through morning slots
+            # that never offered it, and the difference is imported -- the
+            # exact "short, near-ceiling burst" the ceiling above exists to
+            # prevent, reintroduced by pinning where the run lands.
+            #
+            # Widening is what fixes that, not lowering the ceiling: the cost
+            # function is imports at the buy price and exports at the sell
+            # price, so the marginal cost of one more watt in a slot steps up
+            # sharply at the point the slot stops exporting. That kink is
+            # convex, which is why the solver spreads a run across slots and
+            # tracks the surplus curve rather than running flat out in the
+            # fewest slots -- but it can only spread into window it has.
+            #
+            # So the window has to reach far enough that the surplus inside it
+            # actually covers the energy being asked for. Stopping at the
+            # *first* slot where it does keeps this the earliest window that
+            # can deliver the budget without importing, which is what the
+            # switch means; it is also self-tightening, since a window that
+            # only just covers the target leaves the solver no slack to drift
+            # late with. On a flat block the cover is reached at exactly
+            # ``run_steps`` and this is the old clamp unchanged.
+            covered_wh = 0.0
+            covered_end: datetime | None = None
+            for when, deliverable_wh in deliverable:
+                covered_wh += deliverable_wh
+                if covered_wh >= energy_wh * (1 - COVER_TOLERANCE):
+                    covered_end = when
+                    break
+
+            # No ``covered_end`` means the block cannot cover the target
+            # however wide the window gets -- ``credit_wh`` is uncapped per
+            # slot while the draws here are not, so an ample block and a load
+            # whose configured ceiling sits below the block's peak can land
+            # here. Leaving the window at the full block is then the most that
+            # could ever help.
+            if covered_end is not None:
+                if covered_end > tight_end:
+                    _LOGGER.debug(
+                        "%s: start-as-early-as-possible window widened from %d to %d "
+                        "timesteps -- the front of the block cannot deliver %.0f Wh at "
+                        "%.0f W without importing",
+                        spec.subentry_id,
+                        run_steps,
+                        int((covered_end - window_first) / step) + 1,
+                        energy_wh,
+                        nominal_w,
+                    )
+                window_last = min(window_last, max(tight_end, covered_end))
 
         budgets[spec.subentry_id] = SurplusBudget(
             hours=hours,

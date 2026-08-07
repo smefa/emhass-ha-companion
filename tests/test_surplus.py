@@ -525,6 +525,114 @@ def test_asap_does_not_reach_past_the_end_of_the_block():
     assert budget.window_end == START + 3 * STEP
 
 
+def _modulating(**overrides) -> SurplusSpec:
+    """A load that may run anywhere between its floor and its ceiling.
+
+    The ceiling is the block's peak (see ``allocate``), which for these tests
+    is what makes the front of a rising block unable to deliver it.
+    """
+    defaults = {"nominal_w": 3000.0, "run_floor_w": 500.0, "semi_continuous": False}
+    return _spec(**{**defaults, **overrides})
+
+
+def test_asap_widens_the_window_until_the_surplus_can_cover_the_run():
+    """A run clamped to its bare hours would hold peak power through slots
+    that never offered it.
+
+    The ceiling is the block's peak, 3000 W, but the front of this ramp starts
+    at 600 W. EMHASS holds the energy total as an equality, so a two-step
+    window means 900 Wh has to come out of two slots offering 150 and 300 Wh
+    of sun -- the remaining 450 Wh is imported. Reaching one step further is
+    what lets the solver spread the run down the ramp instead.
+    """
+    series = _series(600, 1200, 1800, 3000, 3000, 3000)
+
+    free = allocate(series, [_modulating(max_energy_wh=900.0)], STEP)["pool"]
+    asap = allocate(series, [_modulating(max_energy_wh=900.0, start_asap=True)], STEP)["pool"]
+
+    # 0.3 h rounds up to two steps, which would have ended the window at
+    # START + 3 * STEP once padded. The first three slots are what actually
+    # add up to the 900 Wh being asked for.
+    assert asap.window_end == START + 4 * STEP
+    # Still far tighter than leaving the placement to EMHASS.
+    assert free.window_end == START + 7 * STEP
+    assert asap.window_start == free.window_start == START
+    # Placement only. The budget itself is untouched.
+    assert asap.hours == free.hours == 0.3
+    assert asap.energy_wh == free.energy_wh == 900.0
+    assert asap.steps == free.steps
+
+
+def test_asap_stays_tight_when_the_front_of_the_block_already_covers_it():
+    """Nothing to widen when every slot can deliver the ceiling.
+
+    The reason the rule is safe to apply unconditionally: on a flat block the
+    cover is reached at exactly the hours asked for, and this is the old clamp
+    unchanged.
+    """
+    budget = allocate(
+        _series(3000, 3000, 3000, 3000, 3000, 3000),
+        [_modulating(max_energy_wh=900.0, start_asap=True)],
+        STEP,
+    )["pool"]
+
+    assert budget.hours == 0.3
+    assert budget.window_end == START + 3 * STEP
+
+
+def test_asap_never_narrows_a_modulating_window_below_the_hours():
+    """The infeasibility guard survives the widening.
+
+    Same contract as the semi-continuous case: a window one step short of the
+    hours makes EMHASS declare the whole problem infeasible, not just this
+    load, so the rule may only ever hand back more window than the run needs.
+    """
+    for cap in (100.0, 300.0, 900.0, 2000.0, 50_000.0):
+        budget = allocate(
+            _series(600, 1200, 1800, 3000, 3000, 3000),
+            [_modulating(max_energy_wh=cap, start_asap=True)],
+            STEP,
+        )["pool"]
+        span = (budget.window_end - budget.window_start).total_seconds() / 3600
+        assert span - STEP.total_seconds() / 3600 >= budget.hours, cap
+
+
+def test_asap_widening_stops_at_the_end_of_the_block():
+    """Widening reaches for surplus, so it can never reach past the sun.
+
+    The block ends after three slots here and the run needs all of them. The
+    window has to stop at the last qualifying timestep exactly as the old
+    clamp did -- widening looks for slots that can deliver, and a dark one
+    never can.
+    """
+    budget = allocate(
+        _series(600, 1200, 1800, 0, 0, 0, 0, 0),
+        [_modulating(start_asap=True)],
+        STEP,
+    )["pool"]
+
+    # Last qualifying slot is index 2, plus the two steps of padding.
+    assert budget.window_end == START + 4 * STEP
+
+
+def test_asap_leaves_the_window_alone_when_the_block_can_never_cover_it():
+    """A ceiling below the block's peak asks for energy no window delivers.
+
+    ``credit_wh`` is the aggregate surplus, deliberately uncapped by what any
+    one slot can hand this load, so a load configured below the block's peak
+    is credited hours it cannot physically take -- an already-accepted
+    approximation elsewhere in the budget. There is no window that covers
+    that, and the full block is the most that could ever help.
+    """
+    series = _series(600, 1200, 3000)
+
+    free = allocate(series, [_modulating(nominal_w=1000.0)], STEP)["pool"]
+    asap = allocate(series, [_modulating(nominal_w=1000.0, start_asap=True)], STEP)["pool"]
+
+    assert asap.window_end == free.window_end == START + 4 * STEP
+    assert asap.hours == free.hours == 0.75
+
+
 def test_asap_on_an_empty_block_stays_empty():
     budget = allocate(_series(100, 100), [_spec(start_asap=True)], STEP)["pool"]
 
