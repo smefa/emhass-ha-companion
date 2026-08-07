@@ -63,6 +63,10 @@ def _set_single_constant(load: DeferrableRuntime, value: bool) -> None:
     load.single_constant = value
 
 
+def _set_start_asap(load: DeferrableRuntime, value: bool) -> None:
+    load.start_asap = value
+
+
 def _set_requested(load: DeferrableRuntime, value: bool) -> None:
     # Never a bare assignment: a request without its anchor is a deadline with
     # nothing to count from.
@@ -176,6 +180,29 @@ LOAD_SWITCHES: tuple[LoadSwitchDescription, ...] = (
         applies_fn=lambda load: not load.is_thermal,
         attrs_fn=_requested_attrs,
         restore_fn=_restore_requested,
+    ),
+    # Placement, not arming -- deliberately a separate control from Requested
+    # rather than a second way to ask for a run. "Take the spare solar" and
+    # "take it as early as it appears" are independent answers, and a user who
+    # wants the second one wants it standing, for this appliance, every day:
+    # the car is always wanted charged early, the pool never cares. A button
+    # would make a lasting preference look like a one-shot action, and leave
+    # nothing on the dashboard saying which way the load is currently set.
+    #
+    # Off keeps the old behaviour, which is also the better one for
+    # self-consumption -- see docs/surplus_loads.md.
+    LoadSwitchDescription(
+        key="start_asap",
+        translation_key="start_asap",
+        get_fn=lambda load: load.start_asap,
+        set_fn=_set_start_asap,
+        default=False,
+        # Nothing to place early on any other recurrence: a daily or on-demand
+        # load's window is the one the user typed, not one derived from the
+        # sun, and narrowing that to the front would be a time window they
+        # already have a pair of entities for.
+        available_fn=lambda load: load.on_surplus,
+        applies_fn=lambda load: not load.is_thermal,
     ),
 )
 

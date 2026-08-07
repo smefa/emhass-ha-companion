@@ -20,6 +20,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+import math
 
 from .models import Plan, Point, Series
 
@@ -85,6 +86,13 @@ class SurplusSpec:
     headroom_w: float
     max_energy_wh: float | None = None
     """Remaining energy cap, or None for "take everything available"."""
+
+    start_asap: bool = False
+    """Whether this load wants the *front* of the block rather than anywhere in
+    it. See ``allocate``: it narrows the window to exactly the hours being
+    asked for, leaving EMHASS nowhere later in the day to place them. Changes
+    only the window -- never the hours, the energy or which slots were
+    credited."""
 
 
 @dataclass(slots=True)
@@ -283,6 +291,28 @@ def allocate(
             # for one that modulates.
             hours = min(hours, spec.max_energy_wh / nominal_w)
         energy_wh = hours * nominal_w
+
+        # "Start as early as possible" narrows the *window* and nothing else.
+        # The budget above is already "however much the surplus supports"; all
+        # that is left to decide is where in the block those hours land, and
+        # every gap between ``hours`` and ``span_hours`` is a gap EMHASS is
+        # free to place them in. On flat prices it has no reason to prefer
+        # early, so which end of the block a thin day's run lands on comes down
+        # to solver tie-break.
+        #
+        # Clamping the window to exactly as many timesteps as the run needs
+        # leaves only one place they fit. Deliberately applied after both caps:
+        # the span cap and the energy cap are the two things that open the gap
+        # in the first place -- an energy-capped car on an abundant day is the
+        # clearest case, asking for two hours inside an eight-hour block.
+        if spec.start_asap and window_last is not None and hours > 0:
+            run_steps = math.ceil(hours / step_hours)
+            # Whole timesteps from the first qualifying one, inclusive: the
+            # tight span then rounds *up* to the run, never below it, so this
+            # can only remove placement freedom and never make the window too
+            # narrow for the hours -- which EMHASS answers by declaring the
+            # whole problem infeasible rather than just this one load.
+            window_last = min(window_last, window_first + (run_steps - 1) * step)
 
         budgets[spec.subentry_id] = SurplusBudget(
             hours=hours,

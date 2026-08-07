@@ -12,11 +12,14 @@ reach its own target first; see [the battery reservation](#the-battery-reservati
 
 Choose *On spare solar* under **Runs** when adding the load, then arm it with its
 **Requested** switch. Turn the switch off to stop. That is the whole
-user-facing feature.
+user-facing feature, plus one optional switch —
+[Start as early as possible](#start-as-early-as-possible) — for a load you
+want served at the front of the sun rather than wherever the day suits it
+best.
 
 ![The Add a deferrable load dialog, with On spare solar chosen under Runs](assets/deferrable-add-load.png)
 
-![A surplus load's Controls and Sensors: Requested switch, Run now button, next start, running, runtime today, scheduled power, should run](assets/surplus-load-controls-sensors.png)
+![A surplus load's Controls and Sensors: Requested switch, next start, running, runtime today, scheduled power, should run](assets/surplus-load-controls-sensors.png)
 
 Adding a deferrable load asks two questions first — its name and what makes it
 want to run — because that answer decides which settings it even has. A config
@@ -69,7 +72,8 @@ Once per run, in `surplus.py`, from the **previous** run's plan:
 
 The load is then sent to EMHASS as a completely ordinary deferrable with those
 hours and that window. The optimiser still decides *when* inside it — but only
-inside it. Without the block cut, a window spanning a whole night is still a
+inside it, and [Start as early as possible](#start-as-early-as-possible)
+narrows the window until there is no *inside* left to decide. Without the block cut, a window spanning a whole night is still a
 technically valid window, and EMHASS will place the load at 3 a.m. if that
 happens to be the cheapest way to fill it — solar never entered its decision,
 only the (wrongly wide) window did.
@@ -112,6 +116,52 @@ number of weak or reserved slots inside an otherwise strong block no longer
 shrink `hours` at all, they just get absorbed by it. On a thin day it still
 falls back to something close to the old per-slot count, because there is
 no surplus elsewhere in the span to borrow from.
+
+## Start as early as possible
+
+Off by default. On, the load takes the **front** of the sunny stretch instead
+of leaving EMHASS free to place its hours anywhere inside it.
+
+It changes the window and nothing else — not the hours, not the energy, not
+which timesteps were credited. The budget is already "however much the surplus
+supports"; all this decides is where in the block those hours land.
+
+The slack it closes is the gap between `hours` and the span they were derived
+from, and there are three ordinary ways to open one:
+
+- **An energy cap.** The clearest case. *Energy needed* of 20 kWh into a car
+  on a day with 40 kWh of sun asks for half a window's worth of running, and
+  the other half is placement freedom.
+- **The battery reservation.** Slots the battery's own charging has claimed
+  still count towards *when* the load may run but contribute little or nothing
+  towards *how much* — see [below](#the-battery-reservation).
+- **Weak or sub-threshold timesteps** inside an otherwise strong block.
+
+Whenever `hours` is short of the span, EMHASS picks where they go — and its
+cost function has **no reason to prefer early**. On flat prices, which end of
+the block a thin day's run lands on comes down to solver tie-break, not to
+anything about the sun. With the switch on, the window is clamped to exactly
+as many timesteps as the run needs (rounded up, plus the usual one step of
+padding), so there is only one place it fits.
+
+**It is usually the worse choice for self-consumption**, and that is the point
+of leaving it off by default. Thin morning sun means running a 6 kW charger
+against 1.5 kW of surplus and importing the difference, where EMHASS would
+have waited for midday. Turn it on when you want the energy *early* more than
+you want it *cheap* — a car leaving at noon, or a forecast you don't trust —
+not as a general improvement.
+
+This is also why **Run now** is unavailable on a surplus load. That button
+forces the load on regardless of the plan, which here means charging off the
+grid at midnight, and it clears itself against an `operating_hours` a surplus
+load structurally does not have — so once pressed it stayed on until Home
+Assistant was restarted. This switch is the honest version of the same intent.
+
+The load is still surplus-gated throughout: the window can never open before
+the first qualifying timestep, so "as early as possible" means early within
+the sun, never before it. And because the whole budget is rebuilt from
+scratch every cycle, a run cut short by cloud is not a request spent — a
+later cycle simply derives a fresh window from whatever sun is left.
 
 ### The battery reservation
 

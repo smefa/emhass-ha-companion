@@ -16,12 +16,17 @@ import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.emhass_companion.api import EmhassClient
-from custom_components.emhass_companion.button import async_setup_entry
+from custom_components.emhass_companion.button import LoadRunNowButton, async_setup_entry
 from custom_components.emhass_companion.const import (
     CONF_LOAD,
+    CONF_NOMINAL_POWER,
     CONF_PROFILE,
     CONF_PROFILE_OPTIONS,
     DOMAIN,
+    RECURRENCE_DAILY,
+    RECURRENCE_ON_DEMAND,
+    RECURRENCE_SURPLUS,
+    SUBENTRY_TYPE_DEFERRABLE,
 )
 from custom_components.emhass_companion.coordinator import EmhassCoordinator
 from custom_components.emhass_companion.deferrable import DeferrableRegistry
@@ -88,3 +93,58 @@ async def test_fit_button_absent_with_no_load_profile_chosen(hass: HomeAssistant
 async def test_the_always_present_buttons_are_unaffected(hass: HomeAssistant) -> None:
     keys = await _setup(hass, options={})
     assert {"run_dayahead", "run_mpc"} <= keys
+
+
+async def _run_now_button(hass: HomeAssistant):
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={"url": "http://localhost:5000"},
+        subentries_data=[
+            {
+                "subentry_type": SUBENTRY_TYPE_DEFERRABLE,
+                "title": "Car",
+                "unique_id": "Car",
+                "data": {CONF_NOMINAL_POWER: 6000},
+            }
+        ],
+    )
+    entry.add_to_hass(hass)
+
+    loads = DeferrableRegistry(hass, entry)
+    loads.sync()
+    coordinator = EmhassCoordinator(hass, entry, AsyncMock(spec=EmhassClient), loads)
+    coordinator.profiles = (await async_load_profiles(hass)).profiles
+    coordinator.last_update_success = True
+    entry.runtime_data = _RuntimeData(coordinator, loads)
+
+    added: list = []
+    # Per-load entities are added with config_subentry_id, which the bare
+    # list.extend the tests above use as a stand-in does not accept.
+    await async_setup_entry(hass, entry, lambda entities, **_: added.extend(entities))
+    button = next(b for b in added if isinstance(b, LoadRunNowButton))
+    return button, loads.all()[0]
+
+
+async def test_run_now_is_unavailable_on_a_surplus_load(hass: HomeAssistant) -> None:
+    """force_run means "regardless of the plan", which on a load whose premise
+    is spare solar means charging off the grid at midnight -- and with a
+    structurally zero operating_hours it could never disarm itself either."""
+    button, load = await _run_now_button(hass)
+
+    load.recurrence = RECURRENCE_DAILY
+    assert button.available is True
+
+    load.recurrence = RECURRENCE_SURPLUS
+    assert button.available is False
+
+
+async def test_run_now_follows_a_live_recurrence_change(hass: HomeAssistant) -> None:
+    """Unavailable rather than never created, because the recurrence select can
+    move at any time -- the button has to go then, not on the next restart."""
+    button, load = await _run_now_button(hass)
+
+    load.recurrence = RECURRENCE_SURPLUS
+    assert button.available is False
+
+    load.recurrence = RECURRENCE_ON_DEMAND
+    assert button.available is True

@@ -98,6 +98,29 @@ class LoadRunNowButton(EmhassLoadEntity, ButtonEntity):
     def __init__(self, coordinator: EmhassCoordinator, load: DeferrableRuntime) -> None:
         super().__init__(coordinator, load, "run_now")
 
+    @property
+    def available(self) -> bool:
+        """Never on a surplus load.
+
+        ``force_run`` means "run regardless of the plan", which on a load whose
+        entire premise is spare solar means charging the car off the grid at
+        midnight. It cannot disarm itself there either: the rule is
+        ``elapsed_today >= operating_hours``, and a surplus load's
+        operating_hours is structurally zero -- its run time comes from
+        ``surplus.allocate`` instead -- so the target is either met before the
+        load has done anything or never measured at all.
+
+        The honest version of "run it now" for a surplus load is *Start as
+        early as possible*, which keeps the surplus gate and only gives up the
+        optimiser's freedom to place the run later in the day. See
+        docs/surplus_loads.md.
+
+        Unavailable rather than never created, because ``recurrence`` is a live
+        select: a load switched to spare solar this afternoon has to lose the
+        button then, not only on the next restart.
+        """
+        return super().available and not self.load.on_surplus
+
     async def async_press(self) -> None:
         self.load.force_run()
         self.load.notify()

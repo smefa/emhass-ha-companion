@@ -14,6 +14,8 @@ from custom_components.emhass_companion.const import (
     CONF_POWER_SENSOR,
     CONF_SEMI_CONTINUOUS,
     DOMAIN,
+    LOAD_MODE_AUTO,
+    LOAD_MODE_FORCE_ON,
     RECURRENCE_ON_DEMAND,
     SUBENTRY_TYPE_DEFERRABLE,
 )
@@ -291,7 +293,61 @@ async def test_a_power_sensor_stopping_early_does_not_disarm(hass: HomeAssistant
     registry.async_stop()
 
 
-async def test_assume_from_plan_auto_disarms_a_sourceless_load(hass: HomeAssistant) -> None:
+async def test_a_forced_load_that_never_runs_still_disarms(hass: HomeAssistant) -> None:
+    """The latch this check was made reachable for.
+
+    A load with a power sensor is skipped by ``assume_from_plan``, and the
+    source listener only fires on a running-to-stopped transition -- so a
+    forced run on a load that never actually starts (no control entity, a dead
+    contactor, a car left unplugged) used to reach neither, and stayed on
+    indefinitely with no way back to auto short of restarting Home Assistant.
+
+    Nothing here ever runs: the sensor sits at zero throughout.
+    """
+    entry = _entry(
+        {
+            "title": "Dishwasher",
+            "data": {CONF_NOMINAL_POWER: 2000, CONF_POWER_SENSOR: POWER_SENSOR},
+        }
+    )
+    entry.add_to_hass(hass)
+    hass.states.async_set(POWER_SENSOR, "0")
+
+    registry = DeferrableRegistry(hass, entry)
+    registry.sync()
+    registry.async_start()
+    load = registry.all()[0]
+    load.operating_hours = 0
+    load.force_run()
+    assert load.mode == LOAD_MODE_FORCE_ON
+
+    registry.check_auto_disarm(dt_util.utcnow())
+
+    assert load.mode == LOAD_MODE_AUTO
+
+    registry.async_stop()
+
+
+async def test_an_unmet_forced_run_survives_the_disarm_check(hass: HomeAssistant) -> None:
+    """The other half: running every cycle must not clear a run still owed its
+    hours, or the button would be a no-op instead of a latch."""
+    entry = _entry({"title": "Dishwasher", "data": {CONF_NOMINAL_POWER: 2000}})
+    entry.add_to_hass(hass)
+
+    registry = DeferrableRegistry(hass, entry)
+    registry.sync()
+    load = registry.all()[0]
+    load.operating_hours = 2
+    load.force_run()
+
+    registry.check_auto_disarm(dt_util.utcnow())
+
+    assert load.mode == LOAD_MODE_FORCE_ON
+
+
+async def test_a_sourceless_load_disarms_on_the_runtime_the_plan_credits_it(
+    hass: HomeAssistant,
+) -> None:
     entry = _entry({"title": "Dishwasher", "data": {CONF_NOMINAL_POWER: 2000}})
     entry.add_to_hass(hass)
 
@@ -313,6 +369,11 @@ async def test_assume_from_plan_auto_disarms_a_sourceless_load(hass: HomeAssista
         ],
     )
 
+    # The pairing the coordinator uses: the plan advances the accumulator,
+    # then the disarm check reads it. Separate calls because disarming is not
+    # conditional on any of assume_from_plan's guards -- see
+    # DeferrableRegistry.check_auto_disarm.
     registry.assume_from_plan(plan, [load.subentry_id], now + timedelta(minutes=30))
+    registry.check_auto_disarm(now + timedelta(minutes=30))
 
     assert load.requested is False

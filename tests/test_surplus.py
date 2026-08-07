@@ -435,6 +435,104 @@ def test_no_cap_takes_everything_available():
     assert budget.steps == 2
 
 
+# --- start as early as possible -----------------------------------------------
+
+
+def test_asap_clamps_the_window_to_the_hours_being_asked_for():
+    """The case the switch exists for: a short run inside a long block.
+
+    The cap buys 0.375 h of running, but the block has a full hour of sun to
+    place it in -- and nothing in EMHASS's cost function prefers the early end.
+    Clamping the window to the one timestep the run actually needs (0.375 h
+    rounds up to two 15-minute steps) leaves only one place it fits.
+    """
+    series = _series(3000, 3000, 3000, 3000)
+    spec = _spec(max_energy_wh=300.0)
+
+    free = allocate(series, [spec], STEP)["pool"]
+    asap = allocate(series, [_spec(max_energy_wh=300.0, start_asap=True)], STEP)["pool"]
+
+    assert free.window_start == asap.window_start == START
+    # Two steps of run, plus the one step of padding window_end always carries.
+    assert asap.window_end == START + 3 * STEP
+    assert free.window_end == START + 5 * STEP
+    # Placement only. The budget itself is untouched.
+    assert asap.hours == free.hours == 0.375
+    assert asap.energy_wh == free.energy_wh == 300.0
+    assert asap.steps == free.steps
+
+
+def test_asap_leaves_a_full_block_alone():
+    """Nothing to clamp when the run already fills the sun it was derived from.
+
+    An uncapped load on a block it can use end to end is asking for the whole
+    window already, so the switch must be a no-op rather than shaving a step
+    off a run the surplus genuinely backs.
+    """
+    series = _series(3000, 3000, 3000, 3000)
+
+    free = allocate(series, [_spec()], STEP)["pool"]
+    asap = allocate(series, [_spec(start_asap=True)], STEP)["pool"]
+
+    assert asap.hours == free.hours == 1.0
+    assert asap.window_start == free.window_start
+    assert asap.window_end == free.window_end
+
+
+def test_asap_starts_at_the_first_qualifying_slot_not_the_first_slot():
+    """Early means early *within the surplus*, not at the top of the horizon.
+
+    The distinction the switch has to keep: it moves the run to the front of
+    the sunny stretch, and never lets it open before the sun clears the bar.
+    """
+    budget = allocate(
+        _series(200, 200, 3000, 3000, 3000, 3000),
+        [_spec(max_energy_wh=300.0, start_asap=True)],
+        STEP,
+    )["pool"]
+
+    assert budget.window_start == START + 2 * STEP
+    assert budget.window_end == START + 5 * STEP
+
+
+def test_asap_never_narrows_the_window_below_the_hours():
+    """A window one step short of the hours is answered by EMHASS declaring
+    the whole problem infeasible -- not this one load -- so the clamp rounds
+    the run up to whole timesteps and can only ever remove slack."""
+    for cap in (100.0, 300.0, 700.0, 1000.0, 5000.0):
+        budget = allocate(
+            _series(3000, 3000, 3000, 3000, 3000, 3000),
+            [_spec(max_energy_wh=cap, start_asap=True)],
+            STEP,
+        )["pool"]
+        span = (budget.window_end - budget.window_start).total_seconds() / 3600
+        # window_end carries one step of padding beyond the tight span.
+        assert span - STEP.total_seconds() / 3600 >= budget.hours, cap
+
+
+def test_asap_does_not_reach_past_the_end_of_the_block():
+    """The clamp only ever pulls the window in.
+
+    An energy cap generous enough to buy more hours than the sun has must
+    still stop at the last qualifying timestep, exactly as without the switch.
+    """
+    budget = allocate(
+        _series(3000, 3000, 0, 0, 0, 0, 0, 0),
+        [_spec(max_energy_wh=100_000.0, start_asap=True)],
+        STEP,
+    )["pool"]
+
+    assert budget.window_end == START + 3 * STEP
+
+
+def test_asap_on_an_empty_block_stays_empty():
+    budget = allocate(_series(100, 100), [_spec(start_asap=True)], STEP)["pool"]
+
+    assert budget.is_empty
+    assert budget.window_start is None
+    assert budget.window_end is None
+
+
 # --- nothing to give ----------------------------------------------------------
 
 
@@ -603,6 +701,43 @@ def test_a_surplus_load_reaches_the_payload_as_hours_and_a_window():
     assert payload["start_timesteps_of_each_deferrable_load"] == [4]
     assert payload["end_timesteps_of_each_deferrable_load"] == [21]
     assert not result.warnings
+
+
+def test_start_asap_reaches_the_payload_as_a_window_with_no_room_to_defer():
+    """The switch, end to end: 11:00-15:00 of sun, 2 kWh wanted into an 800 W
+    pool. That is 2.5 h of running with four hours of sun to put it in --
+    exactly the slack the switch exists to close."""
+    pool = _pool()
+    pool.energy_needed_kwh = 2.0
+    pool.start_asap = True
+    registry = _registry(pool)
+    registry.apply_surplus(_plan_with_surplus_between(11, 15), ["pool"], START, 15)
+
+    payload = _payload(registry.to_loads(START, 15), START).payload
+
+    # 2 kWh at 800 W is 2.5 h -- ten steps, starting at 11:00 (step 4). The
+    # window closes at step 15 rather than 21: eleven steps for a ten-step
+    # run, the one step being the padding window_end always carries against
+    # payload rounding. Everything else EMHASS had to defer with is gone.
+    assert payload["operating_timesteps_of_each_deferrable_load"] == [10]
+    assert payload["start_timesteps_of_each_deferrable_load"] == [4]
+    assert payload["end_timesteps_of_each_deferrable_load"] == [15]
+
+
+def test_without_start_asap_the_same_load_may_be_placed_anywhere_in_the_sun():
+    """The contrast the switch is for -- identical load, switch off."""
+    pool = _pool()
+    pool.energy_needed_kwh = 2.0
+    registry = _registry(pool)
+    registry.apply_surplus(_plan_with_surplus_between(11, 15), ["pool"], START, 15)
+
+    payload = _payload(registry.to_loads(START, 15), START).payload
+
+    assert payload["operating_timesteps_of_each_deferrable_load"] == [10]
+    assert payload["start_timesteps_of_each_deferrable_load"] == [4]
+    # Seven steps of slack for a ten-step run: EMHASS may start it any time
+    # between 11:00 and 12:45.
+    assert payload["end_timesteps_of_each_deferrable_load"] == [21]
 
 
 def test_a_dip_below_threshold_does_not_shrink_the_window_the_strong_slots_earned():

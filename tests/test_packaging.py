@@ -169,6 +169,7 @@ EXPECTED_ENTITY_KEYS = {
         "semi_continuous",
         "single_constant",
         "load_requested",
+        "start_asap",
     },
     "select": {"system_mode", "recurrence", "cost_fun"},
     "button": {"run_dayahead", "run_mpc", "run_forecast_fit", "run_now"},

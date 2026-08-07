@@ -416,6 +416,9 @@
       },
       "load_requested": {
         "name": "Begärd"
+      },
+      "start_asap": {
+        "name": "Starta så tidigt som möjligt"
       }
     },
     "select": {

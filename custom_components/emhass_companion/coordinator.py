@@ -680,6 +680,15 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         # before deferrable_loads() below reads completed_timesteps out of it.
         if self.data is not None:
             self.loads.assume_from_plan(self.data.plan, self.data.load_order, now)
+        # Every load, every cycle. Deliberately outside the branch above and
+        # not folded back into assume_from_plan: a request or forced run that
+        # has had what it asked for must clear itself whether or not there is a
+        # previous plan, and whether or not this load is one of the sourceless
+        # ones that plan could speak for. Ordered between the two calls because
+        # it reads the accumulator assume_from_plan just advanced, and writes
+        # the armed flag apply_surplus below reads back.
+        self.loads.check_auto_disarm(now)
+        if self.data is not None:
             # Re-derive each surplus load's hours and window from the spare PV
             # the previous plan predicted. Must run *after*
             # assume_from_plan (whose accumulator feeds the energy cap) and

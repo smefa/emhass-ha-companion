@@ -82,8 +82,14 @@ reference for the full detail.
 
 - **Requested** (switch) — arm a run. *On demand* and *On spare solar*
   loads only. Turning it off cancels a pending run.
+- **Start as early as possible** (switch) — take the spare solar as soon as
+  there is any, instead of letting the optimiser pick a moment later in the
+  day. *On spare solar* loads only. Off by default, and off is usually the
+  better setting — see **[Surplus loads](surplus_loads.md)**.
 - **Run now** (button) — force the load on right now, regardless of the
-  plan.
+  plan. Not available on *On spare solar* loads, where ignoring the plan
+  would mean running off the grid at night; use *Start as early as
+  possible* there instead.
 - **Next start** (sensor) — when it's next due to start.
 - **Running** (binary sensor) — whether it's actually observed running.
 - **Runtime today** (sensor) — how long it's run today.

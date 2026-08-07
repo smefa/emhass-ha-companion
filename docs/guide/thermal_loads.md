@@ -39,12 +39,12 @@ load*.
 ## Its own device page
 
 Every answer above becomes a setting on the load's device page, changeable
-any time. A thermal load also keeps the same **Enabled**, **Run now**, time
-window (**Earliest start** / **Latest finish** / **Restrict to a time
-window**), **Most starts per plan** and **Cost of starting** settings as an
-ordinary deferrable load — but has none of the run-time-target settings
-(*Hours needed per day*, *Must run in one unbroken block*, *Recurrence*,
-*Requested*), since its demand is the comfort band, not a number of hours.
+any time. A thermal load also keeps the same **Enabled**, time window
+(**Earliest start** / **Latest finish** / **Restrict to a time window**),
+**Most starts per plan** and **Cost of starting** settings as an ordinary
+deferrable load — but has none of the run-time-target ones (*Hours needed per
+day*, *Must run in one unbroken block*, *Recurrence*, *Requested*, *Run
+now*), since its demand is the comfort band, not a number of hours.
 
 It also gets one extra sensor:
 

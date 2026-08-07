@@ -30,7 +30,7 @@ you might change day to day becomes a control on the load's own page:
 | `time.<load>_earliest_start` / `_latest_finish` | The window. May cross midnight |
 | `number.<load>_power_when_running` / `_hours_needed_per_day` | |
 | `number.<load>_minimum_on_time` / `_minimum_off_time` | Protects compressor-driven loads from short-cycling — see below |
-| `button.<load>_run_now` | Run this load immediately, regardless of recurrence |
+| `button.<load>_run_now` | Run this load immediately, regardless of recurrence. Unavailable on a surplus load — see [surplus_loads.md](surplus_loads.md) |
 
 Two distinctions worth knowing, because conflating either causes confusion:
 
@@ -43,6 +43,12 @@ configured hours for the day are met, and there is deliberately no equivalent
 still running. To leave a load out of planning entirely, turn off its
 **Enabled** switch instead. Keeping these separate means pausing a load never
 silently changes the problem being solved.
+
+It is unavailable on a **surplus** load, where "regardless of the plan" would
+mean charging off the grid at midnight, and where the hours it clears itself
+against are structurally zero — so it could not disarm itself either. *Start
+as early as possible* is the equivalent there: it keeps the surplus gate and
+only gives up the optimiser's freedom to place the run later in the day.
 
 **A power sensor is optional but worth adding.** With one, the integration
 can tell EMHASS the load is already running — so it is not charged a
@@ -91,7 +97,10 @@ advice.
 ## Surplus loads
 
 A load that only ever wants energy which would otherwise leave the house —
-the motivating case is a pool heater. See [surplus_loads.md](surplus_loads.md).
+the motivating case is a pool heater. Armed with the same **Requested** switch
+as an on-demand load, plus `switch.<load>_start_asap` (*Start as early as
+possible*) to take the front of the sun rather than wherever in the day suits
+it best. See [surplus_loads.md](surplus_loads.md).
 
 ## Minimum on/off time
 

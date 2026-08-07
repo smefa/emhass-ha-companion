@@ -186,6 +186,11 @@ class DeferrableRuntime:
     # simply runs on whatever is spare until its request is turned off.
     surplus_headroom_w: float = DEFAULT_SURPLUS_HEADROOM_W
     energy_needed_kwh: float = 0.0
+    # Whether an armed run takes the front of the sunny stretch or is left for
+    # EMHASS to place anywhere inside it. Not a second way to arm the load --
+    # the request is still what decides *whether* it runs, this only decides
+    # *when* inside what the sun allows. See surplus.allocate.
+    start_asap: bool = False
     # Which surplus load claims a shared series first -- lower first, ties
     # broken by name (see DeferrableRegistry.apply_surplus). Meaningless with
     # only one surplus load.
@@ -848,6 +853,7 @@ class DeferrableRegistry:
                 semi_continuous=load.semi_continuous,
                 headroom_w=load.surplus_headroom_w,
                 max_energy_wh=load.remaining_energy_wh(now),
+                start_asap=load.start_asap,
             )
             # surplus_loads is already priority-ordered, above.
             for load in surplus_loads
@@ -914,6 +920,25 @@ class DeferrableRegistry:
             except ValueError:
                 continue
             load.assume_from_plan(plan.rows, index, now)
+
+    def check_auto_disarm(self, now: datetime) -> None:
+        """Clear every request and forced run that has had what it asked for.
+
+        Called once per run for *every* load, which is the whole point: this
+        used to ride along inside :meth:`assume_from_plan`, and so inherited
+        all three of its guards -- no previous plan, a load with a real
+        running_source, a load absent from that plan's load order -- none of
+        which has anything to do with whether a request is finished. The only
+        other caller is the source listener, and that one fires solely on an
+        observed running-to-stopped transition. Between them, a load that had
+        a power sensor and never actually ran could not disarm at all: a forced
+        run on it stayed armed indefinitely, with no way back to auto short of
+        restarting Home Assistant.
+
+        Safe to call unconditionally because the check is idempotent and only
+        ever clears -- a request short of its target is left exactly as it was.
+        """
+        for load in self._loads.values():
             if load.check_auto_disarm(now):
                 load.notify()
 
