@@ -472,6 +472,11 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
     payload.update(_hybrid_inverter_settings(inputs.hybrid_inverter))
     payload["maximum_power_from_grid"] = inputs.grid.import_max_w
     payload["maximum_power_to_grid"] = inputs.grid.export_max_w
+    # Demand charge on the horizon's peak import. Sent unconditionally rather
+    # than from _battery_settings: EMHASS prices it off the grid variable, so
+    # it must keep working for a plant with no battery at all, and that helper
+    # returns early when the battery is off.
+    payload["capacity_cost_per_kw"] = inputs.grid.capacity_cost_per_kw
 
     deferrable, load_order, deferrable_warnings = _deferrable_settings(inputs, step)
     payload.update(deferrable)
@@ -531,6 +536,21 @@ def _battery_settings(battery: BatteryConfig) -> dict[str, Any]:
         "battery_target_state_of_charge": battery.soc_target,
         "battery_charge_efficiency": battery.charge_efficiency,
         "battery_discharge_efficiency": battery.discharge_efficiency,
+        # Cycle cost per kWh of throughput, charged against the objective
+        # EMHASS maximises. Both default to 0.0 -- EMHASS's own default -- so
+        # an untouched config sends the same numbers it always did.
+        "weight_battery_discharge": battery.weight_battery_discharge,
+        "weight_battery_charge": battery.weight_battery_charge,
+        # Dwell penalties on the SOC level. EMHASS only builds each constraint
+        # when its cost and threshold are both above zero, so the thresholds
+        # ride along unconditionally and simply sit inert at cost 0.0.
+        "battery_soc_deficit_threshold": battery.soc_deficit_threshold,
+        "battery_soc_deficit_cost": battery.soc_deficit_cost,
+        "battery_soc_surplus_threshold": battery.soc_surplus_threshold,
+        "battery_soc_surplus_cost": battery.soc_surplus_cost,
+        # Quadratic C-rate penalty, gated the same way on stress_cost > 0.
+        "battery_stress_cost": battery.stress_cost,
+        "battery_stress_segments": battery.stress_segments,
     }
 
 

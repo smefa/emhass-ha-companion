@@ -436,6 +436,89 @@ def test_battery_enabled_sends_every_limit():
     assert payload["soc_final"] == 0.098
 
 
+def test_battery_cycle_costs_default_to_free_cycling():
+    """EMHASS's own default -- an untouched config must not start pricing wear."""
+    battery = BatteryConfig(enabled=True, capacity_wh=25600)
+    payload = build_payload(_inputs(battery=battery, soc_init=0.098)).payload
+    assert payload["weight_battery_discharge"] == 0.0
+    assert payload["weight_battery_charge"] == 0.0
+
+
+def test_battery_cycle_costs_ride_through_to_emhass():
+    battery = BatteryConfig(
+        enabled=True,
+        capacity_wh=25600,
+        weight_battery_discharge=0.06,
+        weight_battery_charge=0.01,
+    )
+    payload = build_payload(_inputs(battery=battery, soc_init=0.098)).payload
+    assert payload["weight_battery_discharge"] == 0.06
+    assert payload["weight_battery_charge"] == 0.01
+
+
+def test_battery_soc_and_stress_costs_default_to_emhass_own_values():
+    """Every one of these is off or inert at its default, so an existing config
+    entry must keep solving the identical problem after the upgrade."""
+    battery = BatteryConfig(enabled=True, capacity_wh=25600)
+    payload = build_payload(_inputs(battery=battery, soc_init=0.5)).payload
+    assert payload["battery_soc_deficit_threshold"] == 0.40
+    assert payload["battery_soc_deficit_cost"] == 0.0
+    assert payload["battery_soc_surplus_threshold"] == 0.90
+    assert payload["battery_soc_surplus_cost"] == 0.0
+    assert payload["battery_stress_cost"] == 0.0
+    assert payload["battery_stress_segments"] == 10
+
+
+def test_battery_soc_and_stress_costs_ride_through_to_emhass():
+    battery = BatteryConfig(
+        enabled=True,
+        capacity_wh=25600,
+        soc_deficit_threshold=0.30,
+        soc_deficit_cost=0.02,
+        soc_surplus_threshold=0.85,
+        soc_surplus_cost=0.03,
+        stress_cost=0.05,
+        stress_segments=16,
+    )
+    payload = build_payload(_inputs(battery=battery, soc_init=0.5)).payload
+    assert payload["battery_soc_deficit_threshold"] == 0.30
+    assert payload["battery_soc_deficit_cost"] == 0.02
+    assert payload["battery_soc_surplus_threshold"] == 0.85
+    assert payload["battery_soc_surplus_cost"] == 0.03
+    assert payload["battery_stress_cost"] == 0.05
+    assert payload["battery_stress_segments"] == 16
+
+
+def test_stress_segments_stays_an_int():
+    """EMHASS slices PWL segments with it, so a float would be a type error."""
+    battery = BatteryConfig(enabled=True, capacity_wh=25600, stress_cost=0.05)
+    payload = build_payload(_inputs(battery=battery, soc_init=0.5)).payload
+    assert isinstance(payload["battery_stress_segments"], int)
+
+
+def test_capacity_charge_is_sent_even_without_a_battery():
+    """It prices peak *grid* import, which deferrable loads can shave on their
+    own -- so it must not be gated behind set_use_battery the way the battery
+    cost knobs are."""
+    grid = GridConfig(capacity_cost_per_kw=45.0)
+    payload = build_payload(_inputs(grid=grid)).payload
+    assert payload["set_use_battery"] is False
+    assert payload["capacity_cost_per_kw"] == 45.0
+
+
+def test_capacity_charge_defaults_to_a_no_op():
+    payload = build_payload(_inputs()).payload
+    assert payload["capacity_cost_per_kw"] == 0.0
+
+
+def test_battery_cycle_costs_are_omitted_with_no_battery():
+    """Nothing battery-shaped is sent when the flag is off, these included."""
+    battery = BatteryConfig(enabled=False, weight_battery_discharge=0.06)
+    payload = build_payload(_inputs(battery=battery)).payload
+    assert "weight_battery_discharge" not in payload
+    assert "weight_battery_charge" not in payload
+
+
 def test_a_chosen_end_soc_replaces_the_pin_to_start():
     """terminal.decide_end_soc's target rides through as soc_final."""
     battery = BatteryConfig(enabled=True, capacity_wh=25600)

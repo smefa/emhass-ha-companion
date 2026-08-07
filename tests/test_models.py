@@ -6,7 +6,10 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from custom_components.emhass_companion.config_flow import _battery_storage_from_input
 from custom_components.emhass_companion.models import (
+    BatteryConfig,
+    GridConfig,
     HybridInverterConfig,
     LastRun,
     Plan,
@@ -81,6 +84,94 @@ def test_efficiency_is_kept_when_genuinely_set():
     )
     assert config.efficiency_dc_ac == 0.97
     assert config.efficiency_ac_dc == 0.98
+
+
+# --- BatteryConfig -------------------------------------------------------------
+
+
+def test_battery_cycle_costs_default_to_zero():
+    """A config entry stored before these fields existed must keep planning the
+    way it did, so the fallback has to be EMHASS's own default of no wear cost."""
+    config = BatteryConfig.from_dict({"use_battery": True, "capacity_wh": 25600})
+    assert config.weight_battery_discharge == 0.0
+    assert config.weight_battery_charge == 0.0
+
+
+def test_battery_cycle_costs_are_read_from_stored_options():
+    config = BatteryConfig.from_dict(
+        {
+            "use_battery": True,
+            "weight_battery_discharge": 0.06,
+            "weight_battery_charge": 0.01,
+        }
+    )
+    assert config.weight_battery_discharge == 0.06
+    assert config.weight_battery_charge == 0.01
+
+
+def test_battery_cycle_costs_survive_the_form_round_trip():
+    """The battery step stores its values verbatim except for the SOC percents,
+    so a cost typed into the form must come back out unscaled."""
+    stored = _battery_storage_from_input(
+        {
+            "use_battery": True,
+            "weight_battery_discharge": 0.06,
+            "weight_battery_charge": 0.01,
+            "soc_min": 10,
+        }
+    )
+    assert stored["weight_battery_discharge"] == 0.06
+    config = BatteryConfig.from_dict(stored)
+    assert config.weight_battery_discharge == 0.06
+    assert config.weight_battery_charge == 0.01
+    # The percent fields still convert; these two must not have been caught up in it.
+    assert config.soc_min == 0.10
+
+
+def test_battery_soc_and_stress_defaults_match_emhass():
+    config = BatteryConfig.from_dict({"use_battery": True})
+    assert config.soc_deficit_threshold == 0.40
+    assert config.soc_deficit_cost == 0.0
+    assert config.soc_surplus_threshold == 0.90
+    assert config.soc_surplus_cost == 0.0
+    assert config.stress_cost == 0.0
+    assert config.stress_segments == 10
+
+
+def test_stress_segments_is_coerced_to_int():
+    """A NumberSelector hands back a float, but EMHASS uses this as a count."""
+    config = BatteryConfig.from_dict({"use_battery": True, "battery_stress_segments": 16.0})
+    assert config.stress_segments == 16
+    assert isinstance(config.stress_segments, int)
+
+
+def test_soc_comfort_thresholds_convert_from_percent_on_the_form_path():
+    """They join soc_min/soc_max in _SOC_PERCENT_FIELDS, so a threshold typed as
+    30% has to reach EMHASS as 0.30 -- while the costs beside them do not scale."""
+    stored = _battery_storage_from_input(
+        {
+            "use_battery": True,
+            "battery_soc_deficit_threshold": 30,
+            "battery_soc_deficit_cost": 0.02,
+            "battery_soc_surplus_threshold": 85,
+            "battery_soc_surplus_cost": 0.03,
+        }
+    )
+    assert stored["battery_soc_deficit_threshold"] == 0.30
+    assert stored["battery_soc_surplus_threshold"] == 0.85
+    assert stored["battery_soc_deficit_cost"] == 0.02
+    config = BatteryConfig.from_dict(stored)
+    assert config.soc_deficit_threshold == 0.30
+    assert config.soc_surplus_threshold == 0.85
+    assert config.soc_surplus_cost == 0.03
+
+
+def test_grid_capacity_charge_defaults_to_zero():
+    assert GridConfig.from_dict({}).capacity_cost_per_kw == 0.0
+
+
+def test_grid_capacity_charge_is_read_from_stored_options():
+    assert GridConfig.from_dict({"capacity_cost_per_kw": 45.0}).capacity_cost_per_kw == 45.0
 
 
 def _series(*values: float, step_minutes: int = 30) -> Series:

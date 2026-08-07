@@ -88,8 +88,62 @@ the optimiser plans around PV, load and price alone.
 | Shared inverter (hybrid) | On if PV and the battery share one inverter's AC-side power limit — true for most home battery systems. Off if they are two independent inverters, each with its own limit |
 | Maximum AC output / input | Only asked if hybrid — the shared inverter's own throughput ceiling, separate from the battery's own charge/discharge limits |
 | DC to AC / AC to DC efficiency | Conversion losses, only asked if hybrid |
+| Discharge / charge cycle cost | What a kWh through the battery costs in wear. See below |
+| Low / high charge comfort level | Levels the plan prefers to stay between, softly. See below |
+| Cost of sitting below / above it | What that preference is worth, per kWh past the level per hour |
+| High-power stress cost | Discourages fast charge/discharge, growing with the square of the power. See below |
+| Stress cost detail | How finely that curve is approximated — 10 is a good balance |
 | Self-consumption handoff threshold | See below |
 | Live PV power sensor | Optional. See "Blending live PV/load into MPC" below |
+
+**Discharge cycle cost / charge cycle cost.** A battery that is worked hard
+wears out sooner, and a plan that only reads prices will happily cycle for a
+one-cent spread. These two put a number on that wear: a cost per kWh of
+throughput, in the same currency as your prices, charged against the profit the
+optimiser is trying to maximise. The plan then cycles only when the spread it
+is chasing clears the cost.
+
+Both default to **0** — EMHASS's own default, meaning cycle freely — so leaving
+them alone changes nothing. A rough starting point for the discharge cost is
+the battery's price divided by its warranted lifetime throughput, which usually
+lands somewhere around 0.02–0.10 per kWh.
+
+Set *one* of the two unless you know why you want both. The usual choice is the
+discharge cost, priced for the whole round trip; filling in the charge cost as
+well charges every stored kWh twice, which is a legitimate thing to want but
+rarely what people mean.
+
+**Charge comfort levels.** Two soft preferences about where the battery *sits*,
+as opposed to the cycle costs above, which price how much energy moves through
+it. Each is a threshold plus the price of being past it, charged per kWh beyond
+the level for every hour spent there:
+
+- **Low charge comfort level** / **cost of sitting below it** — nudges the plan
+  to keep a reserve instead of running near empty.
+- **High charge comfort level** / **cost of sitting above it** — sitting at
+  full charge ages a lithium battery faster, so this pushes the plan to fill
+  the battery late rather than early when the two cost the same.
+
+These are preferences, not limits. Minimum and maximum charge level are hard
+bounds the optimiser may never cross; these bend the plan and can always be
+overridden when the economics clearly justify it, which also means they can
+never make a plan infeasible.
+
+Both costs default to **0**, which is what keeps the pre-filled 40% and 90%
+thresholds inert — EMHASS only builds the constraint once the matching cost is
+above zero, so the thresholds alone change nothing.
+
+**High-power stress cost.** Discourages hammering the battery at full power.
+The cost grows with the *square* of the power, so running at half power costs a
+quarter as much, and the plan spreads a charge across several hours instead of
+forcing it all into the single cheapest one. Priced per kW at full power, per
+hour; **0** (the default) turns it off. It needs a non-zero charge or discharge
+power limit above to do anything.
+
+**Stress cost detail** is how finely EMHASS approximates that curve, in straight
+line segments. Higher tracks the true cost more closely but adds constraints to
+every optimisation; **10** is a good balance, and it only matters when the
+stress cost is set.
 
 **Self-consumption handoff threshold.** When the plan's grid power is within
 this many watts of zero, the battery is handed to the inverter's own
@@ -134,6 +188,17 @@ list, type any number of minutes.
 
 This is only the *resolution EMHASS plans at*. How often the plan is
 recalculated (below) is a separate setting.
+
+**Capacity (demand) charge**, also on this step, is for network tariffs that
+bill the highest power you draw rather than only the energy you use. Enter the
+price per kW and the plan starts flattening its single worst import peak —
+spreading deferrable loads apart and discharging the battery across the peak —
+instead of only chasing cheap hours. It is charged once on that peak, not per
+hour, so it is the one cost here that is not an energy price.
+
+This is a grid setting, not a battery one: peak shaving works through
+deferrable loads too, so it applies whether or not you have a battery. **0**
+(the default) turns it off entirely.
 
 **Curtail on negative price**, on the same step, is off by default. The plan's
 own PV-curtailment column already tells the executor when to curtail if

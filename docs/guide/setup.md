@@ -95,6 +95,26 @@ this screen is then ignored.
   (charge/import)** — only asked if hybrid; the shared inverter's own
   ceiling.
 - **DC to AC efficiency** / **AC to DC efficiency** — conversion losses.
+- **Discharge cycle cost** / **Charge cycle cost** — what a kWh through the
+  battery costs you in wear, in the same currency as your prices. The
+  optimiser charges it against the profit it's chasing, so the battery only
+  cycles when the price spread beats the wear. Both default to 0 (cycle
+  freely); around 0.02–0.10 per kWh on the discharge side is a reasonable
+  starting point. Set one of the two, not both — see
+  [Setup reference](../setup.md#battery).
+- **Low charge comfort level** / **Cost of sitting below it** — a soft
+  preference for keeping a reserve, priced per kWh below the level per hour
+  spent there. Unlike Minimum charge level this can be crossed when it's
+  clearly worth it.
+- **High charge comfort level** / **Cost of sitting above it** — the mirror
+  image: sitting full ages the battery, so this makes the plan fill it late
+  rather than early. Both costs default to 0, which leaves the pre-filled
+  40%/90% levels doing nothing.
+- **High-power stress cost** — discourages fast charge/discharge. The cost
+  grows with the square of the power, so the plan spreads a charge over
+  several hours rather than forcing it into the cheapest one. 0 by default.
+- **Stress cost detail** — how finely that curve is approximated. 10 is a good
+  balance; only matters if the stress cost is set.
 - **Minimum charge level** / **Maximum charge level** — the range the
   optimiser is allowed to plan within.
 - **Target charge level** — where it aims to leave the battery at the end of
@@ -110,6 +130,11 @@ this screen is then ignored.
 
 - **Maximum import power** / **Maximum export power** — your connection's
   limits, in W.
+- **Capacity (demand) charge** — only for network tariffs that bill your
+  highest power draw, not just your energy. Enter the price per kW and the
+  plan flattens its worst import peak instead of only chasing cheap hours.
+  Charged once on the peak, not per hour. 0 by default, and it works with or
+  without a battery.
 - **curtail_on_negative_price** — off by default. Turn on to also curtail
   solar whenever the sell price goes negative and the battery is full.
 - **Time resolution (minutes)** — how finely the plan is divided. Filled in

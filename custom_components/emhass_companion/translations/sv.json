@@ -99,6 +99,14 @@
           "inverter_ac_input_max_w": "Maximal AC-ineffekt (laddning/import)",
           "inverter_efficiency_dc_ac": "Verkningsgrad DC till AC",
           "inverter_efficiency_ac_dc": "Verkningsgrad AC till DC",
+          "weight_battery_discharge": "Cykelkostnad urladdning",
+          "weight_battery_charge": "Cykelkostnad laddning",
+          "battery_soc_deficit_threshold": "Bekväm lägsta laddningsnivå",
+          "battery_soc_deficit_cost": "Kostnad för att ligga under den",
+          "battery_soc_surplus_threshold": "Bekväm högsta laddningsnivå",
+          "battery_soc_surplus_cost": "Kostnad för att ligga över den",
+          "battery_stress_cost": "Kostnad för hög effekt",
+          "battery_stress_segments": "Detaljnivå för effektkostnaden",
           "soc_min": "Lägsta laddningsnivå",
           "soc_max": "Högsta laddningsnivå",
           "soc_target": "Önskad laddningsnivå",
@@ -114,7 +122,15 @@
           "self_consume_threshold_w": "När planens näteffekt ligger inom detta antal watt från noll lämnas batteriet till växelriktarens egen egenanvändningsläge istället för planens tvingade laddning/urladdning -- även en stor planerad laddning eller urladdning åsidosätts, eftersom egenanvändning följer verklig sol- och lastdata bättre än en prognos vid små obalanser. När läget väl har lämnats över måste näteffekten överstiga dubbla detta värde innan planen kan tvinga batteriet igen, så att läget inte växlar fram och tillbaka vid varje omräkning. Inte samma sak som laddningsnivåerna ovan, som bara begränsar vad optimeringen får planera mellan.",
           "soc_entity": "Läses vid varje körning så att planen utgår från verkligheten.",
           "pv_entity": "Valfritt. Blandas in i det första steget av varje MPC-prognos, viktat av reglaget \"Live-värdets vikt\". Last blandas in på samma sätt automatiskt, med sensorn vald under Husets förbrukning > Sensor för husets last -- ingen separat sensor behövs där.",
-          "end_soc_mode": "Hur batterinivån som planen siktar på vid horisontens slut väljs. \"Optimerad\" beräknas varje körning ur sol-, pris- och lastprognoserna bortom horisonten; \"Samma som start\" planerar alltid tillbaka till nuvarande nivå; \"Fast %-reglage\" siktar alltid på önskad laddningsnivå ovan. Kräver EMHASS 0.18 eller nyare."
+          "end_soc_mode": "Hur batterinivån som planen siktar på vid horisontens slut väljs. \"Optimerad\" beräknas varje körning ur sol-, pris- och lastprognoserna bortom horisonten; \"Samma som start\" planerar alltid tillbaka till nuvarande nivå; \"Fast %-reglage\" siktar alltid på önskad laddningsnivå ovan. Kräver EMHASS 0.18 eller nyare.",
+          "weight_battery_discharge": "Vad en kWh ur batteriet kostar dig i slitage, i samma valuta som dina priser. Optimeringen lägger på den vid varje urladdning, så batteriet töms bara när prisskillnaden den jagar överstiger kostnaden. 0 betyder cykla fritt; en grov utgångspunkt är batteriets pris delat med dess garanterade livstidsgenomströmning, ofta 0,02-0,10 per kWh.",
+          "weight_battery_charge": "Samma kostnad tillämpad på en kWh in i batteriet. Lämna på 0 om du redan räknat in hela tur-och-retur-förlusten i urladdningskostnaden ovan -- sätter du båda debiteras varje lagrad kWh två gånger.",
+          "battery_soc_deficit_threshold": "Nivån under vilken batteriet debiteras en hållkostnad, om en sådan är satt nedan. Till skillnad från Lägsta laddningsnivå är detta en önskan, inte en gräns -- planen får gå under när det klart lönar sig.",
+          "battery_soc_deficit_cost": "Debiteras per kWh under den bekväma nivån, per timme där, i din prisvaluta. Får planen att hålla en reserv i stället för att ligga nära tomt. 0 stänger av detta, vilket är standard.",
+          "battery_soc_surplus_threshold": "Nivån över vilken batteriet debiteras en hållkostnad, om en sådan är satt nedan. Att stå fulladdat åldrar ett litiumbatteri snabbare, så detta motverkar att det parkeras där i timmar.",
+          "battery_soc_surplus_cost": "Debiteras per kWh över den bekväma nivån, per timme där. Använd det för att få planen att fylla batteriet sent i stället för tidigt när båda kostar lika mycket. 0 stänger av detta, vilket är standard.",
+          "battery_stress_cost": "Motverkar snabb laddning och urladdning. Kostnaden växer med effekten i kvadrat, så halv effekt kostar en fjärdedel, och planen sprider en laddning över flera timmar i stället för att pressa in den i den billigaste. Prissatt per kW vid full effekt, per timme. 0 stänger av detta, vilket är standard.",
+          "battery_stress_segments": "Hur fint den kurvan approximeras. Högre följer den verkliga kostnaden närmare men gör varje optimering något långsammare; 10 är en bra avvägning och spelar bara roll när kostnaden ovan är satt."
         }
       },
       "grid": {
@@ -123,6 +139,7 @@
         "data": {
           "grid_import_max_w": "Maximal effekt från nätet",
           "grid_export_max_w": "Maximal effekt till nätet",
+          "capacity_cost_per_kw": "Effektavgift (kapacitetsavgift)",
           "curtail_on_negative_price": "Begränsa export vid negativt pris",
           "optimization_time_step": "Tidsupplösning (minuter)",
           "mpc_interval_minutes": "Räkna om var",
@@ -132,7 +149,8 @@
         "data_description": {
           "curtail_on_negative_price": "Får bara effekt tillsammans med en växelriktarprofil som stödjer exportbegränsning. Begränsar exporten till noll närhelst säljpriset är negativt och batteriet saknar utrymme att ta hand om överskottet istället. Avstängt som standard, eftersom EMHASS egen exportbegränsning redan tar hänsyn till detta när den är aktiverad.",
           "optimization_time_step": "Den tidsupplösning EMHASS planerar med. Matchar du din priskällas egen upplösning (till exempel 15 minuter för dagens Nord Pool-priser) fångas mest detalj; en grövre upplösning löser snabbare. Välj i listan eller skriv valfritt antal minuter.",
-          "dayahead_fallback_time": "En fullständig dygnsplan byggs normalt om automatiskt så snart nya priser kommer. Den här tiden används bara som reserv om det aldrig sker."
+          "dayahead_fallback_time": "En fullständig dygnsplan byggs normalt om automatiskt så snart nya priser kommer. Den här tiden används bara som reserv om det aldrig sker.",
+          "capacity_cost_per_kw": "Om ditt nätavtal debiterar den högsta effekt du tar ut, inte bara energin, ange det priset per kW här. Planen jämnar då ut sin värsta importtopp -- sprider ut laster och laddar ur batteriet över den -- i stället för att bara jaga billiga timmar. Debiteras en gång på toppen, inte per timme. 0 stänger av detta, vilket är standard."
         }
       }
     },
@@ -205,6 +223,14 @@
           "inverter_ac_input_max_w": "Maximal AC-ineffekt (laddning/import)",
           "inverter_efficiency_dc_ac": "Verkningsgrad DC till AC",
           "inverter_efficiency_ac_dc": "Verkningsgrad AC till DC",
+          "weight_battery_discharge": "Cykelkostnad urladdning",
+          "weight_battery_charge": "Cykelkostnad laddning",
+          "battery_soc_deficit_threshold": "Bekväm lägsta laddningsnivå",
+          "battery_soc_deficit_cost": "Kostnad för att ligga under den",
+          "battery_soc_surplus_threshold": "Bekväm högsta laddningsnivå",
+          "battery_soc_surplus_cost": "Kostnad för att ligga över den",
+          "battery_stress_cost": "Kostnad för hög effekt",
+          "battery_stress_segments": "Detaljnivå för effektkostnaden",
           "soc_min": "Lägsta laddningsnivå",
           "soc_max": "Högsta laddningsnivå",
           "soc_target": "Önskad laddningsnivå",
@@ -218,7 +244,15 @@
           "self_consume_threshold_w": "När planens näteffekt ligger inom detta antal watt från noll lämnas batteriet till växelriktarens egen egenanvändningsläge istället för planens tvingade laddning/urladdning -- även en stor planerad laddning eller urladdning åsidosätts, eftersom egenanvändning följer verklig sol- och lastdata bättre än en prognos vid små obalanser. När läget väl har lämnats över måste näteffekten överstiga dubbla detta värde innan planen kan tvinga batteriet igen, så att läget inte växlar fram och tillbaka vid varje omräkning. Inte samma sak som laddningsnivåerna ovan, som bara begränsar vad optimeringen får planera mellan.",
           "pv_entity": "Valfritt. Blandas in i det första steget av varje MPC-prognos, viktat av reglaget \"Live-värdets vikt\". Last blandas in på samma sätt automatiskt, med sensorn vald under Husets förbrukning > Sensor för husets last -- ingen separat sensor behövs där.",
           "soc_target": "Där optimeringen siktar på att lämna batteriet vid horisontens slut. Med slutladdningsnivå \"Optimerad\" är detta i stället reservgolvet som det beräknade målet aldrig planerar under; med \"Fast %-reglage\" är detta exakt den nivå den siktar på.",
-          "end_soc_mode": "Hur batterinivån som planen siktar på vid horisontens slut väljs. \"Optimerad\" beräknas varje körning ur sol-, pris- och lastprognoserna bortom horisonten; \"Samma som start\" planerar alltid tillbaka till nuvarande nivå; \"Fast %-reglage\" siktar alltid på önskad laddningsnivå ovan. Kräver EMHASS 0.18 eller nyare."
+          "end_soc_mode": "Hur batterinivån som planen siktar på vid horisontens slut väljs. \"Optimerad\" beräknas varje körning ur sol-, pris- och lastprognoserna bortom horisonten; \"Samma som start\" planerar alltid tillbaka till nuvarande nivå; \"Fast %-reglage\" siktar alltid på önskad laddningsnivå ovan. Kräver EMHASS 0.18 eller nyare.",
+          "weight_battery_discharge": "Vad en kWh ur batteriet kostar dig i slitage, i samma valuta som dina priser. Optimeringen lägger på den vid varje urladdning, så batteriet töms bara när prisskillnaden den jagar överstiger kostnaden. 0 betyder cykla fritt; en grov utgångspunkt är batteriets pris delat med dess garanterade livstidsgenomströmning, ofta 0,02-0,10 per kWh.",
+          "weight_battery_charge": "Samma kostnad tillämpad på en kWh in i batteriet. Lämna på 0 om du redan räknat in hela tur-och-retur-förlusten i urladdningskostnaden ovan -- sätter du båda debiteras varje lagrad kWh två gånger.",
+          "battery_soc_deficit_threshold": "Nivån under vilken batteriet debiteras en hållkostnad, om en sådan är satt nedan. Till skillnad från Lägsta laddningsnivå är detta en önskan, inte en gräns -- planen får gå under när det klart lönar sig.",
+          "battery_soc_deficit_cost": "Debiteras per kWh under den bekväma nivån, per timme där, i din prisvaluta. Får planen att hålla en reserv i stället för att ligga nära tomt. 0 stänger av detta, vilket är standard.",
+          "battery_soc_surplus_threshold": "Nivån över vilken batteriet debiteras en hållkostnad, om en sådan är satt nedan. Att stå fulladdat åldrar ett litiumbatteri snabbare, så detta motverkar att det parkeras där i timmar.",
+          "battery_soc_surplus_cost": "Debiteras per kWh över den bekväma nivån, per timme där. Använd det för att få planen att fylla batteriet sent i stället för tidigt när båda kostar lika mycket. 0 stänger av detta, vilket är standard.",
+          "battery_stress_cost": "Motverkar snabb laddning och urladdning. Kostnaden växer med effekten i kvadrat, så halv effekt kostar en fjärdedel, och planen sprider en laddning över flera timmar i stället för att pressa in den i den billigaste. Prissatt per kW vid full effekt, per timme. 0 stänger av detta, vilket är standard.",
+          "battery_stress_segments": "Hur fint den kurvan approximeras. Högre följer den verkliga kostnaden närmare men gör varje optimering något långsammare; 10 är en bra avvägning och spelar bara roll när kostnaden ovan är satt."
         }
       },
       "grid": {
@@ -226,6 +260,7 @@
         "data": {
           "grid_import_max_w": "Maximal effekt från nätet",
           "grid_export_max_w": "Maximal effekt till nätet",
+          "capacity_cost_per_kw": "Effektavgift (kapacitetsavgift)",
           "curtail_on_negative_price": "Begränsa export vid negativt pris",
           "optimization_time_step": "Tidsupplösning (minuter)",
           "mpc_interval_minutes": "Räkna om var",
@@ -233,7 +268,8 @@
           "dayahead_fallback_time": "Reservtid för dygnsplanering"
         },
         "data_description": {
-          "curtail_on_negative_price": "Får bara effekt tillsammans med en växelriktarprofil som stödjer exportbegränsning. Begränsar exporten till noll närhelst säljpriset är negativt och batteriet saknar utrymme att ta hand om överskottet istället. Avstängt som standard, eftersom EMHASS egen exportbegränsning redan tar hänsyn till detta när den är aktiverad."
+          "curtail_on_negative_price": "Får bara effekt tillsammans med en växelriktarprofil som stödjer exportbegränsning. Begränsar exporten till noll närhelst säljpriset är negativt och batteriet saknar utrymme att ta hand om överskottet istället. Avstängt som standard, eftersom EMHASS egen exportbegränsning redan tar hänsyn till detta när den är aktiverad.",
+          "capacity_cost_per_kw": "Om ditt nätavtal debiterar den högsta effekt du tar ut, inte bara energin, ange det priset per kW här. Planen jämnar då ut sin värsta importtopp -- sprider ut laster och laddar ur batteriet över den -- i stället för att bara jaga billiga timmar. Debiteras en gång på toppen, inte per timme. 0 stänger av detta, vilket är standard."
         }
       },
       "tariff": {

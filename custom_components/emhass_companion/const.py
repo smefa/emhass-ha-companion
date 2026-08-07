@@ -115,6 +115,31 @@ CONF_SOC_MAX: Final = "soc_max"
 CONF_SOC_TARGET: Final = "soc_target"
 CONF_CHARGE_EFFICIENCY: Final = "charge_efficiency"
 CONF_DISCHARGE_EFFICIENCY: Final = "discharge_efficiency"
+# Cycle-cost penalties, sent as EMHASS's `weight_battery_discharge` /
+# `weight_battery_charge`. Currency per kWh of battery throughput, in the same
+# currency as the tariff prices: EMHASS subtracts weight * energy from the
+# objective it maximises, so they buy back the wear a purely price-driven plan
+# would ignore. Zero (EMHASS's own default) means cycle freely.
+CONF_WEIGHT_BATTERY_DISCHARGE: Final = "weight_battery_discharge"
+CONF_WEIGHT_BATTERY_CHARGE: Final = "weight_battery_charge"
+# Dwell penalties on the *level* rather than the throughput. EMHASS charges
+# cost * (kWh past the threshold) * hours held there, so unlike soc_min/soc_max
+# -- which are hard planning bounds -- these bend the plan without ever making
+# it infeasible. Deficit discourages sitting low (keeps a reserve), surplus
+# discourages sitting full (calendar ageing). A cost of zero disables its half
+# outright: EMHASS skips building the constraint unless cost and threshold are
+# both above zero.
+CONF_BATTERY_SOC_DEFICIT_THRESHOLD: Final = "battery_soc_deficit_threshold"
+CONF_BATTERY_SOC_DEFICIT_COST: Final = "battery_soc_deficit_cost"
+CONF_BATTERY_SOC_SURPLUS_THRESHOLD: Final = "battery_soc_surplus_threshold"
+CONF_BATTERY_SOC_SURPLUS_COST: Final = "battery_soc_surplus_cost"
+# C-rate penalty: a quadratic cost on battery power magnitude, so half power
+# costs a quarter as much and the plan spreads a charge out rather than
+# slamming it into the cheapest hour. `segments` is the piecewise-linear
+# discretisation of that curve -- a solver knob, not a battery property, and
+# EMHASS gates the whole thing on stress_cost > 0 and a non-zero power limit.
+CONF_BATTERY_STRESS_COST: Final = "battery_stress_cost"
+CONF_BATTERY_STRESS_SEGMENTS: Final = "battery_stress_segments"
 # How the end-of-horizon SOC target (EMHASS's `soc_final`) is chosen. Optimized
 # computes it each run from the forecast tails past the horizon (terminal.py);
 # same_as_start pins it to the live SOC (the pre-0.9 behaviour); fixed_50
@@ -138,6 +163,12 @@ CONF_INVERTER_EFFICIENCY_AC_DC: Final = "inverter_efficiency_ac_dc"
 
 CONF_GRID_IMPORT_MAX: Final = "grid_import_max_w"
 CONF_GRID_EXPORT_MAX: Final = "grid_export_max_w"
+# Demand (capacity) charge on the single highest import power over the horizon,
+# in currency per kW. A grid setting, not a battery one: EMHASS prices it off
+# `peak_import`, which exists whether or not a battery does -- deferrable loads
+# can shave a peak on their own. Kept out of _battery_settings for exactly that
+# reason, since that helper returns early when the battery is switched off.
+CONF_CAPACITY_COST_PER_KW: Final = "capacity_cost_per_kw"
 
 CONF_SOC_ENTITY: Final = "soc_entity"
 CONF_LOAD_ENTITY: Final = "load_entity"
@@ -256,11 +287,30 @@ DEFAULT_SOC_TARGET: Final = 0.50
 DEFAULT_END_SOC_MODE: Final = END_SOC_OPTIMIZED
 DEFAULT_CHARGE_EFFICIENCY: Final = 0.95
 DEFAULT_DISCHARGE_EFFICIENCY: Final = 0.95
+# EMHASS's own defaults: no cycle cost, so the plan plays the price spread for
+# any profit at all. Left at zero the payload is byte-identical to before.
+DEFAULT_WEIGHT_BATTERY_DISCHARGE: Final = 0.0
+DEFAULT_WEIGHT_BATTERY_CHARGE: Final = 0.0
+# All EMHASS's own defaults. The thresholds are non-zero but inert on their
+# own -- each pair only builds a constraint once its cost is set above zero --
+# so the shipped values simply pre-fill sensible bands rather than change any
+# plan. Stored as 0-1 fractions, like every other SOC field.
+DEFAULT_BATTERY_SOC_DEFICIT_THRESHOLD: Final = 0.40
+DEFAULT_BATTERY_SOC_DEFICIT_COST: Final = 0.0
+DEFAULT_BATTERY_SOC_SURPLUS_THRESHOLD: Final = 0.90
+DEFAULT_BATTERY_SOC_SURPLUS_COST: Final = 0.0
+DEFAULT_BATTERY_STRESS_COST: Final = 0.0
+# 10 piecewise-linear pieces per quadratic curve. More tracks the curve closer
+# at the cost of two extra solver constraints each; EMHASS's own default.
+DEFAULT_BATTERY_STRESS_SEGMENTS: Final = 10
 # EMHASS's own default for both AC/DC conversion directions -- no assumed loss
 # unless the user knows one and states it.
 DEFAULT_INVERTER_EFFICIENCY: Final = 1.0
 DEFAULT_GRID_IMPORT_MAX: Final = 9000
 DEFAULT_GRID_EXPORT_MAX: Final = 9000
+# Zero is a true no-op in EMHASS: the peak_import variable is only created when
+# this is above zero, so an untouched config solves exactly the same problem.
+DEFAULT_CAPACITY_COST_PER_KW: Final = 0.0
 
 # Executor
 DEFAULT_POWER_DEADBAND_W: Final = 100

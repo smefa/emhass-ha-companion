@@ -15,12 +15,28 @@ import math
 from typing import Any, Self
 
 from .const import (
+    CONF_BATTERY_SOC_DEFICIT_COST,
+    CONF_BATTERY_SOC_DEFICIT_THRESHOLD,
+    CONF_BATTERY_SOC_SURPLUS_COST,
+    CONF_BATTERY_SOC_SURPLUS_THRESHOLD,
+    CONF_BATTERY_STRESS_COST,
+    CONF_BATTERY_STRESS_SEGMENTS,
+    CONF_CAPACITY_COST_PER_KW,
     CONF_END_SOC_MODE,
     CONF_HYBRID_INVERTER,
     CONF_INVERTER_AC_INPUT_MAX,
     CONF_INVERTER_AC_OUTPUT_MAX,
     CONF_INVERTER_EFFICIENCY_AC_DC,
     CONF_INVERTER_EFFICIENCY_DC_AC,
+    CONF_WEIGHT_BATTERY_CHARGE,
+    CONF_WEIGHT_BATTERY_DISCHARGE,
+    DEFAULT_BATTERY_SOC_DEFICIT_COST,
+    DEFAULT_BATTERY_SOC_DEFICIT_THRESHOLD,
+    DEFAULT_BATTERY_SOC_SURPLUS_COST,
+    DEFAULT_BATTERY_SOC_SURPLUS_THRESHOLD,
+    DEFAULT_BATTERY_STRESS_COST,
+    DEFAULT_BATTERY_STRESS_SEGMENTS,
+    DEFAULT_CAPACITY_COST_PER_KW,
     DEFAULT_CHARGE_EFFICIENCY,
     DEFAULT_CURTAIL_ON_NEGATIVE_PRICE,
     DEFAULT_DISCHARGE_EFFICIENCY,
@@ -32,6 +48,8 @@ from .const import (
     DEFAULT_SOC_MAX,
     DEFAULT_SOC_MIN,
     DEFAULT_SOC_TARGET,
+    DEFAULT_WEIGHT_BATTERY_CHARGE,
+    DEFAULT_WEIGHT_BATTERY_DISCHARGE,
 )
 from .thermal import ThermalConfig
 
@@ -268,6 +286,22 @@ class BatteryConfig:
     target never plans below."""
     charge_efficiency: float = DEFAULT_CHARGE_EFFICIENCY
     discharge_efficiency: float = DEFAULT_DISCHARGE_EFFICIENCY
+    weight_battery_discharge: float = DEFAULT_WEIGHT_BATTERY_DISCHARGE
+    weight_battery_charge: float = DEFAULT_WEIGHT_BATTERY_CHARGE
+    """Cycle cost per kWh of throughput, in the tariff's own currency. Charged
+    against the objective EMHASS maximises, so a plan only cycles when the
+    price spread it is chasing clears the wear. Zero cycles freely."""
+    soc_deficit_threshold: float = DEFAULT_BATTERY_SOC_DEFICIT_THRESHOLD
+    soc_deficit_cost: float = DEFAULT_BATTERY_SOC_DEFICIT_COST
+    soc_surplus_threshold: float = DEFAULT_BATTERY_SOC_SURPLUS_THRESHOLD
+    soc_surplus_cost: float = DEFAULT_BATTERY_SOC_SURPLUS_COST
+    """Dwell costs, per kWh past a threshold per hour held there -- a soft
+    preference for the middle of the range, unlike the hard soc_min/soc_max
+    bounds. Each half stays inert until its own cost goes above zero."""
+    stress_cost: float = DEFAULT_BATTERY_STRESS_COST
+    stress_segments: int = DEFAULT_BATTERY_STRESS_SEGMENTS
+    """Quadratic penalty on charge/discharge power, and the piecewise-linear
+    segment count EMHASS approximates that curve with."""
     self_consume_threshold_w: float = DEFAULT_SELF_CONSUME_THRESHOLD_W
     """Below this |P_grid|, the plan wants no grid exchange at all -- hand the
     battery to the inverter's own self-consumption mode instead of forcing it.
@@ -289,6 +323,31 @@ class BatteryConfig:
             discharge_efficiency=float(
                 data.get("discharge_efficiency", DEFAULT_DISCHARGE_EFFICIENCY)
             ),
+            weight_battery_discharge=float(
+                data.get(CONF_WEIGHT_BATTERY_DISCHARGE, DEFAULT_WEIGHT_BATTERY_DISCHARGE)
+            ),
+            weight_battery_charge=float(
+                data.get(CONF_WEIGHT_BATTERY_CHARGE, DEFAULT_WEIGHT_BATTERY_CHARGE)
+            ),
+            soc_deficit_threshold=float(
+                data.get(CONF_BATTERY_SOC_DEFICIT_THRESHOLD, DEFAULT_BATTERY_SOC_DEFICIT_THRESHOLD)
+            ),
+            soc_deficit_cost=float(
+                data.get(CONF_BATTERY_SOC_DEFICIT_COST, DEFAULT_BATTERY_SOC_DEFICIT_COST)
+            ),
+            soc_surplus_threshold=float(
+                data.get(CONF_BATTERY_SOC_SURPLUS_THRESHOLD, DEFAULT_BATTERY_SOC_SURPLUS_THRESHOLD)
+            ),
+            soc_surplus_cost=float(
+                data.get(CONF_BATTERY_SOC_SURPLUS_COST, DEFAULT_BATTERY_SOC_SURPLUS_COST)
+            ),
+            stress_cost=float(data.get(CONF_BATTERY_STRESS_COST, DEFAULT_BATTERY_STRESS_COST)),
+            # Segment count is a solver knob, so it must reach EMHASS as an int
+            # -- a float here would be a type error on a config entry that
+            # round-tripped through a NumberSelector.
+            stress_segments=int(
+                data.get(CONF_BATTERY_STRESS_SEGMENTS, DEFAULT_BATTERY_STRESS_SEGMENTS)
+            ),
             self_consume_threshold_w=float(
                 data.get("self_consume_threshold_w", DEFAULT_SELF_CONSUME_THRESHOLD_W)
             ),
@@ -301,6 +360,10 @@ class GridConfig:
 
     import_max_w: float = DEFAULT_GRID_IMPORT_MAX
     export_max_w: float = DEFAULT_GRID_EXPORT_MAX
+    capacity_cost_per_kw: float = DEFAULT_CAPACITY_COST_PER_KW
+    """Demand charge on the highest import power over the horizon, per kW. A
+    grid setting rather than a battery one -- deferrable loads shave a peak
+    with no battery involved. Zero is a genuine no-op inside EMHASS."""
     curtail_on_negative_price: bool = DEFAULT_CURTAIL_ON_NEGATIVE_PRICE
     """Curtail to zero export whenever the plan's sell price is negative and the
     battery has no headroom left to absorb the surplus instead. Off by default:
@@ -313,6 +376,9 @@ class GridConfig:
         return cls(
             import_max_w=float(data.get("grid_import_max_w", DEFAULT_GRID_IMPORT_MAX)),
             export_max_w=float(data.get("grid_export_max_w", DEFAULT_GRID_EXPORT_MAX)),
+            capacity_cost_per_kw=float(
+                data.get(CONF_CAPACITY_COST_PER_KW, DEFAULT_CAPACITY_COST_PER_KW)
+            ),
             curtail_on_negative_price=bool(
                 data.get("curtail_on_negative_price", DEFAULT_CURTAIL_ON_NEGATIVE_PRICE)
             ),

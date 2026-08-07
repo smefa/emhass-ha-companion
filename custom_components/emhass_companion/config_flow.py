@@ -28,6 +28,13 @@ import voluptuous as vol
 from .api import EmhassClient, EmhassError
 from .const import (
     CONF_ADDER,
+    CONF_BATTERY_SOC_DEFICIT_COST,
+    CONF_BATTERY_SOC_DEFICIT_THRESHOLD,
+    CONF_BATTERY_SOC_SURPLUS_COST,
+    CONF_BATTERY_SOC_SURPLUS_THRESHOLD,
+    CONF_BATTERY_STRESS_COST,
+    CONF_BATTERY_STRESS_SEGMENTS,
+    CONF_CAPACITY_COST_PER_KW,
     CONF_COMFORT_END,
     CONF_COMFORT_START,
     CONF_COMFORT_TEMPERATURE,
@@ -83,6 +90,15 @@ from .const import (
     CONF_THERMAL_INERTIA,
     CONF_TIME_STEP,
     CONF_URL,
+    CONF_WEIGHT_BATTERY_CHARGE,
+    CONF_WEIGHT_BATTERY_DISCHARGE,
+    DEFAULT_BATTERY_SOC_DEFICIT_COST,
+    DEFAULT_BATTERY_SOC_DEFICIT_THRESHOLD,
+    DEFAULT_BATTERY_SOC_SURPLUS_COST,
+    DEFAULT_BATTERY_SOC_SURPLUS_THRESHOLD,
+    DEFAULT_BATTERY_STRESS_COST,
+    DEFAULT_BATTERY_STRESS_SEGMENTS,
+    DEFAULT_CAPACITY_COST_PER_KW,
     DEFAULT_CURTAIL_ON_NEGATIVE_PRICE,
     DEFAULT_DAYAHEAD_FALLBACK_TIME,
     DEFAULT_END_SOC_MODE,
@@ -99,6 +115,8 @@ from .const import (
     DEFAULT_SURPLUS_PRIORITY,
     DEFAULT_TIME_STEP,
     DEFAULT_URL,
+    DEFAULT_WEIGHT_BATTERY_CHARGE,
+    DEFAULT_WEIGHT_BATTERY_DISCHARGE,
     DOMAIN,
     END_SOC_MODES,
     LOAD_PROFILE_CREATE_SENTINEL,
@@ -1296,7 +1314,15 @@ class LoadGroupSubentryFlow(ConfigSubentryFlow):
         )
 
 
-_SOC_PERCENT_FIELDS = ("soc_min", "soc_max", "soc_target")
+_SOC_PERCENT_FIELDS = (
+    "soc_min",
+    "soc_max",
+    "soc_target",
+    # EMHASS wants these as 0-1 fractions too, so they convert on the same path
+    # as the sliders above rather than being stored in the form's own percent.
+    CONF_BATTERY_SOC_DEFICIT_THRESHOLD,
+    CONF_BATTERY_SOC_SURPLUS_THRESHOLD,
+)
 
 
 def _battery_storage_from_input(user_input: dict[str, Any]) -> dict[str, Any]:
@@ -1372,6 +1398,85 @@ def battery_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
             default=defaults.get(CONF_INVERTER_EFFICIENCY_AC_DC, DEFAULT_INVERTER_EFFICIENCY),
         ): selector.NumberSelector(
             selector.NumberSelectorConfig(min=0.5, max=1.0, step=0.01, mode="slider")
+        ),
+        # Cycle cost per kWh of throughput, in the tariff's own currency.
+        # Both default to 0.0 (EMHASS's default): no wear cost, so the plan
+        # chases any price spread at all. A box rather than a slider -- the
+        # useful range is a few cents wide and varies with battery chemistry
+        # and the local price spread, so there is no sensible slider scale.
+        vol.Optional(
+            CONF_WEIGHT_BATTERY_DISCHARGE,
+            default=defaults.get(CONF_WEIGHT_BATTERY_DISCHARGE, DEFAULT_WEIGHT_BATTERY_DISCHARGE),
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(min=0, max=10, step=0.001, mode="box")
+        ),
+        vol.Optional(
+            CONF_WEIGHT_BATTERY_CHARGE,
+            default=defaults.get(CONF_WEIGHT_BATTERY_CHARGE, DEFAULT_WEIGHT_BATTERY_CHARGE),
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(min=0, max=10, step=0.001, mode="box")
+        ),
+        # Dwell costs on the SOC level, each paired with the threshold it is
+        # measured from. Thresholds are sliders in percent like soc_min/soc_max
+        # (converted by _battery_storage_from_input); the costs are boxes, on
+        # the same reasoning as the cycle costs above. Both costs default to 0,
+        # which is what keeps the pre-filled thresholds inert.
+        vol.Optional(
+            CONF_BATTERY_SOC_DEFICIT_THRESHOLD,
+            default=round(
+                defaults.get(
+                    CONF_BATTERY_SOC_DEFICIT_THRESHOLD, DEFAULT_BATTERY_SOC_DEFICIT_THRESHOLD
+                )
+                * 100
+            ),
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0, max=100, step=1, unit_of_measurement="%", mode="slider"
+            )
+        ),
+        vol.Optional(
+            CONF_BATTERY_SOC_DEFICIT_COST,
+            default=defaults.get(CONF_BATTERY_SOC_DEFICIT_COST, DEFAULT_BATTERY_SOC_DEFICIT_COST),
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(min=0, max=10, step=0.001, mode="box")
+        ),
+        vol.Optional(
+            CONF_BATTERY_SOC_SURPLUS_THRESHOLD,
+            default=round(
+                defaults.get(
+                    CONF_BATTERY_SOC_SURPLUS_THRESHOLD, DEFAULT_BATTERY_SOC_SURPLUS_THRESHOLD
+                )
+                * 100
+            ),
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0, max=100, step=1, unit_of_measurement="%", mode="slider"
+            )
+        ),
+        vol.Optional(
+            CONF_BATTERY_SOC_SURPLUS_COST,
+            default=defaults.get(CONF_BATTERY_SOC_SURPLUS_COST, DEFAULT_BATTERY_SOC_SURPLUS_COST),
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(min=0, max=10, step=0.001, mode="box")
+        ),
+        # C-rate penalty. Segments is a solver knob rather than a plant
+        # property -- bounded well below EMHASS's unbounded read because each
+        # extra segment adds two constraints per timestep per battery for
+        # steadily less curve accuracy.
+        vol.Optional(
+            CONF_BATTERY_STRESS_COST,
+            default=defaults.get(CONF_BATTERY_STRESS_COST, DEFAULT_BATTERY_STRESS_COST),
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(min=0, max=10, step=0.001, mode="box")
+        ),
+        vol.Optional(
+            CONF_BATTERY_STRESS_SEGMENTS,
+            default=defaults.get(CONF_BATTERY_STRESS_SEGMENTS, DEFAULT_BATTERY_STRESS_SEGMENTS),
+        ): vol.All(
+            selector.NumberSelector(
+                selector.NumberSelectorConfig(min=2, max=50, step=1, mode="slider")
+            ),
+            vol.Coerce(int),
         ),
         # Stored, and sent to EMHASS, as a 0-1 fraction -- the form shows
         # percent because a slider labelled "0.10" is not obviously "10%".
@@ -1474,6 +1579,15 @@ def grid_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
             selector.NumberSelectorConfig(
                 min=0, max=100000, step=100, unit_of_measurement="W", mode="box"
             )
+        ),
+        # Demand charge on the horizon's peak import, in currency per kW. Sits
+        # with the grid limits rather than the battery because it prices grid
+        # power: deferrable loads can shave a peak with no battery in play.
+        vol.Optional(
+            CONF_CAPACITY_COST_PER_KW,
+            default=defaults.get(CONF_CAPACITY_COST_PER_KW, DEFAULT_CAPACITY_COST_PER_KW),
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(min=0, max=1000, step=0.01, mode="box")
         ),
         # Opt-in: curtail to zero export whenever the plan's own sell price is
         # negative and the battery has no headroom to absorb the surplus
