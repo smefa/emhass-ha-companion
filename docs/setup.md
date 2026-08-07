@@ -91,8 +91,8 @@ the optimiser plans around PV, load and price alone.
 | Discharge / charge cycle cost | What a kWh through the battery costs in wear. See below |
 | Low / high charge comfort level | Levels the plan prefers to stay between, softly. See below |
 | Cost of sitting below / above it | What that preference is worth, per kWh past the level per hour |
+| Stress cost detail | How finely the stress cost curve is approximated — 10 is a good balance |
 | High-power stress cost | Discourages fast charge/discharge, growing with the square of the power. See below |
-| Stress cost detail | How finely that curve is approximated — 10 is a good balance |
 | Self-consumption handoff threshold | See below |
 | Live PV power sensor | Optional. See "Blending live PV/load into MPC" below |
 

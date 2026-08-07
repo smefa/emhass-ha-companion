@@ -105,8 +105,8 @@
           "battery_soc_deficit_cost": "Cost of sitting below it",
           "battery_soc_surplus_threshold": "High charge comfort level",
           "battery_soc_surplus_cost": "Cost of sitting above it",
-          "battery_stress_cost": "High-power stress cost",
           "battery_stress_segments": "Stress cost detail",
+          "battery_stress_cost": "High-power stress cost",
           "soc_min": "Minimum charge level",
           "soc_max": "Maximum charge level",
           "soc_target": "Target charge level",
@@ -129,8 +129,8 @@
           "battery_soc_deficit_cost": "Charged per kWh below the comfort level, per hour spent there, in your price currency. Nudges the plan to keep a reserve rather than sitting near empty. 0 turns this off, which is the default.",
           "battery_soc_surplus_threshold": "The level above which the battery is charged a holding cost, if one is set below. Sitting at full charge ages a lithium battery faster, so this discourages parking there for hours.",
           "battery_soc_surplus_cost": "Charged per kWh above the comfort level, per hour spent there. Use it to make the plan fill the battery late rather than early when both cost the same. 0 turns this off, which is the default.",
-          "battery_stress_cost": "Discourages fast charging and discharging. The cost grows with the square of the power, so running at half power costs a quarter as much, and the plan spreads a charge over several hours instead of forcing it into the single cheapest one. Priced per kW at full power, per hour. 0 turns this off, which is the default.",
-          "battery_stress_segments": "How finely that curve is approximated. Higher tracks the true cost more closely but makes every optimisation a little slower; 10 is a good balance and only matters when the stress cost above is set."
+          "battery_stress_segments": "How finely the squared cost curve below is approximated. Higher tracks the true cost more closely but makes every optimisation a little slower; 10 is a good balance and only matters when a stress cost is set below.",
+          "battery_stress_cost": "Discourages fast charging and discharging. The cost grows with the square of the power, so running at half power costs a quarter as much, and the plan spreads a charge over several hours instead of forcing it into the single cheapest one. Priced per kW at full power, per hour. 0 turns this off, which is the default."
         }
       },
       "grid": {
@@ -229,8 +229,8 @@
           "battery_soc_deficit_cost": "Cost of sitting below it",
           "battery_soc_surplus_threshold": "High charge comfort level",
           "battery_soc_surplus_cost": "Cost of sitting above it",
-          "battery_stress_cost": "High-power stress cost",
           "battery_stress_segments": "Stress cost detail",
+          "battery_stress_cost": "High-power stress cost",
           "soc_min": "Minimum charge level",
           "soc_max": "Maximum charge level",
           "soc_target": "Target charge level",
@@ -251,8 +251,8 @@
           "battery_soc_deficit_cost": "Charged per kWh below the comfort level, per hour spent there, in your price currency. Nudges the plan to keep a reserve rather than sitting near empty. 0 turns this off, which is the default.",
           "battery_soc_surplus_threshold": "The level above which the battery is charged a holding cost, if one is set below. Sitting at full charge ages a lithium battery faster, so this discourages parking there for hours.",
           "battery_soc_surplus_cost": "Charged per kWh above the comfort level, per hour spent there. Use it to make the plan fill the battery late rather than early when both cost the same. 0 turns this off, which is the default.",
-          "battery_stress_cost": "Discourages fast charging and discharging. The cost grows with the square of the power, so running at half power costs a quarter as much, and the plan spreads a charge over several hours instead of forcing it into the single cheapest one. Priced per kW at full power, per hour. 0 turns this off, which is the default.",
-          "battery_stress_segments": "How finely that curve is approximated. Higher tracks the true cost more closely but makes every optimisation a little slower; 10 is a good balance and only matters when the stress cost above is set."
+          "battery_stress_segments": "How finely the squared cost curve below is approximated. Higher tracks the true cost more closely but makes every optimisation a little slower; 10 is a good balance and only matters when a stress cost is set below.",
+          "battery_stress_cost": "Discourages fast charging and discharging. The cost grows with the square of the power, so running at half power costs a quarter as much, and the plan spreads a charge over several hours instead of forcing it into the single cheapest one. Priced per kW at full power, per hour. 0 turns this off, which is the default."
         }
       },
       "grid": {

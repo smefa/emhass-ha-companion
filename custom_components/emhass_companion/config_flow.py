@@ -1464,12 +1464,6 @@ def battery_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
         # extra segment adds two constraints per timestep per battery for
         # steadily less curve accuracy.
         vol.Optional(
-            CONF_BATTERY_STRESS_COST,
-            default=defaults.get(CONF_BATTERY_STRESS_COST, DEFAULT_BATTERY_STRESS_COST),
-        ): selector.NumberSelector(
-            selector.NumberSelectorConfig(min=0, max=10, step=0.001, mode="box")
-        ),
-        vol.Optional(
             CONF_BATTERY_STRESS_SEGMENTS,
             default=defaults.get(CONF_BATTERY_STRESS_SEGMENTS, DEFAULT_BATTERY_STRESS_SEGMENTS),
         ): vol.All(
@@ -1477,6 +1471,12 @@ def battery_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
                 selector.NumberSelectorConfig(min=2, max=50, step=1, mode="slider")
             ),
             vol.Coerce(int),
+        ),
+        vol.Optional(
+            CONF_BATTERY_STRESS_COST,
+            default=defaults.get(CONF_BATTERY_STRESS_COST, DEFAULT_BATTERY_STRESS_COST),
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(min=0, max=10, step=0.001, mode="box")
         ),
         # Stored, and sent to EMHASS, as a 0-1 fraction -- the form shows
         # percent because a slider labelled "0.10" is not obviously "10%".

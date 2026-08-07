@@ -105,8 +105,8 @@
           "battery_soc_deficit_cost": "Kostnad för att ligga under den",
           "battery_soc_surplus_threshold": "Bekväm högsta laddningsnivå",
           "battery_soc_surplus_cost": "Kostnad för att ligga över den",
-          "battery_stress_cost": "Kostnad för hög effekt",
           "battery_stress_segments": "Detaljnivå för effektkostnaden",
+          "battery_stress_cost": "Kostnad för hög effekt",
           "soc_min": "Lägsta laddningsnivå",
           "soc_max": "Högsta laddningsnivå",
           "soc_target": "Önskad laddningsnivå",
@@ -129,8 +129,8 @@
           "battery_soc_deficit_cost": "Debiteras per kWh under den bekväma nivån, per timme där, i din prisvaluta. Får planen att hålla en reserv i stället för att ligga nära tomt. 0 stänger av detta, vilket är standard.",
           "battery_soc_surplus_threshold": "Nivån över vilken batteriet debiteras en hållkostnad, om en sådan är satt nedan. Att stå fulladdat åldrar ett litiumbatteri snabbare, så detta motverkar att det parkeras där i timmar.",
           "battery_soc_surplus_cost": "Debiteras per kWh över den bekväma nivån, per timme där. Använd det för att få planen att fylla batteriet sent i stället för tidigt när båda kostar lika mycket. 0 stänger av detta, vilket är standard.",
-          "battery_stress_cost": "Motverkar snabb laddning och urladdning. Kostnaden växer med effekten i kvadrat, så halv effekt kostar en fjärdedel, och planen sprider en laddning över flera timmar i stället för att pressa in den i den billigaste. Prissatt per kW vid full effekt, per timme. 0 stänger av detta, vilket är standard.",
-          "battery_stress_segments": "Hur fint den kurvan approximeras. Högre följer den verkliga kostnaden närmare men gör varje optimering något långsammare; 10 är en bra avvägning och spelar bara roll när kostnaden ovan är satt."
+          "battery_stress_segments": "Hur fint den kvadratiska kostnadskurvan nedan approximeras. Högre följer den verkliga kostnaden närmare men gör varje optimering något långsammare; 10 är en bra avvägning och spelar bara roll när en effektkostnad är satt nedan.",
+          "battery_stress_cost": "Motverkar snabb laddning och urladdning. Kostnaden växer med effekten i kvadrat, så halv effekt kostar en fjärdedel, och planen sprider en laddning över flera timmar i stället för att pressa in den i den billigaste. Prissatt per kW vid full effekt, per timme. 0 stänger av detta, vilket är standard."
         }
       },
       "grid": {
@@ -229,8 +229,8 @@
           "battery_soc_deficit_cost": "Kostnad för att ligga under den",
           "battery_soc_surplus_threshold": "Bekväm högsta laddningsnivå",
           "battery_soc_surplus_cost": "Kostnad för att ligga över den",
-          "battery_stress_cost": "Kostnad för hög effekt",
           "battery_stress_segments": "Detaljnivå för effektkostnaden",
+          "battery_stress_cost": "Kostnad för hög effekt",
           "soc_min": "Lägsta laddningsnivå",
           "soc_max": "Högsta laddningsnivå",
           "soc_target": "Önskad laddningsnivå",
@@ -251,8 +251,8 @@
           "battery_soc_deficit_cost": "Debiteras per kWh under den bekväma nivån, per timme där, i din prisvaluta. Får planen att hålla en reserv i stället för att ligga nära tomt. 0 stänger av detta, vilket är standard.",
           "battery_soc_surplus_threshold": "Nivån över vilken batteriet debiteras en hållkostnad, om en sådan är satt nedan. Att stå fulladdat åldrar ett litiumbatteri snabbare, så detta motverkar att det parkeras där i timmar.",
           "battery_soc_surplus_cost": "Debiteras per kWh över den bekväma nivån, per timme där. Använd det för att få planen att fylla batteriet sent i stället för tidigt när båda kostar lika mycket. 0 stänger av detta, vilket är standard.",
-          "battery_stress_cost": "Motverkar snabb laddning och urladdning. Kostnaden växer med effekten i kvadrat, så halv effekt kostar en fjärdedel, och planen sprider en laddning över flera timmar i stället för att pressa in den i den billigaste. Prissatt per kW vid full effekt, per timme. 0 stänger av detta, vilket är standard.",
-          "battery_stress_segments": "Hur fint den kurvan approximeras. Högre följer den verkliga kostnaden närmare men gör varje optimering något långsammare; 10 är en bra avvägning och spelar bara roll när kostnaden ovan är satt."
+          "battery_stress_segments": "Hur fint den kvadratiska kostnadskurvan nedan approximeras. Högre följer den verkliga kostnaden närmare men gör varje optimering något långsammare; 10 är en bra avvägning och spelar bara roll när en effektkostnad är satt nedan.",
+          "battery_stress_cost": "Motverkar snabb laddning och urladdning. Kostnaden växer med effekten i kvadrat, så halv effekt kostar en fjärdedel, och planen sprider en laddning över flera timmar i stället för att pressa in den i den billigaste. Prissatt per kW vid full effekt, per timme. 0 stänger av detta, vilket är standard."
         }
       },
       "grid": {

@@ -110,11 +110,11 @@ this screen is then ignored.
   image: sitting full ages the battery, so this makes the plan fill it late
   rather than early. Both costs default to 0, which leaves the pre-filled
   40%/90% levels doing nothing.
+- **Stress cost detail** — how finely the stress cost curve below is
+  approximated. 10 is a good balance; only matters if the stress cost is set.
 - **High-power stress cost** — discourages fast charge/discharge. The cost
   grows with the square of the power, so the plan spreads a charge over
   several hours rather than forcing it into the cheapest one. 0 by default.
-- **Stress cost detail** — how finely that curve is approximated. 10 is a good
-  balance; only matters if the stress cost is set.
 - **Minimum charge level** / **Maximum charge level** — the range the
   optimiser is allowed to plan within.
 - **Target charge level** — where it aims to leave the battery at the end of
