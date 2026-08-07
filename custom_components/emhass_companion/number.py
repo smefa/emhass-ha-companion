@@ -144,7 +144,10 @@ LOAD_NUMBERS: tuple[LoadNumberDescription, ...] = (
         translation_key="nominal_power",
         device_class=NumberDeviceClass.POWER,
         native_unit_of_measurement=UnitOfPower.WATT,
-        native_min_value=1,
+        # A step of 10 counts from the minimum, so a minimum of 1 would put the
+        # whole scale on 1, 11, 21 ... and reject a round 2000 W. Start at one
+        # step instead, which keeps the "must draw something" guard.
+        native_min_value=10,
         native_max_value=100000,
         native_step=10,
         mode=NumberMode.BOX,

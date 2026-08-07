@@ -813,7 +813,7 @@ def deferrable_schema(
                     CONF_NOMINAL_POWER, default=defaults.get(CONF_NOMINAL_POWER, 2000)
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
-                        min=1, max=100000, step=10, unit_of_measurement="W", mode="box"
+                        min=10, max=100000, step=10, unit_of_measurement="W", mode="box"
                     )
                 ),
                 # Shown unconditionally even though it only bites when the load
@@ -995,7 +995,7 @@ def thermal_schema(
                     CONF_NOMINAL_POWER, default=defaults.get(CONF_NOMINAL_POWER, 2000)
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
-                        min=1, max=100000, step=10, unit_of_measurement="W", mode="box"
+                        min=10, max=100000, step=10, unit_of_measurement="W", mode="box"
                     )
                 ),
                 vol.Required(
