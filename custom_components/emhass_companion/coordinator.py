@@ -711,6 +711,11 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
                 load=load_for_terminal,
                 load_source=load_source,
                 buy_price=buy,
+                # Both sides of the meter: the shipping rule only lets the
+                # night cover go early when selling it beats buying it back,
+                # which needs the export price and the export limit.
+                sell_price=sell,
+                grid=config.grid,
                 previous=self._end_soc,
             )
             self._track_pv_tail_issue(end_soc, pv or None, horizon_end)

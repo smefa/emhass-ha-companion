@@ -221,18 +221,26 @@ and reports them all:
 | Key | Label | What it is |
 |---|---|---|
 | `bridge_only` | Test 1 — bridge to the next refill | The calculation as it shipped: `reserve + E / capacity`, no ceiling, no PV proxy |
-| `solar_headroom` | Test 2 — bridge floor, solar ceiling | The design above. **Active** |
+| `solar_headroom` | Test 2 — bridge floor, solar ceiling | The design above. Active until 2026-08-07 |
 | `daily_ratio` | Test 3 — daily-yield template | The Jinja template this feature replaced, ported: drift the live SOC by tomorrow-minus-today's forecast yield, on a sliding floor |
+| `night_cover` | Test 4 — night cover, sold only when it pays | The night-cover rule below. **Active** |
+| `priced_bridge` | Test 5 — priced bridge, curtailment ceiling | The two lowering mechanisms Test 4 refuses, kept where they cost nothing: a published cheap hour ends the night, and room is made only for surplus that would be clipped or given away |
+
+Tests 1 to 3 are frozen. They are the yardsticks the recorded `tests`
+history is measured against, and editing one silently rebases that
+history, so improvements go in as a new candidate.
 
 `ACTIVE_CANDIDATE` names the one whose number actually reaches EMHASS;
 the rest ride along in the End SOC sensor's `tests` attribute:
 
 ```yaml
-active_test: solar_headroom
+active_test: night_cover
 tests:
   bridge_only:     {label: "Test 1 — …", soc: 0.70, reason: "Holding 4.0 kWh …"}
   solar_headroom:  {label: "Test 2 — …", soc: 0.30, reason: "Leaving room for 22.5 kWh …"}
   daily_ratio:     {label: "Test 3 — …", soc: 0.58, reason: "Template drift: 12 kWh …"}
+  night_cover:     {label: "Test 4 — …", soc: 0.70, reason: "Covering 4.0 kWh on top …"}
+  priced_bridge:   {label: "Test 5 — …", soc: 0.70, reason: "Covering 4.0 kWh on top …"}
 ```
 
 Recorded over a month, that attribute says which one *should* have been
@@ -247,11 +255,93 @@ turning that into a setting first.
 
 **Adding another is three lines**: write
 `_my_idea(tail: _Tail) -> EndSocDecision`, add
-`_Candidate("my_idea", "Test 4 — my idea", _my_idea)` to `CANDIDATES`,
+`_Candidate("my_idea", "Test 6 — my idea", _my_idea)` to `CANDIDATES`,
 and it appears in the sensor on the next run. `_Tail` already exposes
-`reserve`, `clamp()`, `first_block()`, `first_cheap()` and
-`deficit_until()`, so a new idea is usually a few lines of arithmetic
-over data that has already been gathered.
+`reserve`, `clamp()`, `first_block()`, `last_block()`, `first_cheap()`
+and `deficit_until()`, and `_required_soc()` / `_sale_credit()` are
+reusable, so a new idea is usually a few lines of arithmetic over data
+that has already been gathered.
+
+## The night-cover rule (2026-08-07)
+
+Test 2 shipped for three days and was replaced. What it did on a clear
+August evening, live:
+
+> *Leaving room for 41.9 kWh of expected solar surplus: ending at 20% so
+> the sun charges the battery instead of being exported. Held at the 20%
+> reserve floor.*
+
+At 18:00 the pin lands at 18:00 tomorrow — **after** tomorrow's solar
+peak, which is inside the horizon and already EMHASS's to plan. The
+surplus being made room for is therefore the *day after tomorrow's*,
+starting ~12 h past the pin with a whole night in between. The ceiling
+then computed `soc_max − (41.9 − 11.2) / 22 = −40%`, an unsatisfiable
+bound, and collapsed to the reserve — overriding a bridge floor of 71%,
+i.e. the 11.2 kWh the house needs to get through that night.
+
+The failure is structural, not a tuning error. The ceiling binds exactly
+when `(soc_max − need)·C < surplus − drawdown` — that is, exactly when
+the coming sun *more than* refills the battery from the bridge target.
+In that regime the battery is full by mid-morning whichever target is
+chosen, so the room buys nothing; the only real difference is that the
+night was spent on grid import at `1.25 × spot + 0.80` instead of on
+stored solar. When the sun genuinely cannot fill the battery, `room >
+need` and the ceiling never binds at all. **Its binding region is its
+refutation.** Nor was it needed for the imminent-sun case: with the sun
+arriving at the pin the bridge is ~0 and Test 1 returns the reserve on
+its own.
+
+The replacement is one rule:
+
+> Never plan to arrive at the pin with less than the house needs before
+> the sun comes back — unless selling that energy first demonstrably
+> pays for buying it again.
+
+**The floor** is `_required_soc`, a backward pass over the lookahead: the
+lowest SOC at the pin that never puts the battery under its reserve.
+Deficits raise the requirement, surpluses lower it, the floor at the
+reserve is what stops 40 kWh of Sunday from excusing an empty Saturday
+evening, and the ceiling at `soc_max` keeps an unreachable requirement
+from understating what a later surplus can pay for. Proxied PV counts as
+darkness, as it does everywhere else here. It subsumes Test 1's bridge
+and handles two cases the bridge does not: a pin landing *inside* a weak
+morning (Test 1 sees sun at the pin, calls the bridge zero and sells off
+the morning's own charge before the night behind it), and the credit a
+surplus straddling the pin genuinely earns.
+
+The walk stops at the **last** forecast surplus block, not the first.
+Stopping at the first ignores a weak day that cannot pay for the night
+behind it; running to the edge of the lookahead demands cover for the
+darkness after the final sunrise, which is a property of a 24 h window
+rather than of the world, and would pin every sunny day at `soc_max`.
+
+**The exception** is priced, not judged. A kWh may leave before the pin
+only when
+
+```
+sell × discharge_eff  >  buy / charge_eff + wear
+```
+
+with `buy` the cheapest hour before the battery would hit its reserve and
+`wear` the configured cycle costs. On this house — buy `1.25 × spot +
+0.80`, sell `spot`, 0.10/kWh wear — a 0.20 night needs a 1.15 evening to
+clear, so the exception sleeps through summer and wakes on winter peaks.
+The credit is an *energy*, capped by what can physically leave in the
+profitable hours and by the cover itself, so one expensive slot releases
+one slot's worth rather than the night.
+
+Only **published** buy prices qualify. Tomorrow night's curve is a proxy
+for part of the tail on most runs, and a spread computed against a guess
+is precisely the calculation that talks a battery into arriving empty.
+Refusing it fails towards carrying the energy, which is the recoverable
+mistake — the same asymmetry already applied to proxied PV.
+
+**One grid refill is accepted**, and only one: when the whole lookahead
+holds no forecast surplus at all, the requirement stops at the cheapest
+hour instead. The rule refuses to buy at night in order to make room for
+sun, and a week of December overcast is exactly the case where there is
+no sun to make room for; without this the cover would run the full 24 h
+and pin every winter run at `soc_max`.
 
 ## PV coverage past the horizon
 
@@ -381,11 +471,19 @@ device, description-based like the existing plan sensors.
   - `reason` — one human sentence, e.g. *"Holding 3.2 kWh to bridge
     evening load until cheap prices at 02:00; solar expected to refill
     from 09:30."*
-  - `next_replenishment` / `replenishment_kind` — timestamp and
-    `solar` / `cheap_grid`
-  - `bridge_energy_wh` — the E from step 3
+  - `replenishment_kind` — `solar` / `cheap_grid` / `none`
+  - `cover_energy_wh` / `cover_target` — what the night needs on top of
+    the reserve, and the SOC that represents
+  - `cover_until` — when the battery would otherwise touch the reserve
+  - `sale_energy_wh` / `sale_margin` / `sale_sell_price` /
+    `sale_buy_price` — present when the priced exception fired
+  - `sale_blocked` — present when it did not, with which of the three
+    reasons (no sell price / prices unpublished / no spread)
   - `reserve` — the floor used (from `soc_target`)
-  - `clamped_by` — `none` / `range` / `hysteresis`
+  - `clamped_by` — `night_cover` (nothing bit) / `profitable_sale` /
+    `reserve` / `range` / `hysteresis`. `range` also covers a night
+    longer than the battery: a bound that bites in silence is how a
+    heuristic gets believed for the wrong reason
   - `unreachable` — present and `true` when the target likely exceeds
     what charge/discharge power can deliver within the horizon (EMHASS
     will aim for it and fall short, softly)
