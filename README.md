@@ -2,6 +2,10 @@
 
 A Home Assistant integration that makes [EMHASS](https://github.com/davidusb-geek/emhass) usable without writing YAML.
 
+## Currently in BETA!
+Join my [Discord](https://discord.gg/wvavNscm8) if you have questions or want to give input.
+
+
 📖 **[Full documentation](https://smefa.github.io/emhass-ha-companion/)**
 
 EMHASS is an excellent energy optimiser with a difficult front door. Using it today means hand-building the same pile everyone else builds: `input_number` helpers in package files, `rest_command` entries with sprawling Jinja2 payloads, and a fleet of automations to schedule runs and act on results.
