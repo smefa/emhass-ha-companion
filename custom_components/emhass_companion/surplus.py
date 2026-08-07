@@ -79,6 +79,31 @@ def surplus_series(plan: Plan, surplus_indices: Sequence[int]) -> Series:
     return Series(points)
 
 
+def seam_carry(previous: Series, incoming: Series) -> Series:
+    """The outgoing plan's last row before ``incoming`` picks up.
+
+    EMHASS starts its horizon at the next timestep boundary after launch, so
+    at the moment a plan is published "now" sits *before* row zero and every
+    surplus sensor reading ``value_at(now)`` gets ``None`` until the horizon
+    catches up. That is a gap at every single run, not an edge case, and
+    publishing a zero through it would be worse than publishing nothing: a
+    fabricated "no spare sun" is indistinguishable from a real one, so
+    anything gated on it short-cycles once per optimisation. The outgoing
+    plan did cover that stretch, so its last row is carried across instead --
+    still a real forecast, just from the previous run.
+
+    Exactly one row, and only one predating the new horizon, so the carry can
+    neither accumulate across runs nor outlive the seam it bridges: the moment
+    "now" passes ``incoming.start``, hold-last semantics stop consulting it.
+    Nothing here reaches the budgets -- those come off the plan itself in
+    ``allocate`` -- and an absent plan on either side carries nothing, because
+    "we have no plan" must keep reading unknown.
+    """
+    if not previous or not incoming:
+        return Series.empty()
+    return Series([point for point in previous if point.time < incoming.start][-1:])
+
+
 @dataclass(frozen=True, slots=True)
 class SurplusSpec:
     """What one surplus load would do with the surplus, if it got any."""

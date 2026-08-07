@@ -16,6 +16,7 @@ from custom_components.emhass_companion.surplus import (
     allocate,
     battery_reserved_series,
     current_block,
+    seam_carry,
     surplus_series,
     total_energy_wh,
     window_of,
@@ -982,3 +983,65 @@ def test_no_plan_parks_the_load_rather_than_reusing_the_last_budget():
     assert _payload(registry.to_loads(START, 15), START).payload[
         "operating_hours_of_each_deferrable_load"
     ] == [0.0]
+
+
+# --- the seam between two plans -----------------------------------------------
+
+
+def _at(offset_steps: int, *values: float) -> Series:
+    """A series starting ``offset_steps`` after ``START``."""
+    return Series(
+        Point(START + (offset_steps + index) * STEP, value) for index, value in enumerate(values)
+    )
+
+
+def test_seam_carry_keeps_the_row_covering_the_moment_before_the_new_horizon():
+    """The gap this exists to close: a plan published at 10:07 whose first row
+    is 10:15 leaves 10:07--10:15 uncovered, and ``value_at`` refuses to
+    extrapolate backwards. The outgoing plan's 10:00 row did cover it."""
+    previous = _at(0, 600, 900, 1200)
+    incoming = _at(2, 1500, 1600)
+
+    carried = seam_carry(previous, incoming)
+
+    assert carried.values == (900.0,)
+    assert carried.start == START + STEP
+
+
+def test_seam_carry_bridges_the_gap_once_spliced():
+    """What the sensors actually read: before the splice the moment between
+    the two plans is unknown, after it the value is the outgoing plan's."""
+    previous = _at(0, 600, 900)
+    incoming = _at(2, 1500)
+    now = START + STEP + timedelta(minutes=7)
+
+    assert incoming.value_at(now) is None
+    assert Series.concat([seam_carry(previous, incoming), incoming]).value_at(now) == 900.0
+
+
+def test_seam_carry_keeps_one_row_however_many_runs_have_gone_by():
+    """Fed its own output run after run, the carry must not accumulate into a
+    growing tail of stale plan behind every horizon."""
+    carried = _at(0, 600)
+    for offset in range(2, 8):
+        incoming = _at(offset, 1500, 1600)
+        carried = seam_carry(Series.concat([carried, _at(offset - 1, 900)]), incoming)
+        assert len(carried) == 1
+
+    assert carried.values == (900.0,)
+
+
+def test_seam_carry_drops_a_row_the_new_horizon_already_covers():
+    """A plan reaching back to or before the carried row makes it redundant --
+    and keeping it would let a stale value win over the fresh one."""
+    previous = _at(0, 600, 900)
+    incoming = _at(0, 1500, 1600)
+
+    assert not seam_carry(previous, incoming)
+
+
+def test_seam_carry_bridges_nothing_when_either_side_is_missing():
+    """No plan must keep reading unknown rather than resurrecting an old row:
+    "we do not know" and "there is no spare sun" drive different automations."""
+    assert not seam_carry(Series.empty(), _at(2, 1500))
+    assert not seam_carry(_at(0, 600), Series.empty())

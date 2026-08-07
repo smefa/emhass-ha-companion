@@ -384,6 +384,15 @@ That threshold is **reporting only**. No load budgets against it: a load's own
 threshold is its run floor plus its own headroom, because "is there enough spare
 sun for the pool" and "…for the car" are different questions.
 
+The two "now" entities read `unknown`, never zero, when there is no plan
+covering this moment — a made-up zero is indistinguishable from a real "the sun
+has gone in", and anything you gate on it would switch off on the strength of a
+missing reading. A numeric-state trigger ignores `unknown`, so this is usually
+what you want. Note that a new plan's horizon starts at the *next* timestep
+boundary, leaving the minutes since the run finished uncovered; the last reading
+of the outgoing plan is carried across that seam, so it is not a source of
+`unknown` in normal running.
+
 Per load, `sensor.<load>_surplus_budget` reports the hours the last run was
 allowed to ask for, with the window, the energy, the qualifying threshold and
 any remaining cap as attributes. A load that is not running is either short of

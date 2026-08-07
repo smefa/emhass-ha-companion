@@ -71,6 +71,7 @@ from .profiles import (
     resolve_settings,
 )
 from .smoothing import TimeWeightedAverage
+from .surplus import seam_carry
 from .terminal import (
     LOAD_SOURCE_LAST_PLAN,
     LOAD_SOURCE_PROFILE,
@@ -153,6 +154,11 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         # what the hub's surplus sensors call a window, and nothing else. Each
         # load budgets against its own power plus its own headroom instead.
         self.surplus_threshold_w = DEFAULT_SURPLUS_THRESHOLD_W
+        # One row of the outgoing plan, kept to bridge the gap between "now"
+        # and the next horizon's first row; see surplus.seam_carry. In-memory
+        # only -- after a restart the first run simply has nothing to bridge
+        # with, the same as the end-SOC anchor above.
+        self._surplus_carry: Series = Series.empty()
         # Owned by the mix beta number. Weight given to the live PV/load
         # reading when it is blended into the current naive-mpc-optim forecast
         # step; see payload.build_payload and models.Series.blend_at. Also
@@ -207,10 +213,21 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         The series every surplus sensor renders, and the same one the budgets
         were derived from -- so what the dashboard shows and what the pool was
         actually given can never disagree.
+
+        Fronted by the carried seam row, so the series covers "now" rather
+        than starting one timestep into the future. Every surplus sensor
+        reads through here for the reason in ``SolarSurplusBase``: one of
+        them splicing privately is how they start disagreeing. The window the
+        from/until sensors report can therefore open one step in the past --
+        which is the honest description of a block already underway, and what
+        those sensors showed anyway until the new plan pushed them forward.
         """
         if not self.data:
             return Series.empty()
-        return self.loads.surplus_series(self.data.plan, self.data.load_order)
+        series = self.loads.surplus_series(self.data.plan, self.data.load_order)
+        if not series:
+            return series
+        return Series.concat([self._surplus_carry, series])
 
     # -- lifecycle ------------------------------------------------------------
 
@@ -450,6 +467,13 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             raise
 
         self._track_run_failed_issue(False, action, "")
+        # Last moment the outgoing plan is still self.data, whichever way this
+        # run publishes: async_set_updated_data below, or the coordinator
+        # storing what _async_update_data returns.
+        self._surplus_carry = seam_carry(
+            self.surplus_series(),
+            self.loads.surplus_series(data.plan, data.load_order),
+        )
         if notify:
             self.async_set_updated_data(data)
         return data
