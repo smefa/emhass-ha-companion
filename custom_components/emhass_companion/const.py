@@ -290,7 +290,11 @@ DEFAULT_DAYAHEAD_FALLBACK_TIME: Final = "13:30:00"
 
 DEFAULT_SOC_MIN: Final = 0.10
 DEFAULT_SOC_MAX: Final = 0.95
-DEFAULT_SOC_TARGET: Final = 0.50
+# Under the default Optimized end-SOC mode this is only the reserve floor the
+# plan may never end below, not a level to aim for, so it wants to be low: a
+# high floor quietly blocks profitable evening discharge. 20% sits just above
+# the 10% soc_min and leaves a usable backup buffer.
+DEFAULT_SOC_TARGET: Final = 0.20
 DEFAULT_END_SOC_MODE: Final = END_SOC_OPTIMIZED
 DEFAULT_CHARGE_EFFICIENCY: Final = 0.95
 DEFAULT_DISCHARGE_EFFICIENCY: Final = 0.95
