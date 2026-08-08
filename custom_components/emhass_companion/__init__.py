@@ -41,6 +41,7 @@ from .coordinator import EmhassCoordinator
 from .deferrable import DeferrableRegistry
 from .executor import Executor
 from .frontend import async_setup_frontend
+from .log_ring import LogRingHandler
 from .schedule import Scheduler
 from .services import async_register_services, async_unregister_services
 from .util import version_at_least
@@ -69,15 +70,39 @@ class EmhassRuntimeData:
         scheduler: Scheduler,
         loads: DeferrableRegistry,
         executor: Executor,
+        log_handler: LogRingHandler,
     ) -> None:
         self.coordinator = coordinator
         self.scheduler = scheduler
         self.loads = loads
         self.executor = executor
+        self.log_handler = log_handler
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bool:
     """Set up EMHASS Companion from a config entry."""
+    # Support-bundle log tail (diagnostics.py). Attached to this exact logger
+    # -- not a child one -- because every submodule logs through
+    # ``logging.getLogger(__name__)``, which propagates up to here by
+    # default; one handler on the package logger therefore sees everything.
+    # The level is decided once, here, rather than forced: below INFO unless
+    # the user already has debug logging on for this logger, so turning
+    # debug logging on before reproducing an issue is what makes those lines
+    # show up in the bundle too.
+    log_handler = LogRingHandler(
+        logging.DEBUG if _LOGGER.getEffectiveLevel() <= logging.DEBUG else logging.INFO
+    )
+    _LOGGER.addHandler(log_handler)
+    # Registered immediately, not grouped with the other teardown below: a
+    # version probe two lines down can raise ConfigEntryNotReady, and core
+    # still runs every already-registered ``async_on_unload`` callback when
+    # setup fails (``ConfigEntries._async_process_on_unload`` in the
+    # ``finally`` branch) -- but only the ones registered before the raise.
+    # Registered any later, a setup that fails on its very first attempt (or
+    # every retry of a persistently-down add-on) would leak one handler per
+    # attempt instead of replacing it.
+    entry.async_on_unload(lambda: _LOGGER.removeHandler(log_handler))
+
     client = EmhassClient(async_get_clientsession(hass), entry.data[CONF_URL])
 
     try:
@@ -112,7 +137,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
 
     scheduler = Scheduler(hass, coordinator)
     executor = Executor(hass, coordinator)
-    entry.runtime_data = EmhassRuntimeData(coordinator, scheduler, loads, executor)
+    entry.runtime_data = EmhassRuntimeData(coordinator, scheduler, loads, executor, log_handler)
 
     # Entities are created before the first optimisation so that a failed or
     # slow first run leaves a diagnosable integration rather than none at all.
