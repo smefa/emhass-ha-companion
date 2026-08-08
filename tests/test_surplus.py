@@ -634,6 +634,46 @@ def test_asap_leaves_the_window_alone_when_the_block_can_never_cover_it():
     assert asap.hours == free.hours == 0.75
 
 
+def test_asap_does_nothing_without_an_energy_cap():
+    """The documented limitation, pinned so it cannot regress silently.
+
+    An energy cap is the *only* input that can give this switch something to
+    remove, whatever the load's shape. ``energy_wh`` is
+    ``min(credit_wh, span_hours * nominal_w, cap)``; the run's own total
+    deliverable never exceeds either of the first two, so nothing but the cap
+    can put the target below what the block delivers -- and until it is below,
+    the earliest covering window is the whole block. See docs/surplus_loads.md:
+    the fix is a budget meaning "what I asked for" rather than "what is going",
+    not a tweak to the clamp.
+    """
+    rising = _series(600, 1200, 1800, 2400, 3000, 2400, 1200)
+    flat = _series(2400, 2400, 2400, 2400, 2400, 2400)
+
+    for label, spec_fn, series in (
+        ("modulating, rising", _modulating, rising),
+        ("modulating, flat", _modulating, flat),
+        ("semi-continuous, rising", _spec, rising),
+        ("semi-continuous, flat", _spec, flat),
+    ):
+        free = allocate(series, [spec_fn()], STEP)["pool"]
+        asap = allocate(series, [spec_fn(start_asap=True)], STEP)["pool"]
+
+        assert asap.window_start == free.window_start, label
+        assert asap.window_end == free.window_end, label
+        assert asap.hours == free.hours, label
+
+
+def test_asap_narrows_the_window_once_a_cap_is_set():
+    """The other half of the above: the cap is what makes the switch bite."""
+    series = _series(600, 1200, 1800, 2400, 3000, 2400, 1200)
+
+    free = allocate(series, [_modulating(max_energy_wh=300.0)], STEP)["pool"]
+    asap = allocate(series, [_modulating(max_energy_wh=300.0, start_asap=True)], STEP)["pool"]
+
+    assert asap.hours == free.hours
+    assert asap.window_end < free.window_end
+
+
 def test_asap_on_an_empty_block_stays_empty():
     budget = allocate(_series(100, 100), [_spec(start_asap=True)], STEP)["pool"]
 

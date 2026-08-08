@@ -347,6 +347,20 @@ def allocate(
         # the span cap and the energy cap are the two things that open the gap
         # in the first place -- an energy-capped car on an abundant day is the
         # clearest case, asking for two hours inside an eight-hour block.
+        #
+        # Which means, more sharply than it first looks: ``max_energy_wh`` is
+        # the *only* one of the three that can open a gap, so with no cap this
+        # whole branch is a no-op for every load shape and the widening below
+        # hands the full block straight back. Narrowing needs ``energy_wh``
+        # below ``sum(deliverable)``, and neither of the other two terms can get
+        # there -- ``credit_wh`` sums ``net`` over the same slots whose
+        # ``min(net, nominal_w)`` the deliverables are, so it is always the
+        # larger; and ``span_hours`` spans at least as many steps as there are
+        # qualifying slots, so ``span_hours * nominal_w`` is too. The battery
+        # reservation and weak timesteps shrink both sides equally, which is why
+        # they feel like slack and are not. Documented as a limitation in
+        # docs/surplus_loads.md rather than papered over here, because the fix
+        # is a budget that means "what I want" instead of "what is going".
         if spec.start_asap and window_last is not None and hours > 0:
             run_steps = math.ceil(hours / step_hours)
             # Whole timesteps from the first qualifying one, inclusive: the

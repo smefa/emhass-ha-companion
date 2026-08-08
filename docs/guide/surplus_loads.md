@@ -19,7 +19,8 @@ one.
   draw before a moment counts as "spare" for it.
 - **16. Surplus priority** — with more than one spare-solar load, the lower
   number gets first claim.
-- **Start as early as possible** (switch) — see [below](#start-as-early-as-possible).
+- **Start as early as possible** (switch) — needs *Energy needed* above 0 to
+  have any effect; see [below](#start-as-early-as-possible).
 - **Spare solar budget** (diagnostic sensor) — how many hours the last plan
   allowed this load to ask for.
 
@@ -28,12 +29,26 @@ one.
 Off by default. It decides **when in the day** an armed load gets its spare
 solar — not how much it gets, which is always however much is going.
 
-Off, the optimiser picks the moment. If there's more sun in the day than the
-load needs — you asked for 20 kWh on a 40 kWh day, or the battery is charging
-hard for part of it — it has room to choose, and nothing in it prefers the
-morning. So the run can land in the afternoon.
+Off, the optimiser picks the moment. If you asked for less energy than the day
+has sun for, it has room to choose, and nothing in it prefers the morning. So
+the run can land in the afternoon.
 
 On, the load starts as soon as there's spare solar and runs from there.
+
+!!! important "It needs **14. Energy needed** set"
+
+    With *Energy needed* left at 0 — no cap — this switch does nothing. Asking
+    for "all the spare solar there is" already means the whole sunny stretch,
+    so there is no spare room in the day for the switch to take away, and the
+    plan comes out identical either way.
+
+    Set *Energy needed* to what you actually want (say 10 kWh into the car) and
+    the switch bites: on a recent 35 kWh day it moved a 10 kWh charge from
+    12:45–15:45, dribbling along at the minimum power, to 10:45–12:00 at full
+    5.9 kW.
+
+    This applies to every surplus load, including ones with **12. Runs at full
+    power only** on.
 
 **Off is usually the better setting.** Early sun is thin, and a car charger
 asking for 6 kW at nine in the morning will take what solar there is and buy

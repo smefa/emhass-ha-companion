@@ -100,7 +100,8 @@ A load that only ever wants energy which would otherwise leave the house —
 the motivating case is a pool heater. Armed with the same **Requested** switch
 as an on-demand load, plus `switch.<load>_start_asap` (*Start as early as
 possible*) to take the front of the sun rather than wherever in the day suits
-it best. See [surplus_loads.md](surplus_loads.md).
+it best — which needs an *Energy needed* cap to have any effect at all. See
+[surplus_loads.md](surplus_loads.md).
 
 ## Minimum on/off time
 

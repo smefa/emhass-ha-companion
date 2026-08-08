@@ -190,7 +190,9 @@ LOAD_SWITCHES: tuple[LoadSwitchDescription, ...] = (
     # nothing on the dashboard saying which way the load is currently set.
     #
     # Off keeps the old behaviour, which is also the better one for
-    # self-consumption -- see docs/surplus_loads.md.
+    # self-consumption -- see docs/surplus_loads.md. That page also documents
+    # when this does nothing at all: without an "Energy needed" cap there is no
+    # placement freedom to give up, so on and off plan identically.
     LoadSwitchDescription(
         key="start_asap",
         translation_key="start_asap",

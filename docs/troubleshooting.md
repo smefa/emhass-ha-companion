@@ -21,6 +21,15 @@ integration page for the same thing plus profile state.
 short, so the plan looks healthy while being built on a price that
 flat-lined. These warnings are how you find out.
 
+**"Start as early as possible" changes nothing.** Expected, if that load's
+*Energy needed* is 0. An uncapped surplus load asks for all the spare solar
+there is, which is already the whole sunny stretch, so there is no placement
+freedom for the switch to remove and the plan comes out identical either way.
+Set *Energy needed* to what you actually want. Confirm it at debug level: a
+line reading `start-as-early-as-possible window widened from N to M timesteps`
+where `M` is the whole block, every run, is the switch doing nothing. See
+[Surplus loads](surplus_loads.md#it-needs-an-energy-cap-to-do-anything).
+
 **"The optimisation problem is infeasible."** Download diagnostics (or grab
 the `payload` attribute off the *Last request to EMHASS* sensor) and run
 [`scripts/check_infeasibility.py`](https://github.com/smefa/emhass-ha-companion/blob/main/scripts/check_infeasibility.py) against

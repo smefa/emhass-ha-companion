@@ -549,9 +549,22 @@ class DeferrableRuntime:
 
     # -- payload --------------------------------------------------------------
 
+    # All three of these are EMHASS inputs, and EMHASS 0.18 validates them as
+    # non-negative -- one negative entry raises ValueError inside the add-on
+    # and fails the whole optimisation with a 500, taking every other load and
+    # the battery down with it. They can go negative by a single step without
+    # anything being wrong: ``running_since``/``off_since`` come from Home
+    # Assistant state-change timestamps, while ``now`` is captured once at the
+    # top of a refresh, so a load that switches on *during* the seconds a run
+    # takes to build its payload is stamped slightly after that ``now``. Floor
+    # division then turns a delta of a few hundred milliseconds the wrong way
+    # into -1. Clamping here rather than skewing ``now`` keeps the elapsed
+    # helpers honest about what they measured; "0 whole timesteps" is also the
+    # true answer in every case this catches.
+
     def completed_timesteps(self, now: datetime, step_minutes: int) -> int:
         elapsed = self.elapsed_towards_target(now).total_seconds() / 60
-        return int(elapsed // step_minutes)
+        return max(0, int(elapsed // step_minutes))
 
     def continuous_on_timesteps(self, now: datetime, step_minutes: int) -> int:
         """How many whole timesteps this load has been continuously on.
@@ -562,7 +575,7 @@ class DeferrableRuntime:
         """
         if self.running_since is None:
             return 0
-        return int((now - self.running_since).total_seconds() / 60 // step_minutes)
+        return max(0, int((now - self.running_since).total_seconds() / 60 // step_minutes))
 
     def continuous_off_timesteps(self, now: datetime, step_minutes: int) -> int:
         """How many whole timesteps this load has been continuously off.
@@ -571,7 +584,7 @@ class DeferrableRuntime:
         """
         if self.off_since is None:
             return 0
-        return int((now - self.off_since).total_seconds() / 60 // step_minutes)
+        return max(0, int((now - self.off_since).total_seconds() / 60 // step_minutes))
 
     def thermal_config(self, current_temperature: float | None) -> ThermalConfig | None:
         """This load's thermal model, or None for an ordinary load.

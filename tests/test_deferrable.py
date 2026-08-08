@@ -121,6 +121,16 @@ def test_completed_timesteps_floors_to_whole_steps():
     assert load.completed_timesteps(now, 15) == 5
 
 
+def test_completed_timesteps_never_goes_negative():
+    """A transition stamped a moment after the ``now`` a payload is built
+    against -- the load switched on while the run was being assembled. Floor
+    division would answer -1, which EMHASS 0.18 rejects outright."""
+    load = _load()
+    load.observe_power(1900, T0 + timedelta(milliseconds=300))
+
+    assert load.completed_timesteps(T0, 15) == 0
+
+
 # --- continuous on/off streaks (minimum on/off time) -------------------------
 
 
@@ -150,6 +160,18 @@ def test_continuous_off_timesteps_is_zero_before_any_transition_is_observed():
     rather than assuming the load has been off since the dawn of time."""
     load = _load()
     assert load.continuous_off_timesteps(T0, 30) == 0
+
+
+def test_continuous_streaks_never_go_negative():
+    """Both streaks are stamped from Home Assistant state changes, so either can
+    land just after the ``now`` a payload is built against; -1 fails the whole
+    optimisation in EMHASS 0.18, not just this load."""
+    load = _load()
+    load.observe_power(1900, T0 + timedelta(milliseconds=300))
+    assert load.continuous_on_timesteps(T0, 15) == 0
+
+    load.observe_power(0, T0 + timedelta(milliseconds=600))
+    assert load.continuous_off_timesteps(T0, 15) == 0
 
 
 def test_switching_on_clears_the_off_streak():

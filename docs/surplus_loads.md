@@ -73,7 +73,8 @@ Once per run, in `surplus.py`, from the **previous** run's plan:
 The load is then sent to EMHASS as a completely ordinary deferrable with those
 hours and that window. The optimiser still decides *when* inside it — but only
 inside it, and [Start as early as possible](#start-as-early-as-possible)
-narrows the window until there is no *inside* left to decide. Without the block cut, a window spanning a whole night is still a
+narrows the window until there is no *inside* left to decide, on the loads
+where it can. Without the block cut, a window spanning a whole night is still a
 technically valid window, and EMHASS will place the load at 3 a.m. if that
 happens to be the cheapest way to fill it — solar never entered its decision,
 only the (wrongly wide) window did.
@@ -126,21 +127,55 @@ It changes the window and nothing else — not the hours, not the energy, not
 which timesteps were credited. The budget is already "however much the surplus
 supports"; all this decides is where in the block those hours land.
 
-The slack it closes is the gap between `hours` and the span they were derived
-from, and there are three ordinary ways to open one:
+### It needs an energy cap to do anything
 
-- **An energy cap.** The clearest case. *Energy needed* of 20 kWh into a car
-  on a day with 40 kWh of sun asks for half a window's worth of running, and
-  the other half is placement freedom.
-- **The battery reservation.** Slots the battery's own charging has claimed
-  still count towards *when* the load may run but contribute little or nothing
-  towards *how much* — see [below](#the-battery-reservation).
-- **Weak or sub-threshold timesteps** inside an otherwise strong block.
+!!! important
 
-Whenever `hours` is short of the span, EMHASS picks where they go — and its
-cost function has **no reason to prefer early**. On flat prices, which end of
-the block a thin day's run lands on comes down to solver tie-break, not to
-anything about the sun. With the switch on, the window is pulled in to the
+    Unless *Energy needed* is set above 0, this switch has **no effect at
+    all** — on any surplus load, modulating or full-power-only. Turning it on
+    with the cap left at 0 sends EMHASS exactly the window it would have got
+    anyway. This is a real limitation of the mechanism, not a preference.
+
+The slack the switch closes is the gap between `hours` and the span they were
+derived from, and an energy cap is the only input that can open one. The
+target handed to EMHASS is
+
+```
+energy_wh = hours * nominal_w
+hours     = min(credit_wh / nominal_w, span_hours, max_energy_wh / nominal_w)
+```
+
+while what the block can actually put into this load is
+`Σ draw · step`, where `draw` is `min(net, nominal_w)` for a modulating load
+and `nominal_w` for a full-power-only one. Narrowing requires `energy_wh` to be
+*below* that total — otherwise the earliest window that covers the target is
+the last qualifying timestep, which is the whole block. And:
+
+- `credit_wh` = `Σ net · step` over the same qualifying slots, so it is always
+  **at or above** the deliverable total. It can never put the target below it.
+- `span_hours * nominal_w` is at least `(qualifying slots) * nominal_w * step`,
+  which is also at or above the deliverable total. Same conclusion.
+- `max_energy_wh` is unrelated to the block, so it is the one term that can sit
+  under it — and does, whenever you ask for less energy than the day has sun
+  for.
+
+So *Energy needed* of 10 kWh into a car on a day with 35 kWh of sun asks for
+well under a window's worth of running, and the rest is placement freedom for
+the switch to take away. That is the case the switch exists for; there is no
+other.
+
+Two things that look like slack but are not: **the battery reservation** and
+**weak or sub-threshold timesteps**. Both do reduce the hours, but they reduce
+what the block can deliver by exactly as much, so the earliest covering window
+is still the whole block.
+
+Fixing this properly means a budget that means "what I asked for" rather than
+"whatever is going" — the clamp itself is doing what it says.
+
+Whenever `hours` genuinely is short of the span, EMHASS picks where they go —
+and its cost function has **no reason to prefer early**. On flat prices, which
+end of the block a thin day's run lands on comes down to solver tie-break, not
+to anything about the sun. With the switch on, the window is pulled in to the
 earliest stretch that can still deliver the budget, leaving as little room to
 drift late as the day allows.
 
@@ -177,7 +212,15 @@ you don't trust — not as a general improvement.
 
 A widened window is logged at debug level, naming the load and how many
 timesteps it grew by; a run that starts later than expected on a peaked day
-is usually this.
+is usually this. It is also how to confirm the uncapped case above — a line
+widening the window back to the full block, run after run, means the switch is
+doing nothing:
+
+```
+01KZF7RZDVQXFMCGJD9ZFNBT74: start-as-early-as-possible window widened from 21
+to 38 timesteps -- the front of the block cannot deliver 36607 Wh at 7022 W
+without importing
+```
 
 This is also why **Run now** is unavailable on a surplus load. That button
 forces the load on regardless of the plan, which here means charging off the
