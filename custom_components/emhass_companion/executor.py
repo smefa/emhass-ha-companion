@@ -379,9 +379,7 @@ class Executor:
             self.last_decision is not None and self.last_decision.action == MODE_SELF_CONSUME
         )
         action, power, battery_rules = decide_battery(row, config, in_self_consume=in_self_consume)
-        curtail, curtail_w, curtail_rules = decide_curtailment(
-            row, config, self.coordinator.soc_percent
-        )
+        curtail, curtail_w, curtail_rules = decide_curtailment(row)
         return Decision(
             action=action,
             power_w=power,

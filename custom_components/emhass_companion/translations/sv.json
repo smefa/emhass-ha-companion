@@ -133,6 +133,21 @@
           "battery_stress_cost": "Motverkar snabb laddning och urladdning. Kostnaden växer med effekten i kvadrat, så halv effekt kostar en fjärdedel, och planen sprider en laddning över flera timmar i stället för att pressa in den i den billigaste. Prissatt per kW vid full effekt, per timme. 0 stänger av detta, vilket är standard."
         }
       },
+      "inverter": {
+        "title": "Växelriktarstyrning",
+        "description": "Hur batteriet faktiskt styrs. Lämnar du detta tomt läser integrationen bara — planen är din att agera på hur du vill.\n\nInget skrivs till din utrustning förrän du dessutom slår på reglaget Styrning aktiverad.",
+        "data": {
+          "profile": "Växelriktarprofil"
+        }
+      },
+      "inverter_options": {
+        "title": "Konfigurera {profile}",
+        "description": "{notes}",
+        "data": {
+          "export_limit_switch": "Exportgränsbrytare",
+          "export_limit_number": "Exportgränseffekt"
+        }
+      },
       "grid": {
         "title": "Nätanslutning och schema",
         "description": "Dina anslutningsgränser och hur ofta planen räknas om.{detected_resolution}",
@@ -140,14 +155,14 @@
           "grid_import_max_w": "Maximal effekt från nätet",
           "grid_export_max_w": "Maximal effekt till nätet",
           "capacity_cost_per_kw": "Effektavgift (kapacitetsavgift)",
-          "curtail_on_negative_price": "Begränsa export vid negativt pris",
+          "compute_curtailment": "Låt EMHASS optimera solcellsbegränsning",
           "optimization_time_step": "Tidsupplösning (minuter)",
           "mpc_interval_minutes": "Räkna om var",
           "horizon_hours": "Planeringshorisont",
           "dayahead_fallback_time": "Reservtid för dygnsplanering"
         },
         "data_description": {
-          "curtail_on_negative_price": "Får bara effekt tillsammans med en växelriktarprofil som stödjer exportbegränsning. Begränsar exporten till noll närhelst säljpriset är negativt och batteriet saknar utrymme att ta hand om överskottet istället. Avstängt som standard, eftersom EMHASS egen exportbegränsning redan tar hänsyn till detta när den är aktiverad.",
+          "compute_curtailment": "Slår på EMHASS egen begränsning (inställningen compute_curtailment) och skickar den med varje körning, så den åsidosätter det som står i tillägget. Optimeraren får då kapa solproduktion den inte kan använda — planen får en begränsningskolumn, och en växelriktarprofil som stöder begränsning följer den. Av som standard, och bara meningsfull om något faktiskt kan agera på den: utan en växelriktarprofil som stöder begränsning utgår planen från att solel kapades som i verkligheten fortfarande går ut på nätet.",
           "optimization_time_step": "Den tidsupplösning EMHASS planerar med. Matchar du din priskällas egen upplösning (till exempel 15 minuter för dagens Nord Pool-priser) fångas mest detalj; en grövre upplösning löser snabbare. Välj i listan eller skriv valfritt antal minuter.",
           "dayahead_fallback_time": "En fullständig dygnsplan byggs normalt om automatiskt så snart nya priser kommer. Den här tiden används bara som reserv om det aldrig sker.",
           "capacity_cost_per_kw": "Om ditt nätavtal debiterar den högsta effekt du tar ut, inte bara energin, ange det priset per kW här. Planen jämnar då ut sin värsta importtopp -- sprider ut laster och laddar ur batteriet över den -- i stället för att bara jaga billiga timmar. Debiteras en gång på toppen, inte per timme. 0 stänger av detta, vilket är standard."
@@ -261,14 +276,14 @@
           "grid_import_max_w": "Maximal effekt från nätet",
           "grid_export_max_w": "Maximal effekt till nätet",
           "capacity_cost_per_kw": "Effektavgift (kapacitetsavgift)",
-          "curtail_on_negative_price": "Begränsa export vid negativt pris",
+          "compute_curtailment": "Låt EMHASS optimera solcellsbegränsning",
           "optimization_time_step": "Tidsupplösning (minuter)",
           "mpc_interval_minutes": "Räkna om var",
           "horizon_hours": "Planeringshorisont",
           "dayahead_fallback_time": "Reservtid för dygnsplanering"
         },
         "data_description": {
-          "curtail_on_negative_price": "Får bara effekt tillsammans med en växelriktarprofil som stödjer exportbegränsning. Begränsar exporten till noll närhelst säljpriset är negativt och batteriet saknar utrymme att ta hand om överskottet istället. Avstängt som standard, eftersom EMHASS egen exportbegränsning redan tar hänsyn till detta när den är aktiverad.",
+          "compute_curtailment": "Slår på EMHASS egen begränsning (inställningen compute_curtailment) och skickar den med varje körning, så den åsidosätter det som står i tillägget. Optimeraren får då kapa solproduktion den inte kan använda — planen får en begränsningskolumn, och en växelriktarprofil som stöder begränsning följer den. Av som standard, och bara meningsfull om något faktiskt kan agera på den: utan en växelriktarprofil som stöder begränsning utgår planen från att solel kapades som i verkligheten fortfarande går ut på nätet.",
           "capacity_cost_per_kw": "Om ditt nätavtal debiterar den högsta effekt du tar ut, inte bara energin, ange det priset per kW här. Planen jämnar då ut sin värsta importtopp -- sprider ut laster och laddar ur batteriet över den -- i stället för att bara jaga billiga timmar. Debiteras en gång på toppen, inte per timme. 0 stänger av detta, vilket är standard."
         }
       },

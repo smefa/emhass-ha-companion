@@ -38,6 +38,7 @@ from .const import (
     CONF_COMFORT_END,
     CONF_COMFORT_START,
     CONF_COMFORT_TEMPERATURE,
+    CONF_COMPUTE_CURTAILMENT,
     CONF_CONTROL_ENTITY,
     CONF_COOLING_CONSTANT,
     CONF_DAYAHEAD_FALLBACK_TIME,
@@ -99,7 +100,7 @@ from .const import (
     DEFAULT_BATTERY_STRESS_COST,
     DEFAULT_BATTERY_STRESS_SEGMENTS,
     DEFAULT_CAPACITY_COST_PER_KW,
-    DEFAULT_CURTAIL_ON_NEGATIVE_PRICE,
+    DEFAULT_COMPUTE_CURTAILMENT,
     DEFAULT_DAYAHEAD_FALLBACK_TIME,
     DEFAULT_END_SOC_MODE,
     DEFAULT_GRID_EXPORT_MAX,
@@ -417,6 +418,22 @@ def _collect_tariff(user_input: dict[str, Any]) -> dict[str, Any]:
     return tariff
 
 
+def _collect_grid(user_input: dict[str, Any]) -> dict[str, Any]:
+    """The grid step's own keys, split out from the schedule ones beside them.
+
+    Shared by setup and options so the two cannot drift -- which is exactly
+    what happened to ``capacity_cost_per_kw``: the schema asked for it and
+    both handlers dropped it on the floor, leaving it stuck at its default no
+    matter what anyone typed.
+    """
+    return {
+        "grid_import_max_w": user_input["grid_import_max_w"],
+        "grid_export_max_w": user_input["grid_export_max_w"],
+        CONF_CAPACITY_COST_PER_KW: user_input[CONF_CAPACITY_COST_PER_KW],
+        CONF_COMPUTE_CURTAILMENT: user_input[CONF_COMPUTE_CURTAILMENT],
+    }
+
+
 class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
     """Guided setup."""
 
@@ -618,17 +635,56 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
                 self._options[CONF_SOC_ENTITY] = soc
             if pv_live := user_input.get(CONF_PV_ENTITY):
                 self._options[CONF_PV_ENTITY] = pv_live
-            return await self.async_step_grid()
+            return await self.async_step_inverter()
 
         return self.async_show_form(step_id="battery", data_schema=vol.Schema(battery_schema({})))
 
+    async def async_step_inverter(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Choose how the plan is written to hardware, if it is at all.
+
+        Optional, and skippable with a blank answer -- the integration is
+        perfectly useful read-only. It comes before the grid step rather than
+        being left to Configure afterwards because the grid step asks about
+        curtailment, and whether curtailment is even a question depends on the
+        profile chosen here defining a curtail/uncurtail pair.
+        """
+        choices = available_profiles(self.hass, self._profiles, PROFILE_KIND_INVERTER)
+
+        if user_input is not None:
+            key = user_input.get(CONF_PROFILE)
+            if not key:
+                self._options[CONF_INVERTER] = {}
+                return await self.async_step_grid()
+            self._options[CONF_INVERTER] = {CONF_PROFILE: key, CONF_PROFILE_OPTIONS: {}}
+            return await self.async_step_inverter_options()
+
+        return self.async_show_form(
+            step_id="inverter",
+            data_schema=vol.Schema({vol.Optional(CONF_PROFILE): _profile_selector(choices)}),
+        )
+
+    async def async_step_inverter_options(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        profile = self._profiles[self._options[CONF_INVERTER][CONF_PROFILE]]
+
+        if user_input is not None or not profile.options:
+            self._options[CONF_INVERTER][CONF_PROFILE_OPTIONS] = user_input or {}
+            return await self.async_step_grid()
+
+        return self.async_show_form(
+            step_id="inverter_options",
+            data_schema=self.add_suggested_values_to_schema(
+                vol.Schema(profile.selector_schema()), _suggested_entities(self.hass, profile)
+            ),
+            description_placeholders={"profile": profile.name, "notes": profile.notes or ""},
+        )
+
     async def async_step_grid(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is not None:
-            self._options["grid"] = {
-                "grid_import_max_w": user_input["grid_import_max_w"],
-                "grid_export_max_w": user_input["grid_export_max_w"],
-                "curtail_on_negative_price": user_input["curtail_on_negative_price"],
-            }
+            self._options["grid"] = _collect_grid(user_input)
             self._options.update(
                 {
                     key: user_input[key]
@@ -1589,14 +1645,12 @@ def grid_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
         ): selector.NumberSelector(
             selector.NumberSelectorConfig(min=0, max=1000, step=0.01, mode="box")
         ),
-        # Opt-in: curtail to zero export whenever the plan's own sell price is
-        # negative and the battery has no headroom to absorb the surplus
-        # instead. Off by default -- it is a second optimiser competing with
-        # EMHASS's own curtailment cost function, and only does anything at
-        # all for an inverter profile whose control block defines curtail.
+        # The only curtailment question there is: without this, no run ever
+        # produces a P_PV_curtailment column, and strategy.decide_curtailment
+        # has nothing to act on.
         vol.Required(
-            "curtail_on_negative_price",
-            default=defaults.get("curtail_on_negative_price", DEFAULT_CURTAIL_ON_NEGATIVE_PRICE),
+            CONF_COMPUTE_CURTAILMENT,
+            default=defaults.get(CONF_COMPUTE_CURTAILMENT, DEFAULT_COMPUTE_CURTAILMENT),
         ): selector.BooleanSelector(),
         # A fixed list would leave anyone whose price source publishes at some
         # other resolution stuck rounding to the nearest preset; custom_value
@@ -1996,12 +2050,9 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
 
     async def async_step_grid(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         options = dict(self.config_entry.options)
+        stored = options.get("grid", {})
         if user_input is not None:
-            options["grid"] = {
-                "grid_import_max_w": user_input["grid_import_max_w"],
-                "grid_export_max_w": user_input["grid_export_max_w"],
-                "curtail_on_negative_price": user_input["curtail_on_negative_price"],
-            }
+            options["grid"] = _collect_grid(user_input)
             options.update(
                 {
                     key: user_input[key]
@@ -2017,7 +2068,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
 
         return self.async_show_form(
             step_id="grid",
-            data_schema=vol.Schema(grid_schema({**options, **options.get("grid", {})})),
+            data_schema=vol.Schema(grid_schema({**options, **stored})),
         )
 
     async def async_step_tariff(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:

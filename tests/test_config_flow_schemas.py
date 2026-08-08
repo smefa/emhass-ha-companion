@@ -14,6 +14,7 @@ import voluptuous as vol
 
 from custom_components.emhass_companion.config_flow import (
     STANDARD_TIME_STEPS,
+    _collect_grid,
     _collect_tariff,
     _default_profile_options,
     _load_profile_selector,
@@ -24,6 +25,8 @@ from custom_components.emhass_companion.config_flow import (
     grid_schema,
 )
 from custom_components.emhass_companion.const import (
+    CONF_CAPACITY_COST_PER_KW,
+    CONF_COMPUTE_CURTAILMENT,
     CONF_MULTIPLIER,
     CONF_TIME_STEP,
     LOAD_PROFILE_CREATE_SENTINEL,
@@ -109,6 +112,27 @@ def test_grid_schema_builds():
 def test_grid_schema_builds_with_a_detected_time_step():
     """The value async_step_grid passes in after detection must be renderable."""
     assert vol.Schema(grid_schema({CONF_TIME_STEP: 15}))
+
+
+def test_the_grid_step_asks_only_about_emhass_curtailment():
+    """The Companion's own negative-price rule is gone -- one curtailment
+    question, and it is EMHASS's."""
+    keys = {str(key) for key in grid_schema({})}
+    assert CONF_COMPUTE_CURTAILMENT in keys
+    assert "curtail_on_negative_price" not in keys
+
+
+def test_collect_grid_keeps_the_capacity_charge():
+    """It was asked for and then dropped by both handlers for a while."""
+    submitted = {
+        "grid_import_max_w": 9000,
+        "grid_export_max_w": 9000,
+        CONF_CAPACITY_COST_PER_KW: 45.0,
+        CONF_COMPUTE_CURTAILMENT: True,
+    }
+    collected = _collect_grid(submitted)
+    assert collected[CONF_CAPACITY_COST_PER_KW] == 45.0
+    assert collected[CONF_COMPUTE_CURTAILMENT] is True
 
 
 # --- time step: the dropdown offers presets plus whatever was detected -------

@@ -73,6 +73,27 @@ does, via its export-limit switch and number. Whether a given profile
 supports it is documented in that profile's own notes, shown on the
 confirmation step when you select it.
 
+That column only exists when EMHASS is asked to optimise curtailment in the
+first place — **Let EMHASS optimise PV curtailment** on the Grid and schedule
+step, which the Companion sends with every run as `compute_curtailment`. With
+it off there is no curtailment at all: the plan never asks for any, so nothing
+is ever written.
+
+There used to be a second, Companion-side rule here — curtail to zero whenever
+the sell price was negative and the battery was full — from when
+`compute_curtailment` could only be set by editing the add-on's configuration.
+It was removed once that became a checkbox: EMHASS prices negative export
+itself, including deciding *not* to curtail when exporting beats shedding, and
+a fixed threshold running afterwards could only overrule that.
+
+One case would want something like it back. EMHASS's curtailment is
+continuous, and the executor turns it into an export cap in watts. A profile
+whose `curtail_mode` is `zero_export_switch` has no such dial — the write is
+on or off — so a plan asking to shed part of the array collapses to shedding
+all export. No shipped profile uses that mode today; one that does would need
+either a decision rule of its own or a way to tell EMHASS its curtailment is
+all-or-nothing.
+
 > Some inverters also separately permission charging from the grid at all,
 > on top of the plan asking for it (Growatt's `allow_grid_charge`, Deye's
 > `grid_charge_enabled`, and others). The Companion doesn't yet assert that

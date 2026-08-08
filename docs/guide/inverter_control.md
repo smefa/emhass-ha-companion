@@ -28,9 +28,30 @@ Configure → Inverter control**.
       HACS update never touches it. See [Writing a profile](../profiles.md)
       for the format and a starter template.
 
-You'll then be asked to confirm a handful of entities the chosen profile
-needs (a select, a number, a script — whatever that profile's hardware
-uses).
+## Configuring the profile
+
+You're then asked to confirm the entities the chosen profile needs — a
+select, a number, a script, whatever that profile's hardware uses. For the
+two that ship in-box:
+
+- **Scripts** — a script per battery action: **Self-consumption script**
+  (also used as the safe fallback whenever a plan goes stale, so this one in
+  particular is worth providing), **Charge script**, **Discharge script** and
+  **Idle script** (neither charging nor discharging). Each receives a
+  `power_w` variable holding the watts requested, plus `soc` and `soc_target`
+  as percentages. Leave one unset only if your inverter genuinely has no such
+  mode.
+- **Sungrow SH-RT Hybrid (SHx Modbus)** — the mkaiser Modbus package's own
+  entities, pre-filled with its default entity ids: **EMS mode** (the select
+  that arms forced mode), **Battery forced charge discharge** (the direction
+  select), **Battery forced charge discharge power** (the power number), and
+  the package's two curtailment entities, **Export limit switch** and
+  **Export limit power**. There are also five text fields naming the exact
+  options to write into those two selects (**EMS mode — self-consumption /
+  forced option name**, **Direction — stop / forced charge / forced discharge
+  option name**), pre-filled with the package's defaults. Confirm all of
+  these against your own install if you changed the object ids or run a
+  different language.
 
 ## Entities
 

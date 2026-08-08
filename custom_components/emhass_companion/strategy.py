@@ -70,9 +70,7 @@ def decide_battery(
     return action, power, rules
 
 
-def decide_curtailment(
-    row: PlanRow, config: EmhassConfig, soc_percent: float | None
-) -> tuple[bool, float, list[str]]:
+def decide_curtailment(row: PlanRow) -> tuple[bool, float, list[str]]:
     """Whether to curtail export right now, and the export ceiling to apply.
 
     The returned ``curtail_w`` is the allowed *export* in watts -- what an
@@ -84,26 +82,26 @@ def decide_curtailment(
     an 8 kW array is still exporting most of the rest, not capping export at
     500 W.
 
-    Two independent rules, in priority order, both plan-driven:
+    One rule, and it is the plan's: the ``P_PV_curtailment`` column, which
+    exists only when EMHASS is asked to optimise curtailment (the
+    ``compute_curtailment`` setting on the grid step). The cap is read off
+    ``P_grid`` (``max(0, -p_grid)``) rather than off ``P_PV_curtailment``
+    itself, because ``P_grid`` already is the post-curtailment balance -- the
+    same reason ``decide_battery`` reads ``P_grid`` instead of reconstructing
+    the balance from ``P_PV``. Skipped when the row carries no ``P_grid``:
+    translating a shed amount into an export cap without it means recomputing
+    the PV/load/battery balance by hand, which is exactly the
+    misclassification the module docstring warns about.
 
-    1. The plan's own ``P_PV_curtailment`` column, when EMHASS's curtailment
-       is enabled. This is the primary rule -- ``None`` whenever it is not,
-       which is most installs, including the reference one this was built
-       against. The cap is read off ``P_grid`` (``max(0, -p_grid)``) rather
-       than off ``P_PV_curtailment`` itself, because ``P_grid`` already is
-       the post-curtailment balance -- the same reason ``decide_battery``
-       reads ``P_grid`` instead of reconstructing the balance from ``P_PV``.
-       Skipped when the row carries no ``P_grid``: translating a shed amount
-       into an export cap without it means recomputing the PV/load/battery
-       balance by hand, which is exactly the misclassification the module
-       docstring warns about.
-    2. Opt-in: the plan's sell price is negative and the battery has no
-       headroom (real-time SOC at or above the configured maximum) to absorb
-       the surplus instead of exporting it into a negative price. Off by
-       default -- it is a second optimiser competing with EMHASS's own
-       curtailment cost function, which already prices this in when enabled.
-       Caps export at 0 outright, since the whole point is that nothing
-       should be exported.
+    There was a second, opt-in rule here -- curtail to zero whenever the sell
+    price was negative and the battery was full -- from back when
+    ``compute_curtailment`` could only be set by editing the add-on's own
+    configuration, so a Companion-side heuristic was the only curtailment most
+    installs could reach. It is gone: EMHASS prices negative export properly
+    once asked to, including choosing *not* to curtail when exporting beats
+    shedding, and a hardcoded threshold running after it could only overrule
+    that. See docs/inverter_control.md for the one hardware case
+    (``zero_export_switch``) that would want something like it back.
 
     Otherwise, uncurtail.
     """
@@ -115,22 +113,6 @@ def decide_curtailment(
             [
                 f"plan curtails {row.p_pv_curtailment:.0f}W PV; capping export at "
                 f"{allowed_export_w:.0f}W (p_grid={row.p_grid:.0f}W)"
-            ],
-        )
-
-    if (
-        config.grid.curtail_on_negative_price
-        and row.unit_prod_price is not None
-        and row.unit_prod_price < 0
-        and soc_percent is not None
-        and soc_percent >= config.battery.soc_max * 100
-    ):
-        return (
-            True,
-            0.0,
-            [
-                f"unit_prod_price={row.unit_prod_price:.4f} < 0 and battery at "
-                f"{soc_percent:.0f}% (>= soc_max) has no headroom"
             ],
         )
 

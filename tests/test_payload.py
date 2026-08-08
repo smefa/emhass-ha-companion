@@ -511,6 +511,22 @@ def test_capacity_charge_defaults_to_a_no_op():
     assert payload["capacity_cost_per_kw"] == 0.0
 
 
+def test_compute_curtailment_is_sent_when_configured():
+    """EMHASS produces no P_PV_curtailment column without it, so the plan-driven
+    branch of decide_curtailment depends on this reaching the run."""
+    grid = GridConfig(compute_curtailment=True)
+    assert build_payload(_inputs(grid=grid)).payload["compute_curtailment"] is True
+
+    grid = GridConfig(compute_curtailment=False)
+    assert build_payload(_inputs(grid=grid)).payload["compute_curtailment"] is False
+
+
+def test_compute_curtailment_is_omitted_when_unset():
+    """Sending False here would override an add-on-side setting the user never
+    asked us to touch -- an unset entry must stay silent instead."""
+    assert "compute_curtailment" not in build_payload(_inputs()).payload
+
+
 def test_battery_cycle_costs_are_omitted_with_no_battery():
     """Nothing battery-shaped is sent when the flag is off, these included."""
     battery = BatteryConfig(enabled=False, weight_battery_discharge=0.06)

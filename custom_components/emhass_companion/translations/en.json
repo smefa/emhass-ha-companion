@@ -133,6 +133,21 @@
           "battery_stress_cost": "Discourages fast charging and discharging. The cost grows with the square of the power, so running at half power costs a quarter as much, and the plan spreads a charge over several hours instead of forcing it into the single cheapest one. Priced per kW at full power, per hour. 0 turns this off, which is the default."
         }
       },
+      "inverter": {
+        "title": "Inverter control",
+        "description": "How the battery is actually commanded. Leave this unset and the integration only ever reads — the plan is yours to act on however you like.\n\nDon't see your inverter? **Scripts** works with any inverter you can already control from Home Assistant, and advanced users can write their own YAML profile for a dedicated entry — see the profiles guide in the documentation.\n\nNothing is written to your hardware until you also turn on the Control enabled switch.",
+        "data": {
+          "profile": "Inverter profile"
+        }
+      },
+      "inverter_options": {
+        "title": "Configure {profile}",
+        "description": "{notes}",
+        "data": {
+          "export_limit_switch": "Export limit switch",
+          "export_limit_number": "Export limit power"
+        }
+      },
       "grid": {
         "title": "Grid connection and schedule",
         "description": "Your connection limits, and how often the plan is recalculated.{detected_resolution}",
@@ -140,14 +155,14 @@
           "grid_import_max_w": "Maximum import power",
           "grid_export_max_w": "Maximum export power",
           "capacity_cost_per_kw": "Capacity (demand) charge",
-          "curtail_on_negative_price": "Curtail export at a negative price",
+          "compute_curtailment": "Let EMHASS optimise PV curtailment",
           "optimization_time_step": "Time resolution (minutes)",
           "mpc_interval_minutes": "Recalculate every",
           "horizon_hours": "Planning horizon",
           "dayahead_fallback_time": "Day-ahead fallback time"
         },
         "data_description": {
-          "curtail_on_negative_price": "Only takes effect for an inverter profile that supports curtailment. Curtails to zero export whenever the sell price is negative and the battery has no room left to absorb the surplus instead. Off by default, since EMHASS's own curtailment already prices this in when enabled.",
+          "compute_curtailment": "Turns on EMHASS's own curtailment (its compute_curtailment setting), sent with every run so it overrides whatever the add-on has stored. The optimiser is then free to shed solar it cannot use — the plan gains a curtailment column, and an inverter profile that supports curtailment follows it. Off by default, and only worth turning on if something can actually act on it: with no curtailment-capable inverter profile the plan assumes solar was shed that in reality still flows to the grid.",
           "optimization_time_step": "The step size EMHASS plans at. Matching your price source's own resolution (for example 15 minutes for current Nord Pool prices) captures the most detail; a coarser step solves faster. Pick from the list or type any number of minutes.",
           "dayahead_fallback_time": "A full day-ahead plan is normally rebuilt automatically as soon as new prices arrive. This time is only used as a backstop if that never happens.",
           "capacity_cost_per_kw": "If your network tariff bills the highest power you draw, not just the energy, enter that price per kW here. The plan then flattens its single worst import peak -- shifting loads apart and discharging the battery across it -- instead of only chasing cheap hours. Charged once on the peak, not per hour. 0 turns this off, which is the default."
@@ -261,14 +276,14 @@
           "grid_import_max_w": "Maximum import power",
           "grid_export_max_w": "Maximum export power",
           "capacity_cost_per_kw": "Capacity (demand) charge",
-          "curtail_on_negative_price": "Curtail export at a negative price",
+          "compute_curtailment": "Let EMHASS optimise PV curtailment",
           "optimization_time_step": "Time resolution (minutes)",
           "mpc_interval_minutes": "Recalculate every",
           "horizon_hours": "Planning horizon",
           "dayahead_fallback_time": "Day-ahead fallback time"
         },
         "data_description": {
-          "curtail_on_negative_price": "Only takes effect for an inverter profile that supports curtailment. Curtails to zero export whenever the sell price is negative and the battery has no room left to absorb the surplus instead. Off by default, since EMHASS's own curtailment already prices this in when enabled.",
+          "compute_curtailment": "Turns on EMHASS's own curtailment (its compute_curtailment setting), sent with every run so it overrides whatever the add-on has stored. The optimiser is then free to shed solar it cannot use — the plan gains a curtailment column, and an inverter profile that supports curtailment follows it. Off by default, and only worth turning on if something can actually act on it: with no curtailment-capable inverter profile the plan assumes solar was shed that in reality still flows to the grid.",
           "capacity_cost_per_kw": "If your network tariff bills the highest power you draw, not just the energy, enter that price per kW here. The plan then flattens its single worst import peak -- shifting loads apart and discharging the battery across it -- instead of only chasing cheap hours. Charged once on the peak, not per hour. 0 turns this off, which is the default."
         }
       },

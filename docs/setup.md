@@ -11,21 +11,24 @@ sources you actually have installed**.
 | Solar forecast | Which forecast source — or *No solar* |
 | House consumption | Which sensor, and how to forecast from it |
 | Battery | Capacity and limits — or leave it off |
-| Grid and schedule | Connection limits, time resolution, how often to recalculate |
+| Inverter control | Which profile writes the plan to hardware — or none, and stay read-only |
+| Grid and schedule | Connection limits, curtailment, time resolution, how often to recalculate |
 
 Most of these can be revisited any time from **Settings → Devices & Services
 → EMHASS Companion → Configure**:
 
 ![The Configure menu, listing House consumption, Battery, Grid and schedule, Buy and sell prices, Inverter control and Outdoor temperature](assets/setup-configure-menu.png)
 
-**Inverter control** and **Outdoor temperature** only appear once they're
-relevant — a battery for the former, a thermal load for the latter — and are
-covered in [Inverter control](inverter_control.md) and
+**Inverter control** is the same step as during setup — come back here to add
+a profile you skipped, or to swap one. **Outdoor temperature** is only worth
+visiting once you have a thermal load. Both are covered in
+[Inverter control](inverter_control.md) and
 [Thermal loads](thermal_loads.md) rather than here.
 
-Electricity price and solar forecast sources are asked only during initial
-setup — changing which *source* you use means removing and re-adding the
-integration, since it decides which other questions even apply.
+The electricity price source is the one thing asked only during initial setup
+— changing which *source* you use means removing and re-adding the
+integration, since it decides which other questions even apply. The solar
+forecast source can be changed from **Configure → Solar forecast**.
 
 ## Connect
 
@@ -84,7 +87,8 @@ the optimiser plans around PV, load and price alone.
 | Usable capacity | In Wh |
 | Maximum charge / discharge power | The battery's own limits |
 | Minimum / maximum charge level | The optimiser will not plan the battery outside this range |
-| Target charge level | Where the optimiser aims to leave the battery at the end of the horizon |
+| Target charge level | Where the optimiser aims to leave the battery at the end of the horizon. What it means depends on End SOC below |
+| End SOC | How that end-of-horizon level is chosen. See below |
 | Shared inverter (hybrid) | On if PV and the battery share one inverter's AC-side power limit — true for most home battery systems. Off if they are two independent inverters, each with its own limit |
 | Maximum AC output / input | Only asked if hybrid — the shared inverter's own throughput ceiling, separate from the battery's own charge/discharge limits |
 | DC to AC / AC to DC efficiency | Conversion losses, only asked if hybrid |
@@ -145,6 +149,22 @@ line segments. Higher tracks the true cost more closely but adds constraints to
 every optimisation; **10** is a good balance, and it only matters when the
 stress cost is set.
 
+**End SOC.** Which battery level the plan is required to reach at the end of
+the horizon — the single constraint that decides whether an overnight
+discharge is allowed to run the battery down, or has to leave it charged for
+tomorrow. Three modes:
+
+- **Optimized** — computed fresh each run from the solar, price and load
+  forecasts *beyond* the horizon. Target charge level then acts as a reserve
+  floor the computed target never plans below.
+- **Same as start** — always plans back to the level the battery is at now.
+  The old fixed behaviour.
+- **Fixed % slider** — always aims for Target charge level exactly.
+
+Requires EMHASS 0.18 or newer. The resulting target, and the reasoning behind
+it, is published on the **End SOC target** sensor. See
+[End SOC](end_soc_plan.md) for how *Optimized* decides.
+
 **Self-consumption handoff threshold.** When the plan's grid power is within
 this many watts of zero, the battery is handed to the inverter's own
 self-consumption mode instead of the plan's forced charge/discharge — even a
@@ -177,7 +197,7 @@ now.
 
 ## Time resolution
 
-![The Grid connection and schedule step, with import/export limits, curtail-on-negative-price, time resolution, recalculation interval, planning horizon and day-ahead fallback time](assets/setup-grid-schedule.png)
+![The Grid connection and schedule step, with import/export limits, capacity charge, PV curtailment, time resolution, recalculation interval, planning horizon and day-ahead fallback time](assets/setup-grid-schedule.png)
 
 The **Grid and schedule** step defaults the optimisation time step to whatever
 your chosen price source actually publishes at — Nord Pool has been 15-minute
@@ -200,14 +220,18 @@ This is a grid setting, not a battery one: peak shaving works through
 deferrable loads too, so it applies whether or not you have a battery. **0**
 (the default) turns it off entirely.
 
-**Curtail on negative price**, on the same step, is off by default. The plan's
-own PV-curtailment column already tells the executor when to curtail if
-EMHASS's own curtailment cost function is enabled — that is the primary rule.
-This option adds a second, independent one: curtail whenever the sell price
-is negative *and* the battery has no headroom (already at its maximum charge
-level) to absorb the surplus instead. Leave it off unless you specifically
-want that behaviour — it is a second optimiser competing with EMHASS's own,
-which already prices this in when its curtailment is enabled.
+**Let EMHASS optimise PV curtailment**, on the same step, is off by default.
+It is EMHASS's own `compute_curtailment`, sent with every run rather than left
+to the add-on's stored configuration, and it is the only curtailment switch
+there is. With it on, the plan gains a PV-curtailment column and the executor
+turns that into an export cap for an inverter profile that supports one; with
+it off, nothing curtails at all.
+
+Turn it on only if something can act on it. Without a curtailment-capable
+inverter profile, the plan assumes solar was shed that in reality still flows
+to the grid — a plan you cannot execute is worse than one that never tried.
+Negative sell prices are part of what EMHASS weighs here: it decides for
+itself when exporting into one is worse than shedding, and when it isn't.
 
 ## Scheduling
 

@@ -51,6 +51,11 @@ It also gets one extra sensor:
 - **Planned temperature** — the room temperature the plan currently expects,
   with the full forecast in its `forecast` attribute.
 
+**Edit thermal load** in the integration's menu only asks for the things that
+aren't controls: **Name**, **Temperature sensor**, **Heats or cools**,
+**Running sensor** and **Control entity**. Everything else is on the load's
+own page.
+
 ## Outdoor temperature
 
 ![The Outdoor temperature step](../assets/thermal-outdoor-temperature.png)
@@ -70,6 +75,13 @@ required:
   needed, but requires your home's location to be set correctly under Home
   Assistant's Settings → System → Home information, and is only correct when
   the solar forecast is also EMHASS built-in.
+
+The follow-up screen asks for what that source needs. **Home Assistant
+weather entity** wants just a **Weather entity**. **Temperature forecast from
+an entity attribute** wants a **Forecast entity**, an **Attribute name**, a
+**Timestamp field** and a **Temperature field** — values must be in degrees
+Celsius, which is what EMHASS's thermal model assumes. **EMHASS built-in**
+asks for nothing.
 
 ## Getting the numbers right
 

@@ -1,8 +1,11 @@
 # Surplus loads
 
 A "surplus load" isn't a separate thing you add — it's a deferrable load
-with **Runs** (or **Recurrence**) set to **On spare solar**. See
-**[Deferrable loads](deferrable_loads.md)** for how to add and configure
+with **Runs** (or **Recurrence**) set to **On spare solar**:
+
+![Add a deferrable load, with Runs set to On spare solar](../assets/setup-deferrable.png)
+
+See **[Deferrable loads](deferrable_loads.md)** for how to add and configure
 one. This page covers the extra sensors that appear once you have at least
 one.
 

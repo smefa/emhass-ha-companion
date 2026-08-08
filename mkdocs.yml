@@ -53,6 +53,7 @@ nav:
       - Thermal loads: guide/thermal_loads.md
       - Surplus loads: guide/surplus_loads.md
       - Inverter control: guide/inverter_control.md
+      - Hub controls: guide/hub_controls.md
       - Dashboard cards: guide/dashboard_cards.md
   - Technical reference:
       - Setup: setup.md

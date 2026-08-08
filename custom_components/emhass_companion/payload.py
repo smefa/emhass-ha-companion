@@ -477,6 +477,14 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
     # it must keep working for a plant with no battery at all, and that helper
     # returns early when the battery is off.
     payload["capacity_cost_per_kw"] = inputs.grid.capacity_cost_per_kw
+    # EMHASS's own PV curtailment, a plant_conf parameter reachable through
+    # runtimeparams via its associations.csv. With it off there is no
+    # `P_PV_curtailment` column at all, so strategy.decide_curtailment's
+    # primary rule has nothing to act on. Omitted entirely when unset rather
+    # than sent as False: an entry saved before this setting existed must not
+    # silently override whatever the add-on already has configured.
+    if inputs.grid.compute_curtailment is not None:
+        payload["compute_curtailment"] = inputs.grid.compute_curtailment
 
     deferrable, load_order, deferrable_warnings = _deferrable_settings(inputs, step)
     payload.update(deferrable)

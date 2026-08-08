@@ -22,6 +22,7 @@ from .const import (
     CONF_BATTERY_STRESS_COST,
     CONF_BATTERY_STRESS_SEGMENTS,
     CONF_CAPACITY_COST_PER_KW,
+    CONF_COMPUTE_CURTAILMENT,
     CONF_END_SOC_MODE,
     CONF_HYBRID_INVERTER,
     CONF_INVERTER_AC_INPUT_MAX,
@@ -38,7 +39,6 @@ from .const import (
     DEFAULT_BATTERY_STRESS_SEGMENTS,
     DEFAULT_CAPACITY_COST_PER_KW,
     DEFAULT_CHARGE_EFFICIENCY,
-    DEFAULT_CURTAIL_ON_NEGATIVE_PRICE,
     DEFAULT_DISCHARGE_EFFICIENCY,
     DEFAULT_END_SOC_MODE,
     DEFAULT_GRID_EXPORT_MAX,
@@ -364,23 +364,26 @@ class GridConfig:
     """Demand charge on the highest import power over the horizon, per kW. A
     grid setting rather than a battery one -- deferrable loads shave a peak
     with no battery involved. Zero is a genuine no-op inside EMHASS."""
-    curtail_on_negative_price: bool = DEFAULT_CURTAIL_ON_NEGATIVE_PRICE
-    """Curtail to zero export whenever the plan's sell price is negative and the
-    battery has no headroom left to absorb the surplus instead. Off by default:
-    it is a second optimiser competing with EMHASS's own curtailment cost
-    function. See strategy.decide_curtailment."""
+    compute_curtailment: bool | None = None
+    """Whether EMHASS itself should optimise PV curtailment, sent as a runtime
+    parameter so the answer travels with the run instead of living only in the
+    add-on's stored configuration. ``None`` means the entry predates this
+    setting: nothing is sent and EMHASS keeps whatever it has, which is the
+    only way to avoid switching off an add-on-side setting nobody asked us to
+    touch."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> GridConfig:
         data = data or {}
+        compute_curtailment = data.get(CONF_COMPUTE_CURTAILMENT)
         return cls(
             import_max_w=float(data.get("grid_import_max_w", DEFAULT_GRID_IMPORT_MAX)),
             export_max_w=float(data.get("grid_export_max_w", DEFAULT_GRID_EXPORT_MAX)),
             capacity_cost_per_kw=float(
                 data.get(CONF_CAPACITY_COST_PER_KW, DEFAULT_CAPACITY_COST_PER_KW)
             ),
-            curtail_on_negative_price=bool(
-                data.get("curtail_on_negative_price", DEFAULT_CURTAIL_ON_NEGATIVE_PRICE)
+            compute_curtailment=(
+                None if compute_curtailment is None else bool(compute_curtailment)
             ),
         )
 

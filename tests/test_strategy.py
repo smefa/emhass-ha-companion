@@ -24,7 +24,7 @@ from custom_components.emhass_companion.const import (
     MODE_IDLE,
     MODE_SELF_CONSUME,
 )
-from custom_components.emhass_companion.models import BatteryConfig, GridConfig, PlanRow
+from custom_components.emhass_companion.models import BatteryConfig, PlanRow
 from custom_components.emhass_companion.strategy import decide_battery, decide_curtailment
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -163,7 +163,7 @@ def test_plan_curtailment_column_takes_priority():
     amount -- an export_limit profile writes it straight to hardware as a
     feed-in cap, and those are not the same number."""
     row = _row(p_grid=-1200, p_pv_curtailment=1900, unit_prod_price=0.10)
-    curtail, curtail_w, rules = decide_curtailment(row, _config(), soc_percent=50)
+    curtail, curtail_w, rules = decide_curtailment(row)
     assert curtail is True
     assert curtail_w == 1200
     assert rules
@@ -174,49 +174,26 @@ def test_plan_curtailment_is_skipped_without_p_grid():
     reconstructing the PV/load/battery balance by hand -- exactly the
     misclassification this module's docstring warns about avoiding."""
     row = _row(p_grid=None, p_pv_curtailment=1200, unit_prod_price=0.10)
-    curtail, curtail_w, _rules = decide_curtailment(row, _config(), soc_percent=50)
+    curtail, curtail_w, _rules = decide_curtailment(row)
     assert curtail is False
     assert curtail_w == 0.0
 
 
 def test_no_curtailment_signal_means_uncurtail():
     row = _row(p_grid=0, p_pv_curtailment=None, unit_prod_price=0.10)
-    curtail, curtail_w, rules = decide_curtailment(row, _config(), soc_percent=50)
+    curtail, curtail_w, rules = decide_curtailment(row)
     assert curtail is False
     assert curtail_w == 0.0
     assert rules == []
 
 
-def test_negative_price_curtails_only_when_opted_in():
+def test_a_negative_price_alone_never_curtails():
+    """The negative-price rule is gone: EMHASS prices negative export itself
+    once compute_curtailment is on, including deciding *not* to curtail when
+    exporting beats shedding, and a threshold running after it could only
+    overrule that. Only the plan's own column curtails now."""
     row = _row(p_grid=0, p_pv_curtailment=None, unit_prod_price=-0.05)
-    config = _config(soc_max=0.95)
-
-    off = decide_curtailment(row, config, soc_percent=98)
-    assert off[0] is False
-
-    config.grid = GridConfig(curtail_on_negative_price=True)
-    on = decide_curtailment(row, config, soc_percent=98)
-    assert on[0] is True
-
-
-def test_negative_price_curtailment_requires_no_battery_headroom():
-    row = _row(p_grid=0, p_pv_curtailment=None, unit_prod_price=-0.05)
-    config = _config(soc_max=0.95)
-    config.grid = GridConfig(curtail_on_negative_price=True)
-
-    has_headroom = decide_curtailment(row, config, soc_percent=50)
-    assert has_headroom[0] is False
-
-    unknown_soc = decide_curtailment(row, config, soc_percent=None)
-    assert unknown_soc[0] is False
-
-
-def test_positive_price_never_curtails_even_when_opted_in():
-    row = _row(p_grid=0, p_pv_curtailment=None, unit_prod_price=0.20)
-    config = _config(soc_max=0.95)
-    config.grid = GridConfig(curtail_on_negative_price=True)
-    curtail, _, _ = decide_curtailment(row, config, soc_percent=99)
-    assert curtail is False
+    assert decide_curtailment(row)[0] is False
 
 
 # --- against the real reference plan ------------------------------------------

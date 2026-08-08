@@ -20,7 +20,9 @@ in much more depth.
    load runs only on spare solar.
 6. **[Inverter control](inverter_control.md)** — letting the integration
    command your battery.
-7. **[Dashboard cards](dashboard_cards.md)** — the two cards that ship
+7. **[Hub controls](hub_controls.md)** — the switches, selects and sensors on
+   the integration's own device.
+8. **[Dashboard cards](dashboard_cards.md)** — the two cards that ship
    in-box.
 
 Start with **Install** if you haven't added the integration yet.

@@ -169,6 +169,13 @@ CONF_GRID_EXPORT_MAX: Final = "grid_export_max_w"
 # can shave a peak on their own. Kept out of _battery_settings for exactly that
 # reason, since that helper returns early when the battery is switched off.
 CONF_CAPACITY_COST_PER_KW: Final = "capacity_cost_per_kw"
+# EMHASS's own PV curtailment. A `plant_conf` parameter on its side, listed in
+# its associations.csv, so it can be set per run through runtimeparams rather
+# than only in the add-on's stored configuration. Turning it on is what makes
+# the optimiser produce the `P_PV_curtailment` column that
+# strategy.decide_curtailment's primary rule reads -- without it that rule can
+# never fire, whatever the inverter profile supports.
+CONF_COMPUTE_CURTAILMENT: Final = "compute_curtailment"
 
 CONF_SOC_ENTITY: Final = "soc_entity"
 CONF_LOAD_ENTITY: Final = "load_entity"
@@ -326,10 +333,11 @@ DEFAULT_SELF_CONSUME_THRESHOLD_W: Final = 300
 # let through on every recalculation.
 SELF_CONSUME_EXIT_FACTOR: Final = 2.0
 
-# Curtailment (strategy.decide_curtailment). Plan-driven (P_PV_curtailment) is
-# the primary rule; the negative-price rule is opt-in because it is a second
-# optimiser competing with EMHASS's own curtailment cost function.
-DEFAULT_CURTAIL_ON_NEGATIVE_PRICE: Final = False
+# What the form offers for EMHASS's own curtailment, matching EMHASS's own
+# default. Distinct from "not configured" (None), which is what an entry saved
+# before this setting existed carries: that sends nothing and leaves whatever
+# the add-on has stored alone, rather than silently switching it off.
+DEFAULT_COMPUTE_CURTAILMENT: Final = False
 
 # Surplus loads
 DEFAULT_SURPLUS_HEADROOM_W: Final = 300

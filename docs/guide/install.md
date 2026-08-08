@@ -22,6 +22,8 @@ actually have during setup.
 4. Go to **Settings → Devices & Services → Add Integration**, and search for
    **EMHASS Companion**.
 
+![The Add integration dialog, with EMHASS Companion found by typing "emha"](../assets/add-integration.png)
+
 If you're running the EMHASS add-on, its address is filled in for you on the
 first screen. Continue to **[Setup](setup.md)** for what each question after
 that means.
