@@ -34,7 +34,9 @@ forecast source can be changed from **Configure → Solar forecast**.
 
 The first question, during initial setup, is simply where EMHASS is. The
 add-on's address is filled in automatically if it's running; otherwise
-enter it yourself (for example `http://localhost:5000`).
+enter it yourself (for example `http://192.168.1.10:5000`). Note that
+`localhost` only ever reaches Home Assistant's own container, never the
+machine or sibling add-on EMHASS runs in.
 
 If EMHASS itself moves — a new host, a different port — change just that
 via the integration's **Reconfigure** option, without touching anything

@@ -187,6 +187,10 @@ async def _async_addon_url(hass: HomeAssistant) -> str | None:
     "localhost" only ever reaches Home Assistant's own container, never a
     sibling add-on's -- so a fallback default has to be either this discovered
     hostname or a URL the user types in themselves.
+
+    Every step logs why it gave up. Discovery failing looks identical to
+    having no add-on -- a URL field defaulted to localhost -- so without
+    these there is nothing to read when it goes wrong.
     """
     try:
         from homeassistant.components.hassio import (
@@ -194,12 +198,18 @@ async def _async_addon_url(hass: HomeAssistant) -> str | None:
             AddonManager,
             AddonState,
             get_supervisor_client,
-            is_hassio,
         )
-    except ImportError:  # pragma: no cover - not a supervised install
+    except ImportError as err:  # pragma: no cover - not a supervised install
+        _LOGGER.debug("Supervisor add-on API unavailable: %s", err)
         return None
 
+    try:
+        from homeassistant.helpers.hassio import is_hassio
+    except ImportError:  # pragma: no cover - HA older than 2024.6
+        from homeassistant.components.hassio import is_hassio  # type: ignore[no-redef]
+
     if not is_hassio(hass):
+        _LOGGER.debug("Not a supervised install, cannot discover the EMHASS add-on")
         return None
 
     from .const import ADDON_NAME, DEFAULT_PORT
@@ -212,6 +222,7 @@ async def _async_addon_url(hass: HomeAssistant) -> str | None:
 
     slug = next((addon.slug for addon in installed if addon.name == ADDON_NAME), None)
     if slug is None:
+        _LOGGER.debug("No add-on named %r among the %d installed", ADDON_NAME, len(installed))
         return None
 
     manager = AddonManager(hass, _LOGGER, ADDON_NAME, slug)
@@ -222,8 +233,11 @@ async def _async_addon_url(hass: HomeAssistant) -> str | None:
         return None
 
     if info.state != AddonState.RUNNING or not info.hostname:
+        _LOGGER.debug("EMHASS add-on %s is %s with hostname %r", slug, info.state, info.hostname)
         return None
-    return f"http://{info.hostname}:{DEFAULT_PORT}"
+    url = f"http://{info.hostname}:{DEFAULT_PORT}"
+    _LOGGER.debug("Discovered the EMHASS add-on at %s", url)
+    return url
 
 
 async def _async_detect_time_step(

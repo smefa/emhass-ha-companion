@@ -8,7 +8,7 @@
           "url": "EMHASS address"
         },
         "data_description": {
-          "url": "For example http://localhost:5000, or the add-on's internal address."
+          "url": "For example http://192.168.1.10:5000. Filled in for you if you run the EMHASS add-on -- localhost only ever reaches Home Assistant itself."
         }
       },
       "reconfigure": {
@@ -18,7 +18,7 @@
           "url": "EMHASS address"
         },
         "data_description": {
-          "url": "For example http://localhost:5000, or the add-on's internal address."
+          "url": "For example http://192.168.1.10:5000. Filled in for you if you run the EMHASS add-on -- localhost only ever reaches Home Assistant itself."
         }
       },
       "price": {

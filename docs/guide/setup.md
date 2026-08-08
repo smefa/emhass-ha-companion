@@ -11,7 +11,8 @@ Every screen is listed below field by field, in the order it appears.
 ![The Connect to EMHASS step, with the EMHASS address field filled in](../assets/install-connect-to-emhass.png)
 
 - **EMHASS address** — where EMHASS is running, for example
-  `http://localhost:5000`. Filled in for you if you use the add-on.
+  `http://192.168.1.10:5000`. Filled in for you if you use the add-on.
+  `localhost` won't work: it only reaches Home Assistant's own container.
 
 ## 2. Electricity prices
 
