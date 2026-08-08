@@ -35,7 +35,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.loader import async_get_integration
 from yarl import URL
 
-from .const import CONF_URL, DOMAIN, USER_PROFILE_DIR
+from .const import CONF_URL, DOMAIN, ML_MIN_HISTORY_DAYS, USER_PROFILE_DIR
 from .coordinator import EmhassCoordinator
 
 # A down add-on must produce a finding, not a 30s hang -- api.py's own
@@ -467,38 +467,56 @@ def _triage_section(
             findings.append({"severity": "warning", "message": "The current plan is stale"})
 
         if data is not None:
-            # An empty source is the one failure the series section cannot
-            # show by itself: a forecast with no points also has no end
-            # timestamp, so it reads as absent rather than as broken, and the
-            # run carries on with whatever EMHASS falls back to. This is what
-            # "the plan ignores my prices" looks like from the outside.
-            for name, series in (
-                ("buy_price", data.buy_price),
-                ("sell_price", data.sell_price),
-                ("pv_forecast", data.pv_forecast),
-                ("load_forecast", data.load_forecast),
+            payload = data.payload or {}
+            # Not "is the series empty": several profiles deliberately
+            # contribute settings instead of points and let EMHASS build the
+            # forecast server-side, so an empty series is the ordinary shape
+            # for those. What is worth reporting is an input EMHASS was given
+            # no way to obtain from either side of the wire, which leaves it
+            # falling back to its own stored configuration.
+            for name, series, array_key, method_key in (
+                ("buy price", data.buy_price, "load_cost_forecast", "load_cost_forecast_method"),
+                (
+                    "sell price",
+                    data.sell_price,
+                    "prod_price_forecast",
+                    "production_price_forecast_method",
+                ),
+                ("PV forecast", data.pv_forecast, "pv_power_forecast", "weather_forecast_method"),
+                (
+                    "load forecast",
+                    data.load_forecast,
+                    "load_power_forecast",
+                    "load_forecast_method",
+                ),
             ):
-                if not len(series):
-                    findings.append(
-                        {
-                            "severity": "error",
-                            "message": f"The {name} series is empty -- its source returned "
-                            "no points",
-                        }
-                    )
+                if len(series) or payload.get(array_key) or payload.get(method_key):
+                    continue
+                if name == "PV forecast" and payload.get("set_use_pv") is False:
+                    continue
+                findings.append(
+                    {
+                        "severity": "error",
+                        "message": f"EMHASS was given no {name} -- no {array_key} was sent and "
+                        f"no {method_key} was named",
+                    }
+                )
 
-            # The load forecast method is negotiated at run time, not simply
-            # obeyed: mlforecaster silently falls back to naive until a fit
-            # has succeeded against enough history. Configured-versus-sent is
-            # the only place that downgrade is visible.
+            # mlforecaster is negotiated rather than obeyed: it reverts to a
+            # fallback until a fit has succeeded against enough history of the
+            # load sensor. Informational because that wait is by design and
+            # self-resolving -- but it is the only outward sign of the
+            # downgrade, and it explains a forecast that looks unlike the
+            # method the options name.
             requested = coordinator.config.load.options.get("method")
-            sent = (data.payload or {}).get("load_forecast_method")
+            sent = payload.get("load_forecast_method")
             if requested and sent and requested != sent:
                 findings.append(
                     {
-                        "severity": "warning",
+                        "severity": "info",
                         "message": f"Load forecast method '{requested}' was configured but the "
-                        f"last run asked EMHASS for '{sent}'",
+                        f"last run asked EMHASS for '{sent}' -- expected while mlforecaster "
+                        f"waits for {ML_MIN_HISTORY_DAYS} days of history on its load sensor",
                     }
                 )
 

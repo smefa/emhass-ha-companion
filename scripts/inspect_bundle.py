@@ -80,6 +80,10 @@ FORECAST_GAP_THRESHOLD = timedelta(hours=1)
 # options predate the horizon being configurable.
 DEFAULT_HORIZON_HOURS = 24
 
+# Mirrors const.ML_MIN_HISTORY_DAYS: how long a load sensor must have been
+# recorded before mlforecaster can be fitted against it at all.
+ML_MIN_HISTORY_DAYS = 9
+
 
 class Severity(Enum):
     CRITICAL = "CRITICAL"  # a run will fail, or already has
@@ -316,21 +320,6 @@ def check_forecast_coverage(bundle: dict, report: Report) -> None:
     optimisation actually solves.
     """
     series = bundle.get("series") or {}
-
-    # An empty source has no end timestamp to compare, so it would slip
-    # through the coverage arithmetic below entirely -- the emptier the
-    # series, the quieter the failure. Report it on its own terms first.
-    for name, info in sorted(series.items()):
-        if (info or {}).get("points") == 0:
-            report.add(
-                Severity.CRITICAL,
-                f"{name} is empty",
-                "Its source returned no points at all, so EMHASS was given nothing to work "
-                "from and fell back to whatever its own configuration says. Call "
-                "emhass_companion.test_profile against the profile behind this source to see "
-                "what it actually returned.",
-            )
-
     horizon_end = _horizon_end(bundle)
     if horizon_end is None:
         return
@@ -350,6 +339,54 @@ def check_forecast_coverage(bundle: dict, report: Report) -> None:
             )
 
 
+def check_inputs_reached_emhass(bundle: dict, report: Report) -> None:
+    """Flag an input EMHASS was given no way to obtain.
+
+    Not the same question as "is the series empty". This integration does not
+    always compute a forecast itself: several profiles contribute *settings*
+    instead of points and let EMHASS build the forecast server-side -- the
+    load/sensor profile sends sensor_power_load_no_var_loads and a method
+    name, pv/emhass_native sends weather_forecast_method: open-meteo. An
+    empty local series is the ordinary, correct shape for those, and calling
+    it a fault is the same cried-wolf mistake as comparing forecast lengths
+    to each other.
+
+    What actually matters is whether EMHASS ended up with the input at all,
+    from either side of the wire: an array in the payload, or a method it can
+    satisfy on its own. Neither is the real fault, and it leaves EMHASS
+    falling back to whatever its own stored configuration happens to say --
+    which is nothing like what the integration would have asked for.
+    """
+    payload = bundle.get("last_payload") or {}
+    # (payload array, the method key that would let EMHASS build it itself)
+    supplied_elsewhere = {
+        "load_forecast": ("load_power_forecast", "load_forecast_method"),
+        "pv_forecast": ("pv_power_forecast", "weather_forecast_method"),
+        "buy_price": ("load_cost_forecast", "load_cost_forecast_method"),
+        "sell_price": ("prod_price_forecast", "production_price_forecast_method"),
+    }
+    # "No solar" is a deliberate answer, not a missing PV forecast.
+    if payload.get("set_use_pv") is False:
+        supplied_elsewhere.pop("pv_forecast")
+
+    series = bundle.get("series") or {}
+    for name, (array_key, method_key) in sorted(supplied_elsewhere.items()):
+        # Only judge a source the bundle actually reports on -- an older
+        # bundle predating one of these names says nothing about it either way.
+        if name not in series or (series[name] or {}).get("points"):
+            continue
+        if payload.get(array_key) or payload.get(method_key):
+            continue
+        report.add(
+            Severity.CRITICAL,
+            f"EMHASS was given no {name}",
+            f"This integration sent no {array_key} array and named no {method_key}, so EMHASS "
+            "fell back to whatever its own stored configuration says -- which is not what the "
+            "integration would have asked for. Call emhass_companion.test_profile against the "
+            "profile behind this source to see what it actually returned.",
+        )
+
+
 def check_forecast_method(bundle: dict, report: Report) -> None:
     """Flag a load forecast method that was asked for but not used.
 
@@ -367,11 +404,12 @@ def check_forecast_method(bundle: dict, report: Report) -> None:
     sent = (bundle.get("last_payload") or {}).get("load_forecast_method")
     if requested and sent and requested != sent:
         report.add(
-            Severity.WARNING,
+            Severity.INFO,
             f"Load forecast method '{requested}' was configured, '{sent}' was used",
-            "mlforecaster reverts to naive until it has been fitted against enough history of "
-            "the load sensor. Check for an ml_forecaster_not_ready repair issue and confirm the "
-            "sensor has been recorded for long enough.",
+            "Expected, and self-resolving, while a newly configured mlforecaster waits for "
+            f"{ML_MIN_HISTORY_DAYS} days of recorder history on its load sensor -- runs keep "
+            "succeeding on the fallback meanwhile. Only worth pursuing if it persists past "
+            "that, which would mean the fit itself is failing rather than waiting.",
         )
 
 
@@ -479,6 +517,7 @@ CHECKS = [
     check_last_run,
     check_plan,
     check_forecast_coverage,
+    check_inputs_reached_emhass,
     check_forecast_method,
     check_profile_errors,
     check_subentries,

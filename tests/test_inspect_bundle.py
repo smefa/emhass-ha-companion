@@ -295,27 +295,74 @@ def test_a_horizon_longer_than_a_source_reaches_is_still_flagged():
     )
 
 
-def test_an_empty_series_is_critical_even_though_it_has_no_end_timestamp():
-    """The failure that slipped through a purely timestamp-based check.
+# --- inputs reaching EMHASS ---------------------------------------------------
 
-    A source returning nothing has no end to compare against anything, so
-    the emptier the series the quieter it used to be.
+
+def test_an_empty_series_is_fine_when_emhass_computes_it_server_side():
+    """The load/sensor profile's ordinary shape, which must stay silent.
+
+    It contributes sensor_power_load_no_var_loads and a method name rather
+    than any points, and EMHASS builds the forecast itself from the sensor's
+    own history. An empty local series is correct here, not a fault.
     """
     bundle = _clean_bundle()
     bundle["series"]["load_forecast"] = {"points": 0, "end": None}
+    bundle["last_payload"] = {
+        "load_forecast_method": "naive",
+        "sensor_power_load_no_var_loads": "sensor.net_house_load",
+    }
     report = run_checks(bundle)
-    assert any("load_forecast is empty" in f.title for f in _findings(report, Severity.CRITICAL))
+    assert report.findings == []
+
+
+def test_an_input_that_reached_emhass_by_no_route_at_all_is_critical():
+    bundle = _clean_bundle()
+    bundle["series"]["load_forecast"] = {"points": 0, "end": None}
+    bundle["last_payload"] = {"pv_power_forecast": {"2026-01-01T00:00:00+00:00": 0.0}}
+    report = run_checks(bundle)
+    assert any("no load_forecast" in f.title for f in _findings(report, Severity.CRITICAL))
+
+
+def test_an_empty_series_supplied_as_a_payload_array_is_fine():
+    bundle = _clean_bundle()
+    bundle["series"]["load_forecast"] = {"points": 0, "end": None}
+    bundle["last_payload"] = {"load_power_forecast": {"2026-01-01T00:00:00+00:00": 400.0}}
+    report = run_checks(bundle)
+    assert report.findings == []
+
+
+def test_no_pv_forecast_is_fine_when_the_user_said_they_have_no_solar():
+    bundle = _clean_bundle()
+    bundle["series"]["pv_forecast"] = {"points": 0, "end": None}
+    bundle["last_payload"] = {"set_use_pv": False, "load_forecast_method": "naive"}
+    report = run_checks(bundle)
+    assert report.findings == []
+
+
+def test_a_series_the_bundle_does_not_report_is_not_judged():
+    """An older bundle predating one of these names says nothing either way."""
+    bundle = _clean_bundle()
+    bundle["series"] = {}
+    report = run_checks(bundle)
+    assert _findings(report, Severity.CRITICAL) == []
 
 
 # --- forecast method ---------------------------------------------------------
 
 
-def test_a_load_forecast_method_that_was_not_honoured_is_a_warning():
+def test_a_load_forecast_method_that_was_not_honoured_is_reported_as_info():
+    """Informational, not a warning: the wait is by design and self-resolving.
+
+    Runs keep succeeding on the fallback, so this must not be the thing that
+    makes the script exit non-zero.
+    """
     bundle = _clean_bundle()
     bundle["entry"]["options"]["load"] = {"profile_options": {"method": "mlforecaster"}}
     bundle["last_payload"] = {"load_forecast_method": "naive"}
     report = run_checks(bundle)
-    assert any("mlforecaster" in f.title and "naive" in f.title for f in report.findings)
+    findings = _findings(report, Severity.INFO)
+    assert any("mlforecaster" in f.title and "naive" in f.title for f in findings)
+    assert _findings(report, Severity.CRITICAL) == []
 
 
 def test_the_load_forecast_method_actually_used_is_not_flagged():

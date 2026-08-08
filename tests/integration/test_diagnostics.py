@@ -129,32 +129,63 @@ async def test_the_missing_entity_is_flagged_in_triage(hass: HomeAssistant) -> N
     assert any(MISSING_ENTITY in finding["message"] for finding in diagnostics["triage"])
 
 
-async def test_an_empty_forecast_series_is_flagged_in_triage(hass: HomeAssistant) -> None:
-    """A source that returned nothing has no end timestamp to give away that
-    it is broken, so the series section alone reads as merely absent.
-    """
+async def test_an_input_that_reached_emhass_by_no_route_is_flagged_in_triage(
+    hass: HomeAssistant,
+) -> None:
     entry = await _setup_entry(hass)
+    coordinator = entry.runtime_data.coordinator
+    coordinator.data.payload = {}
 
     diagnostics = await async_get_config_entry_diagnostics(hass, entry)
     assert any(
-        "load_forecast series is empty" in finding["message"] and finding["severity"] == "error"
+        "EMHASS was given no load forecast" in finding["message"] and finding["severity"] == "error"
         for finding in diagnostics["triage"]
     )
 
 
-async def test_a_load_forecast_method_that_was_not_honoured_is_flagged_in_triage(
+async def test_an_empty_series_emhass_computes_itself_is_not_flagged_in_triage(
     hass: HomeAssistant,
 ) -> None:
+    """The load/sensor profile's ordinary shape.
+
+    It contributes a sensor and a method name rather than points, and EMHASS
+    builds the forecast server-side -- so an empty local series is correct
+    here. Reporting it would be the same cried-wolf mistake as comparing
+    forecast lengths against each other.
+    """
+    entry = await _setup_entry(hass)
+    coordinator = entry.runtime_data.coordinator
+    coordinator.data.payload = {
+        "load_forecast_method": "naive",
+        "sensor_power_load_no_var_loads": "sensor.net_house_load",
+    }
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+    assert not any(
+        "load forecast" in finding["message"] and finding["severity"] == "error"
+        for finding in diagnostics["triage"]
+    )
+
+
+async def test_a_load_forecast_method_that_was_not_honoured_is_info_not_an_error(
+    hass: HomeAssistant,
+) -> None:
+    """The wait for history is by design and self-resolving, so this must not
+    read as something to go and fix.
+    """
     entry = await _setup_entry(hass)
     coordinator = entry.runtime_data.coordinator
     coordinator.config.load.options = {"method": "mlforecaster"}
     coordinator.data.payload = {"load_forecast_method": "naive"}
 
     diagnostics = await async_get_config_entry_diagnostics(hass, entry)
-    assert any(
-        "mlforecaster" in finding["message"] and "naive" in finding["message"]
+    downgrade = [
+        finding
         for finding in diagnostics["triage"]
-    )
+        if "mlforecaster" in finding["message"] and "naive" in finding["message"]
+    ]
+    assert downgrade
+    assert all(finding["severity"] == "info" for finding in downgrade)
 
 
 async def test_latitude_in_the_emhass_config_comes_back_redacted(hass: HomeAssistant) -> None:
