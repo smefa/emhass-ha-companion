@@ -145,9 +145,9 @@ full detail.
   loads only. Turning it off cancels a pending run.
 - **Start as early as possible** (switch) — take the spare solar as soon as
   there is any, instead of letting the optimiser pick a moment later in the
-  day. *On spare solar* loads only, and only does anything with *Energy
-  needed* set above 0. Off by default, and off is usually the better setting
-  — see **[Surplus loads](surplus_loads.md)**.
+  day. *On spare solar* loads only. It pays for that by claiming a few per cent
+  less of the day's surplus. Off by default, and off is usually the better
+  setting — see **[Surplus loads](surplus_loads.md)**.
 - **Run now** (button) — force the load on right now, regardless of the
   plan. Not available on *On spare solar* loads, where ignoring the plan
   would mean running off the grid at night; use *Start as early as

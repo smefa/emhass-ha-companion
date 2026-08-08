@@ -10,12 +10,15 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from custom_components.emhass_companion.models import Plan, PlanRow, Point, Series
 from custom_components.emhass_companion.surplus import (
     SurplusSpec,
     allocate,
     battery_reserved_series,
     current_block,
+    modulation_margin,
     seam_carry,
     surplus_series,
     total_energy_wh,
@@ -454,8 +457,10 @@ def test_asap_clamps_the_window_to_the_hours_being_asked_for():
     asap = allocate(series, [_spec(max_energy_wh=300.0, start_asap=True)], STEP)["pool"]
 
     assert free.window_start == asap.window_start == START
-    # Two steps of run, plus the one step of padding window_end always carries.
-    assert asap.window_end == START + 3 * STEP
+    # Two steps of run, one step of modulation slack (a quarter of a two-step
+    # run, floored at one), plus the one step of padding window_end always
+    # carries.
+    assert asap.window_end == START + 4 * STEP
     assert free.window_end == START + 5 * STEP
     # Placement only. The budget itself is untouched.
     assert asap.hours == free.hours == 0.375
@@ -493,7 +498,8 @@ def test_asap_starts_at_the_first_qualifying_slot_not_the_first_slot():
     )["pool"]
 
     assert budget.window_start == START + 2 * STEP
-    assert budget.window_end == START + 5 * STEP
+    # Two steps of run from 10:30, one of modulation slack, one of padding.
+    assert budget.window_end == START + 6 * STEP
 
 
 def test_asap_never_narrows_the_window_below_the_hours():
@@ -553,8 +559,8 @@ def test_asap_widens_the_window_until_the_surplus_can_cover_the_run():
 
     # 0.3 h rounds up to two steps, which would have ended the window at
     # START + 3 * STEP once padded. The first three slots are what actually
-    # add up to the 900 Wh being asked for.
-    assert asap.window_end == START + 4 * STEP
+    # add up to the 900 Wh being asked for, plus one step of modulation slack.
+    assert asap.window_end == START + 5 * STEP
     # Still far tighter than leaving the placement to EMHASS.
     assert free.window_end == START + 7 * STEP
     assert asap.window_start == free.window_start == START
@@ -578,7 +584,8 @@ def test_asap_stays_tight_when_the_front_of_the_block_already_covers_it():
     )["pool"]
 
     assert budget.hours == 0.3
-    assert budget.window_end == START + 3 * STEP
+    # Two steps of run, one of modulation slack, one of padding.
+    assert budget.window_end == START + 4 * STEP
 
 
 def test_asap_never_narrows_a_modulating_window_below_the_hours():
@@ -634,44 +641,71 @@ def test_asap_leaves_the_window_alone_when_the_block_can_never_cover_it():
     assert asap.hours == free.hours == 0.75
 
 
-def test_asap_does_nothing_without_an_energy_cap():
-    """The documented limitation, pinned so it cannot regress silently.
+def test_asap_gives_up_a_margin_of_an_uncapped_block_to_buy_a_window():
+    """Without this the switch is a no-op on every uncapped load.
 
-    An energy cap is the *only* input that can give this switch something to
-    remove, whatever the load's shape. ``energy_wh`` is
-    ``min(credit_wh, span_hours * nominal_w, cap)``; the run's own total
-    deliverable never exceeds either of the first two, so nothing but the cap
-    can put the target below what the block delivers -- and until it is below,
-    the earliest covering window is the whole block. See docs/surplus_loads.md:
-    the fix is a budget meaning "what I asked for" rather than "what is going",
-    not a tweak to the clamp.
+    ``credit_wh`` sums ``net`` over the same slots whose ``min(net, nominal_w)``
+    the deliverables are, and ``span_hours * nominal_w`` covers at least as many
+    steps as there are qualifying slots -- so an uncapped ask always equals what
+    the block delivers, the only window covering it is the block, and the clamp
+    hands back exactly the window it was meant to narrow. Giving up a margin of
+    the surplus is what manufactures the gap.
     """
-    rising = _series(600, 1200, 1800, 2400, 3000, 2400, 1200)
-    flat = _series(2400, 2400, 2400, 2400, 2400, 2400)
+    # Three strong slots then a long weak tail: 3250 Wh over eight qualifying
+    # slots, ceiling clipped to the 3000 W peak, so the uncapped ask is 13/12 h
+    # -- five steps of run inside an eight-slot block. That is the gap the
+    # margin can act on, and a flat block is precisely the shape where it
+    # cannot (there, credit/peak *is* the slot count; see the test below).
+    series = _series(3000, 3000, 3000, 800, 800, 800, 800, 800)
 
-    for label, spec_fn, series in (
-        ("modulating, rising", _modulating, rising),
-        ("modulating, flat", _modulating, flat),
-        ("semi-continuous, rising", _spec, rising),
-        ("semi-continuous, flat", _spec, flat),
-    ):
-        free = allocate(series, [spec_fn()], STEP)["pool"]
-        asap = allocate(series, [spec_fn(start_asap=True)], STEP)["pool"]
+    free = allocate(series, [_modulating()], STEP)["pool"]
+    asap = allocate(series, [_modulating(start_asap=True)], STEP)["pool"]
 
-        assert asap.window_start == free.window_start, label
-        assert asap.window_end == free.window_end, label
-        assert asap.hours == free.hours, label
+    assert free.hours == pytest.approx(13 / 12)
+    # A five-step run keeps 1/5 -- inside both clamps.
+    assert asap.hours == pytest.approx(13 / 12 * 0.8)
+    # ...and that buys a window two steps shorter than the block.
+    assert free.window_end == START + 9 * STEP
+    assert asap.window_end == START + 7 * STEP
 
 
-def test_asap_narrows_the_window_once_a_cap_is_set():
-    """The other half of the above: the cap is what makes the switch bite."""
+def test_asap_margin_scales_up_as_the_run_gets_shorter():
+    """ "Higher margin on fewer slots": a short run averages fewer timesteps, so
+    one coming in under forecast moves it further."""
+    assert modulation_margin(2) == 0.25  # clamped at the ceiling
+    assert modulation_margin(4) == 0.25
+    assert modulation_margin(8) == 0.125
+    assert modulation_margin(20) == 0.05
+    assert modulation_margin(100) == 0.05  # clamped at the floor
+
+
+def test_asap_never_takes_a_margin_out_of_an_energy_cap():
+    """A cap is a number the user typed. It already sits below what the block
+    delivers -- which is the gap the margin exists to manufacture -- so taking a
+    margin out of it as well would just quietly under-deliver the ask."""
     series = _series(600, 1200, 1800, 2400, 3000, 2400, 1200)
 
     free = allocate(series, [_modulating(max_energy_wh=300.0)], STEP)["pool"]
     asap = allocate(series, [_modulating(max_energy_wh=300.0, start_asap=True)], STEP)["pool"]
 
-    assert asap.hours == free.hours
+    assert asap.hours == free.hours == 0.1
+    assert asap.energy_wh == free.energy_wh == 300.0
     assert asap.window_end < free.window_end
+
+
+def test_asap_takes_no_margin_when_the_run_needs_every_qualifying_slot():
+    """No placement freedom exists to buy, at any price.
+
+    Four qualifying slots and a run that needs all four: derating would trade
+    sun for a window that cannot narrow.
+    """
+    series = _series(3000, 3000, 3000, 3000)
+
+    free = allocate(series, [_spec()], STEP)["pool"]
+    asap = allocate(series, [_spec(start_asap=True)], STEP)["pool"]
+
+    assert asap.hours == free.hours == 1.0
+    assert asap.window_end == free.window_end
 
 
 def test_asap_on_an_empty_block_stays_empty():
@@ -865,12 +899,14 @@ def test_start_asap_reaches_the_payload_as_a_window_with_no_room_to_defer():
     payload = _payload(registry.to_loads(START, 15), START).payload
 
     # 2 kWh at 800 W is 2.5 h -- ten steps, starting at 11:00 (step 4). The
-    # window closes at step 15 rather than 21: eleven steps for a ten-step
-    # run, the one step being the padding window_end always carries against
-    # payload rounding. Everything else EMHASS had to defer with is gone.
+    # window closes at step 16 rather than 21: twelve steps for a ten-step run,
+    # being the run itself, the one step past the slot that closes the cover,
+    # and the one step of padding window_end always carries against payload
+    # rounding. Everything EMHASS had to defer with is gone; the room left to
+    # shape the run is the margin inside the window, not window to drift in.
     assert payload["operating_timesteps_of_each_deferrable_load"] == [10]
     assert payload["start_timesteps_of_each_deferrable_load"] == [4]
-    assert payload["end_timesteps_of_each_deferrable_load"] == [15]
+    assert payload["end_timesteps_of_each_deferrable_load"] == [16]
 
 
 def test_without_start_asap_the_same_load_may_be_placed_anywhere_in_the_sun():

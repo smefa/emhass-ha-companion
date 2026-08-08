@@ -19,8 +19,7 @@ one.
   draw before a moment counts as "spare" for it.
 - **16. Surplus priority** — with more than one spare-solar load, the lower
   number gets first claim.
-- **Start as early as possible** (switch) — needs *Energy needed* above 0 to
-  have any effect; see [below](#start-as-early-as-possible).
+- **Start as early as possible** (switch) — see [below](#start-as-early-as-possible).
 - **Spare solar budget** (diagnostic sensor) — how many hours the last plan
   allowed this load to ask for.
 
@@ -35,20 +34,21 @@ the run can land in the afternoon.
 
 On, the load starts as soon as there's spare solar and runs from there.
 
-!!! important "It needs **14. Energy needed** set"
+!!! note "It gives up a few per cent of the sun"
 
-    With *Energy needed* left at 0 — no cap — this switch does nothing. Asking
-    for "all the spare solar there is" already means the whole sunny stretch,
-    so there is no spare room in the day for the switch to take away, and the
-    plan comes out identical either way.
+    Asking for *all* the spare solar there is already means the whole sunny
+    stretch, which leaves no room in the day to move the run into. So a load
+    with this switch on deliberately claims a little less than the day offers —
+    between 5% and 25%, more when the run is short — and spends that slack on
+    starting earlier.
 
-    Set *Energy needed* to what you actually want (say 10 kWh into the car) and
-    the switch bites: on a recent 35 kWh day it moved a 10 kWh charge from
-    12:45–15:45, dribbling along at the minimum power, to 10:45–12:00 at full
-    5.9 kW.
+    You do not have to configure this, and it is the reason the switch works
+    with **14. Energy needed** left at 0. If you do set *Energy needed*, that
+    number is delivered in full: it is already less than the day has going, so
+    it needs no slack of its own.
 
-    This applies to every surplus load, including ones with **12. Runs at full
-    power only** on.
+    The margin buys most on a day whose sun tails off and nothing at all on a
+    flat one, where the run fills the block whatever you do.
 
 **Off is usually the better setting.** Early sun is thin, and a car charger
 asking for 6 kW at nine in the morning will take what solar there is and buy

@@ -127,50 +127,63 @@ It changes the window and nothing else — not the hours, not the energy, not
 which timesteps were credited. The budget is already "however much the surplus
 supports"; all this decides is where in the block those hours land.
 
-### It needs an energy cap to do anything
-
-!!! important
-
-    Unless *Energy needed* is set above 0, this switch has **no effect at
-    all** — on any surplus load, modulating or full-power-only. Turning it on
-    with the cap left at 0 sends EMHASS exactly the window it would have got
-    anyway. This is a real limitation of the mechanism, not a preference.
+### The modulation margin
 
 The slack the switch closes is the gap between `hours` and the span they were
-derived from, and an energy cap is the only input that can open one. The
-target handed to EMHASS is
+derived from — and an uncapped budget has none. The target handed to EMHASS is
 
 ```
 energy_wh = hours * nominal_w
 hours     = min(credit_wh / nominal_w, span_hours, max_energy_wh / nominal_w)
 ```
 
-while what the block can actually put into this load is
-`Σ draw · step`, where `draw` is `min(net, nominal_w)` for a modulating load
-and `nominal_w` for a full-power-only one. Narrowing requires `energy_wh` to be
-*below* that total — otherwise the earliest window that covers the target is
-the last qualifying timestep, which is the whole block. And:
+while what the block can actually put into this load is `Σ draw · step`, where
+`draw` is `min(net, nominal_w)` for a modulating load and `nominal_w` for a
+full-power-only one. Narrowing requires `energy_wh` to be *below* that total —
+otherwise the earliest window that covers the target is the last qualifying
+timestep, which is the whole block. And two of the three terms can never get
+there:
 
 - `credit_wh` = `Σ net · step` over the same qualifying slots, so it is always
-  **at or above** the deliverable total. It can never put the target below it.
+  **at or above** the deliverable total.
 - `span_hours * nominal_w` is at least `(qualifying slots) * nominal_w * step`,
-  which is also at or above the deliverable total. Same conclusion.
-- `max_energy_wh` is unrelated to the block, so it is the one term that can sit
-  under it — and does, whenever you ask for less energy than the day has sun
-  for.
+  which is also at or above it.
 
-So *Energy needed* of 10 kWh into a car on a day with 35 kWh of sun asks for
-well under a window's worth of running, and the rest is placement freedom for
-the switch to take away. That is the case the switch exists for; there is no
-other.
+Which leaves `max_energy_wh`, unrelated to the block and so the one term that
+can sit under it. Before the margin existed, that made the switch a **complete
+no-op** on any load without an *Energy needed* cap: the ask was the block, the
+only window covering the block was the block, and the clamp handed back exactly
+the window it was meant to narrow. Two things that look like they would open a
+gap and do not: **the battery reservation** and **weak or sub-threshold
+timesteps** — both shrink the ask and the deliverable by the same amount.
 
-Two things that look like slack but are not: **the battery reservation** and
-**weak or sub-threshold timesteps**. Both do reduce the hours, but they reduce
-what the block can deliver by exactly as much, so the earliest covering window
-is still the whole block.
+So a start-asap run **gives up a slice of the surplus** to buy the gap:
 
-Fixing this properly means a budget that means "what I asked for" rather than
-"whatever is going" — the clamp itself is doing what it says.
+```
+margin = clamp(1 / run_steps, 5%, 25%)
+hours *= 1 - margin
+```
+
+Scaled by the run length because the margin has to absorb the difference
+between a slot's forecast surplus and its real one, and a short run averages
+fewer slots — so one bad slot moves it further. A four-step run gives up a
+quarter; a twenty-step run a twentieth.
+
+Two deliberate exemptions:
+
+- **An `Energy needed` cap is never derated.** It already sits below what the
+  block delivers, which is the gap the margin exists to manufacture, and
+  quietly delivering 6% less of a number the user typed would be a different
+  feature.
+- **A run that already needs every qualifying slot takes no margin.** There is
+  no placement freedom to buy at any price, so derating would trade sun for
+  nothing. A flat block is the common case here: `credit_wh / peak` is exactly
+  the slot count, so the run fills the block by construction.
+
+That last point is worth reading twice, because it means the margin does
+nothing on a *flat* block and most on a **peaked or declining** one — where the
+weak tail contributes little to `credit_wh`, so giving up a few per cent drops
+several timesteps off the end of the window.
 
 Whenever `hours` genuinely is short of the span, EMHASS picks where they go —
 and its cost function has **no reason to prefer early**. On flat prices, which
@@ -194,13 +207,53 @@ kink is what makes the solver *modulate* — spreading a run down the morning
 ramp and tracking the surplus curve, rather than running flat out in the
 fewest possible slots. It can only spread into window it has been given.
 
-So the window grows until the surplus inside it actually covers the energy
-being asked for, and stops at the first timestep where it does. That keeps it
-the earliest window that can deliver the budget without importing, and it
-stays self-tightening: a window that only just covers the target leaves no
-slack to drift late with. On a block flat enough that every timestep can
-deliver the ceiling, the cover is reached at exactly the hours asked for and
+So the window grows until the surplus inside it actually covers the energy being
+asked for, and stops **one timestep** past the first slot where it does — the
+covering slot is the first whose *cumulative* surplus clears the target, so the
+run may need part of the next one.
+
+Deliberately one step, and not scaled with the run. Adding room proportional to
+the run's length is the obvious thing to reach for — "a longer run needs more
+space to shape itself in" — but it double-counts the margin and loses to it. The
+margin *is* the shaping room: an ask a few per cent under what the window
+supplies leaves that few per cent as slack spread across every slot, which is
+exactly the freedom the solver needs to track the surplus curve. Measured on a
+real 24-slot block, a proportional slack of a quarter of the run added four
+timesteps back while a 6% margin removed three — the two together narrowed
+nothing, and the switch stayed the no-op it had always been.
+
+That keeps the window the earliest one that can deliver the budget without
+importing, and it stays self-tightening: a window that only just covers the
+target leaves little room to drift late with. On a block flat enough that every
+timestep can deliver the ceiling, the cover is reached at exactly the hours asked for and
 nothing is widened at all.
+
+### What it does in practice
+
+Measured against a real plan — a car on a 24-slot afternoon block, ceiling
+clipped to the 6188 W peak, no *Energy needed* cap:
+
+| | window | slots | run | asked |
+|---|---|---|---|---|
+| switch off | 11:00–17:15 | 26 | 16 | 24.55 kWh |
+| switch on, before the margin | 11:00–17:15 | 26 | 16 | 24.55 kWh |
+| switch on, with the margin | 11:00–16:45 | 24 | 15 | 23.02 kWh |
+
+Two timesteps of placement freedom removed for 1.53 kWh of surplus given up.
+Raising the margin trades more sun for more of the day, and on this block it is
+close to linear:
+
+| margin | window | slots | asked | given up |
+|---|---|---|---|---|
+| 6.25% (default at 16 steps) | 11:00–16:45 | 24 | 23.02 kWh | 1.53 kWh |
+| 10% | 11:00–16:30 | 23 | 22.09 kWh | 2.45 kWh |
+| 15% | 11:00–16:00 | 21 | 20.87 kWh | 3.68 kWh |
+| 20% | 11:00–15:30 | 19 | 19.64 kWh | 4.91 kWh |
+| 25% | 11:00–15:15 | 18 | 18.41 kWh | 6.14 kWh |
+
+The clamps on `modulation_margin` are where to change that trade, and the shape
+of the day decides how much a given margin buys: a block whose sun tails off
+loses several timesteps to a small margin, a flat one loses none to any margin.
 
 **It is still usually the worse choice for self-consumption**, and that is the
 point of leaving it off by default. Widening buys the run somewhere to spread,
