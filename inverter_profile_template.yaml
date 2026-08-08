@@ -1,0 +1,590 @@
+# =============================================================================
+#  EMHASS Companion — inverter profile template
+# =============================================================================
+#
+#  Copy this file, fill it in, drop it in:
+#
+#      <config>/emhass_companion/profiles/inverter/<your_inverter>.yaml
+#
+#  Reload the integration. Your profile appears in
+#  Configure → Battery control. That directory is outside the integration, so
+#  a HACS update never deletes it.
+#
+#  To contribute it back, put it in
+#  custom_components/emhass_companion/profiles/builtin/inverter/ instead.
+#
+#  ---------------------------------------------------------------------------
+#  WHAT A PROFILE IS
+#  ---------------------------------------------------------------------------
+#
+#  Data, never code. It says which of *your* entities to write and what the
+#  numbers mean. This integration never talks to hardware — it only calls
+#  entities and services your own inverter integration already provides.
+#
+#  EMHASS produces one battery power figure per timestep, in watts, signed:
+#
+#      NEGATIVE = charge          POSITIVE = discharge
+#
+#  Your job is to describe how that becomes a write on your inverter.
+#
+#  ---------------------------------------------------------------------------
+#  BEFORE YOU START — the six questions
+#  ---------------------------------------------------------------------------
+#
+#  Answer these about your inverter and the rest is mechanical:
+#
+#   1. Which entity or service sets the power?          → `actions`
+#   2. Is that number watts, kW, or a percentage?       → `control.power_unit`
+#   3. Does one number carry direction too (a signed    → `control.signed`
+#      value), or does a mode select decide?
+#   4. Does the command expire on its own?              → `control.lifetime`
+#   5. Does forcing need a mode set first?              → `actions.prepare`
+#   6. How do you give control back?                    → `actions.restore`
+#
+#  If you cannot answer 2 or 4 from documentation, say so in `notes:` and
+#  default to `w` and `persistent`. Both are the conservative choice: watts
+#  because a wrong percentage is a 100x error, persistent because it means the
+#  integration re-asserts rather than assuming the inverter reverted.
+#
+# =============================================================================
+
+# --- Identity ----------------------------------------------------------------
+
+name: My Inverter (change me)
+kind: inverter
+version: 2
+
+# Groups the picker. Use the name on the box.
+brand: ExampleCorp
+
+# Which models this is known to work with. Be honest — list what was tested.
+models:
+  - EX-5000
+  - EX-10000
+
+# The integration this profile needs, shown next to the name in the picker.
+# Say this even when it seems obvious. Several brands have a core integration
+# that is read-only and a HACS one that can actually write, and a user who
+# picks their brand and then finds control impossible has had the worst
+# possible experience. Naming the route up front is the only thing that
+# prevents it.
+requires: examplecorp_modbus (HACS) — not the core examplecorp integration
+
+docs: https://github.com/someone/examplecorp-modbus
+
+description: >-
+  One line, shown when choosing an inverter.
+
+notes: >-
+  Anything the user must check or set up first. Firmware quirks, entities that
+  are disabled by default, registers whose scaling differs by model. This text
+  is shown during setup, so it is the right place for "enable Power Control
+  Options in the hub settings first".
+
+# NOTE: no `detect:` block. Inverter profiles are always offered and the user
+# picks their own hardware. Auto-detection was deliberately dropped: two of the
+# most common routes cannot be detected at all (the Sungrow Modbus package has
+# no integration domain; core GoodWe and its HACS fork share one), and a wrong
+# guess about the control model is far more dangerous than a list to scroll.
+
+# --- What the numbers mean ---------------------------------------------------
+#
+# This block does not change *what* gets written — `actions` does that. It
+# tells the executor what the number means and how long a write survives, which
+# is what it needs in order to decide *when* to write.
+
+control:
+  # ~~~ archetype ~~~ documentation, not behaviour. Pick the closest:
+  #
+  #   signed_power           One signed number carries magnitude and direction.
+  #                          (SolaX remotecontrol_active_power, Sigenergy)
+  #   mode_and_magnitude     A select picks the direction, a number the size.
+  #                          (Sungrow, SolarEdge, GoodWe, Fox ESS) ← most common
+  #   command_with_duration  A service call carrying power *and* a lifetime.
+  #                          (Huawei forcible_charge)
+  #   grid_setpoint          The write is a *grid* target, not a battery one.
+  #                          (Victron ESS AcPowerSetPoint)
+  #   tou_rewrite            Rewrite a time-of-use slot. No session concept.
+  #                          (Deye Prog1-6, Growatt SPH)
+  archetype: mode_and_magnitude
+
+  # ~~~ power_unit ~~~ THE SINGLE EASIEST WAY TO BREAK SOMEONE'S BATTERY.
+  #
+  # The engine converts EMHASS's watts into this unit and hands your actions
+  # the result as `{{ power }}`. Never do this arithmetic yourself in a
+  # template — that is how a 15 becomes a 1500.
+  #
+  #   w                    plain watts                    1500  → 1500
+  #   kw                   kilowatts                      1500  → 1.5
+  #                        (Sigenergy, Fox ESS; set round_to: 0.001)
+  #   percent_of_rated     percent of rated power         1500  → 15
+  #                        (GoodWe eco_mode_power, most Growatt)
+  #   percent_hundredths   percent × 100, range 0-10000   1500  → 1500
+  #                        (Fronius SunSpec InWRte/OutWRte)
+  #
+  # Both percent units need `rated_power_w` below. Values are clamped to the
+  # rating, so a plan that overshoots is trimmed rather than rejected.
+  power_unit: w
+
+  # Required for the two percent units, ignored otherwise. May be a template,
+  # so it can read the inverter's own reported rating rather than being typed.
+  # rated_power_w: 10000
+  # rated_power_w: "{{ states('sensor.inverter_rated_power') | float }}"
+
+  # ~~~ signed ~~~
+  # false → `power` is always a positive magnitude, and something else (a mode
+  #         select, or which service you call) carries the direction.
+  # true  → `power` is negative to charge and positive to discharge, matching
+  #         EMHASS. Use for a single ±setpoint register.
+  signed: false
+
+  # Some hardware calls *charging* positive — the opposite of EMHASS. SolarEdge's
+  # battery power reads that way, and Victron's grid setpoint is positive for
+  # import. Only meaningful when `signed: true`.
+  invert_sign: false
+
+  # ~~~ charge_boost ~~~ a tweak, not a correction.
+  # Charging loses something between the meter and the cells, so asking for
+  # exactly the planned figure can under-deliver. 1.03 asks for 3% more, and
+  # applies to charging only — never to discharge. Leave at 1.0 unless you have
+  # measured a shortfall.
+  charge_boost: 1.0
+
+  # Rounding step for the final value. 1 for watts (whole watts, written as an
+  # int), 0.001 for kW, 100 for a register with a 100 W step.
+  round_to: 1
+
+  # ~~~ lifetime ~~~ how long a command survives without being re-sent.
+  #
+  #   persistent   The register holds until changed. Nothing reverts on its own,
+  #                so `restore` is mandatory — this is the case where a Home
+  #                Assistant restart can leave a battery force-charging through
+  #                the evening peak.
+  #                (Sungrow, GoodWe, Deye, Sigenergy)
+  #
+  #   expires      The command carries its own duration and the inverter reverts
+  #                when it elapses. Set `duration_min` and pass
+  #                `{{ duration_min }}` to the service.
+  #                (Huawei forcible_charge)
+  #
+  #   watchdog     A countdown the controller must keep reloading.
+  #                (Fox ESS timeout_set, SolaX remotecontrol_duration, Victron)
+  #
+  # For `expires` and `watchdog` the executor re-issues once half the lifetime
+  # has passed, even when nothing changed. Getting this wrong is silent: the
+  # battery simply stops following the plan partway through.
+  lifetime: persistent
+
+  # How long to ask for, and the interval the re-issue above is based on.
+  # Only used when lifetime is `expires` or `watchdog`.
+  duration_min: 30
+
+  # Don't re-send a command whose power moved less than this. Raise it for a
+  # slow bus, lower it for finer tracking. A *change of direction* is always
+  # sent regardless of this value.
+  deadband_w: 100
+
+  # A floor on how often this profile may write at all, for hardware that
+  # dislikes being hammered. 0 means no floor.
+  min_write_interval_s: 0
+
+  # Whether control must be handed back on shutdown, unload, and when the user
+  # switches control off. Leave true unless the inverter genuinely reverts by
+  # itself. With it set, the profile must define `restore` or `self_consume`,
+  # and loading fails if it defines neither.
+  restore_required: true
+
+  # ~~~ curtail_mode / curtail_unit ~~~ only meaningful if you define `curtail`
+  # and `uncurtail` below. Two different mechanisms, and only your hardware's
+  # documentation tells you which one it has:
+  #
+  #   export_limit          Caps feed-in; PV still serves load and battery.
+  #                         (Sungrow, SolarEdge, Fronius, Huawei, SolaX,
+  #                         GoodWe, Fox ESS) ← most common
+  #   zero_export_switch    Boolean only, no magnitude -- `curtail_w` is
+  #                         ignored, the switch alone does the job.
+  #
+  # `curtail_unit` is converted exactly like `power_unit` above, and exposed
+  # to your actions as `{{ curtail_w }}` -- never do this arithmetic yourself,
+  # for the same 100x reason as power_unit.
+  curtail_mode: export_limit
+  curtail_unit: w
+
+# --- Questions asked during setup --------------------------------------------
+#
+# Each becomes a form field, using any Home Assistant selector.
+# Answers are available everywhere below as {{ options.<key> }}.
+#
+# `suggest` is the entity id this integration normally creates. The form is
+# pre-filled with the first suggestion that actually exists, so a user who has
+# already told us which inverter they own usually just presses Next. A wrong
+# suggestion is a visibly wrong entity id in a form field — harmless, and the
+# reason suggestions are safe here in a way auto-detection was not.
+#
+# Suggest generously. Entity ids vary with the device name a user chose, so
+# list the common spellings.
+
+options:
+  mode_select:
+    name: Inverter mode entity
+    description: The select that switches between self-consumption and forcing.
+    suggest:
+      - select.ems_mode
+      - select.inverter_mode
+    selector:
+      entity:
+        domain: select
+
+  power_number:
+    name: Charge/discharge power entity
+    suggest:
+      - number.battery_forced_charge_discharge_power
+    selector:
+      entity:
+        domain: number
+
+  # Mode option names are a per-integration string, sometimes per-firmware.
+  # Make them options rather than hardcoding, and default to what the common
+  # integration uses. Check the select entity's own option list to get the
+  # capitalisation exactly right — these must match character for character.
+  self_consume_option:
+    name: Self-consumption mode name
+    default: Self Consumption
+    selector:
+      text: {}
+
+  force_charge_option:
+    name: Forced charge mode name
+    default: Forced Charge
+    selector:
+      text: {}
+
+  force_discharge_option:
+    name: Forced discharge mode name
+    default: Forced Discharge
+    selector:
+      text: {}
+
+  idle_option:
+    name: Idle mode name
+    default: Stop
+    selector:
+      text: {}
+
+# --- Entities to read --------------------------------------------------------
+#
+# Role → entity id. Optional, and templates are allowed. Used for reporting and
+# to fill in EMHASS settings, never for control.
+#
+# Known roles: battery_soc, battery_power, grid_power, pv_power, load_power.
+
+sensors:
+  battery_soc: sensor.battery_level
+  battery_power: sensor.battery_power
+  # grid_power: sensor.total_active_power
+  # pv_power: sensor.total_dc_power
+  # load_power: sensor.load_power
+
+# --- Model defaults ----------------------------------------------------------
+#
+# Offered to pre-fill the Battery and hybrid-inverter settings the user would
+# otherwise type by hand. Templates allowed, so these can be read from the
+# inverter rather than hardcoded per model.
+
+limits:
+  # battery_capacity_wh: 10000
+  # charge_power_max_w: "{{ states('number.battery_max_charge_power') | float }}"
+  # discharge_power_max_w: "{{ states('number.battery_max_discharge_power') | float }}"
+  # ac_output_max_w: 10000
+
+# --- Actions -----------------------------------------------------------------
+#
+# The set of actions you define IS your capability list. There is no separate
+# capabilities block to keep in sync. Omit an action your hardware genuinely
+# cannot do and the integration reports the limitation rather than pretending.
+#
+#   self_consume   Normal operation. Also the fallback whenever a plan goes
+#                  stale, so define it even if nothing else.
+#   force_charge   Charge at `power`.
+#   force_discharge  Discharge at `power`.
+#   idle           Neither charging nor discharging.
+#   prepare        Optional. Run once before the first forced command of a
+#                  session — for inverters that gate remote control behind a
+#                  mode (SolarEdge "Remote Control", Victron "External control",
+#                  Sigenergy remote_ems_enable). Not re-run on every write.
+#   restore        Optional. How control is handed back. Falls back to
+#                  self_consume. Define it separately when handing back also
+#                  means undoing `prepare`.
+#   curtail        Optional. Limit export/production to `curtail_w`.
+#   uncurtail      Optional. Remove that limit.
+#   allow_grid_charge / block_grid_charge
+#                  Optional but important on most hybrids: grid charging is
+#                  separately permissioned (Growatt allow_grid_charge, Deye
+#                  grid_charge_enabled, SolarEdge ac_charge_policy, Huawei
+#                  storage_power_of_charge_from_grid). EMHASS knows nothing
+#                  about that gate, so without these a planned cheap-hours grid
+#                  charge is silently refused by the hardware.
+#
+# ~~~ Variables available in every action ~~~
+#
+#   {{ power }}         Ready to write. Converted to power_unit, signed if the
+#                       profile is, boosted, clamped, rounded. USE THIS ONE.
+#   {{ power_w }}       Raw signed watts from the plan, EMHASS convention.
+#                       For anything the conversion cannot express.
+#   {{ magnitude_w }}   abs(power_w), unconverted.
+#   {{ duration_min }}  From control.duration_min. For `expires` inverters.
+#   {{ soc }}           Battery state of charge now, percent (may be None).
+#   {{ soc_target }}    Configured target, percent.
+#   {{ action }}        The action name being rendered.
+#   {{ options.<key> }} Answers to the questions above.
+#
+# ~~~ Ordering ~~~
+#
+# Write the power BEFORE switching into a forced mode. Setting the mode first
+# makes the inverter act briefly on whatever value was left over from last
+# time — a real and visible glitch on slow buses.
+
+actions:
+  self_consume:
+    - service: select.select_option
+      target: { entity_id: "{{ options.mode_select }}" }
+      data: { option: "{{ options.self_consume_option }}" }
+
+  force_charge:
+    - service: number.set_value
+      target: { entity_id: "{{ options.power_number }}" }
+      data: { value: "{{ power }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.mode_select }}" }
+      data: { option: "{{ options.force_charge_option }}" }
+
+  force_discharge:
+    - service: number.set_value
+      target: { entity_id: "{{ options.power_number }}" }
+      data: { value: "{{ power }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.mode_select }}" }
+      data: { option: "{{ options.force_discharge_option }}" }
+
+  idle:
+    - service: select.select_option
+      target: { entity_id: "{{ options.mode_select }}" }
+      data: { option: "{{ options.idle_option }}" }
+# =============================================================================
+#  PATTERNS — Not Tested at all,copy the one that matches your hardware
+# =============================================================================
+#
+# -----------------------------------------------------------------------------
+# A. Signed setpoint (SolaX GEN4/5, Sigenergy)
+# -----------------------------------------------------------------------------
+# control:
+#   archetype: signed_power
+#   power_unit: w          # kW for Sigenergy — then round_to: 0.001
+#   signed: true
+#   lifetime: watchdog     # SolaX reverts when remotecontrol_duration lapses
+#   duration_min: 30
+# actions:
+#   prepare:
+#     - service: select.select_option
+#       target: {entity_id: "{{ options.control_select }}"}
+#       data: {option: Enabled Power Control}
+#   force_charge: &setpoint
+#     - service: number.set_value
+#       target: {entity_id: "{{ options.power_number }}"}
+#       data: {value: "{{ power }}"}      # already negative for charge
+#   force_discharge: *setpoint
+#   idle: *setpoint                        # power renders as 0
+#   restore:
+#     - service: select.select_option
+#       target: {entity_id: "{{ options.control_select }}"}
+#       data: {option: Enabled Self Use}
+#
+# -----------------------------------------------------------------------------
+# B. Service call carrying a duration (Huawei)
+# -----------------------------------------------------------------------------
+# control:
+#   archetype: command_with_duration
+#   power_unit: w
+#   signed: false          # direction is which service you call
+#   lifetime: expires      # THE IMPORTANT PART — auto-reverts, must be re-sent
+#   duration_min: 30
+# actions:
+#   force_charge:
+#     - service: huawei_solar.forcible_charge
+#       data:
+#         device_id: "{{ options.device_id }}"
+#         power: "{{ power }}"
+#         duration: "{{ duration_min }}"
+#   force_discharge:
+#     - service: huawei_solar.forcible_discharge
+#       data:
+#         device_id: "{{ options.device_id }}"
+#         power: "{{ power }}"
+#         duration: "{{ duration_min }}"
+#   idle:
+#     - service: huawei_solar.stop_forcible_charge
+#       data: {device_id: "{{ options.device_id }}"}
+#   self_consume:
+#     - service: huawei_solar.stop_forcible_charge
+#       data: {device_id: "{{ options.device_id }}"}
+#
+# -----------------------------------------------------------------------------
+# C. Percentage of rated power (GoodWe)
+# -----------------------------------------------------------------------------
+# control:
+#   archetype: mode_and_magnitude
+#   power_unit: percent_of_rated
+#   rated_power_w: "{{ options.rated_power_w }}"
+#   round_to: 1
+#   lifetime: persistent
+# actions:
+#   force_charge:
+#     - service: number.set_value
+#       target: {entity_id: "{{ options.eco_power_number }}"}
+#       data: {value: "{{ power }}"}      # e.g. 15, meaning 15% of rated
+#     - service: select.select_option
+#       target: {entity_id: "{{ options.mode_select }}"}
+#       data: {option: eco_charge}
+#
+# -----------------------------------------------------------------------------
+# D. Two selects plus a number (Sungrow SH — a mode gate AND a direction)
+# -----------------------------------------------------------------------------
+# This is the shape that the older single-select profile could not express, and
+# it is common: one select arms forced mode, a second chooses the direction.
+#
+# options:
+#   ems_mode_select:      {suggest: [select.ems_mode], selector: {entity: {domain: select}}}
+#   direction_select:     {suggest: [select.battery_forced_charge_discharge],
+#                          selector: {entity: {domain: select}}}
+#   power_number:         {suggest: [number.battery_forced_charge_discharge_power],
+#                          selector: {entity: {domain: number}}}
+# control:
+#   archetype: mode_and_magnitude
+#   power_unit: w
+#   round_to: 100          # the register steps in 100 W
+#   lifetime: persistent   # nothing reverts on its own — restore is mandatory
+#   charge_boost: 1.03
+# actions:
+#   force_charge:
+#     - service: number.set_value
+#       target: {entity_id: "{{ options.power_number }}"}
+#       data: {value: "{{ power }}"}
+#     - service: select.select_option
+#       target: {entity_id: "{{ options.ems_mode_select }}"}
+#       data: {option: Forced mode}
+#     - service: select.select_option
+#       target: {entity_id: "{{ options.direction_select }}"}
+#       data: {option: Forced charge}
+#   self_consume:
+#     - service: select.select_option
+#       target: {entity_id: "{{ options.ems_mode_select }}"}
+#       data: {option: Self-consumption mode (default)}
+#     - service: select.select_option
+#       target: {entity_id: "{{ options.direction_select }}"}
+#       data: {option: Stop (default)}
+#     - service: number.set_value
+#       target: {entity_id: "{{ options.power_number }}"}
+#       data: {value: 0}
+#
+# -----------------------------------------------------------------------------
+# E. Anything else — call your own script
+# -----------------------------------------------------------------------------
+# Any action may call a script instead. This covers conditional logic, retries,
+# and multi-write sequences without needing new vocabulary here. The script
+# receives whatever variables you pass it.
+#
+# actions:
+#   force_charge:
+#     - service: script.turn_on
+#       target: {entity_id: "{{ options.charge_script }}"}
+#       data:
+#         variables:
+#           power_w: "{{ power }}"
+#           duration_min: "{{ duration_min }}"
+#
+# -----------------------------------------------------------------------------
+# F. PV curtailment (export limit) — Sungrow, SolarEdge, Fronius, most others
+# -----------------------------------------------------------------------------
+# `curtail`/`uncurtail` are a second, independent axis from the battery
+# actions above — a plan can curtail while idle, and force-charge while not
+# curtailing. Optional: define both together or neither. A profile that
+# defines `curtail` without `uncurtail` (or vice versa) fails validation —
+# anything this integration can turn on, it must be able to turn back off.
+# An export limit stuck at zero is a silent, ongoing cost in a way a battery
+# stuck in the wrong mode is not, which is why that pairing is enforced rather
+# than left to convention.
+#
+# options:
+#   export_limit_switch:  {suggest: [switch.export_power_limit],
+#                          selector: {entity: {domain: switch}}}
+#   export_limit_number:  {suggest: [number.export_power_limit],
+#                          selector: {entity: {domain: number}}}
+# control:
+#   curtail_mode: export_limit
+#   curtail_unit: w
+# actions:
+#   curtail:
+#     - service: switch.turn_on
+#       target: {entity_id: "{{ options.export_limit_switch }}"}
+#     - service: number.set_value
+#       target: {entity_id: "{{ options.export_limit_number }}"}
+#       data: {value: "{{ curtail_w }}"}
+#   uncurtail:
+#     - service: switch.turn_off
+#       target: {entity_id: "{{ options.export_limit_switch }}"}
+#
+#
+# =============================================================================
+#  GOTCHAS SEEN ON REAL HARDWARE
+# =============================================================================
+#
+#  * Mode option strings must match the select's own options exactly, including
+#    capitalisation and any "(default)" suffix. Read the entity's option list;
+#    do not copy them from documentation.
+#
+#  * Register scaling can differ between models of the same brand — the same
+#    field has been reported as W on one unit and kW×100 on another. If you
+#    cannot confirm it for the whole family, list only the models you tested in
+#    `models:` and say so in `notes:`.
+#
+#  * Many control entities are disabled by default in HA and must be enabled on
+#    the device page before they can be written. Say so in `notes:`.
+#
+#  * Writing the mode before the power makes the inverter act on a stale value
+#    for a moment. Power first, always.
+#
+#  * `uncurtail` must not write "no limit" as some large number if your grid
+#    connection has a standing export cap (the German 70% rule, an Australian
+#    DNSP limit, etc). Writing the switch off, as the pattern above does, is
+#    what's usually correct — an inverter with a genuine two-tier limit
+#    (a hard compliance cap *and* a softer EMHASS-driven one) needs its own
+#    profile logic to respect both, not a blanket "remove the limit."
+#
+#  * A cloud integration usually cannot be driven on a 30-minute cycle even
+#    when it exposes writable entities — latency and rate limits make it
+#    unreliable. Prefer the local Modbus route and name it in `requires:`.
+#
+#
+# =============================================================================
+#  TESTING IT
+# =============================================================================
+#
+#  1. Leave switch.emhass_control_enabled OFF. The executor still runs and
+#     records what it *would* do on sensor.emhass_battery_action — its `steps`
+#     attribute is the literal list of service calls. Check them before letting
+#     anything reach the inverter.
+#
+#  2. Watch it for a day against your existing automation. Compare decisions.
+#
+#  3. Turn control on, and check that the inverter actually reached the state
+#     the steps claimed — a write that is accepted but ignored is a real
+#     failure mode on several brands.
+#
+#  4. Restart Home Assistant while a forced charge is active, and confirm the
+#     battery is handed back rather than left forcing. That is what
+#     `restore` and `restore_required` are for, and it is the failure that
+#     costs actual money.
+#
+#  To contribute the profile, add a fixture under tests/fixtures/ and a test
+#  asserting the steps each action resolves to. That is what lets a maintainer
+#  verify a profile for hardware none of them owns. See docs/profiles.md.

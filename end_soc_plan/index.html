@@ -1,0 +1,2047 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A Home Assistant integration that makes EMHASS usable without writing YAML.">
+      
+      
+      
+        <link rel="canonical" href="https://smefa.github.io/emhass-ha-companion/end_soc_plan/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/icon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>End SOC (planned) - EMHASS Companion</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#end-soc-planned" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="EMHASS Companion" class="md-header__button md-logo" aria-label="EMHASS Companion" data-md-component="logo">
+      
+  <img src="../assets/logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            EMHASS Companion
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              End SOC (planned)
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="teal" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/smefa/emhass-ha-companion" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    smefa/emhass-ha-companion
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="EMHASS Companion" class="md-nav__button md-logo" aria-label="EMHASS Companion" data-md-component="logo">
+      
+  <img src="../assets/logo.png" alt="logo">
+
+    </a>
+    EMHASS Companion
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/smefa/emhass-ha-companion" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    smefa/emhass-ha-companion
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    User Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/deferrable_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deferrable loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/thermal_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Thermal loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/surplus_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Surplus loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/inverter_control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inverter control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/hub_controls/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hub controls
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/dashboard_cards/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dashboard cards
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Technical reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Technical reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_2" id="__nav_3_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Loads
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Loads
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deferrable_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deferrable loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../thermal_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Thermal loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../surplus_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Surplus loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../on_demand_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    On-demand loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../load_groups/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Load groups
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../request_run_service/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Request-run service (planned)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dashboard_cards/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dashboard cards
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../entities/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Entities
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../handing_over_control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Handing over control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../inverter_control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inverter control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data_sources/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data sources
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../template_additions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Template additions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../profiles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Writing a profile
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../inverter_profile_roadmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inverter profile roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-problem" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The problem
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#design-overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-selector" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The selector
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-optimized-heuristic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Optimized heuristic
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#candidates-added-2026-08-06" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Candidates (added 2026-08-06)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-night-cover-rule-2026-08-07" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The night-cover rule (2026-08-07)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pv-coverage-past-the-horizon" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PV coverage past the horizon
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#load-coverage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Load coverage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wiring" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Wiring
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-sensor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The sensor
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tests
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#appendix-emhass-end-soc-mechanics-018-verified-2026-08-04" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Appendix: EMHASS end-SOC mechanics (≥ 0.18, verified 2026-08-04)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#appendix-live-ab-validation-2026-08-04" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Appendix: live A/B validation (2026-08-04)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#out-of-scope-future-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Out of scope / future work
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/smefa/emhass-ha-companion/edit/main/docs/end_soc_plan.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="end-soc-planned">End SOC (planned)<a class="headerlink" href="#end-soc-planned" title="Permanent link">&para;</a></h1>
+<p><em>Status: implemented (2026-08-05) — the selector, <code>terminal.py</code>, the End SOC
+target sensor, the Solcast day-3 default, the engine relaxation and the
+<code>p_load</code>-borrowing fallback for settings-only load profiles are all in.
+Still open: the candidate-sweep v2 and the upstream EMHASS terminal-value
+objective under Future work.</em></p>
+<p><em>Backend requirement: EMHASS </em><em>≥ v0.18.0</em><em>. From 0.18 the <code>soc_final</code>
+constraint is soft (deviation penalised in currency, ~100× the dearest
+import slot), so an over-ambitious target degrades with a warning
+instead of failing the run. On ≤ 0.17.x the same constraint is a hard
+equality and an unreachable target makes the whole optimisation
+infeasible — the existing infeasibility repair issue would surface it,
+but the answer is "upgrade the add-on", not companion-side workarounds.
+Release notes and docs must state the floor; this HA runs v0.17.9
+today, so upgrading the EMHASS add-on to v0.18.0 is part of rollout.</em></p>
+<h2 id="the-problem">The problem<a class="headerlink" href="#the-problem" title="Permanent link">&para;</a></h2>
+<p>Every optimisation request currently pins <code>soc_final</code> to the live SOC
+(<code>payload.py</code>, "soc_final = soc_init"). EMHASS enforces that as a hard
+equality on net battery throughput, so every kWh discharged inside the
+horizon must be bought back inside the horizon. Three ways this hurts:</p>
+<ol>
+<li><strong>Arbitrage refusal at the horizon edge.</strong> Battery full, prices high
+   now, cheap hours starting just <em>past</em> the horizon end: the plan does
+   nothing with the battery, because it cannot see where to buy the
+   energy back.</li>
+<li><strong>No pre-positioning for solar.</strong> The plan can never aim to reach
+   sunrise with an empty battery to absorb tomorrow's surplus, unless
+   that sunrise happens to fall inside the horizon.</li>
+<li><strong>The ratchet.</strong> Each MPC cycle re-pins the target to the drifting
+   live SOC, so sensor noise becomes a hard constraint and the target
+   follows every excursion instead of correcting it.</li>
+</ol>
+<p>The distortion is worst exactly when the horizon ends just before a big
+price or solar event — with Nordpool publishing tomorrow's prices at
+~13:00, a daily occurrence.</p>
+<h2 id="design-overview">Design overview<a class="headerlink" href="#design-overview" title="Permanent link">&para;</a></h2>
+<p>A kWh in the battery at horizon end has a value: the cost of the energy
+it displaces <em>after</em> the horizon. EMHASS's API offers no terminal-value
+objective — only the hard <code>soc_final</code> equality — so the companion picks
+the end SOC and EMHASS executes. That split (terminal condition chosen
+outside the solver) is the standard architecture for finite-horizon MPC,
+not a workaround.</p>
+<p>Three pieces:</p>
+<ul>
+<li>an <strong>End SOC</strong> selector in the battery settings step,</li>
+<li>a <strong>terminal-SOC heuristic</strong> (<code>terminal.py</code>) that computes the target
+  from the forecast tails past the horizon,</li>
+<li>an <strong>End SOC target sensor</strong> whose attributes explain the number.</li>
+</ul>
+<h2 id="the-selector">The selector<a class="headerlink" href="#the-selector" title="Permanent link">&para;</a></h2>
+<p>Battery settings (<code>config_flow.battery_schema</code>, both setup and options
+flow) gains one <code>SelectSelector</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Stored value</th>
+<th>Behaviour</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Optimized</strong> <em>(default)</em></td>
+<td><code>optimized</code></td>
+<td>Computed each run from PV, price and load forecasts — see below</td>
+</tr>
+<tr>
+<td><strong>Same as start</strong></td>
+<td><code>same_as_start</code></td>
+<td>Today's behaviour: <code>soc_final = soc_init</code></td>
+</tr>
+<tr>
+<td><strong>Fixed % slider</strong></td>
+<td><code>fixed_50</code></td>
+<td><code>soc_final = soc_target</code> (the Target charge level slider), feasibility-clamped</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>Stored under the existing <code>battery</code> options dict as <code>end_soc_mode</code>.</li>
+<li><code>BatteryConfig</code> gains <code>end_soc_mode: str = DEFAULT_END_SOC_MODE</code>
+  (<code>"optimized"</code>), parsed in <code>from_dict</code> with the default covering every
+  existing install.</li>
+<li>Option labels via <code>strings.json</code> selector translations (plus the
+  existing translation files), so no English literals in code.</li>
+</ul>
+<blockquote>
+<p><strong>Upgrade note:</strong> existing installs silently move from <em>Same as start</em>
+to <em>Optimized</em> on update, because that default is the point of the
+feature. Release notes must say so, and <em>Same as start</em> is the one-click
+way back to the old behaviour if a user distrusts the new plans.</p>
+</blockquote>
+<h2 id="the-optimized-heuristic">The Optimized heuristic<a class="headerlink" href="#the-optimized-heuristic" title="Permanent link">&para;</a></h2>
+<p>New module <code>custom_components/emhass_companion/terminal.py</code> — a pure
+function in the style of <code>surplus.py</code>, no I/O, fed by the series the
+coordinator has already fetched. <code>Series.window()</code> / <code>value_at()</code> give
+everything needed to look past the horizon.</p>
+<div class="highlight"><pre><span></span><code><span class="nd">@dataclass</span><span class="p">(</span><span class="n">slots</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">EndSocDecision</span><span class="p">:</span>
+    <span class="n">soc</span><span class="p">:</span> <span class="nb">float</span>                     <span class="c1"># final fraction, all clamps applied</span>
+    <span class="n">reason</span><span class="p">:</span> <span class="nb">str</span>                    <span class="c1"># one human sentence, for the sensor</span>
+    <span class="n">details</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span>        <span class="c1"># structured attributes, see sensor below</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">decide_end_soc</span><span class="p">(</span>
+    <span class="n">mode</span><span class="p">,</span> <span class="n">soc_init</span><span class="p">,</span> <span class="n">battery</span><span class="p">,</span> <span class="n">now</span><span class="p">,</span> <span class="n">horizon_end</span><span class="p">,</span> <span class="n">step</span><span class="p">,</span>
+    <span class="n">pv</span><span class="p">,</span> <span class="n">load</span><span class="p">,</span> <span class="n">buy_price</span><span class="p">,</span> <span class="n">sell_price</span><span class="p">,</span>
+    <span class="n">previous</span><span class="p">:</span> <span class="n">EndSocDecision</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">EndSocDecision</span>
+</code></pre></div>
+<p>For <code>same_as_start</code> and <code>fixed_50</code> it just returns the value with a
+matching reason. For <code>optimized</code>:</p>
+<ol>
+<li><strong>Collect the tails</strong> — the slice of each series past <code>horizon_end</code>.
+   The load profile is statistical (typical daily curve), so it extends
+   as far as asked; PV extends as far as the selected profile provides
+   (see <em>PV coverage past the horizon</em> below). Two per-input fallbacks
+   when a tail is missing or short:</li>
+<li><strong>Price</strong> — before ~13:00 tomorrow's Nordpool prices don't exist,
+     so when the price tail is shorter than ~2 h, substitute today's
+     known curve shifted 24 h as a statistical proxy (the daily <em>shape</em>
+     is structural), and mark the decision
+     <code>price_tail: "assumed from today"</code>.</li>
+<li><strong>PV</strong> — where the PV series ends, reuse the previous day's shape at
+     <code>PV_PROXY_CONFIDENCE</code> (50%) weight and mark
+     <code>pv_tail: "assumed from the previous day"</code>; with no previous day
+     either, assume <strong>zero</strong> and mark <code>pv_tail: "assumed zero"</code>.
+     (2026-08-06: originally zero-only. Unlike prices, PV has huge
+     day-to-day weather variance, and promising sun that never arrives
+     strands the battery low — so the proxy is <strong>one-sided</strong>. It may
+     lower the solar ceiling, where being wrong costs a partial charge
+     and the next MPC cycle corrects it; it may never shorten the bridge,
+     where being wrong costs an empty battery at dawn, and a guessed
+     block may only push the refill event <em>later</em> than the price trough,
+     never earlier. Without it the ceiling was dead on every evening run
+     — with a 24 h horizon a today+tomorrow forecast runs out within
+     hours of <code>horizon_end</code> — which is exactly when the overnight
+     strategy is decided.)</li>
+<li><strong>Load</strong> — a slot the fetched series doesn't cover falls back to the
+     same slot 24 h earlier, which for the default 24 h horizon lands
+     inside the horizon itself: this quietly duplicates day 1's load
+     shape into the tail with no extra code (see <em>Load coverage</em> below
+     for where the series itself comes from).</li>
+<li><strong>Find the next replenishment event</strong> after <code>horizon_end</code> — solar
+   outranks price outright, not whichever comes first chronologically:</li>
+<li><em>solar</em>: the first PV-surplus block (<code>pv − load &gt; 0</code>) whose
+     cumulative surplus reaches a material fraction of capacity
+     (~10%), timestamped at the block's start. If found anywhere in the
+     lookahead, it wins even when a cheap grid moment occurs earlier —
+     paying anything, even at the cheap end of the tariff, to skip a
+     short wait for free PV is a bad trade.</li>
+<li><em>cheap grid</em>: the first price at or below the 25th percentile of
+     the full known buy-price series, used only when the lookahead has
+     no material solar block at all (winter's short, weak days).
+   (2026-08-06: originally "whichever comes first"; a live Nordpool
+   night trough almost always falls within a couple of hours of any
+   horizon end, which made the reserve dominate nearly every decision —
+   see the session note below.)</li>
+<li><strong>Bridge energy</strong>: <code>E = Σ max(0, load − pv) · step</code> over
+   <code>[horizon_end, replenishment)</code>, divided by discharge efficiency —
+   the energy the house needs from the battery before it can be
+   refilled cheaply or for free.</li>
+<li><strong>The floor</strong> — <code>reserve + E / capacity</code>, where <code>reserve</code> is the
+   existing <code>soc_target</code> setting, repurposed to its natural meaning of
+   "comfort/backup floor the plan should always end with". <code>soc_target</code>
+   is still sent to EMHASS as <code>battery_target_state_of_charge</code>,
+   unchanged: EMHASS only reads that key as the <em>default</em> end SOC when
+   no <code>soc_final</code> is supplied, and we always supply one, so it is inert
+   there — but the companion's convention is to assert every setting on
+   every request so EMHASS's persisted config never silently decides,
+   and "default end SOC" stays semantically compatible with the floor
+   reading if that fallback ever fired.</li>
+<li><strong>The ceiling</strong> — <code>soc_max − max(0, S − E) / capacity</code>, where <code>S</code> is
+   the absorbable energy of the next material surplus block (its
+   integral × charge efficiency). This is the term that makes the
+   feature about <em>self-consumption</em> rather than arbitrage: every kWh
+   held past what the house needs is a kWh of tomorrow's sun that gets
+   exported at the sell price and bought back at the buy price. The
+   <code>− E</code> matters — the constraint binds at the moment the surplus
+   <em>starts</em>, by which time the bridge has already been drawn down, so
+   the target may sit that much higher than the raw surplus suggests.</li>
+</ol>
+<p>Ceiling ≥ floor reduces to <code>soc_max − reserve ≥ S / capacity</code>: the
+   ceiling binds <strong>only</strong> when the coming sun genuinely exceeds the
+   usable span above the reserve, so it is inert all winter and needs no
+   seasonal switch. Unlike the floor, the ceiling accepts a <em>proxied</em>
+   surplus block, at its already-discounted weight.</p>
+<p>(2026-08-06: replaces the original "solar bias" step, which only said
+   "do not round the target up further" and was therefore a no-op. With
+   nothing but the floor, the heuristic was one-directional — it could
+   only ever add to the reserve — so it returned the reserve itself on
+   any day whose next refill was close, and looked inert.)
+6. <strong>Bounds, in order</strong> (the last one to bite is recorded in
+   <code>details["clamped_by"]</code>, with the untouched floor kept as
+   <code>raw_target</code>):
+   - <code>solar_headroom</code>: the ceiling, when it sits below the floor;
+   - <code>reserve</code>: the user's comfort floor. Solar headroom may push the
+     target down <em>to</em> it but never through it. When this is what a
+     summer day reports every time, the answer is to lower <code>soc_target</code>
+     — it is the one setting that widens the band the computation can
+     move in;
+   - <code>range</code>: <code>[soc_min, soc_max]</code>;
+   - <code>hysteresis</code>: if <code>previous</code> exists and the new target is within
+     ±2 percentage points, keep the previous value — a pinned target
+     that jitters run-to-run makes plans thrash.</p>
+<p>There is deliberately <strong>no feasibility clamp</strong>: from EMHASS 0.18 the
+   <code>soc_final</code> constraint is soft, so a target the battery cannot reach
+   in time makes the solver get as close as physics allows (the penalty
+   is priced too high to trade away for energy cost) and log a warning.
+   The solver knows the physics better than a companion-side bound
+   would. Instead, <code>decide_end_soc</code> <em>annotates</em>: when
+   <code>|target − soc_init|</code> exceeds the rough power-limit reach for the
+   horizon, set <code>details["unreachable"] = true</code> so the sensor can say
+   the plan will aim for the target but fall short.
+7. <strong>Fallback</strong>: with no usable tails at all, behave as
+   <code>same_as_start</code>, with <code>reason</code> saying which input was missing.</p>
+<p>The <code>previous</code> decision lives on the coordinator in memory only; after a
+restart the first run simply computes fresh (hysteresis needs no
+persistence).</p>
+<h2 id="candidates-added-2026-08-06">Candidates (added 2026-08-06)<a class="headerlink" href="#candidates-added-2026-08-06" title="Permanent link">&para;</a></h2>
+<p>There is no ground truth for a terminal-value heuristic short of running
+one against a real house for a season. So <code>terminal.py</code> computes
+<em>several</em> on every run, against one shared view of the world (<code>_Tail</code>),
+and reports them all:</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Label</th>
+<th>What it is</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>bridge_only</code></td>
+<td>Test 1 — bridge to the next refill</td>
+<td>The calculation as it shipped: <code>reserve + E / capacity</code>, no ceiling, no PV proxy</td>
+</tr>
+<tr>
+<td><code>solar_headroom</code></td>
+<td>Test 2 — bridge floor, solar ceiling</td>
+<td>The design above. Active until 2026-08-07</td>
+</tr>
+<tr>
+<td><code>daily_ratio</code></td>
+<td>Test 3 — daily-yield template</td>
+<td>The Jinja template this feature replaced, ported: drift the live SOC by tomorrow-minus-today's forecast yield, on a sliding floor</td>
+</tr>
+<tr>
+<td><code>night_cover</code></td>
+<td>Test 4 — night cover, sold only when it pays</td>
+<td>The night-cover rule below. <strong>Active</strong></td>
+</tr>
+<tr>
+<td><code>priced_bridge</code></td>
+<td>Test 5 — priced bridge, curtailment ceiling</td>
+<td>The two lowering mechanisms Test 4 refuses, kept where they cost nothing: a published cheap hour ends the night, and room is made only for surplus that would be clipped or given away</td>
+</tr>
+</tbody>
+</table>
+<p>Tests 1 to 3 are frozen. They are the yardsticks the recorded <code>tests</code>
+history is measured against, and editing one silently rebases that
+history, so improvements go in as a new candidate.</p>
+<p><code>ACTIVE_CANDIDATE</code> names the one whose number actually reaches EMHASS;
+the rest ride along in the End SOC sensor's <code>tests</code> attribute:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">active_test</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">night_cover</span>
+<span class="nt">tests</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">bridge_only</span><span class="p">:</span><span class="w">     </span><span class="p p-Indicator">{</span><span class="nt">label</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Test</span><span class="nv"> </span><span class="s">1</span><span class="nv"> </span><span class="s">—</span><span class="nv"> </span><span class="s">…&quot;</span><span class="p p-Indicator">,</span><span class="nt"> soc</span><span class="p">:</span><span class="w"> </span><span class="nv">0.70</span><span class="p p-Indicator">,</span><span class="nt"> reason</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Holding</span><span class="nv"> </span><span class="s">4.0</span><span class="nv"> </span><span class="s">kWh</span><span class="nv"> </span><span class="s">…&quot;</span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="nt">solar_headroom</span><span class="p">:</span><span class="w">  </span><span class="p p-Indicator">{</span><span class="nt">label</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Test</span><span class="nv"> </span><span class="s">2</span><span class="nv"> </span><span class="s">—</span><span class="nv"> </span><span class="s">…&quot;</span><span class="p p-Indicator">,</span><span class="nt"> soc</span><span class="p">:</span><span class="w"> </span><span class="nv">0.30</span><span class="p p-Indicator">,</span><span class="nt"> reason</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Leaving</span><span class="nv"> </span><span class="s">room</span><span class="nv"> </span><span class="s">for</span><span class="nv"> </span><span class="s">22.5</span><span class="nv"> </span><span class="s">kWh</span><span class="nv"> </span><span class="s">…&quot;</span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="nt">daily_ratio</span><span class="p">:</span><span class="w">     </span><span class="p p-Indicator">{</span><span class="nt">label</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Test</span><span class="nv"> </span><span class="s">3</span><span class="nv"> </span><span class="s">—</span><span class="nv"> </span><span class="s">…&quot;</span><span class="p p-Indicator">,</span><span class="nt"> soc</span><span class="p">:</span><span class="w"> </span><span class="nv">0.58</span><span class="p p-Indicator">,</span><span class="nt"> reason</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Template</span><span class="nv"> </span><span class="s">drift:</span><span class="nv"> </span><span class="s">12</span><span class="nv"> </span><span class="s">kWh</span><span class="nv"> </span><span class="s">…&quot;</span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="nt">night_cover</span><span class="p">:</span><span class="w">     </span><span class="p p-Indicator">{</span><span class="nt">label</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Test</span><span class="nv"> </span><span class="s">4</span><span class="nv"> </span><span class="s">—</span><span class="nv"> </span><span class="s">…&quot;</span><span class="p p-Indicator">,</span><span class="nt"> soc</span><span class="p">:</span><span class="w"> </span><span class="nv">0.70</span><span class="p p-Indicator">,</span><span class="nt"> reason</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Covering</span><span class="nv"> </span><span class="s">4.0</span><span class="nv"> </span><span class="s">kWh</span><span class="nv"> </span><span class="s">on</span><span class="nv"> </span><span class="s">top</span><span class="nv"> </span><span class="s">…&quot;</span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="nt">priced_bridge</span><span class="p">:</span><span class="w">   </span><span class="p p-Indicator">{</span><span class="nt">label</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Test</span><span class="nv"> </span><span class="s">5</span><span class="nv"> </span><span class="s">—</span><span class="nv"> </span><span class="s">…&quot;</span><span class="p p-Indicator">,</span><span class="nt"> soc</span><span class="p">:</span><span class="w"> </span><span class="nv">0.70</span><span class="p p-Indicator">,</span><span class="nt"> reason</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Covering</span><span class="nv"> </span><span class="s">4.0</span><span class="nv"> </span><span class="s">kWh</span><span class="nv"> </span><span class="s">on</span><span class="nv"> </span><span class="s">top</span><span class="nv"> </span><span class="s">…&quot;</span><span class="p p-Indicator">}</span>
+</code></pre></div>
+<p>Recorded over a month, that attribute says which one <em>should</em> have been
+driving. The active candidate's entry is repeated in <code>tests</code> on purpose,
+and holds the value the candidate computed <strong>before</strong> hysteresis, so a
+recorded history compares like with like.</p>
+<p>Test 3 carries <code>TEMPLATE_REFERENCE_YIELD_KWH = 40.0</code> — the plant-scale
+constant from the original template. Hard-coding it is only acceptable
+because the candidate is a shadow calculation; promoting it means
+turning that into a setting first.</p>
+<p><strong>Adding another is three lines</strong>: write
+<code>_my_idea(tail: _Tail) -&gt; EndSocDecision</code>, add
+<code>_Candidate("my_idea", "Test 6 — my idea", _my_idea)</code> to <code>CANDIDATES</code>,
+and it appears in the sensor on the next run. <code>_Tail</code> already exposes
+<code>reserve</code>, <code>clamp()</code>, <code>first_block()</code>, <code>last_block()</code>, <code>first_cheap()</code>
+and <code>deficit_until()</code>, and <code>_required_soc()</code> / <code>_sale_credit()</code> are
+reusable, so a new idea is usually a few lines of arithmetic over data
+that has already been gathered.</p>
+<h2 id="the-night-cover-rule-2026-08-07">The night-cover rule (2026-08-07)<a class="headerlink" href="#the-night-cover-rule-2026-08-07" title="Permanent link">&para;</a></h2>
+<p>Test 2 shipped for three days and was replaced. What it did on a clear
+August evening, live:</p>
+<blockquote>
+<p><em>Leaving room for 41.9 kWh of expected solar surplus: ending at 20% so
+the sun charges the battery instead of being exported. Held at the 20%
+reserve floor.</em></p>
+</blockquote>
+<p>At 18:00 the pin lands at 18:00 tomorrow — <strong>after</strong> tomorrow's solar
+peak, which is inside the horizon and already EMHASS's to plan. The
+surplus being made room for is therefore the <em>day after tomorrow's</em>,
+starting ~12 h past the pin with a whole night in between. The ceiling
+then computed <code>soc_max − (41.9 − 11.2) / 22 = −40%</code>, an unsatisfiable
+bound, and collapsed to the reserve — overriding a bridge floor of 71%,
+i.e. the 11.2 kWh the house needs to get through that night.</p>
+<p>The failure is structural, not a tuning error. The ceiling binds exactly
+when <code>(soc_max − need)·C &lt; surplus − drawdown</code> — that is, exactly when
+the coming sun <em>more than</em> refills the battery from the bridge target.
+In that regime the battery is full by mid-morning whichever target is
+chosen, so the room buys nothing; the only real difference is that the
+night was spent on grid import at <code>1.25 × spot + 0.80</code> instead of on
+stored solar. When the sun genuinely cannot fill the battery, <code>room &gt;
+need</code> and the ceiling never binds at all. <strong>Its binding region is its
+refutation.</strong> Nor was it needed for the imminent-sun case: with the sun
+arriving at the pin the bridge is ~0 and Test 1 returns the reserve on
+its own.</p>
+<p>The replacement is one rule:</p>
+<blockquote>
+<p>Never plan to arrive at the pin with less than the house needs before
+the sun comes back — unless selling that energy first demonstrably
+pays for buying it again.</p>
+</blockquote>
+<p><strong>The floor</strong> is <code>_required_soc</code>, a backward pass over the lookahead: the
+lowest SOC at the pin that never puts the battery under its reserve.
+Deficits raise the requirement, surpluses lower it, the floor at the
+reserve is what stops 40 kWh of Sunday from excusing an empty Saturday
+evening, and the ceiling at <code>soc_max</code> keeps an unreachable requirement
+from understating what a later surplus can pay for. Proxied PV counts as
+darkness, as it does everywhere else here. It subsumes Test 1's bridge
+and handles two cases the bridge does not: a pin landing <em>inside</em> a weak
+morning (Test 1 sees sun at the pin, calls the bridge zero and sells off
+the morning's own charge before the night behind it), and the credit a
+surplus straddling the pin genuinely earns.</p>
+<p>The walk stops at the <strong>last</strong> forecast surplus block, not the first.
+Stopping at the first ignores a weak day that cannot pay for the night
+behind it; running to the edge of the lookahead demands cover for the
+darkness after the final sunrise, which is a property of a 24 h window
+rather than of the world, and would pin every sunny day at <code>soc_max</code>.</p>
+<p><strong>The exception</strong> is priced, not judged. A kWh may leave before the pin
+only when</p>
+<div class="highlight"><pre><span></span><code>sell × discharge_eff  &gt;  buy / charge_eff + wear
+</code></pre></div>
+<p>with <code>buy</code> the cheapest hour before the battery would hit its reserve and
+<code>wear</code> the configured cycle costs. On this house — buy <code>1.25 × spot +
+0.80</code>, sell <code>spot</code>, 0.10/kWh wear — a 0.20 night needs a 1.15 evening to
+clear, so the exception sleeps through summer and wakes on winter peaks.
+The credit is an <em>energy</em>, capped by what can physically leave in the
+profitable hours and by the cover itself, so one expensive slot releases
+one slot's worth rather than the night.</p>
+<p>Only <strong>published</strong> buy prices qualify. Tomorrow night's curve is a proxy
+for part of the tail on most runs, and a spread computed against a guess
+is precisely the calculation that talks a battery into arriving empty.
+Refusing it fails towards carrying the energy, which is the recoverable
+mistake — the same asymmetry already applied to proxied PV.</p>
+<p><strong>One grid refill is accepted</strong>, and only one: when the whole lookahead
+holds no forecast surplus at all, the requirement stops at the cheapest
+hour instead. The rule refuses to buy at night in order to make room for
+sun, and a week of December overcast is exactly the case where there is
+no sun to make room for; without this the cover would run the full 24 h
+and pin every winter run at <code>soc_max</code>.</p>
+<h2 id="pv-coverage-past-the-horizon">PV coverage past the horizon<a class="headerlink" href="#pv-coverage-past-the-horizon" title="Permanent link">&para;</a></h2>
+<p>Optimized mode is only as good as its view of tomorrow's sun. With the
+Solcast profile's current default of <em>today + tomorrow</em>, coverage past
+a 24 h horizon shrinks from ~24 h just after midnight to roughly zero
+by late evening — exactly when the next day's end SOC is being decided.</p>
+<p>Naming note: Solcast has <strong>no <code>forecast_day_2</code> sensor</strong> — <em>tomorrow</em>
+is day 2. The consecutive extra day is
+<code>sensor.solcast_pv_forecast_forecast_day_3</code> (then <code>day_4</code>, …), each
+carrying the same half-hourly <code>detailedForecast</code> attribute (verified on
+this HA: today/tomorrow/day_3/day_4 are consecutive days, 48 entries
+each).</p>
+<p>Three changes:</p>
+<ol>
+<li><strong>Solcast profile template</strong> (<code>profiles/builtin/pv/solcast.yaml</code>):
+   add <code>sensor.solcast_pv_forecast_forecast_day_3</code> to the default
+   <code>entities</code> list and reword the option description: today + tomorrow
+   covers the horizon; one more day lets End SOC's Optimized mode see
+   past it. Costs nothing — the profile reads the integration's local
+   cache, no extra Solcast API calls.</li>
+<li><strong>Engine: missing entities stop being fatal</strong>
+   (<code>profiles/engine.py::_read_attributes</code>): today a single missing
+   entity raises <code>ProfileError</code> and kills the whole run. Relax to: warn
+   and skip missing entities, raise only when <em>no</em> requested entity
+   resolves (or no records result). A day-3 sensor that is briefly
+   unavailable (integration reload, user disabled it) then just
+   shortens the series instead of failing the optimisation — and short
+   coverage already has a safety net, <code>build_payload</code>'s
+   horizon-coverage warning. The unavailable-state case (entity exists,
+   attributes stripped) already degrades gracefully via the
+   attribute-<code>None</code> skip.</li>
+<li><strong>Actionable hint instead of silent migration</strong>: changed template
+   defaults only affect <em>new</em> profile selections — existing installs
+   (like this one) keep <code>[today, tomorrow]</code> in their stored options.
+   Don't mutate stored options behind the user's back. Instead, when
+   Optimized mode finds the PV tail shorter than ~12 h past the horizon
+   <em>and</em> the selected profile is Solcast <em>and</em> an unselected
+   <code>forecast_day_3</code> entity exists, raise a repair issue (the
+   codebase's established pattern) suggesting adding day 3 to the PV
+   profile. Other profiles just get the honest
+   <code>pv_tail: "assumed zero"</code> annotation on the sensor.</li>
+</ol>
+<p>Non-Solcast sources: <code>emhass_native</code> contributes settings rather than a
+series, so Optimized mode there always runs with
+<code>pv_tail: "assumed zero"</code>; <code>generic_attribute</code> depends on whatever the
+user points it at.</p>
+<h2 id="load-coverage">Load coverage<a class="headerlink" href="#load-coverage" title="Permanent link">&para;</a></h2>
+<p>Most PV/price sources are calendar-day-shaped (Solcast, Nordpool), so the
+tail's main risk is running out of <em>real</em> data. Load is the opposite
+problem for one common profile: <strong>"House load sensor"</strong> (<code>load/sensor</code>,
+likely the most-picked load profile for anyone with a whole-house meter)
+sets <code>sensor_power_load_no_var_loads</code>/<code>load_forecast_method</code> and lets
+EMHASS compute the load forecast itself, server-side. It has no
+<code>source:</code> block, so <code>profile.produces_series</code> is <code>False</code> and the
+coordinator's own <code>load</code> is <em>always</em> <code>Series.empty()</code> for it — not
+short, genuinely absent. Without a fix, every Optimized decision on that
+profile hits the "missing inputs" fallback (this module's <code>missing</code>
+check, above) and quietly behaves as same-as-start on every single run.</p>
+<p>EMHASS still computes a real load forecast for that profile every run —
+it just never sends it back to the companion as its own artifact. It is,
+however, sitting in the <code>p_load</code> column of whatever plan EMHASS last
+actually solved. <code>coordinator._load_for_terminal</code> borrows it:</p>
+<div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">_load_for_terminal</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">load</span><span class="p">:</span> <span class="n">Series</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">Series</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
+    <span class="k">if</span> <span class="n">load</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">load</span><span class="p">,</span> <span class="n">LOAD_SOURCE_PROFILE</span>
+    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">data</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">plan</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">borrowed</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">plan</span><span class="o">.</span><span class="n">series</span><span class="p">(</span><span class="s2">&quot;p_load&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">borrowed</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">borrowed</span><span class="p">,</span> <span class="n">LOAD_SOURCE_LAST_PLAN</span>
+    <span class="k">return</span> <span class="kc">None</span><span class="p">,</span> <span class="n">LOAD_SOURCE_PROFILE</span>
+</code></pre></div>
+<p>The borrowed series' timestamps land within the <em>previous</em> run's own
+horizon (last cycle's horizon, shifted by roughly one MPC interval) —
+not in the tail. That is exactly what the load fallback above already
+expects (<code>when - 24h</code> lands inside the horizon for a 24 h default), so
+the borrowed series slots in with no further changes: one cycle stale
+at worst, the same kind of imperfect-but-reasonable proxy the price
+tail already relies on. <code>decide_end_soc</code> records which happened —
+<code>load_source</code> (<code>LOAD_SOURCE_PROFILE</code> / <code>LOAD_SOURCE_LAST_PLAN</code>) rides
+through into the Optimized decision's <code>details["load_tail"]</code> — the
+module cannot tell a borrowed series from a real one on its own, so the
+caller has to say.</p>
+<p><strong>Scan scope, settled</strong>: the replenishment search stays anchored at
+<code>horizon_end</code>, not <code>now</code>. <code>soc_final</code> only takes effect at
+<code>horizon_end</code> — EMHASS already optimises everything before that on its
+own, regardless of what pattern this module notices there, so widening
+the search to include it couldn't produce a better target. What
+actually matters is good <em>data</em> for the part EMHASS can't see, which
+the load-borrowing fix above delivers without needing to touch the
+search window itself.</p>
+<h2 id="wiring">Wiring<a class="headerlink" href="#wiring" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>PayloadInputs</code> gains <code>soc_final: float | None = None</code>.
+  <code>build_payload</code> sends it when set, and keeps the current
+  <code>soc_final = soc_init</code> fallback when not. The existing comment block
+  moves to the fallback branch and gets rewritten while at it: it
+  describes the pre-0.18 hard equality, which is now a softly-enforced
+  pin (see appendix).</li>
+<li><code>coordinator._build()</code> calls <code>decide_end_soc(...)</code> after the series
+  gather (both actions — day-ahead gets the same target for
+  consistency, though the MPC is where it changes behaviour at the
+  meter), passes <code>decision.soc</code> into <code>PayloadInputs</code>, and stores the
+  <code>EndSocDecision</code> on the coordinator data so entities can read it.</li>
+<li><code>diagnostics.py</code> includes the last decision.</li>
+</ul>
+<h2 id="the-sensor">The sensor<a class="headerlink" href="#the-sensor" title="Permanent link">&para;</a></h2>
+<p><code>sensor.&lt;name&gt;_end_soc_target</code> — one per config entry, on the main
+device, description-based like the existing plan sensors.</p>
+<ul>
+<li><strong>State</strong>: the target as a percentage. <code>device_class: battery</code> (right
+  unit and icon); no <code>state_class</code> — it is a setpoint, not a
+  measurement, and long-term statistics on it are noise.</li>
+<li><strong>Attributes</strong> (the explanation the value needs to be trusted):</li>
+<li><code>mode</code> — <code>optimized</code> / <code>same_as_start</code> / <code>fixed_50</code></li>
+<li><code>reason</code> — one human sentence, e.g. <em>"Holding 3.2 kWh to bridge
+    evening load until cheap prices at 02:00; solar expected to refill
+    from 09:30."</em></li>
+<li><code>replenishment_kind</code> — <code>solar</code> / <code>cheap_grid</code> / <code>none</code></li>
+<li><code>cover_energy_wh</code> / <code>cover_target</code> — what the night needs on top of
+    the reserve, and the SOC that represents</li>
+<li><code>cover_until</code> — when the battery would otherwise touch the reserve</li>
+<li><code>sale_energy_wh</code> / <code>sale_margin</code> / <code>sale_sell_price</code> /
+    <code>sale_buy_price</code> — present when the priced exception fired</li>
+<li><code>sale_blocked</code> — present when it did not, with which of the three
+    reasons (no sell price / prices unpublished / no spread)</li>
+<li><code>reserve</code> — the floor used (from <code>soc_target</code>)</li>
+<li><code>clamped_by</code> — <code>night_cover</code> (nothing bit) / <code>profitable_sale</code> /
+    <code>reserve</code> / <code>range</code> / <code>hysteresis</code>. <code>range</code> also covers a night
+    longer than the battery: a bound that bites in silence is how a
+    heuristic gets believed for the wrong reason</li>
+<li><code>unreachable</code> — present and <code>true</code> when the target likely exceeds
+    what charge/discharge power can deliver within the horizon (EMHASS
+    will aim for it and fall short, softly)</li>
+<li><code>price_tail</code> — <code>known</code> / <code>assumed from today</code></li>
+<li><code>load_tail</code> — <code>own forecast</code> / <code>borrowed from last plan</code></li>
+<li><code>fallback</code> — present with the cause when the heuristic could not run</li>
+<li>Unavailable while the battery is disabled; in the non-optimized modes
+  the sensor still reports (state + <code>mode</code> + <code>reason</code>), so the dropdown
+  and the sensor never disagree.</li>
+</ul>
+<p><code>docs/entities.md</code> gains a row for it when implemented.</p>
+<h2 id="tests">Tests<a class="headerlink" href="#tests" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>tests/test_terminal.py</code> — pure-function scenarios:</li>
+<li>evening before a cheap night → target near reserve (discharge
+    allowed through the peak);</li>
+<li>night before a sunny surplus day → low target, solar bias engaged;</li>
+<li>no PV tail, expensive tail → target covers the bridge energy;</li>
+<li>missing price tail before 13:00 → today's curve proxy used and
+    flagged;</li>
+<li>target beyond power-limit reach → <code>unreachable</code> annotated, value
+    <em>not</em> clamped;</li>
+<li>±2 pp jitter → hysteresis holds the previous value;</li>
+<li>no tails at all → same-as-start fallback with explanatory reason;</li>
+<li><code>same_as_start</code> and <code>fixed_50</code> passthroughs;</li>
+<li><code>load_source</code> defaults to <code>own forecast</code>, rides through verbatim to
+    <code>details["load_tail"]</code> when the caller passes <code>borrowed from last
+    plan</code>.</li>
+<li><code>tests/test_payload.py</code> — <code>soc_final</code> passthrough when set; existing
+  pin-to-<code>soc_init</code> behaviour preserved when unset.</li>
+<li>Config-flow test: <code>end_soc_mode</code> stored, default <code>optimized</code>,
+  round-trips through the options flow.</li>
+<li>Engine test: one missing entity out of three → warn + skip, records
+  from the remaining two; all entities missing → <code>ProfileError</code> as
+  before.</li>
+<li>PV-tail tests: series ending at horizon → <code>pv_tail: "assumed zero"</code>,
+  no solar bias; Solcast profile selected without day 3 while the
+  entity exists → repair issue raised.</li>
+</ul>
+<h2 id="appendix-emhass-end-soc-mechanics-018-verified-2026-08-04">Appendix: EMHASS end-SOC mechanics (≥ 0.18, verified 2026-08-04)<a class="headerlink" href="#appendix-emhass-end-soc-mechanics-018-verified-2026-08-04" title="Permanent link">&para;</a></h2>
+<p>Checked against the v0.18.0 tag (and v0.17.9 / master for comparison).
+Three similarly-named knobs that are <em>not</em> the same thing:</p>
+<ul>
+<li><strong><code>soc_final</code></strong> (runtime param — our delivery mechanism): a
+  throughput constraint per battery,
+  <code>total_energy_change == (soc_init − soc_final) · cap</code>, <strong>soft since
+  0.18</strong>: under/over slack variables enter the objective priced at
+  <code>SOC_FINAL_DEVIATION_PENALTY_FACTOR = 100</code> × the dearest positive
+  import price (floored so it stays meaningful at zero/negative
+  tariffs). Effectively still a pinned target — 100× the worst price is
+  never worth trading away — but an unreachable value now degrades
+  gracefully with a solver warning instead of an infeasible run, which
+  is why this plan has no feasibility clamp. On ≤ 0.17.x the same
+  constraint is a hard equality (that's the world <code>payload.py</code>'s
+  current comment describes), hence the ≥ 0.18 backend floor.</li>
+<li><strong><code>battery_target_state_of_charge</code></strong> (config key, what we send in
+  <code>_battery_settings</code>): read <em>only</em> as the fallback default when
+  <code>soc_init</code>/<code>soc_final</code> are not passed at runtime — an unpassed
+  <code>soc_final</code> first defaults to <code>soc_init</code>, and the config key is only
+  reached when <em>neither</em> is passed. We always pass both, so it is
+  inert. Kept in the payload per the assert-every-setting convention;
+  companion-side it becomes the Optimized mode's reserve floor.</li>
+<li><strong><code>soc_target</code> + <code>soc_target_timestep</code></strong> (runtime params, issue
+  #553): an optional stored-energy <strong>floor (≥)</strong> at <em>one specific
+  timestep</em> of the horizon — defaulting to the <strong>last</strong> timestep when
+  no timestep is given. It coexists with the <code>soc_final</code> constraint and
+  cannot replace it (a lower <code>soc_final</code> pin plus a higher end floor
+  just fights the penalty). Useful later for mid-horizon guarantees
+  ("≥80% before the EV leaves at 17:00"), not for this feature.</li>
+</ul>
+<p>Also relevant from 0.18: batteries are per-index lists internally
+(#610) and <code>soc_init</code>/<code>soc_final</code> accept either a bare float (broadcast
+to every battery) or a per-battery list. The companion is
+single-battery and keeps sending scalars, which is the unchanged
+<code>number_of_batteries == 1</code> calling convention.</p>
+<h2 id="appendix-live-ab-validation-2026-08-04">Appendix: live A/B validation (2026-08-04)<a class="headerlink" href="#appendix-live-ab-validation-2026-08-04" title="Permanent link">&para;</a></h2>
+<p>Ran against the real EMHASS (v0.17.9) with the forecasts from that
+evening's actual MPC run (22 kWh battery, 24 h horizon 23:00→22:45, a
+low-solar day peaking ~2.6 kW, prices 1.00–1.48 SEK/kWh): same
+<code>soc_init</code> = 0.85, deferrable loads dropped, only <code>soc_final</code> varied.</p>
+<table>
+<thead>
+<tr>
+<th><code>soc_final</code></th>
+<th>24 h cost</th>
+<th>grid import</th>
+<th>export</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0.85 (today's pin)</td>
+<td>10.93 SEK</td>
+<td>10.3 kWh</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0.60</td>
+<td>5.00 SEK</td>
+<td>4.7 kWh</td>
+<td>0</td>
+</tr>
+<tr>
+<td>0.30</td>
+<td><strong>−0.46 SEK</strong></td>
+<td><strong>0 kWh</strong></td>
+<td>1.8 kWh</td>
+</tr>
+</tbody>
+</table>
+<p>The pinned plan showed both predicted failure modes: the battery idled
+at ~0.78 all night while the grid carried the whole house load, and at
+14:15 it imported <strong>8.6 kW</strong> at the day's price floor purely to force
+the battery to 100% in time to ride back down to the pin. The freed
+plans ran the night on battery with zero import and exported the
+morning PV instead of hoarding it.</p>
+<p>Caveat: gross numbers overstate the net win — energy released below the
+start SOC must be re-bought after the horizon, so the true benefit is
+the price spread plus the avoided forced buys, which is exactly the
+trade-off <code>decide_end_soc</code> exists to judge. Note also that the
+configured reserve (<code>soc_target</code>, here 0.5) floors what Optimized mode
+may free: on this day the heuristic would have landed around
+0.6–0.7 (reserve 0.5 + ~5 kWh bridge to the next cheap night hours),
+capturing roughly half the 0.30 run's gross gain.</p>
+<h2 id="out-of-scope-future-work">Out of scope / future work<a class="headerlink" href="#out-of-scope-future-work" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Horizon anchoring</strong> — letting the effective horizon end at the last
+  known price instead of a fixed <code>horizon_steps</code> would make the tail
+  analysis stronger (separate change, touches scheduling).</li>
+<li><strong>Candidate sweep (v2)</strong> — solve the same MPC for 3–5 candidate end
+  SOCs, score each by EMHASS's reported cost minus the terminal energy
+  value, pick the winner. Strictly more exact; costs extra EMHASS calls;
+  reuses this feature's plumbing (it is just a better <code>decide_end_soc</code>).</li>
+<li><strong>Upstream terminal value (endgame)</strong> — an EMHASS option that drops
+  the <code>soc_final</code> equality and adds <code>−value · soc_end</code> to the objective
+  would let the solver choose the end SOC itself; the companion would
+  then only estimate the €/kWh value of stored energy. Worth a PR to
+  <code>davidusb-geek/emhass</code> once the heuristic has proven the concept here.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "navigation.tracking", "search.suggest", "search.highlight", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

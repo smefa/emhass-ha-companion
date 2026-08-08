@@ -1,0 +1,1946 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A Home Assistant integration that makes EMHASS usable without writing YAML.">
+      
+      
+      
+        <link rel="canonical" href="https://smefa.github.io/emhass-ha-companion/guide/setup/">
+      
+      
+        <link rel="prev" href="../install/">
+      
+      
+        <link rel="next" href="../deferrable_loads/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/icon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Setup - EMHASS Companion</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#setup" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="EMHASS Companion" class="md-header__button md-logo" aria-label="EMHASS Companion" data-md-component="logo">
+      
+  <img src="../../assets/logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            EMHASS Companion
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Setup
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="teal" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/smefa/emhass-ha-companion" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    smefa/emhass-ha-companion
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="EMHASS Companion" class="md-nav__button md-logo" aria-label="EMHASS Companion" data-md-component="logo">
+      
+  <img src="../../assets/logo.png" alt="logo">
+
+    </a>
+    EMHASS Companion
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/smefa/emhass-ha-companion" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    smefa/emhass-ha-companion
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    User Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Setup
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-connect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Connect
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-electricity-prices" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Electricity prices
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Electricity prices">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#configuring-the-price-source" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuring the price source
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-buy-and-sell-prices" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Buy and sell prices
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-solar-forecast" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Solar forecast
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. Solar forecast">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#configuring-the-solar-source" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuring the solar source
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-house-consumption" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. House consumption
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. House consumption">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#configuring-the-load-source" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuring the load source
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-battery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Battery
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-inverter-control" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Inverter control
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-grid-and-schedule" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Grid and schedule
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#changing-your-mind-later" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changing your mind later
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#next" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Next
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deferrable_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deferrable loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../thermal_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Thermal loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../surplus_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Surplus loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../inverter_control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inverter control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../hub_controls/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hub controls
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dashboard_cards/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dashboard cards
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Technical reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Technical reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_2" id="__nav_3_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Loads
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Loads
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deferrable_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deferrable loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../thermal_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Thermal loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../surplus_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Surplus loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../on_demand_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    On-demand loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../load_groups/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Load groups
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../request_run_service/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Request-run service (planned)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../dashboard_cards/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dashboard cards
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../entities/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Entities
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../handing_over_control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Handing over control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../inverter_control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inverter control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../data_sources/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data sources
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../template_additions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Template additions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../profiles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Writing a profile
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../inverter_profile_roadmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inverter profile roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-connect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Connect
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-electricity-prices" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Electricity prices
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Electricity prices">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#configuring-the-price-source" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuring the price source
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-buy-and-sell-prices" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Buy and sell prices
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-solar-forecast" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Solar forecast
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. Solar forecast">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#configuring-the-solar-source" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuring the solar source
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-house-consumption" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. House consumption
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. House consumption">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#configuring-the-load-source" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuring the load source
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-battery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Battery
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-inverter-control" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Inverter control
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-grid-and-schedule" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Grid and schedule
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#changing-your-mind-later" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changing your mind later
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#next" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Next
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/smefa/emhass-ha-companion/edit/main/docs/guide/setup.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="setup">Setup<a class="headerlink" href="#setup" title="Permanent link">&para;</a></h1>
+<p>When you add the integration, it asks a handful of questions, one screen at
+a time. It only ever offers choices that match integrations you actually
+have installed.</p>
+<p>Every screen is listed below field by field, in the order it appears.</p>
+<h2 id="1-connect">1. Connect<a class="headerlink" href="#1-connect" title="Permanent link">&para;</a></h2>
+<p><img alt="The Connect to EMHASS step, with the EMHASS address field filled in" src="../../assets/install-connect-to-emhass.png" /></p>
+<ul>
+<li><strong>EMHASS address</strong> — where EMHASS is running, for example
+  <code>http://192.168.1.10:5000</code>. Filled in for you if you use the add-on.
+  <code>localhost</code> won't work: it only reaches Home Assistant's own container.</li>
+</ul>
+<h2 id="2-electricity-prices">2. Electricity prices<a class="headerlink" href="#2-electricity-prices" title="Permanent link">&para;</a></h2>
+<p><img alt="The Electricity prices step, listing the installed price sources" src="../../assets/install-electricity-prices.png" /></p>
+<ul>
+<li><strong>Price source</strong> — pick the one that matches what you have installed.
+  Sources you don't have installed aren't listed at all:<ul>
+<li><strong>Nord Pool (Home Assistant core)</strong> — uses the core Nord Pool
+  integration's <code>get_prices_for_date</code> action to fetch today's and
+  tomorrow's day-ahead prices.</li>
+<li><strong>Nord Pool (custom-components/nordpool)</strong> — reads the <code>raw_today</code> /
+  <code>raw_tomorrow</code> attributes of a sensor from the HACS Nord Pool
+  integration.</li>
+<li><strong>ENTSO-E</strong> — reads the <code>prices</code> attribute of the ENTSO-E
+  integration's average-price sensor.</li>
+<li><strong>Tibber</strong> — asks Tibber for the price series of one of your homes.</li>
+<li><strong>Fixed tariff</strong> — a flat rate, or a simple peak/off-peak split. Use
+  this when you have no dynamic pricing integration; it fetches nothing
+  and needs none.</li>
+<li><strong>Prices from an entity attribute</strong> — reads a price forecast from a
+  list-valued attribute on any entity. The escape hatch for a price
+  integration with no profile of its own, or a template sensor you build
+  yourself.</li>
+</ul>
+</li>
+</ul>
+<blockquote>
+<p>Don't see your integration? You're not stuck with this list — see
+<strong><a href="../../template_additions/">Template additions</a></strong> to add your own price
+source.</p>
+</blockquote>
+<h3 id="configuring-the-price-source">Configuring the price source<a class="headerlink" href="#configuring-the-price-source" title="Permanent link">&para;</a></h3>
+<p>The next screen asks for whatever that particular source needs, and nothing
+else:</p>
+<p><img alt="The Configure Nord Pool (custom-components/nordpool) step, with an entity picker" src="../../assets/install-electricity-prices-config.png" /></p>
+<ul>
+<li><strong>Nord Pool (Home Assistant core)</strong> — <strong>Nord Pool configuration</strong> (which
+  config entry to read) and <strong>Price area</strong> (the bidding zone, for example
+  <code>SE3</code> or <code>NO1</code>). Prices come back per MWh and are scaled to per kWh for
+  you.</li>
+<li><strong>Nord Pool (custom-components/nordpool)</strong> — <strong>Nord Pool sensor</strong>, the one
+  exposing <code>raw_today</code> / <code>raw_tomorrow</code>. This integration applies VAT and its
+  own <code>additional_costs</code> template itself, so if you configured those, set the
+  import method on the next screen to <em>Already includes costs</em> rather than
+  adding them a second time.</li>
+<li><strong>ENTSO-E</strong> — <strong>ENTSO-E sensor</strong>, usually the "Average price" one, since
+  that's the sensor carrying the full <code>prices</code> attribute. Whether the values
+  already include VAT depends on the ENTSO-E integration's own VAT setting.</li>
+<li><strong>Tibber</strong> — <strong>Home name</strong>, exactly as it appears in the Tibber app.
+  Tibber returns the <em>total</em> price, VAT, taxes and grid fees included, so use
+  <em>Already includes costs</em> on the next screen.</li>
+<li><strong>Fixed tariff</strong> — <strong>Peak price</strong> and <strong>Off-peak price</strong> (import price per
+  kWh in each period), <strong>Peak period start</strong> / <strong>Peak period end</strong> (when the
+  peak rate applies) and <strong>Export price</strong> (what you're paid per kWh
+  exported).</li>
+<li><strong>Prices from an entity attribute</strong> — <strong>Price entity</strong>, <strong>Attribute name</strong>
+  (the attribute holding the list, for example <code>raw_today</code>), <strong>Second
+  attribute</strong> (optional — many integrations split today and tomorrow across
+  two attributes), <strong>Timestamp field</strong> and <strong>Price field</strong> (the keys inside
+  each record), and <strong>Scale factor</strong> (a multiplier to reach a price per kWh;
+  use <code>0.001</code> if the source is priced per MWh).</li>
+</ul>
+<h2 id="3-buy-and-sell-prices">3. Buy and sell prices<a class="headerlink" href="#3-buy-and-sell-prices" title="Permanent link">&para;</a></h2>
+<p><img alt="The Buy and sell prices step" src="../../assets/setup-buy-sell-prices.png" /></p>
+<p>Your price source gives raw spot prices. This step turns that into what you
+actually pay or get paid, for import and export separately:</p>
+<ul>
+<li><strong>Import price method</strong> — how your buy price is built: <em>Linear</em>
+  (multiply, then add), <em>Already includes costs</em> (use the price as-is), or
+  <em>Template</em> (write your own formula).</li>
+<li><strong>Import multiplier</strong> — multiplies the spot price. Use for VAT — <code>1.25</code> for
+  25%.</li>
+<li><strong>Import addition per kWh</strong> — a flat amount added after the multiplier. Use
+  for grid fees, energy tax, supplier markup.</li>
+<li><strong>Import template</strong> — only used if you picked <em>Template</em> above. <code>spot</code> and
+  <code>time</code> (your local time) are available.</li>
+<li><strong>Export price method / multiplier / addition per kWh / template</strong> — the
+  same four questions, for what you're paid when selling back to the grid.</li>
+</ul>
+<h2 id="4-solar-forecast">4. Solar forecast<a class="headerlink" href="#4-solar-forecast" title="Permanent link">&para;</a></h2>
+<p><img alt="The Solar forecast step, listing the four sources" src="../../assets/setup-solar-temp.png" /></p>
+<ul>
+<li><strong>Solar forecast source</strong>:<ul>
+<li><strong>Solcast PV Forecast</strong> — reads the <code>detailedForecast</code> attribute of the
+  Solcast integration's daily sensors.</li>
+<li><strong>EMHASS built-in forecast (Open-Meteo)</strong> — EMHASS produces the
+  forecast itself, from Open-Meteo weather data and a description of your
+  array. No API key, no forecast integration needed.</li>
+<li><strong>Solar forecast from an entity attribute</strong> — reads a PV production
+  forecast from a list-valued attribute on any entity.</li>
+<li><strong>No solar</strong> — if you have no PV array. Nothing further is asked, and
+  the optimiser works on tariff and battery arbitrage alone.</li>
+</ul>
+</li>
+</ul>
+<blockquote>
+<p>Don't see your integration? You're not stuck with this list — see
+<strong><a href="../../template_additions/">Template additions</a></strong> to add your own solar
+source.</p>
+</blockquote>
+<h3 id="configuring-the-solar-source">Configuring the solar source<a class="headerlink" href="#configuring-the-solar-source" title="Permanent link">&para;</a></h3>
+<p><img alt="The Configure Solcast PV Forecast step, with four forecast sensors and the confidence level" src="../../assets/setup-solcast-sensors.png" /></p>
+<ul>
+<li><strong>Solcast PV Forecast</strong> — <strong>Forecast sensors</strong> (today and tomorrow cover
+  the optimisation horizon; the later days let End SOC's <em>Optimized</em> mode see
+  past it) and <strong>Confidence level</strong>: <em>P50</em> is the central estimate, <em>P10</em> is
+  pessimistic — which biases the plan towards importing rather than assuming
+  sun that may not arrive — and <em>P90</em> is optimistic. Reading is local and
+  costs no Solcast API calls, so selecting more sensors than you need costs
+  nothing.</li>
+<li><strong>EMHASS built-in forecast (Open-Meteo)</strong> — <strong>Array peak power</strong> (total DC
+  peak power of your panels, in W), <strong>Inverter AC power</strong> (in W), <strong>Panel
+  tilt</strong> (0 horizontal, 90 vertical) and <strong>Panel azimuth</strong> (0 north, 90 east,
+  180 south, 270 west).</li>
+<li><strong>Solar forecast from an entity attribute</strong> — <strong>Forecast entities</strong> (select
+  every entity needed to cover your planning horizon), <strong>Attribute name</strong>,
+  <strong>Timestamp field</strong>, <strong>Power field</strong> and <strong>Scale factor</strong> (values must end
+  up in watts, so use <code>1000</code> if the source reports kW).</li>
+</ul>
+<p>Changeable later under <strong>Configure → Solar forecast</strong>, source and all. Worth
+revisiting after an update: a source's default entity list can gain entries,
+and those are offered there rather than applied for you. Solcast users should
+add <code>sensor.solcast_pv_forecast_forecast_day_3</code>, which lets
+<a href="../../end_soc_plan/">End SOC</a>'s <em>Optimized</em> mode see the next solar day past
+the horizon instead of inferring it from the previous day.</p>
+<h2 id="5-house-consumption">5. House consumption<a class="headerlink" href="#5-house-consumption" title="Permanent link">&para;</a></h2>
+<p><img alt="The House consumption step" src="../../assets/setup-house-consumption.png" /></p>
+<ul>
+<li><strong>Load forecast source</strong> — how EMHASS should predict your household's
+  baseline load:<ul>
+<li><strong>Create a house load sensor</strong> — pick this if the only thing you
+  measure is <em>total</em> house power. It builds you a new sensor that keeps
+  that reading minus whatever your deferrable loads are drawing at any
+  moment, and forecasts from that.</li>
+<li><strong>Typical household profile (no sensor needed)</strong> — a generic daily
+  shape, scaled to an average power you type in. Least accurate, but
+  works with no sensor at all.</li>
+<li><strong>Load forecast from an entity attribute</strong> — for when you already
+  generate a load prediction elsewhere and want EMHASS to consume it
+  rather than forecast for itself.</li>
+<li><strong>House load sensor</strong> — most accurate, if you have one that already
+  excludes your own deferrable loads.</li>
+</ul>
+</li>
+</ul>
+<h3 id="configuring-the-load-source">Configuring the load source<a class="headerlink" href="#configuring-the-load-source" title="Permanent link">&para;</a></h3>
+<p><img alt="The Configure House load sensor step, with the forecast method set to Machine-learning forecaster" src="../../assets/setup-configure-house-load-sensor.png" /></p>
+<ul>
+<li><strong>Create a house load sensor</strong> — <strong>Total house power sensor</strong> first. It
+  should exclude the <em>battery's</em> own charge/discharge power, which EMHASS
+  plans separately. Then the same <strong>Forecast method</strong> question as below.</li>
+<li><strong>House load sensor</strong> — <strong>House load sensor</strong> (power consumption excluding
+  deferrable loads) and <strong>Forecast method</strong>:<ul>
+<li><em>Typical daily profile</em> — a generic daily shape.</li>
+<li><em>Naive (repeat yesterday)</em> — repeats the last day. Suits stable
+  households.</li>
+<li><em>Machine-learning forecaster</em> — trains on your own history and is the
+  most accurate, but must be trained before first use. Picking it adds a
+  <strong>Train load forecaster</strong> button to the EMHASS Companion device; press
+  it once after setup, and again whenever you want the model retrained on
+  more recent history.</li>
+</ul>
+</li>
+<li><strong>Typical household profile</strong> — <strong>Average power</strong>, your household's typical
+  average draw in watts. The generic shape is scaled so its own average
+  matches it. A rough starting point: last year's bill in kWh, divided by
+  8760, times 1000.</li>
+<li><strong>Load forecast from an entity attribute</strong> — <strong>Forecast entity</strong>,
+  <strong>Attribute name</strong>, <strong>Timestamp field</strong>, <strong>Value field</strong> and <strong>Scale
+  factor</strong> (use <code>1000</code> if the values are in kW).</li>
+</ul>
+<h2 id="6-battery">6. Battery<a class="headerlink" href="#6-battery" title="Permanent link">&para;</a></h2>
+<p><img alt="The Battery step" src="../../assets/setup-battery.png" /></p>
+<p>Leave <strong>I have a battery</strong> off if you don't have one — everything else on
+this screen is then ignored.</p>
+<ul>
+<li><strong>Usable capacity</strong> — in Wh.</li>
+<li><strong>Maximum charge power</strong> / <strong>Maximum discharge power</strong> — the battery's own
+  limits, in W.</li>
+<li><strong>Shared inverter (hybrid)</strong> — on if PV and the battery share one
+  inverter's AC-side limit (most home systems). Off if they're two separate
+  inverters.</li>
+<li><strong>Maximum AC output (discharge/export)</strong> / <strong>Maximum AC input
+  (charge/import)</strong> — only asked if hybrid; the shared inverter's own
+  ceiling.</li>
+<li><strong>DC to AC efficiency</strong> / <strong>AC to DC efficiency</strong> — conversion losses.</li>
+<li><strong>Discharge cycle cost</strong> / <strong>Charge cycle cost</strong> — what a kWh through the
+  battery costs you in wear, in the same currency as your prices. The
+  optimiser charges it against the profit it's chasing, so the battery only
+  cycles when the price spread beats the wear. Both default to 0 (cycle
+  freely); around 0.02–0.10 per kWh on the discharge side is a reasonable
+  starting point. Set one of the two, not both — see
+  <a href="../../setup/#battery">Setup reference</a>.</li>
+<li><strong>Low charge comfort level</strong> / <strong>Cost of sitting below it</strong> — a soft
+  preference for keeping a reserve, priced per kWh below the level per hour
+  spent there. Unlike Minimum charge level this can be crossed when it's
+  clearly worth it.</li>
+<li><strong>High charge comfort level</strong> / <strong>Cost of sitting above it</strong> — the mirror
+  image: sitting full ages the battery, so this makes the plan fill it late
+  rather than early. Both costs default to 0, which leaves the pre-filled
+  40%/90% levels doing nothing.</li>
+<li><strong>Stress cost detail</strong> — how finely the stress cost curve below is
+  approximated. 10 is a good balance; only matters if the stress cost is set.</li>
+<li><strong>High-power stress cost</strong> — discourages fast charge/discharge. The cost
+  grows with the square of the power, so the plan spreads a charge over
+  several hours rather than forcing it into the cheapest one. 0 by default.</li>
+<li><strong>Minimum charge level</strong> / <strong>Maximum charge level</strong> — the range the
+  optimiser is allowed to plan within. Hard bounds, unlike the comfort
+  levels above.</li>
+<li><strong>Target charge level</strong> — where it aims to leave the battery at the end of
+  the plan. What it means depends on <strong>End SOC</strong> below: with <em>Optimized</em> it's
+  the reserve floor the computed target never plans below; with <em>Fixed %
+  slider</em> it's the exact level aimed for.</li>
+<li>
+<p><strong>End SOC</strong> — how that end-of-horizon level is chosen:</p>
+<ul>
+<li><em>Optimized</em> — computed fresh each run from the solar, price and load
+  forecasts beyond the horizon.</li>
+<li><em>Same as start</em> — always plans back to whatever level the battery is
+  at now.</li>
+<li><em>Fixed % slider</em> — always aims for <strong>Target charge level</strong> above.</li>
+</ul>
+<p>Requires EMHASS 0.18 or newer. See <strong><a href="../../end_soc_plan/">End SOC</a></strong> for
+how <em>Optimized</em> decides.
+- <strong>Self-consumption handoff threshold</strong> — how close to zero the grid power
+  needs to be before the battery is handed back to plain self-consumption
+  instead of a forced charge/discharge. Once handed over, grid power must
+  exceed <em>twice</em> this value before the plan can force the battery again, so
+  it doesn't flip modes every recalculation.
+- <strong>Battery SOC sensor</strong> — read at the start of every plan.
+- <strong>Live PV power sensor</strong> — optional. Its current reading is blended into
+  the first step of every model-predictive PV forecast, weighted by the
+  <strong>Live value weight</strong> number on the hub device. Load is blended the same
+  way automatically when the load source is <em>House load sensor</em>.</p>
+</li>
+</ul>
+<h2 id="7-inverter-control">7. Inverter control<a class="headerlink" href="#7-inverter-control" title="Permanent link">&para;</a></h2>
+<p>Optional — leave the profile blank and the integration only ever reads, and
+the plan is yours to act on however you like. Pick a profile and you're asked
+for the entities it needs; nothing is written to your hardware until you also
+turn on the <strong>Control enabled</strong> switch afterwards.</p>
+<p>It comes before the grid step because the next step asks whether EMHASS
+should plan PV curtailment, and that only pays off if something can carry the
+plan out — which is a property of the profile you pick here.</p>
+<p>See <strong><a href="../inverter_control/">Inverter control</a></strong> for what each profile can do,
+and for writing your own if yours isn't listed.</p>
+<h2 id="8-grid-and-schedule">8. Grid and schedule<a class="headerlink" href="#8-grid-and-schedule" title="Permanent link">&para;</a></h2>
+<p><img alt="The Grid connection and schedule step" src="../../assets/setup-grid-schedule.png" /></p>
+<ul>
+<li><strong>Maximum import power</strong> / <strong>Maximum export power</strong> — your connection's
+  limits, in W.</li>
+<li><strong>Capacity (demand) charge</strong> — only for network tariffs that bill your
+  highest power draw, not just your energy. Enter the price per kW and the
+  plan flattens its worst import peak instead of only chasing cheap hours.
+  Charged once on the peak, not per hour. 0 by default, and it works with or
+  without a battery.</li>
+<li><strong>Let EMHASS optimise PV curtailment</strong> — off by default. Turn it on and
+  EMHASS may shed solar it can't use profitably, and the plan gains a
+  curtailment column for an inverter profile to follow. Only worth it if
+  something can act on it: without a curtailment-capable inverter profile the
+  plan assumes solar was shed that in reality still goes to the grid.
+  Negative sell prices are part of what it weighs: with this on, EMHASS
+  decides for itself when exporting into a negative price is worse than
+  shedding, and when it isn't.</li>
+<li><strong>Time resolution (minutes)</strong> — how finely the plan is divided. Filled in
+  automatically to match your price source (15 minutes for current Nord Pool
+  prices, 60 for most others). Pick from the list or type any number of
+  minutes; a coarser step solves faster.</li>
+<li><strong>Recalculate every</strong> — how often the plan is re-optimised, in minutes.</li>
+<li><strong>Planning horizon</strong> — how many hours ahead it plans.</li>
+<li><strong>Day-ahead fallback time</strong> — backup time for the once-a-day full
+  re-plan, in case new prices haven't shown up yet.</li>
+</ul>
+<h2 id="changing-your-mind-later">Changing your mind later<a class="headerlink" href="#changing-your-mind-later" title="Permanent link">&para;</a></h2>
+<p>Most of these can be revisited any time from <strong>Settings → Devices &amp;
+Services → EMHASS Companion → Configure</strong>:</p>
+<p><img alt="The Configure menu" src="../../assets/setup-configure-menu.png" /></p>
+<p>The menu holds <strong>House consumption</strong>, <strong>Solar forecast</strong>, <strong>Battery</strong>, <strong>Grid
+and schedule</strong>, <strong>Buy and sell prices</strong>, <strong>Inverter control</strong> and <strong>Outdoor
+temperature</strong> — the same screens as above, plus one more:</p>
+<p><strong>Outdoor temperature</strong> is only worth visiting once you have a thermal load —
+see <strong><a href="../thermal_loads/">Thermal loads</a></strong>. <strong>Inverter control</strong> is the same
+step you saw during setup, so this is where you go to add a profile you
+skipped, or to swap one.</p>
+<p>The electricity price source is the one exception — changing which <em>source</em>
+you use means removing and re-adding the integration, since it decides which
+other questions even apply.</p>
+<p>To move EMHASS itself to a different address, use <strong>Reconfigure</strong> instead —
+everything else you've set up is left untouched:</p>
+<p><img alt="The Change the EMHASS address dialog" src="../../assets/setup-reconfigure-address.png" /></p>
+<h2 id="next">Next<a class="headerlink" href="#next" title="Permanent link">&para;</a></h2>
+<p>Add your first load — see <strong><a href="../deferrable_loads/">Deferrable loads</a></strong> or
+<strong><a href="../thermal_loads/">Thermal loads</a></strong>. The controls on the integration's own
+device are listed under <strong><a href="../hub_controls/">Hub controls</a></strong>.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.top", "navigation.tracking", "search.suggest", "search.highlight", "content.code.copy", "content.action.edit"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
