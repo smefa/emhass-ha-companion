@@ -25,17 +25,21 @@ flat-lined. These warnings are how you find out.
 every run:
 
 ```
-start-as-early-as-possible asking for 23059 Wh at 6361 W (94% of the block's
-24596 Wh, keeping the rest to modulate with) in 22 timesteps, 16 of them run
+start-as-early-as-possible asking for 8750 Wh at 5683 W (87% of the block's
+10013 Wh, keeping 13% to modulate with) in 22 timesteps, 7 of them run
 ```
 
-If the timestep count is the whole block, the modulation margin found no
-placement freedom to buy. Two ordinary reasons: the block is **flat**, so the
-run genuinely fills it whatever the margin (`credit_wh / peak` is the slot
-count by construction), or the load's configured power sits **below the block's
-peak**, in which case no window covers the credited energy at all. Setting
-*Energy needed* to less than the day's surplus gives the clamp something firmer
-to work with. See
+The tail says which case you are in. `no margin -- it would not have narrowed
+the window` means derating was tried and dropped: the tail slots the run would
+have stopped needing were too weak to move the covering slot. That happens on a
+**flat** block, where the run fills it whatever the margin (`credit_wh / peak`
+is the slot count by construction), and on any block whose last slots are worth
+less than the margin itself. If instead the margin was charged but the timestep
+count is still the whole block, the load's configured power sits **below the
+block's peak**, so no window covers the credited energy at all.
+
+Setting *Energy needed* to less than the day's surplus gives the clamp something
+firmer to work with — and it is delivered in full, never derated. See
 [Surplus loads](surplus_loads.md#the-modulation-margin).
 
 **"The optimisation problem is infeasible."** Download diagnostics (or grab

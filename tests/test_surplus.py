@@ -708,6 +708,48 @@ def test_asap_takes_no_margin_when_the_run_needs_every_qualifying_slot():
     assert asap.window_end == free.window_end
 
 
+def test_asap_drops_the_margin_when_it_would_not_narrow_the_window():
+    """Whether a margin buys anything is a property of the block's *shape*.
+
+    Five strong slots and one weak one: the margin stops the run needing that
+    last slot, but it was only worth 150 Wh of the 3900 Wh block, so the
+    covering slot moves one step and MODULATION_SLACK_STEPS puts it straight
+    back. Charging the margin here would give up sun for zero timesteps --
+    measured on a real 13-slot block, 1.36 kWh for nothing. "Is there placement
+    freedom in principle" does not catch this; computing both windows does.
+    """
+    series = _series(3000, 3000, 3000, 3000, 3000, 600)
+
+    free = allocate(series, [_modulating()], STEP)["pool"]
+    asap = allocate(series, [_modulating(start_asap=True)], STEP)["pool"]
+
+    assert asap.hours == free.hours == 1.3
+    assert asap.energy_wh == free.energy_wh
+    assert asap.window_end == free.window_end
+
+
+def test_asap_delivers_a_cap_that_lands_inside_the_margin_in_full():
+    """The ordering that makes the cap exemption real rather than approximate.
+
+    A 4000 Wh cap on a block worth 4500 Wh sits *between* the full ask and the
+    ask minus a 1/6 margin (3750 Wh). Derating first and clamping to the cap
+    afterwards would deliver 3750 -- 250 Wh short of a number the user typed,
+    and only in the narrow band where the cap falls inside the margin, which is
+    exactly the kind of bug that never shows up in a round-numbers test.
+    """
+    series = _series(3000, 3000, 3000, 3000, 3000, 3000)
+
+    free = allocate(series, [_modulating(max_energy_wh=4000.0)], STEP)["pool"]
+    asap = allocate(series, [_modulating(max_energy_wh=4000.0, start_asap=True)], STEP)["pool"]
+
+    assert free.energy_wh == pytest.approx(4000.0)
+    assert asap.energy_wh == pytest.approx(4000.0)
+    # No window assertion to make here: 4000 Wh of a 4500 Wh flat block is a
+    # six-step run in a six-slot block, so there is nothing to narrow either
+    # way. The point is only that the cap arrives whole.
+    assert asap.window_end == free.window_end
+
+
 def test_asap_on_an_empty_block_stays_empty():
     budget = allocate(_series(100, 100), [_spec(start_asap=True)], STEP)["pool"]
 

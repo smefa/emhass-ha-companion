@@ -169,21 +169,32 @@ between a slot's forecast surplus and its real one, and a short run averages
 fewer slots — so one bad slot moves it further. A four-step run gives up a
 quarter; a twenty-step run a twentieth.
 
-Two deliberate exemptions:
+**The margin is only charged when it actually buys a shorter window.** The
+window is computed twice — once for the full ask, once for the derated one — and
+the margin is kept only if the second is strictly narrower. Otherwise the full
+ask stands.
 
-- **An `Energy needed` cap is never derated.** It already sits below what the
-  block delivers, which is the gap the margin exists to manufacture, and
-  quietly delivering 6% less of a number the user typed would be a different
-  feature.
-- **A run that already needs every qualifying slot takes no margin.** There is
-  no placement freedom to buy at any price, so derating would trade sun for
-  nothing. A flat block is the common case here: `credit_wh / peak` is exactly
-  the slot count, so the run fills the block by construction.
+That check is doing real work, not guarding a corner case. Whether a margin buys
+anything is a property of the block's *shape*: it removes energy from the ask,
+but if the tail slots the run stops needing are the weakest ones, the covering
+slot barely moves and the single slack step puts it straight back. Measured on a
+real 13-slot block, a 10% margin gave up **1.36 kWh for exactly zero
+timesteps**. The cheaper test — "is there placement freedom in principle",
+comparing the run length against the qualifying slot count — does not catch
+that, because the freedom exists and derating still cannot reach it.
 
-That last point is worth reading twice, because it means the margin does
-nothing on a *flat* block and most on a **peaked or declining** one — where the
-weak tail contributes little to `credit_wh`, so giving up a few per cent drops
-several timesteps off the end of the window.
+**An `Energy needed` cap is never derated**, either. It already sits below what
+the block delivers, which is the gap the margin exists to manufacture, and
+delivering less of a number the user typed would be a different feature. The
+test is `cap_hours < hours_from_block`, checked *before* derating rather than
+clamping to the cap afterwards — that ordering matters for a cap landing
+*inside* the margin. 9.5 h of cap against a 10 h block and a 25% margin would
+otherwise come out as 7.5 h, a full hour short, and only in that narrow band.
+
+Together these mean the margin does nothing on a **flat** block — where
+`credit_wh / peak` is exactly the slot count, so the run fills the block by
+construction — and most on a **peaked or declining** one whose weak tail
+contributes little to `credit_wh`.
 
 Whenever `hours` genuinely is short of the span, EMHASS picks where they go —
 and its cost function has **no reason to prefer early**. On flat prices, which
@@ -239,9 +250,17 @@ clipped to the 6188 W peak, no *Energy needed* cap:
 | switch on, before the margin | 11:00–17:15 | 26 | 16 | 24.55 kWh |
 | switch on, with the margin | 11:00–16:45 | 24 | 15 | 23.02 kWh |
 
-Two timesteps of placement freedom removed for 1.53 kWh of surplus given up.
-Raising the margin trades more sun for more of the day, and on this block it is
-close to linear:
+Two timesteps of placement freedom removed for 1.53 kWh of surplus given up. The
+same car later the same afternoon, on a 14-slot block whose ceiling had dropped
+to 5683 W — a shorter run, so a larger margin:
+
+| | window | slots | run | asked |
+|---|---|---|---|---|
+| switch off | 12:00–18:15 | 26 | 8 | 10.01 kWh |
+| switch on (12.5% margin, 1/8) | 12:00–17:15 | 22 | 7 | 8.75 kWh |
+
+Four timesteps for 1.25 kWh. Raising the margin trades more sun for more of the
+day, and on the morning block it was close to linear:
 
 | margin | window | slots | asked | given up |
 |---|---|---|---|---|

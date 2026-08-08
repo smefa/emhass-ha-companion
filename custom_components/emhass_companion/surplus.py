@@ -76,6 +76,68 @@ def modulation_margin(run_steps: int) -> float:
     return min(MODULATION_MARGIN_MAX, max(MODULATION_MARGIN_MIN, 1.0 / run_steps))
 
 
+def _asap_window_last(
+    hours: float,
+    nominal_w: float,
+    window_first: datetime,
+    window_last: datetime,
+    deliverable: Sequence[tuple[datetime, float]],
+    step: timedelta,
+    step_hours: float,
+) -> datetime:
+    """The last timestep a start-asap run of ``hours`` needs its window to reach.
+
+    Factored out of ``allocate`` because the answer has to be computed twice --
+    once for the full ask and once for the ask minus the modulation margin -- so
+    that the margin is only charged when it genuinely narrows the window. Never
+    returns anything later than the ``window_last`` handed in: this may only
+    ever remove window, never invent it.
+    """
+    run_steps = math.ceil(hours / step_hours)
+    # Whole timesteps from the first qualifying one, inclusive: the tight span
+    # rounds *up* to the run, never below it, so this can only remove placement
+    # freedom and never make the window too narrow for the hours -- which EMHASS
+    # answers by declaring the whole problem infeasible rather than just this
+    # one load.
+    tight_end = window_first + (run_steps - 1) * step
+
+    # ...but the hours alone are the wrong measure of how much window the run
+    # needs, because ``nominal_w`` is the block's *peak* and the front of the
+    # block is its weakest end. EMHASS holds the energy total as an equality, so
+    # a window clamped to the bare hours forces the load to hold peak power
+    # through morning slots that never offered it, and the difference is
+    # imported -- the exact "short, near-ceiling burst" the ceiling exists to
+    # prevent, reintroduced by pinning where the run lands.
+    #
+    # Widening is what fixes that, not lowering the ceiling: the cost function is
+    # imports at the buy price and exports at the sell price, so the marginal
+    # cost of one more watt in a slot steps up sharply at the point the slot
+    # stops exporting. That kink is convex, which is why the solver spreads a run
+    # across slots and tracks the surplus curve rather than running flat out in
+    # the fewest slots -- but it can only spread into window it has.
+    #
+    # So the window has to reach far enough that the surplus inside it actually
+    # covers the energy being asked for. Stopping just past the first slot where
+    # it does keeps this the earliest window that can deliver the budget without
+    # importing, which is what the switch means. The one
+    # ``MODULATION_SLACK_STEPS`` past it covers the discreteness of the test
+    # rather than buying shaping room -- the margin is what buys that. On a flat
+    # block the cover is reached at exactly ``run_steps`` and that single step is
+    # the only widening that happens.
+    energy_wh = hours * nominal_w
+    covered_wh = 0.0
+    for when, deliverable_wh in deliverable:
+        covered_wh += deliverable_wh
+        if covered_wh >= energy_wh * (1 - COVER_TOLERANCE):
+            return min(window_last, max(tight_end, when + MODULATION_SLACK_STEPS * step))
+
+    # Never covered means the block cannot deliver the target however wide the
+    # window gets -- ``credit_wh`` is uncapped per slot while the draws are not,
+    # so an ample block and a load whose configured ceiling sits below the
+    # block's peak lands here. The full block is then the most that could help.
+    return window_last
+
+
 # How long a stretch of "can't even feed the floor" has to persist before
 # allocate() treats it as the block actually ending, rather than noise. A
 # real night is many hours long; a passing cloud, or the house load spiking
@@ -366,35 +428,19 @@ def allocate(
             if window_last is None
             else (window_last - window_first).total_seconds() / 3600 + step_hours
         )
-        hours = credit_wh / nominal_w if nominal_w > 0 else 0.0
-        hours = min(hours, span_hours)
+        hours_from_block = credit_wh / nominal_w if nominal_w > 0 else 0.0
+        hours_from_block = min(hours_from_block, span_hours)
 
-        # The start-asap margin: give up a slice of the block so the run has a
-        # window narrower than the block to sit in. Deliberately applied to the
-        # *block-derived* ask only, and before ``max_energy_wh`` -- an energy cap
-        # is a number the user typed, and quietly delivering 6% less of it would
-        # be a different feature. A cap already sits below what the block
-        # delivers, which is the gap the margin exists to manufacture, so it
-        # needs no margin of its own.
-        #
-        # Skipped when the run already needs every qualifying slot: there is no
-        # placement freedom to buy at any price, and derating would only trade
-        # sun for nothing. ``steps`` is the count of slots that actually fed the
-        # credit, which is the honest denominator -- the span can be wider.
-        margin = 0.0
-        if spec.start_asap and hours > 0 and steps > 0:
-            full_run_steps = math.ceil(hours / step_hours)
-            if full_run_steps < steps:
-                margin = modulation_margin(full_run_steps)
-        hours *= 1.0 - margin
-
-        if spec.max_energy_wh is not None:
-            # A hard cap on delivered energy, not on the aggregate credit --
-            # sizing it against nominal_w is exact for a semi-continuous load
-            # (it draws exactly that whenever it runs) and the same
-            # already-accepted approximation the rest of this budget makes
-            # for one that modulates.
-            hours = min(hours, spec.max_energy_wh / nominal_w)
+        # A hard cap on delivered energy, not on the aggregate credit -- sizing
+        # it against nominal_w is exact for a semi-continuous load (it draws
+        # exactly that whenever it runs) and the same already-accepted
+        # approximation the rest of this budget makes for one that modulates.
+        cap_hours = (
+            spec.max_energy_wh / nominal_w
+            if spec.max_energy_wh is not None and nominal_w > 0
+            else None
+        )
+        hours = hours_from_block if cap_hours is None else min(hours_from_block, cap_hours)
         energy_wh = hours * nominal_w
 
         # "Start as early as possible" narrows the *window* and nothing else.
@@ -421,68 +467,69 @@ def allocate(
         # block is the block, and this clamp would hand back precisely the window
         # it exists to narrow. That slice of surplus is the placement freedom.
         if spec.start_asap and window_last is not None and hours > 0:
-            run_steps = math.ceil(hours / step_hours)
-            # Whole timesteps from the first qualifying one, inclusive: the
-            # tight span then rounds *up* to the run, never below it, so this
-            # can only remove placement freedom and never make the window too
-            # narrow for the hours -- which EMHASS answers by declaring the
-            # whole problem infeasible rather than just this one load.
-            tight_end = window_first + (run_steps - 1) * step
+            plain_last = _asap_window_last(
+                hours, nominal_w, window_first, window_last, deliverable, step, step_hours
+            )
 
-            # ...but the hours alone are the wrong measure of how much window
-            # the run needs, because ``nominal_w`` is the block's *peak* and
-            # the front of the block is its weakest end. EMHASS holds the
-            # energy total as an equality, so a window clamped to the bare
-            # hours forces the load to hold peak power through morning slots
-            # that never offered it, and the difference is imported -- the
-            # exact "short, near-ceiling burst" the ceiling above exists to
-            # prevent, reintroduced by pinning where the run lands.
-            #
-            # Widening is what fixes that, not lowering the ceiling: the cost
-            # function is imports at the buy price and exports at the sell
-            # price, so the marginal cost of one more watt in a slot steps up
-            # sharply at the point the slot stops exporting. That kink is
-            # convex, which is why the solver spreads a run across slots and
-            # tracks the surplus curve rather than running flat out in the
-            # fewest slots -- but it can only spread into window it has.
-            #
-            # So the window has to reach far enough that the surplus inside it
-            # actually covers the energy being asked for. Stopping just past the
-            # first slot where it does keeps this the earliest window that can
-            # deliver the budget without importing, which is what the switch
-            # means. The one ``MODULATION_SLACK_STEPS`` past it covers the
-            # discreteness of the test rather than buying shaping room -- the
-            # margin taken off ``hours`` above is what buys that. On a flat block
-            # the cover is reached at exactly ``run_steps`` and that single step
-            # is the only widening that happens.
-            covered_wh = 0.0
-            covered_end: datetime | None = None
-            for when, deliverable_wh in deliverable:
-                covered_wh += deliverable_wh
-                if covered_wh >= energy_wh * (1 - COVER_TOLERANCE):
-                    covered_end = when + MODULATION_SLACK_STEPS * step
-                    break
+            # The margin is only ever worth taking out of a *block-derived* ask.
+            # When the cap is what is binding, the ask already sits below what
+            # the block delivers -- which is the whole gap the margin exists to
+            # manufacture -- and a number the user typed must be delivered in
+            # full, not 6% short of it. Testing ``cap_hours < hours_from_block``
+            # rather than derating first and clamping after matters for a cap
+            # that lands *inside* the margin: 9.5 h of cap against a 10 h block
+            # would otherwise come out as 7.5 h.
+            margin = (
+                0.0
+                if cap_hours is not None and cap_hours < hours_from_block
+                else modulation_margin(math.ceil(hours_from_block / step_hours))
+            )
 
-            # No ``covered_end`` means the block cannot cover the target
-            # however wide the window gets -- ``credit_wh`` is uncapped per
-            # slot while the draws here are not, so an ample block and a load
-            # whose configured ceiling sits below the block's peak can land
-            # here. Leaving the window at the full block is then the most that
-            # could ever help.
-            if covered_end is not None:
-                _LOGGER.debug(
-                    "%s: start-as-early-as-possible asking for %.0f Wh at %.0f W "
-                    "(%.0f%% of the block's %.0f Wh, keeping the rest to modulate with) "
-                    "in %d timesteps, %d of them run",
-                    spec.subentry_id,
-                    energy_wh,
+            # ...and only worth taking at all if it actually buys a shorter
+            # window. Whether it does is a property of the block's *shape*: a
+            # margin removes energy from the ask, but if the tail slots it stops
+            # needing are the weakest ones, the covering slot barely moves and
+            # ``MODULATION_SLACK_STEPS`` puts it straight back. Measured on a real
+            # 13-slot block, a 10% margin gave up 1.36 kWh for exactly zero
+            # timesteps. Asking "is there placement freedom in principle" --
+            # comparing the run against the qualifying slot count -- does not
+            # catch that; only computing both windows does.
+            derated_hours = hours_from_block * (1.0 - margin)
+            if margin > 0.0 and derated_hours > 0.0:
+                derated_last = _asap_window_last(
+                    derated_hours,
                     nominal_w,
-                    100 * (1.0 - margin),
-                    credit_wh,
-                    int((min(window_last, max(tight_end, covered_end)) - window_first) / step) + 1,
-                    run_steps,
+                    window_first,
+                    window_last,
+                    deliverable,
+                    step,
+                    step_hours,
                 )
-                window_last = min(window_last, max(tight_end, covered_end))
+                if derated_last < plain_last:
+                    hours = derated_hours
+                    energy_wh = hours * nominal_w
+                    window_last = derated_last
+                else:
+                    margin = 0.0
+                    window_last = plain_last
+            else:
+                margin = 0.0
+                window_last = plain_last
+
+            _LOGGER.debug(
+                "%s: start-as-early-as-possible asking for %.0f Wh at %.0f W "
+                "(%.0f%% of the block's %.0f Wh, %s) in %d timesteps, %d of them run",
+                spec.subentry_id,
+                energy_wh,
+                nominal_w,
+                100 * (energy_wh / credit_wh) if credit_wh > 0 else 100.0,
+                credit_wh,
+                f"keeping {margin * 100:.0f}% to modulate with"
+                if margin > 0
+                else "no margin -- it would not have narrowed the window",
+                int((window_last - window_first) / step) + 1,
+                math.ceil(hours / step_hours),
+            )
 
         budgets[spec.subentry_id] = SurplusBudget(
             hours=hours,
