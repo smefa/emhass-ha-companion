@@ -24,6 +24,7 @@ from custom_components.emhass_companion.const import (
     SUBENTRY_TYPE_THERMAL,
 )
 from custom_components.emhass_companion.diagnostics import async_get_config_entry_diagnostics
+from custom_components.emhass_companion.log_ring import MAX_MESSAGE_CHARS
 
 MISSING_ENTITY = "sensor.definitely_missing"
 
@@ -128,6 +129,34 @@ async def test_the_missing_entity_is_flagged_in_triage(hass: HomeAssistant) -> N
     assert any(MISSING_ENTITY in finding["message"] for finding in diagnostics["triage"])
 
 
+async def test_an_empty_forecast_series_is_flagged_in_triage(hass: HomeAssistant) -> None:
+    """A source that returned nothing has no end timestamp to give away that
+    it is broken, so the series section alone reads as merely absent.
+    """
+    entry = await _setup_entry(hass)
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+    assert any(
+        "load_forecast series is empty" in finding["message"] and finding["severity"] == "error"
+        for finding in diagnostics["triage"]
+    )
+
+
+async def test_a_load_forecast_method_that_was_not_honoured_is_flagged_in_triage(
+    hass: HomeAssistant,
+) -> None:
+    entry = await _setup_entry(hass)
+    coordinator = entry.runtime_data.coordinator
+    coordinator.config.load.options = {"method": "mlforecaster"}
+    coordinator.data.payload = {"load_forecast_method": "naive"}
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+    assert any(
+        "mlforecaster" in finding["message"] and "naive" in finding["message"]
+        for finding in diagnostics["triage"]
+    )
+
+
 async def test_latitude_in_the_emhass_config_comes_back_redacted(hass: HomeAssistant) -> None:
     entry = await _setup_entry(hass)
     diagnostics = await async_get_config_entry_diagnostics(hass, entry)
@@ -176,6 +205,23 @@ async def test_logs_section_carries_records_from_this_integrations_logger(
     diagnostics = await async_get_config_entry_diagnostics(hass, entry)
     messages = [record["message"] for record in diagnostics["logs"]]
     assert "diagnostics test marker" in messages
+
+
+async def test_a_runaway_log_message_is_truncated(hass: HomeAssistant) -> None:
+    """Bounding the record count is not enough when one record is the problem.
+
+    Add-on discovery logs the Supervisor's whole store entry for EMHASS at
+    debug level, and that carries the add-on's rendered long_description --
+    several kilobytes of README in a single message, which in a real bundle
+    outweighed every other record put together.
+    """
+    entry = await _setup_entry(hass)
+    logging.getLogger("custom_components.emhass_companion.coordinator").warning("x" * 50_000)
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+    runaway = next(record for record in diagnostics["logs"] if record["message"].startswith("xxx"))
+    assert len(runaway["message"]) < MAX_MESSAGE_CHARS + 100
+    assert "48000 more characters" in runaway["message"]
 
 
 async def test_the_log_handler_is_removed_when_the_entry_is_unloaded(hass: HomeAssistant) -> None:

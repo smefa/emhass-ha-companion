@@ -466,6 +466,42 @@ def _triage_section(
         if coordinator.plan_is_stale:
             findings.append({"severity": "warning", "message": "The current plan is stale"})
 
+        if data is not None:
+            # An empty source is the one failure the series section cannot
+            # show by itself: a forecast with no points also has no end
+            # timestamp, so it reads as absent rather than as broken, and the
+            # run carries on with whatever EMHASS falls back to. This is what
+            # "the plan ignores my prices" looks like from the outside.
+            for name, series in (
+                ("buy_price", data.buy_price),
+                ("sell_price", data.sell_price),
+                ("pv_forecast", data.pv_forecast),
+                ("load_forecast", data.load_forecast),
+            ):
+                if not len(series):
+                    findings.append(
+                        {
+                            "severity": "error",
+                            "message": f"The {name} series is empty -- its source returned "
+                            "no points",
+                        }
+                    )
+
+            # The load forecast method is negotiated at run time, not simply
+            # obeyed: mlforecaster silently falls back to naive until a fit
+            # has succeeded against enough history. Configured-versus-sent is
+            # the only place that downgrade is visible.
+            requested = coordinator.config.load.options.get("method")
+            sent = (data.payload or {}).get("load_forecast_method")
+            if requested and sent and requested != sent:
+                findings.append(
+                    {
+                        "severity": "warning",
+                        "message": f"Load forecast method '{requested}' was configured but the "
+                        f"last run asked EMHASS for '{sent}'",
+                    }
+                )
+
         if coordinator.profile_errors:
             findings.append(
                 {

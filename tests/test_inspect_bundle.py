@@ -244,7 +244,7 @@ def test_fresh_plan_is_not_flagged_as_stale():
 # --- forecast coverage -------------------------------------------------------
 
 
-def test_forecast_source_that_stops_short_is_a_warning():
+def test_forecast_source_that_stops_short_of_the_horizon_is_a_warning():
     bundle = _clean_bundle()
     now = datetime.now(UTC)
     bundle["series"] = {
@@ -252,12 +252,78 @@ def test_forecast_source_that_stops_short_is_a_warning():
         "load_forecast": {"points": 48, "end": _iso(now + timedelta(hours=24))},
     }
     report = run_checks(bundle)
-    assert any("pv_forecast" in f.title and "before the others" in f.title for f in report.findings)
+    assert any(
+        "pv_forecast" in f.title and "short of the horizon" in f.title for f in report.findings
+    )
 
 
-def test_forecast_sources_covering_the_same_horizon_are_not_flagged():
+def test_forecast_sources_covering_the_horizon_are_not_flagged():
     report = run_checks(_clean_bundle())
-    assert not any("before the others" in f.title for f in report.findings)
+    assert not any("short of the horizon" in f.title for f in report.findings)
+
+
+def test_sources_of_different_lengths_are_fine_while_all_cover_the_horizon():
+    """The ordinary healthy install, which must stay silent.
+
+    Solcast publishes four days of PV where a day-ahead market has published
+    perhaps two of prices. Comparing sources against each other rather than
+    against the horizon reported that as a fault on most installs.
+    """
+    bundle = _clean_bundle()
+    now = datetime.now(UTC)
+    bundle["series"] = {
+        "buy_price": {"points": 192, "end": _iso(now + timedelta(days=2))},
+        "sell_price": {"points": 192, "end": _iso(now + timedelta(days=2))},
+        "pv_forecast": {"points": 192, "end": _iso(now + timedelta(days=4))},
+        "load_forecast": {"points": 96, "end": _iso(now + timedelta(hours=24))},
+    }
+    report = run_checks(bundle)
+    assert report.findings == []
+
+
+def test_a_horizon_longer_than_a_source_reaches_is_still_flagged():
+    bundle = _clean_bundle()
+    now = datetime.now(UTC)
+    bundle["entry"]["options"]["horizon_hours"] = 48
+    bundle["series"] = {
+        "pv_forecast": {"points": 96, "end": _iso(now + timedelta(hours=24))},
+        "load_forecast": {"points": 96, "end": _iso(now + timedelta(hours=48))},
+    }
+    report = run_checks(bundle)
+    assert any(
+        "pv_forecast" in f.title and "short of the horizon" in f.title for f in report.findings
+    )
+
+
+def test_an_empty_series_is_critical_even_though_it_has_no_end_timestamp():
+    """The failure that slipped through a purely timestamp-based check.
+
+    A source returning nothing has no end to compare against anything, so
+    the emptier the series the quieter it used to be.
+    """
+    bundle = _clean_bundle()
+    bundle["series"]["load_forecast"] = {"points": 0, "end": None}
+    report = run_checks(bundle)
+    assert any("load_forecast is empty" in f.title for f in _findings(report, Severity.CRITICAL))
+
+
+# --- forecast method ---------------------------------------------------------
+
+
+def test_a_load_forecast_method_that_was_not_honoured_is_a_warning():
+    bundle = _clean_bundle()
+    bundle["entry"]["options"]["load"] = {"profile_options": {"method": "mlforecaster"}}
+    bundle["last_payload"] = {"load_forecast_method": "naive"}
+    report = run_checks(bundle)
+    assert any("mlforecaster" in f.title and "naive" in f.title for f in report.findings)
+
+
+def test_the_load_forecast_method_actually_used_is_not_flagged():
+    bundle = _clean_bundle()
+    bundle["entry"]["options"]["load"] = {"profile_options": {"method": "naive"}}
+    bundle["last_payload"] = {"load_forecast_method": "naive"}
+    report = run_checks(bundle)
+    assert report.findings == []
 
 
 # --- profile errors -------------------------------------------------------

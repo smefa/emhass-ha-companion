@@ -70,10 +70,15 @@ NUMERIC_POWER_FIELDS = {"pv_entity", "house_load_total_entity", "power_sensor"}
 
 LOAD_SUBENTRY_TYPES = ("deferrable_load", "thermal_load")
 
-# A forecast source ending this much earlier than the others is treated as
-# "stops short" rather than ordinary resampling jitter between sources that
-# are all, in practice, covering the same horizon.
+# A forecast falling this far short of the horizon end is treated as "stops
+# short" rather than as the ordinary off-by-one-timestep difference between a
+# source that lands on the closing boundary and one that stops just inside it.
 FORECAST_GAP_THRESHOLD = timedelta(hours=1)
+
+# Mirrors const.DEFAULT_HORIZON_HOURS, restated rather than imported so this
+# script keeps running outside a checkout. Only reached for a bundle whose
+# options predate the horizon being configurable.
+DEFAULT_HORIZON_HOURS = 24
 
 
 class Severity(Enum):
@@ -160,6 +165,25 @@ def _parse_timestamp(value: str) -> datetime | None:
     except ValueError:
         return None
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def _horizon_end(bundle: dict) -> datetime | None:
+    """When the window the last optimisation solved runs out.
+
+    Anchored on the plan's own generation time rather than on the clock: the
+    bundle may be read days after it was downloaded, and every series in it
+    was gathered relative to that run, not to whenever someone gets round to
+    triaging the issue.
+    """
+    generated = _parse_timestamp((bundle.get("plan") or {}).get("generated_at") or "")
+    if generated is None:
+        return None
+    options = (bundle.get("entry") or {}).get("options") or {}
+    try:
+        hours = float(options.get("horizon_hours", DEFAULT_HORIZON_HOURS))
+    except (TypeError, ValueError):
+        hours = DEFAULT_HORIZON_HOURS
+    return generated + timedelta(hours=hours)
 
 
 # -- checks ---------------------------------------------------------------
@@ -281,34 +305,74 @@ def check_plan(bundle: dict, report: Report) -> None:
 
 
 def check_forecast_coverage(bundle: dict, report: Report) -> None:
-    """Flag a forecast source that ends well before the others.
+    """Flag a forecast source that does not reach the end of the horizon.
 
-    The bundle does not carry the horizon end directly, only each series'
-    own last timestamp, so this compares sources against each other instead
-    of against an absolute horizon -- which is the practically useful
-    version of the same signal anyway: a lone source cut short is what
-    actually produces the forward-filled flat-line EMHASS's own warnings
-    describe.
+    Measured against the horizon, never against the other sources. Sources
+    legitimately run to different lengths -- Solcast offers four days of PV
+    where a day-ahead market has published perhaps two of prices -- so
+    comparing them to each other reports the healthy, ordinary case as a
+    fault on most installs, and a checker that cries wolf is one nobody
+    reads. What matters is only whether each source covers the window the
+    optimisation actually solves.
     """
-    ends: dict[str, datetime] = {}
-    for name, info in (bundle.get("series") or {}).items():
-        end = (info or {}).get("end")
-        parsed = _parse_timestamp(end) if end else None
-        if parsed is not None:
-            ends[name] = parsed
-    if len(ends) < 2:
+    series = bundle.get("series") or {}
+
+    # An empty source has no end timestamp to compare, so it would slip
+    # through the coverage arithmetic below entirely -- the emptier the
+    # series, the quieter the failure. Report it on its own terms first.
+    for name, info in sorted(series.items()):
+        if (info or {}).get("points") == 0:
+            report.add(
+                Severity.CRITICAL,
+                f"{name} is empty",
+                "Its source returned no points at all, so EMHASS was given nothing to work "
+                "from and fell back to whatever its own configuration says. Call "
+                "emhass_companion.test_profile against the profile behind this source to see "
+                "what it actually returned.",
+            )
+
+    horizon_end = _horizon_end(bundle)
+    if horizon_end is None:
         return
 
-    latest = max(ends.values())
-    for name, end in ends.items():
-        gap = latest - end
+    for name, info in sorted(series.items()):
+        end = (info or {}).get("end")
+        parsed = _parse_timestamp(end) if end else None
+        if parsed is None:
+            continue
+        gap = horizon_end - parsed
         if gap > FORECAST_GAP_THRESHOLD:
             report.add(
                 Severity.WARNING,
-                f"{name} forecast ends {gap} before the others",
+                f"{name} stops {gap} short of the horizon",
                 "EMHASS forward-fills a forecast that stops short, so the plan can look healthy "
                 "while being built on a value that flat-lined for the tail of the horizon.",
             )
+
+
+def check_forecast_method(bundle: dict, report: Report) -> None:
+    """Flag a load forecast method that was asked for but not used.
+
+    mlforecaster is negotiated rather than obeyed: it falls back to naive
+    until a fit has succeeded against enough recorder history, and the only
+    outward sign is that the payload names a different method than the
+    options do.
+    """
+    requested = (
+        (((bundle.get("entry") or {}).get("options") or {}).get("load") or {}).get(
+            "profile_options"
+        )
+        or {}
+    ).get("method")
+    sent = (bundle.get("last_payload") or {}).get("load_forecast_method")
+    if requested and sent and requested != sent:
+        report.add(
+            Severity.WARNING,
+            f"Load forecast method '{requested}' was configured, '{sent}' was used",
+            "mlforecaster reverts to naive until it has been fitted against enough history of "
+            "the load sensor. Check for an ml_forecaster_not_ready repair issue and confirm the "
+            "sensor has been recorded for long enough.",
+        )
 
 
 def check_profile_errors(bundle: dict, report: Report) -> None:
@@ -415,6 +479,7 @@ CHECKS = [
     check_last_run,
     check_plan,
     check_forecast_coverage,
+    check_forecast_method,
     check_profile_errors,
     check_subentries,
     check_nothing_to_optimise,

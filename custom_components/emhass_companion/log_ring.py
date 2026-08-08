@@ -21,6 +21,14 @@ from typing import Any
 # bundle into something nobody wants to scroll through.
 MAX_RECORDS = 200
 
+# One record must not be able to dominate the bundle. The add-on discovery
+# path logs the Supervisor's whole store entry for EMHASS at debug level,
+# which carries the add-on's rendered long_description -- several kilobytes
+# of README that arrives as a single message, larger than every other record
+# in a fresh buffer combined. Bounding the record count alone does not help
+# when one record is the problem.
+MAX_MESSAGE_CHARS = 2000
+
 
 class LogRingHandler(logging.Handler):
     """Keeps the last :data:`MAX_RECORDS` records emitted by one logger.
@@ -35,11 +43,15 @@ class LogRingHandler(logging.Handler):
         self._records: collections.deque[dict[str, Any]] = collections.deque(maxlen=MAX_RECORDS)
 
     def emit(self, record: logging.LogRecord) -> None:
+        message = record.getMessage()
+        if len(message) > MAX_MESSAGE_CHARS:
+            dropped = len(message) - MAX_MESSAGE_CHARS
+            message = f"{message[:MAX_MESSAGE_CHARS]}... [{dropped} more characters]"
         self._records.append(
             {
                 "ts": datetime.fromtimestamp(record.created, tz=UTC).isoformat(),
                 "level": record.levelname,
-                "message": record.getMessage(),
+                "message": message,
             }
         )
 
