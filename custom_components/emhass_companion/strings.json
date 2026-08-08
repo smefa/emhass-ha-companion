@@ -675,7 +675,7 @@
             "recurrence": "Runs"
           },
           "data_description": {
-            "recurrence": "Every day -- it needs a set number of hours every day, and the optimiser picks when. On demand -- it runs only when something arms it, for a set number of hours. On spare solar -- it takes whatever solar the house, the other loads and the battery are not already using, for as long as it is armed. A load on spare solar has no hours and no time window; both come from the plan."
+            "recurrence": "Every day -- it needs a set number of hours every day, and the optimiser picks when. On demand -- it runs only when something arms it, for a set number of hours. On spare solar -- it takes whatever solar the house, the other loads and the battery are not already using, for as long as it is armed. A load on spare solar has no hours and no time window; both come from the plan. Spare solar is a Companion feature -- EMHASS has no such mode, so there is nothing to configure for it on the EMHASS side."
           }
         },
         "reconfigure": {

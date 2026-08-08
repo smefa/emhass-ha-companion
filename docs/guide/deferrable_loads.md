@@ -18,8 +18,9 @@ EMHASS Companion → Add deferrable load**.
     - **On spare solar** — it takes whatever solar the house, the other
       loads and the battery aren't already using, for as long as it's
       armed. Has no hours and no time window of its own — both come from
-      the plan. See **[Surplus loads](surplus_loads.md)** for the extra
-      sensors this adds.
+      the plan. This mode is a Companion feature; EMHASS has none of its
+      own, so there's nothing to set up for it on the EMHASS side. See
+      **[Surplus loads](surplus_loads.md)** for the extra sensors this adds.
 
 ## Load settings
 

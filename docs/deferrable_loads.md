@@ -104,6 +104,10 @@ it best — paid for by claiming a few per cent less of the day's surplus, which
 is what leaves room in the window to move the run into. See
 [surplus_loads.md](surplus_loads.md).
 
+The mode is a Companion construct: EMHASS has no surplus mode, and a surplus
+load reaches it as an ordinary deferrable with an hours target and a window
+computed here.
+
 ## Minimum on/off time
 
 `number.<load>_minimum_on_time` / `_minimum_off_time` give a compressor-driven

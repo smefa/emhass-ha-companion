@@ -10,6 +10,9 @@ without any regard for the battery or the grid — see [the add-back](#the-add-b
 for why — but *how much* it is asked for still leaves room for the battery to
 reach its own target first; see [the battery reservation](#the-battery-reservation).
 
+This is a **Companion construct**, not an EMHASS feature — see
+[why this cannot be an ordinary deferrable load](#why-this-cannot-be-an-ordinary-deferrable-load).
+
 Choose *On spare solar* under **Runs** when adding the load, then arm it with its
 **Requested** switch. Turn the switch off to stop. That is the whole
 user-facing feature, plus one optional switch —
@@ -28,6 +31,14 @@ and a surplus load has no operating hours and no time window to offer. An
 existing load can be switched over at any time with its `recurrence` select.
 
 ## Why this cannot be an ordinary deferrable load
+
+**There is no surplus mode in EMHASS.** No self-consumption mode either, and no
+config option, payload field or API endpoint that corresponds to one — nothing
+in EMHASS's own configuration, the add-on's options, or the upstream docs will
+match anything on this page, and looking for it there is a dead end. Everything
+described here is computed by the Companion; what EMHASS is finally sent for a
+surplus load is a completely ordinary deferrable load with an hours target and a
+window, indistinguishable from any other.
 
 EMHASS's cost function is imports minus export revenue. It has **no value term
 for consumption at all**, so any load it is not forced to run is pure cost and

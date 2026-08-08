@@ -9,6 +9,15 @@ See **[Deferrable loads](deferrable_loads.md)** for how to add and configure
 one. This page covers the extra sensors that appear once you have at least
 one.
 
+!!! note "Spare solar is a Companion feature"
+
+    EMHASS has no spare-solar mode of its own — there's no setting for it in
+    the EMHASS add-on's configuration and nothing in the EMHASS documentation
+    that describes one, so don't go looking for a switch on that side. The
+    Companion works out how long the day's spare solar can run the load for and
+    then asks EMHASS for it as an ordinary deferrable load. Everything on this
+    page is configured here, in the Companion.
+
 ## On the load itself
 
 ![A surplus load's Configuration](../assets/surplus-load-configuration.png)

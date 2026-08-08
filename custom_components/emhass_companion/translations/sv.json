@@ -675,7 +675,7 @@
             "recurrence": "Kör"
           },
           "data_description": {
-            "recurrence": "Varje dag -- den behöver ett bestämt antal timmar varje dygn och optimeraren väljer när. Vid behov -- den kör bara när något aktiverar den, ett bestämt antal timmar. På solöverskott -- den tar den sol som huset, de andra lasterna och batteriet inte redan använder, så länge den är aktiverad. En last på solöverskott har varken timmar eller tidsfönster; båda kommer från planen."
+            "recurrence": "Varje dag -- den behöver ett bestämt antal timmar varje dygn och optimeraren väljer när. Vid behov -- den kör bara när något aktiverar den, ett bestämt antal timmar. På solöverskott -- den tar den sol som huset, de andra lasterna och batteriet inte redan använder, så länge den är aktiverad. En last på solöverskott har varken timmar eller tidsfönster; båda kommer från planen. Solöverskott är en funktion i Companion -- EMHASS har inget sådant läge, så det finns inget att ställa in för det på EMHASS-sidan."
           }
         },
         "reconfigure": {
