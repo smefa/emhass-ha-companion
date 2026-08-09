@@ -109,6 +109,20 @@ async def test_clamps_at_zero_rather_than_going_negative(hass: HomeAssistant) ->
     assert _sensor(hass, [load]).native_value == 0.0
 
 
+async def test_reports_whole_watts(hass: HomeAssistant) -> None:
+    """An unrounded trailing average differs in its last decimal on every
+    recomputation, so the recorder stores a row for each of the thousands of
+    daily rewrites even when the load has not actually moved."""
+    hass.states.async_set("sensor.total_house", "1500")
+    hass.states.async_set("sensor.dishwasher_power", "333.333333")
+    load = DeferrableRuntime(
+        subentry_id="d1", name="Dishwasher", power_sensor="sensor.dishwasher_power"
+    )
+    value = _sensor(hass, [load]).native_value
+    assert value == 1167
+    assert value == int(value)
+
+
 async def test_native_value_is_none_when_the_total_entity_is_unavailable(
     hass: HomeAssistant,
 ) -> None:

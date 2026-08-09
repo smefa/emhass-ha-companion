@@ -381,8 +381,17 @@ class NetHouseLoadSensor(EmhassEntity, SensorEntity):
 
     @property
     def native_value(self) -> float | None:
+        # Whole watts, matching the resolution a house power sensor actually
+        # measures at. This entity rewrites on every change of every source
+        # it watches -- several times a minute for a live power sensor -- and
+        # an unrounded average differs somewhere around the twelfth decimal
+        # every single time, so the recorder stores a row for each one even
+        # when the load has not moved. Rounding keeps the frequent updates
+        # the forecast history needs while letting genuinely unchanged
+        # readings collapse into no-ops.
         now = dt_util.utcnow()
-        return self._average.average(now, self._window)
+        average = self._average.average(now, self._window)
+        return None if average is None else round(average)
 
 
 class LoadDeferrableNumberSensor(EmhassLoadEntity, SensorEntity):
@@ -440,8 +449,10 @@ class LoadScheduledPowerSensor(EmhassLoadEntity, SensorEntity):
     @property
     def native_value(self) -> float:
         # No plan yet or before the first point still means "nothing
-        # scheduled", which is a real 0 W, not an unknown state.
-        return self._series().value_at(dt_util.utcnow()) or 0.0
+        # scheduled", which is a real 0 W, not an unknown state. Whole watts:
+        # the solver's own arithmetic leaves noise like 210.10000000000002,
+        # which payload.py already rounds away on the way out.
+        return round(self._series().value_at(dt_util.utcnow()) or 0.0)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -477,7 +488,10 @@ class LoadPlannedTemperatureSensor(EmhassLoadEntity, SensorEntity):
 
     @property
     def native_value(self) -> float | None:
-        return self._series().value_at(dt_util.utcnow())
+        # Two decimals: finer than any thermal model this plans against can
+        # honestly claim, and enough to keep a slow ramp visibly moving.
+        planned = self._series().value_at(dt_util.utcnow())
+        return None if planned is None else round(planned, 2)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -640,7 +654,9 @@ class SolarSurplusSensor(SolarSurplusBase, SensorEntity):
 
     @property
     def native_value(self) -> float | None:
-        return self._series().value_at(dt_util.utcnow())
+        # Whole watts, as for every other power figure this device reports.
+        surplus = self._series().value_at(dt_util.utcnow())
+        return None if surplus is None else round(surplus)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -681,7 +697,9 @@ class SolarSurplusEnergySensor(SolarSurplusBase, SensorEntity):
         if not series:
             return 0.0
         step = self._step(series)
-        return total_energy_wh(current_block(series, step), step) / 1000
+        # To the watt-hour: a kWh budget carried to full float precision is
+        # spurious detail on a figure derived from a forecast.
+        return round(total_energy_wh(current_block(series, step), step) / 1000, 3)
 
 
 class SolarSurplusStartSensor(SolarSurplusBase, SensorEntity):
@@ -741,7 +759,10 @@ class LoadSurplusBudgetSensor(EmhassLoadEntity, SensorEntity):
 
     @property
     def native_value(self) -> float | None:
-        return self.load.surplus_budget.hours
+        # Four decimals, as LoadRuntimeTodaySensor uses for the same unit --
+        # well under a second of runtime.
+        hours = self.load.surplus_budget.hours
+        return None if hours is None else round(hours, 4)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

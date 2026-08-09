@@ -18,6 +18,7 @@ from custom_components.emhass_companion.models import (
     Point,
     Series,
     SeriesError,
+    ceil_to_step,
     parse_utc,
 )
 
@@ -272,6 +273,110 @@ def test_covers_detects_a_short_series():
 def test_step_finds_the_dominant_spacing():
     assert _series(1.0, 2.0, 3.0, step_minutes=15).step() == timedelta(minutes=15)
     assert Series.empty().step() is None
+
+
+def test_resampled_sizes_a_series_by_the_grid_not_the_sensor():
+    """A chatty sensor must not set the size of the payload.
+
+    Half an hour of 5-second readings is 360 points; on a 15-minute grid
+    that is two, whatever the sensor's update rate happens to be.
+    """
+    start = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    chatty = Series(Point(start + timedelta(seconds=5 * i), 100.0) for i in range(360))
+    assert len(chatty.resampled(timedelta(minutes=15))) == 2
+
+
+def test_resampled_lands_on_whole_timestep_boundaries():
+    """No stray seconds, whatever the readings' own offsets.
+
+    EMHASS reindexes onto a grid anchored to whole timesteps, and
+    extended_with_previous_day can only find a point exactly 24h back when
+    this side is anchored the same way.
+    """
+    ragged = Series(
+        [
+            Point(datetime(2026, 7, 28, 17, 6, 4, 871334, tzinfo=UTC), 857.4),
+            Point(datetime(2026, 7, 28, 17, 6, 9, 938016, tzinfo=UTC), 857.9),
+            Point(datetime(2026, 7, 28, 17, 22, 31, 12345, tzinfo=UTC), 900.0),
+        ]
+    )
+    resampled = ragged.resampled(timedelta(minutes=15))
+    assert [p.time for p in resampled] == [
+        datetime(2026, 7, 28, 17, 0, tzinfo=UTC),
+        datetime(2026, 7, 28, 17, 15, tzinfo=UTC),
+    ]
+    assert all(p.time.second == 0 and p.time.microsecond == 0 for p in resampled)
+
+
+def test_resampled_weights_a_bucket_by_time_not_by_sample_count():
+    """Recorder rows appear on *change*, so samples are not evenly spaced.
+
+    Here 1000 W holds for 14 of the bucket's 15 minutes and 0 W for the
+    last one. A plain mean over the two samples would say 500 W; the
+    honest answer is 933.3 W.
+    """
+    start = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    series = Series(
+        [
+            Point(start, 1000.0),
+            Point(start + timedelta(minutes=14), 0.0),
+        ]
+    )
+    resampled = series.resampled(timedelta(minutes=15))
+    assert len(resampled) == 1
+    assert resampled.values[0] == pytest.approx(1000.0 * 14 / 15)
+
+
+def test_resampled_keeps_a_lone_reading():
+    """A brand new sensor has exactly one reading; it must survive."""
+    series = Series([Point(datetime(2026, 7, 28, 10, 7, 33, tzinfo=UTC), 420.0)])
+    resampled = series.resampled(timedelta(minutes=15))
+    assert resampled.values == (420.0,)
+    assert resampled.start == datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+
+
+def test_resampled_is_a_no_op_on_an_empty_series():
+    assert not Series.empty().resampled(timedelta(minutes=15))
+
+
+def test_resampling_makes_the_previous_day_extension_walk_the_grid():
+    """The two together are what bound the payload.
+
+    Left un-resampled, extended_with_previous_day walks forward in the
+    series' own modal spacing -- five seconds -- and fills the horizon with
+    thousands of points instead of one per timestep.
+    """
+    start = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    chatty = Series(Point(start + timedelta(seconds=5 * i), 100.0) for i in range(720))
+    until = start + timedelta(hours=2)
+    grid = timedelta(minutes=15)
+
+    extended = chatty.resampled(grid).extended_with_previous_day(until)
+
+    assert extended.covers(until)
+    assert extended.step() == grid
+    assert len(extended) == 9  # 2h of quarter-hours, inclusive of both ends
+
+
+def test_ceil_to_step_reaches_the_boundary_past_an_off_grid_horizon():
+    """A horizon end inherits now's stray microseconds and rarely lands on a
+    boundary; a grid-aligned series must still be asked to cover past it."""
+    off_grid = datetime(2026, 7, 28, 15, 30, 36, 916483, tzinfo=UTC)
+    assert ceil_to_step(off_grid, timedelta(minutes=15)) == datetime(
+        2026, 7, 28, 15, 45, tzinfo=UTC
+    )
+    on_grid = datetime(2026, 7, 28, 15, 45, tzinfo=UTC)
+    assert ceil_to_step(on_grid, timedelta(minutes=15)) == on_grid
+
+
+def test_extension_takes_an_explicit_step_when_the_series_has_none():
+    """One reading has no spacing to infer, and guessing an hour would hand
+    EMHASS a forecast four times coarser than the optimisation it feeds."""
+    start = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    lone = Series([Point(start, 420.0)])
+    extended = lone.extended_with_previous_day(start + timedelta(hours=1), timedelta(minutes=15))
+    assert extended.step() == timedelta(minutes=15)
+    assert extended.values == (420.0,) * 5
 
 
 def test_extended_with_previous_day_is_a_no_op_when_already_covering():

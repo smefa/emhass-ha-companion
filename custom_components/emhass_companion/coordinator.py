@@ -59,7 +59,15 @@ from .const import (
     SUPPORTED_PLAN_SCHEMA_MAJOR,
 )
 from .deferrable import DeferrableRegistry, state_to_watts
-from .models import DeferrableLoad, DeferrableLoadGroup, LastRun, Plan, Point, Series
+from .models import (
+    DeferrableLoad,
+    DeferrableLoadGroup,
+    LastRun,
+    Plan,
+    Point,
+    Series,
+    ceil_to_step,
+)
 from .payload import PayloadInputs, PayloadResult, build_payload
 from .profiles import (
     Profile,
@@ -1100,17 +1108,31 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
 
         Real measured watts, however little of it exists -- the raw material
         :meth:`_load_forecast_fallback` repeats forward to bootstrap a load
-        forecast before there is enough history for EMHASS's "naive" method
-        to use directly.
+        forecast until a trained mlforecaster takes over.
+
+        Averaged onto the optimisation timestep before it is returned, so the
+        series is sized by the horizon rather than by how chattily the sensor
+        reports (see :meth:`Series.resampled`).
         """
         try:
             instance = get_instance(self.hass)
         except (KeyError, RuntimeError):
             return Series.empty()
         cutoff = now - LOAD_BOOTSTRAP_LOOKBACK
-        try:
-            states = await instance.async_add_executor_job(
-                history.state_changes_during_period,
+        step = timedelta(minutes=self.config.time_step_minutes)
+
+        def read() -> Series:
+            """Fetch and reduce within the one executor job.
+
+            The reduction belongs on this side of the thread boundary every
+            bit as much as the fetch does. Two days of a house power sensor
+            reporting every few seconds is tens of thousands of points, and
+            building a Series from them -- let alone walking one forward a
+            timestep at a time in extended_with_previous_day -- is long
+            enough on a small host to cost Home Assistant its responsiveness
+            on every single optimisation cycle.
+            """
+            states = history.state_changes_during_period(
                 self.hass,
                 cutoff,
                 now,
@@ -1120,15 +1142,18 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
                 None,  # limit
                 True,  # include_start_time_state
             )
+            points = [
+                Point(state.last_changed, watts)
+                for state in states.get(entity_id, [])
+                if (watts := state_to_watts(state)) is not None
+            ]
+            return Series(points).resampled(step)
+
+        try:
+            return await instance.async_add_executor_job(read)
         except Exception:  # a history probe must never break a run
             _LOGGER.debug("Could not fetch recorder history for %s", entity_id, exc_info=True)
             return Series.empty()
-        points = [
-            Point(state.last_changed, watts)
-            for state in states.get(entity_id, [])
-            if (watts := state_to_watts(state)) is not None
-        ]
-        return Series(points)
 
     async def _load_forecast_fallback(
         self, sensor: str | None, now: datetime, horizon_end: datetime
@@ -1170,14 +1195,20 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         if not sensor:
             return LOAD_FORECAST_METHOD_TYPICAL, None
 
+        step = timedelta(minutes=self.config.time_step_minutes)
         recent = await self._recent_load_series(sensor, now)
         if not recent:
             state = self.hass.states.get(sensor)
             live = state_to_watts(state) if state else None
             if live is None:
                 return LOAD_FORECAST_METHOD_TYPICAL, None
-            recent = Series([Point(now, live)])
-        return LOAD_FORECAST_METHOD_LIST, recent.extended_with_previous_day(horizon_end)
+            # Onto the same grid as the recorder path, so that a sensor with
+            # no history yet does not start the horizon at an arbitrary
+            # fraction of a second past the timestep boundary.
+            recent = Series([Point(now, live)]).resampled(step)
+        return LOAD_FORECAST_METHOD_LIST, recent.extended_with_previous_day(
+            ceil_to_step(horizon_end, step), step
+        )
 
     async def _resolve_load_forecast_method(
         self, settings: dict[str, Any], now: datetime, horizon_end: datetime
