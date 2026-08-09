@@ -32,6 +32,8 @@ _LOGGER = logging.getLogger(__name__)
 
 _PRICE_KEYS = ("load_cost_forecast", "prod_price_forecast")
 
+_POWER_KEYS = ("pv_power_forecast", "load_power_forecast")
+
 
 class PayloadError(ValueError):
     """The payload could not be built."""
@@ -358,7 +360,7 @@ def resolve_grid_limit(
     live_w: float | None,
     ceiling_w: float,
     floor_w: float = 0.0,
-) -> float:
+) -> int:
     """The grid limit to send, given an optional live reading of it.
 
     The static number configured on the grid step is the physical rating of
@@ -376,10 +378,15 @@ def resolve_grid_limit(
     says will be drawn. Clamped rather than rejected: a plan built against a
     slightly optimistic limit still beats no plan at all, and the caller
     reports the clamp.
+
+    Whole watts go out: EMHASS's own config carries these as integers, so a
+    ``9000.0`` in the runtime parameters is only noise in its log. Rounded
+    down rather than to nearest, since the number is a fuse rating and the
+    plan must never be invited past it.
     """
     if live_w is None:
-        return ceiling_w
-    return min(ceiling_w, max(live_w, min(floor_w, ceiling_w)))
+        return math.floor(ceiling_w)
+    return math.floor(min(ceiling_w, max(live_w, min(floor_w, ceiling_w))))
 
 
 def _import_floor_w(inputs: PayloadInputs, horizon_end: datetime) -> float:
@@ -446,12 +453,7 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
     ):
         if series is None or not series:
             continue
-        if key == "pv_power_forecast":
-            # Profile math (efficiency factors, unit conversions) leaves tiny
-            # float noise like 210.10000000000002 W; round to whole watts
-            # since sub-watt PV precision is meaningless anyway.
-            series = series.map_values(round)
-        elif key in _PRICE_KEYS:
+        if key in _PRICE_KEYS:
             # Tariff math (multiplier/adder) leaves the same float noise on
             # a per-kWh price; round rather than lose currency precision.
             series = series.map_values(lambda v: round(v, 4))
@@ -474,7 +476,17 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
                     "remainder was filled in by repeating the previous day's "
                     "prices."
                 )
-        payload[key] = series.to_payload()
+        values = series.to_payload()
+        if key in _POWER_KEYS:
+            # Profile math (efficiency factors, unit conversions) and the live
+            # blend above both leave long float tails like 1575.2129175703624 W.
+            # Sub-watt precision is meaningless in a forecast and only bloats
+            # the request and EMHASS's log, so whole watts go out. Done here
+            # rather than on the Series, whose constructor coerces every value
+            # back to float, and after the blend so the blended step is rounded
+            # too.
+            values = {when: round(value) for when, value in values.items()}
+        payload[key] = values
         if not series.covers(horizon_end):
             # EMHASS forward-fills a timestamped forecast onto its grid, so a
             # short series is extended with its final value instead of raising.

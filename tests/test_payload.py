@@ -343,6 +343,28 @@ def test_mpc_blends_live_pv_into_now_even_when_the_series_starts_earlier():
     assert forecast[now.isoformat()] == 6000.0  # 0.5 * 5000 + 0.5 * 7000
 
 
+def test_power_forecasts_are_sent_as_whole_watts():
+    """Profile math and the live blend both leave long float tails like
+    1575.2129175703624 W. Sub-watt precision means nothing in a forecast and
+    only bloats the request, so both power series go out rounded -- including
+    the step the live value was blended into."""
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    result = build_payload(
+        _inputs(
+            now=now,
+            pv=_series(now, 24, 5000.4),
+            pv_live_w=7000.9,
+            load=_series(now, 24, 1575.2129175703624),
+            load_live_w=1200.3,
+            mix_beta=0.5,
+        )
+    )
+    for key in ("pv_power_forecast", "load_power_forecast"):
+        assert all(isinstance(value, int) for value in result.payload[key].values())
+    assert result.payload["pv_power_forecast"][now.isoformat()] == 6001  # 0.5*5000.4+0.5*7000.9
+    assert result.payload["load_power_forecast"][now.isoformat()] == 1388  # 0.5*1575.2+0.5*1200.3
+
+
 def test_mpc_without_a_live_value_leaves_the_forecast_untouched():
     now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
     result = build_payload(_inputs(pv=_series(now, 24, 5000.0)))
@@ -558,6 +580,16 @@ def test_the_floor_never_beats_the_ceiling():
     """A house forecast above the connection's rating is a separate problem;
     it must not raise the limit past what the connection can do."""
     assert resolve_grid_limit(500.0, 4000.0, floor_w=9000.0) == 4000.0
+
+
+def test_grid_limits_are_sent_as_whole_watts():
+    """EMHASS keeps these as integers in its own config; a float only shows up
+    as noise in its log. Rounded down, since the number is a fuse rating."""
+    payload = build_payload(_inputs(grid_import_limit_w=6800.4, grid_export_limit_w=1500.9)).payload
+    assert payload["maximum_power_from_grid"] == 6800
+    assert payload["maximum_power_to_grid"] == 1500
+    assert isinstance(payload["maximum_power_from_grid"], int)
+    assert isinstance(payload["maximum_power_to_grid"], int)
 
 
 def test_a_live_import_limit_reaches_the_payload():
