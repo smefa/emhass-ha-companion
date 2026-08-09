@@ -24,7 +24,7 @@ from homeassistant.const import (
     UnitOfTemperature,
     UnitOfTime,
 )
-from homeassistant.core import Event, EventStateChangedData, HomeAssistant, callback
+from homeassistant.core import Event, EventStateChangedData, HomeAssistant, State, callback
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.util import dt as dt_util
@@ -192,6 +192,34 @@ DIAGNOSTIC_SENSORS: tuple[EmhassSensorDescription, ...] = (
 )
 
 
+def _deferred_watts(
+    loads: Iterable[DeferrableRuntime], state_of: Callable[[str], State | None]
+) -> float:
+    """What ``loads`` are drawing right now, counting each source exactly once.
+
+    Several loads can legitimately share one running source: an EV set up as
+    both a scheduled charge and a surplus-only charge is the ordinary case,
+    and both point at the charger's single meter. A meter measures everything
+    behind it once, so summing per load subtracts that draw twice -- enough to
+    hold NetHouseLoadSensor on its zero clamp for as long as the load runs,
+    and to write a day of false zeros into the history a load forecast is
+    later built from.
+
+    Where loads sharing a source disagree about what its state means -- an
+    on/off source is read as each load's own nominal power -- the largest
+    reading wins. The source is one physical thing, so the most any of them
+    claims it could be drawing is the honest reading of it.
+    """
+    by_source: dict[str, float] = {}
+    for load in loads:
+        source = load.running_source
+        if source is None:
+            continue
+        watts = load.state_to_power(state_of(source)) or 0.0
+        by_source[source] = max(by_source.get(source, 0.0), watts)
+    return sum(by_source.values())
+
+
 def _run_attributes(data: EmhassData) -> dict[str, Any]:
     if data.last_run is None:
         return {}
@@ -357,12 +385,7 @@ class NetHouseLoadSensor(EmhassEntity, SensorEntity):
         if total is None:
             return None
 
-        deferred = 0.0
-        for load in self._loads:
-            source = load.running_source
-            if source is None:
-                continue
-            deferred += load.state_to_power(self.hass.states.get(source)) or 0.0
+        deferred = _deferred_watts(self._loads, self.hass.states.get)
 
         # Clamped rather than left negative: the total and each deferrable's
         # power sensor update on their own schedules, not in lockstep, so a
