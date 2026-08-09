@@ -436,11 +436,12 @@ def test_battery_enabled_sends_every_limit():
     assert payload["soc_final"] == 0.098
 
 
-def test_battery_cycle_costs_default_to_free_cycling():
-    """EMHASS's own default -- an untouched config must not start pricing wear."""
+def test_battery_cycle_costs_default_to_priced_discharge():
+    """The shipped discharge weight has to reach EMHASS, or a round trip is
+    planned as if the wear it causes were free."""
     battery = BatteryConfig(enabled=True, capacity_wh=25600)
     payload = build_payload(_inputs(battery=battery, soc_init=0.098)).payload
-    assert payload["weight_battery_discharge"] == 0.0
+    assert payload["weight_battery_discharge"] == 0.02
     assert payload["weight_battery_charge"] == 0.0
 
 
@@ -456,13 +457,14 @@ def test_battery_cycle_costs_ride_through_to_emhass():
     assert payload["weight_battery_charge"] == 0.01
 
 
-def test_battery_soc_and_stress_costs_default_to_emhass_own_values():
-    """Every one of these is off or inert at its default, so an existing config
-    entry must keep solving the identical problem after the upgrade."""
+def test_battery_soc_and_stress_costs_default_to_the_shipped_values():
+    """The deficit pair is live at its default and must arrive as a real
+    constraint; the surplus pair and stress cost stay inert (cost 0 means
+    EMHASS never builds their constraints at all)."""
     battery = BatteryConfig(enabled=True, capacity_wh=25600)
     payload = build_payload(_inputs(battery=battery, soc_init=0.5)).payload
-    assert payload["battery_soc_deficit_threshold"] == 0.40
-    assert payload["battery_soc_deficit_cost"] == 0.0
+    assert payload["battery_soc_deficit_threshold"] == 0.10
+    assert payload["battery_soc_deficit_cost"] == 0.05
     assert payload["battery_soc_surplus_threshold"] == 0.90
     assert payload["battery_soc_surplus_cost"] == 0.0
     assert payload["battery_stress_cost"] == 0.0

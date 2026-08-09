@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from custom_components.emhass_companion.config_flow import _battery_storage_from_input
+from custom_components.emhass_companion.const import DEFAULT_INVERTER_EFFICIENCY
 from custom_components.emhass_companion.models import (
     BatteryConfig,
     GridConfig,
@@ -29,8 +30,8 @@ T0 = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
 def test_hybrid_inverter_config_defaults_to_disabled():
     config = HybridInverterConfig.from_dict(None)
     assert config.enabled is False
-    assert config.efficiency_dc_ac == 1.0
-    assert config.efficiency_ac_dc == 1.0
+    assert config.efficiency_dc_ac == 0.97
+    assert config.efficiency_ac_dc == 0.97
 
 
 def test_ac_input_max_falls_back_to_ac_output_max_when_blank():
@@ -66,7 +67,7 @@ def test_ac_input_max_is_kept_when_genuinely_different():
 
 
 @pytest.mark.parametrize("stored_efficiency", [None, 0, 0.0])
-def test_efficiency_falls_back_to_one_when_blank_or_zero(stored_efficiency):
+def test_efficiency_falls_back_to_the_default_when_blank_or_zero(stored_efficiency):
     """A 0 efficiency would mean 100% conversion loss -- clearly never what a
     user meant by leaving the field unset."""
     data = {"hybrid_inverter": True}
@@ -74,8 +75,8 @@ def test_efficiency_falls_back_to_one_when_blank_or_zero(stored_efficiency):
         data["inverter_efficiency_dc_ac"] = stored_efficiency
         data["inverter_efficiency_ac_dc"] = stored_efficiency
     config = HybridInverterConfig.from_dict(data)
-    assert config.efficiency_dc_ac == 1.0
-    assert config.efficiency_ac_dc == 1.0
+    assert config.efficiency_dc_ac == DEFAULT_INVERTER_EFFICIENCY
+    assert config.efficiency_ac_dc == DEFAULT_INVERTER_EFFICIENCY
 
 
 def test_efficiency_is_kept_when_genuinely_set():
@@ -89,11 +90,11 @@ def test_efficiency_is_kept_when_genuinely_set():
 # --- BatteryConfig -------------------------------------------------------------
 
 
-def test_battery_cycle_costs_default_to_zero():
-    """A config entry stored before these fields existed must keep planning the
-    way it did, so the fallback has to be EMHASS's own default of no wear cost."""
+def test_battery_cycle_costs_default_to_priced_discharge_and_free_charge():
+    """Discharge carries the shipped throughput cost; charge stays free so the
+    same cycle is not paid for twice (it is already bought at the import price)."""
     config = BatteryConfig.from_dict({"use_battery": True, "capacity_wh": 25600})
-    assert config.weight_battery_discharge == 0.0
+    assert config.weight_battery_discharge == 0.02
     assert config.weight_battery_charge == 0.0
 
 
@@ -128,10 +129,13 @@ def test_battery_cycle_costs_survive_the_form_round_trip():
     assert config.soc_min == 0.10
 
 
-def test_battery_soc_and_stress_defaults_match_emhass():
+def test_battery_soc_and_stress_defaults():
+    """The deficit pair ships live -- it keeps the plan off the soc_min floor
+    without ever making a problem infeasible. The surplus pair and the stress
+    cost stay at EMHASS's own inert defaults."""
     config = BatteryConfig.from_dict({"use_battery": True})
-    assert config.soc_deficit_threshold == 0.40
-    assert config.soc_deficit_cost == 0.0
+    assert config.soc_deficit_threshold == 0.10
+    assert config.soc_deficit_cost == 0.05
     assert config.soc_surplus_threshold == 0.90
     assert config.soc_surplus_cost == 0.0
     assert config.stress_cost == 0.0
