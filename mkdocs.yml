@@ -69,6 +69,7 @@ nav:
       - Handing over control: handing_over_control.md
       - Inverter control: inverter_control.md
       - Data sources: data_sources.md
+      - Dynamic grid limits: grid_limits.md
       - Template additions: template_additions.md
       - Writing a profile: profiles.md
       - Inverter profile roadmap: inverter_profile_roadmap.md

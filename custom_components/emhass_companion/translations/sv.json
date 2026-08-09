@@ -154,6 +154,8 @@
         "data": {
           "grid_import_max_w": "Maximal effekt från nätet",
           "grid_export_max_w": "Maximal effekt till nätet",
+          "grid_import_limit_entity": "Sensor för importgräns (valfritt)",
+          "grid_export_limit_entity": "Sensor för exportgräns (valfritt)",
           "capacity_cost_per_kw": "Effektavgift (kapacitetsavgift)",
           "compute_curtailment": "Låt EMHASS optimera solcellsbegränsning",
           "optimization_time_step": "Tidsupplösning (minuter)",
@@ -163,6 +165,8 @@
         },
         "data_description": {
           "compute_curtailment": "Slår på EMHASS egen begränsning (inställningen compute_curtailment) och skickar den med varje körning, så den åsidosätter det som står i tillägget. Optimeraren får då kapa solproduktion den inte kan använda — planen får en begränsningskolumn, och en växelriktarprofil som stöder begränsning följer den. Av som standard, och bara meningsfull om något faktiskt kan agera på den: utan en växelriktarprofil som stöder begränsning utgår planen från att solel kapades som i verkligheten fortfarande går ut på nätet.",
+          "grid_import_limit_entity": "Lämna tomt om inte din användbara importgräns varierar. En sensor som anger gränsen i watt just nu används i stället för det fasta värdet ovan — för en trefasanslutning är det så du tar hänsyn till ojämn fasbelastning, eftersom det är säkringen på den värsta fasen som stoppar dig och den användbara totalen ligger under summan så snart faserna är obalanserade. Andra användningar: lastbalansering eller dynamisk huvudsäkring, eller en effektbegränsning från nätägaren. Sensorn kan bara sänka det fasta värdet, aldrig höja det, och det fasta värdet används så fort sensorn inte går att läsa. Den höjs också tillbaka till den effekt huset ändå väntas dra om den skulle hamna under den, eftersom ingen plan finns under det värdet.",
+          "grid_export_limit_entity": "Samma sak för export: en sensor som anger hur många watt du får mata ut just nu, använd i stället för det fasta värdet ovan och bara kapabel att sänka det. Är EMHASS begränsning avstängd, var försiktig med en gräns under ditt största solelöverskott — optimeraren har då ingenstans att göra av effekten och rapporterar problemet som olösbart.",
           "optimization_time_step": "Den tidsupplösning EMHASS planerar med. Matchar du din priskällas egen upplösning (till exempel 15 minuter för dagens Nord Pool-priser) fångas mest detalj; en grövre upplösning löser snabbare. Välj i listan eller skriv valfritt antal minuter.",
           "dayahead_fallback_time": "En fullständig dygnsplan byggs normalt om automatiskt så snart nya priser kommer. Den här tiden används bara som reserv om det aldrig sker.",
           "capacity_cost_per_kw": "Om ditt nätavtal debiterar den högsta effekt du tar ut, inte bara energin, ange det priset per kW här. Planen jämnar då ut sin värsta importtopp -- sprider ut laster och laddar ur batteriet över den -- i stället för att bara jaga billiga timmar. Debiteras en gång på toppen, inte per timme. 0 stänger av detta, vilket är standard."
@@ -275,6 +279,8 @@
         "data": {
           "grid_import_max_w": "Maximal effekt från nätet",
           "grid_export_max_w": "Maximal effekt till nätet",
+          "grid_import_limit_entity": "Sensor för importgräns (valfritt)",
+          "grid_export_limit_entity": "Sensor för exportgräns (valfritt)",
           "capacity_cost_per_kw": "Effektavgift (kapacitetsavgift)",
           "compute_curtailment": "Låt EMHASS optimera solcellsbegränsning",
           "optimization_time_step": "Tidsupplösning (minuter)",
@@ -284,6 +290,8 @@
         },
         "data_description": {
           "compute_curtailment": "Slår på EMHASS egen begränsning (inställningen compute_curtailment) och skickar den med varje körning, så den åsidosätter det som står i tillägget. Optimeraren får då kapa solproduktion den inte kan använda — planen får en begränsningskolumn, och en växelriktarprofil som stöder begränsning följer den. Av som standard, och bara meningsfull om något faktiskt kan agera på den: utan en växelriktarprofil som stöder begränsning utgår planen från att solel kapades som i verkligheten fortfarande går ut på nätet.",
+          "grid_import_limit_entity": "Lämna tomt om inte din användbara importgräns varierar. En sensor som anger gränsen i watt just nu används i stället för det fasta värdet ovan — för en trefasanslutning är det så du tar hänsyn till ojämn fasbelastning, eftersom det är säkringen på den värsta fasen som stoppar dig och den användbara totalen ligger under summan så snart faserna är obalanserade. Andra användningar: lastbalansering eller dynamisk huvudsäkring, eller en effektbegränsning från nätägaren. Sensorn kan bara sänka det fasta värdet, aldrig höja det, och det fasta värdet används så fort sensorn inte går att läsa. Den höjs också tillbaka till den effekt huset ändå väntas dra om den skulle hamna under den, eftersom ingen plan finns under det värdet.",
+          "grid_export_limit_entity": "Samma sak för export: en sensor som anger hur många watt du får mata ut just nu, använd i stället för det fasta värdet ovan och bara kapabel att sänka det. Är EMHASS begränsning avstängd, var försiktig med en gräns under ditt största solelöverskott — optimeraren har då ingenstans att göra av effekten och rapporterar problemet som olösbart.",
           "capacity_cost_per_kw": "Om ditt nätavtal debiterar den högsta effekt du tar ut, inte bara energin, ange det priset per kW här. Planen jämnar då ut sin värsta importtopp -- sprider ut laster och laddar ur batteriet över den -- i stället för att bara jaga billiga timmar. Debiteras en gång på toppen, inte per timme. 0 stänger av detta, vilket är standard."
         }
       },

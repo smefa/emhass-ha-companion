@@ -333,6 +333,12 @@ class PayloadInputs:
     the old pin-to-start behaviour (see build_payload)."""
     pv_live_w: float | None = None
     load_live_w: float | None = None
+    grid_import_limit_w: float | None = None
+    grid_export_limit_w: float | None = None
+    """Live readings of the optional grid-limit sensors, already fetched by the
+    coordinator. ``None`` means none is configured, or the one that is could
+    not be read -- either way the static limit in ``grid`` is used unchanged.
+    See ``resolve_grid_limit``."""
     mix_beta: float = 0.5
     cost_fun: str = DEFAULT_COST_FUN
     extra_settings: dict[str, Any] = field(default_factory=dict)
@@ -346,6 +352,56 @@ class PayloadResult:
     warnings: list[str] = field(default_factory=list)
     load_order: list[str] = field(default_factory=list)
     """Subentry ids in the order they map to EMHASS's ``P_deferrable{k}``."""
+
+
+def resolve_grid_limit(
+    live_w: float | None,
+    ceiling_w: float,
+    floor_w: float = 0.0,
+) -> float:
+    """The grid limit to send, given an optional live reading of it.
+
+    The static number configured on the grid step is the physical rating of
+    the connection, so a sensor may only ever lower it: a template with a
+    wrong fuse size or a stale unit can then make the plan needlessly cautious
+    but can never invite EMHASS to plan through a fuse. An absent reading
+    means no sensor is configured or it could not be read, and leaves the
+    static number untouched.
+
+    ``floor_w`` guards the other end. EMHASS reports an infeasible problem
+    rather than a small one when the limit falls below the load that has to be
+    served regardless -- the household baseline is not deferrable, and no
+    amount of battery is guaranteed to cover it -- so a limit derived from a
+    momentary reading is not allowed to drop below what the horizon already
+    says will be drawn. Clamped rather than rejected: a plan built against a
+    slightly optimistic limit still beats no plan at all, and the caller
+    reports the clamp.
+    """
+    if live_w is None:
+        return ceiling_w
+    return min(ceiling_w, max(live_w, min(floor_w, ceiling_w)))
+
+
+def _import_floor_w(inputs: PayloadInputs, horizon_end: datetime) -> float:
+    """The lowest import limit that can still serve the baseline house load.
+
+    Deferrable loads are deliberately not counted: they are what the limit is
+    supposed to be able to squeeze out. What must fit is the non-deferrable
+    forecast, taken as its peak over the horizon rather than its mean, since
+    EMHASS's limit binds per timestep.
+
+    Both sources are optional and neither is always present -- the load
+    profiles that let EMHASS build its own forecast hand us no series at all,
+    which is exactly when the live reading is the only thing there is to go on.
+    """
+    candidates = [0.0]
+    if inputs.load:
+        window = inputs.load.window(inputs.now, horizon_end)
+        if window:
+            candidates.append(max(window.values))
+    if inputs.load_live_w is not None:
+        candidates.append(inputs.load_live_w)
+    return max(candidates)
 
 
 def build_payload(inputs: PayloadInputs) -> PayloadResult:
@@ -470,8 +526,29 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
     # -- settings -------------------------------------------------------------
     payload.update(_battery_settings(inputs.battery))
     payload.update(_hybrid_inverter_settings(inputs.hybrid_inverter))
-    payload["maximum_power_from_grid"] = inputs.grid.import_max_w
-    payload["maximum_power_to_grid"] = inputs.grid.export_max_w
+    import_floor = _import_floor_w(inputs, horizon_end)
+    payload["maximum_power_from_grid"] = resolve_grid_limit(
+        inputs.grid_import_limit_w, inputs.grid.import_max_w, import_floor
+    )
+    # Export gets the same override with no floor of its own: nothing has to
+    # leave the property the way the house load has to be served, so a low
+    # limit only costs revenue -- except with EMHASS's own curtailment off,
+    # where surplus PV has nowhere else to go. That case is documented rather
+    # than guessed at, since the surplus depends on a PV forecast the limit
+    # sensor knows nothing about.
+    payload["maximum_power_to_grid"] = resolve_grid_limit(
+        inputs.grid_export_limit_w, inputs.grid.export_max_w
+    )
+    if (
+        inputs.grid_import_limit_w is not None
+        and inputs.grid_import_limit_w < import_floor <= inputs.grid.import_max_w
+    ):
+        warnings.append(
+            f"The grid import limit sensor read "
+            f"{inputs.grid_import_limit_w:.0f} W, below the "
+            f"{import_floor:.0f} W the house is forecast to draw anyway. Raised "
+            "to that value, since a lower limit has no feasible plan."
+        )
     # Demand charge on the horizon's peak import. Sent unconditionally rather
     # than from _battery_settings: EMHASS prices it off the grid variable, so
     # it must keep working for a plant with no battery at all, and that helper

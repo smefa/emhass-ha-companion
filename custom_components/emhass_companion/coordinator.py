@@ -822,6 +822,8 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             soc_final=end_soc.soc if end_soc else None,
             pv_live_w=self._read_pv_live(),
             load_live_w=self._read_load_live(),
+            grid_import_limit_w=self._read_grid_limit(config.grid.import_limit_entity, "import"),
+            grid_export_limit_w=self._read_grid_limit(config.grid.export_limit_entity, "export"),
             mix_beta=self.mix_beta,
             cost_fun=self.cost_fun,
             extra_settings=settings,
@@ -912,6 +914,55 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         if state is None or state.state in ("unknown", "unavailable", ""):
             return str(entity_id)
         return None
+
+    def _read_grid_limit(self, entity_id: str | None, direction: str) -> float | None:
+        """A live grid import/export limit, in watts, or None to use the static one.
+
+        Read fresh rather than averaged like ``_read_pv_live``: the sensors
+        this accepts are commonly templates over a house meter, and smoothing
+        one that already smooths itself would only add lag to a limit whose
+        whole point is to track the connection right now. Anyone feeding it a
+        noisy raw reading is better served by a statistics helper on their
+        side, where the window can match their own fuse's thermal behaviour.
+
+        Every failure resolves to None, which ``payload.resolve_grid_limit``
+        turns back into the configured static limit. A sensor that breaks must
+        not be able to stop the plan.
+        """
+        if not entity_id:
+            return None
+        state = self.hass.states.get(entity_id)
+        if state is None or state.state in ("unknown", "unavailable", ""):
+            _LOGGER.warning(
+                "Grid %s limit entity %s is unavailable; falling back to the "
+                "configured static limit",
+                direction,
+                entity_id,
+            )
+            return None
+        try:
+            value = float(state.state)
+        except ValueError:
+            _LOGGER.warning(
+                "Grid %s limit entity %s has a non-numeric state: %s",
+                direction,
+                entity_id,
+                state.state,
+            )
+            return None
+        if value < 0:
+            # Both limits are magnitudes in EMHASS. A negative reading means
+            # the sensor is signed the other way round, and passing it through
+            # would clamp the limit to zero on every run.
+            _LOGGER.warning(
+                "Grid %s limit entity %s reads a negative power (%s W); it "
+                "should report the limit as a positive number of watts",
+                direction,
+                entity_id,
+                value,
+            )
+            return None
+        return value
 
     def _read_pv_live(self) -> float | None:
         """PV power for blending into the MPC forecast, in watts.

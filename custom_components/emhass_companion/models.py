@@ -24,6 +24,8 @@ from .const import (
     CONF_CAPACITY_COST_PER_KW,
     CONF_COMPUTE_CURTAILMENT,
     CONF_END_SOC_MODE,
+    CONF_GRID_EXPORT_LIMIT_ENTITY,
+    CONF_GRID_IMPORT_LIMIT_ENTITY,
     CONF_HYBRID_INVERTER,
     CONF_INVERTER_AC_INPUT_MAX,
     CONF_INVERTER_AC_OUTPUT_MAX,
@@ -371,6 +373,13 @@ class GridConfig:
     setting: nothing is sent and EMHASS keeps whatever it has, which is the
     only way to avoid switching off an add-on-side setting nobody asked us to
     touch."""
+    import_limit_entity: str | None = None
+    export_limit_entity: str | None = None
+    """Sensors read on every run whose value replaces the matching static limit
+    above, for a connection whose usable limit moves. Never raises the static
+    number -- that stays the physical ceiling. Held here rather than beside
+    ``soc_entity`` on EmhassConfig so that everything the grid step collects
+    travels together into ``payload.resolve_grid_limit``."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> GridConfig:
@@ -382,6 +391,8 @@ class GridConfig:
             capacity_cost_per_kw=float(
                 data.get(CONF_CAPACITY_COST_PER_KW, DEFAULT_CAPACITY_COST_PER_KW)
             ),
+            import_limit_entity=data.get(CONF_GRID_IMPORT_LIMIT_ENTITY) or None,
+            export_limit_entity=data.get(CONF_GRID_EXPORT_LIMIT_ENTITY) or None,
             compute_curtailment=(
                 None if compute_curtailment is None else bool(compute_curtailment)
             ),

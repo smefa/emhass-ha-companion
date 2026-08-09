@@ -45,6 +45,8 @@ from .const import (
     CONF_EARLIEST_START,
     CONF_END_SOC_MODE,
     CONF_ENERGY_NEEDED,
+    CONF_GRID_EXPORT_LIMIT_ENTITY,
+    CONF_GRID_IMPORT_LIMIT_ENTITY,
     CONF_GROUP_LOAD_IDS,
     CONF_GROUP_MAX_POWER,
     CONF_GROUP_MUTUAL_EXCLUSION,
@@ -445,6 +447,11 @@ def _collect_grid(user_input: dict[str, Any]) -> dict[str, Any]:
         "grid_export_max_w": user_input["grid_export_max_w"],
         CONF_CAPACITY_COST_PER_KW: user_input[CONF_CAPACITY_COST_PER_KW],
         CONF_COMPUTE_CURTAILMENT: user_input[CONF_COMPUTE_CURTAILMENT],
+        # Absent when left blank (see _optional_blank), and stored as None
+        # rather than dropped so that clearing the field in the options flow
+        # actually clears it instead of leaving the old entity in place.
+        CONF_GRID_IMPORT_LIMIT_ENTITY: user_input.get(CONF_GRID_IMPORT_LIMIT_ENTITY) or None,
+        CONF_GRID_EXPORT_LIMIT_ENTITY: user_input.get(CONF_GRID_EXPORT_LIMIT_ENTITY) or None,
     }
 
 
@@ -1649,6 +1656,19 @@ def grid_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
             selector.NumberSelectorConfig(
                 min=0, max=100000, step=100, unit_of_measurement="W", mode="box"
             )
+        ),
+        # Live overrides for the two numbers above, for a connection whose
+        # usable limit is not constant -- most often an unbalanced three-phase
+        # service, where the fuse that binds is the worst phase's, not the sum.
+        # Not filtered on device_class="power" like soc_entity/pv_entity are:
+        # what belongs here is nearly always a template sensor the user wrote,
+        # and those are routinely declared without a device class, which would
+        # leave the picker looking empty for exactly the people who need it.
+        _optional_blank(CONF_GRID_IMPORT_LIMIT_ENTITY, defaults): selector.EntitySelector(
+            selector.EntitySelectorConfig(domain="sensor")
+        ),
+        _optional_blank(CONF_GRID_EXPORT_LIMIT_ENTITY, defaults): selector.EntitySelector(
+            selector.EntitySelectorConfig(domain="sensor")
         ),
         # Demand charge on the horizon's peak import, in currency per kW. Sits
         # with the grid limits rather than the battery because it prices grid

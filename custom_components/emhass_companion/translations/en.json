@@ -154,6 +154,8 @@
         "data": {
           "grid_import_max_w": "Maximum import power",
           "grid_export_max_w": "Maximum export power",
+          "grid_import_limit_entity": "Import limit sensor (optional)",
+          "grid_export_limit_entity": "Export limit sensor (optional)",
           "capacity_cost_per_kw": "Capacity (demand) charge",
           "compute_curtailment": "Let EMHASS optimise PV curtailment",
           "optimization_time_step": "Time resolution (minutes)",
@@ -163,6 +165,8 @@
         },
         "data_description": {
           "compute_curtailment": "Turns on EMHASS's own curtailment (its compute_curtailment setting), sent with every run so it overrides whatever the add-on has stored. The optimiser is then free to shed solar it cannot use — the plan gains a curtailment column, and an inverter profile that supports curtailment follows it. Off by default, and only worth turning on if something can actually act on it: with no curtailment-capable inverter profile the plan assumes solar was shed that in reality still flows to the grid.",
+          "grid_import_limit_entity": "Leave empty unless your usable import limit moves. A sensor giving the limit in watts right now is used in place of the fixed number above — for a three-phase connection that is how you account for uneven phase loading, since the fuse that stops you is the worst phase's and the usable total is below the sum whenever the phases are unbalanced. Other uses: a load-balancing or dynamic-capacity system, a grid operator curtailment order. The sensor can only lower the fixed limit, never raise it, and the fixed number is used whenever it cannot be read. It is also raised back to the power the house is forecast to draw anyway if it ever falls below that, because no plan exists below that value.",
+          "grid_export_limit_entity": "The same thing for export: a sensor giving the watts you may feed out right now, used in place of the fixed number above and only ever able to lower it. If EMHASS curtailment is off, be careful with a limit below your peak surplus solar — the optimiser then has nowhere to put that power and reports the problem as infeasible.",
           "optimization_time_step": "The step size EMHASS plans at. Matching your price source's own resolution (for example 15 minutes for current Nord Pool prices) captures the most detail; a coarser step solves faster. Pick from the list or type any number of minutes.",
           "dayahead_fallback_time": "A full day-ahead plan is normally rebuilt automatically as soon as new prices arrive. This time is only used as a backstop if that never happens.",
           "capacity_cost_per_kw": "If your network tariff bills the highest power you draw, not just the energy, enter that price per kW here. The plan then flattens its single worst import peak -- shifting loads apart and discharging the battery across it -- instead of only chasing cheap hours. Charged once on the peak, not per hour. 0 turns this off, which is the default."
@@ -275,6 +279,8 @@
         "data": {
           "grid_import_max_w": "Maximum import power",
           "grid_export_max_w": "Maximum export power",
+          "grid_import_limit_entity": "Import limit sensor (optional)",
+          "grid_export_limit_entity": "Export limit sensor (optional)",
           "capacity_cost_per_kw": "Capacity (demand) charge",
           "compute_curtailment": "Let EMHASS optimise PV curtailment",
           "optimization_time_step": "Time resolution (minutes)",
@@ -284,6 +290,8 @@
         },
         "data_description": {
           "compute_curtailment": "Turns on EMHASS's own curtailment (its compute_curtailment setting), sent with every run so it overrides whatever the add-on has stored. The optimiser is then free to shed solar it cannot use — the plan gains a curtailment column, and an inverter profile that supports curtailment follows it. Off by default, and only worth turning on if something can actually act on it: with no curtailment-capable inverter profile the plan assumes solar was shed that in reality still flows to the grid.",
+          "grid_import_limit_entity": "Leave empty unless your usable import limit moves. A sensor giving the limit in watts right now is used in place of the fixed number above — for a three-phase connection that is how you account for uneven phase loading, since the fuse that stops you is the worst phase's and the usable total is below the sum whenever the phases are unbalanced. Other uses: a load-balancing or dynamic-capacity system, a grid operator curtailment order. The sensor can only lower the fixed limit, never raise it, and the fixed number is used whenever it cannot be read. It is also raised back to the power the house is forecast to draw anyway if it ever falls below that, because no plan exists below that value.",
+          "grid_export_limit_entity": "The same thing for export: a sensor giving the watts you may feed out right now, used in place of the fixed number above and only ever able to lower it. If EMHASS curtailment is off, be careful with a limit below your peak surplus solar — the optimiser then has nowhere to put that power and reports the problem as infeasible.",
           "capacity_cost_per_kw": "If your network tariff bills the highest power you draw, not just the energy, enter that price per kW here. The plan then flattens its single worst import peak -- shifting loads apart and discharging the battery across it -- instead of only chasing cheap hours. Charged once on the peak, not per hour. 0 turns this off, which is the default."
         }
       },

@@ -26,6 +26,7 @@ from custom_components.emhass_companion.payload import (
     build_payload,
     in_window,
     operating_timesteps,
+    resolve_grid_limit,
     resolve_load_window,
     window_to_timesteps,
 )
@@ -527,6 +528,87 @@ def test_compute_curtailment_is_omitted_when_unset():
     """Sending False here would override an add-on-side setting the user never
     asked us to touch -- an unset entry must stay silent instead."""
     assert "compute_curtailment" not in build_payload(_inputs()).payload
+
+
+# --- live grid limits ---------------------------------------------------------
+
+
+def test_a_live_grid_limit_may_lower_the_configured_one():
+    assert resolve_grid_limit(6800.0, 11000.0) == 6800.0
+
+
+def test_a_live_grid_limit_may_never_raise_the_configured_one():
+    """The static number is the connection's physical rating. A sensor built on
+    the wrong fuse size may make the plan cautious; it must not be able to plan
+    through a fuse."""
+    assert resolve_grid_limit(20000.0, 11000.0) == 11000.0
+
+
+def test_no_live_reading_leaves_the_configured_limit_alone():
+    assert resolve_grid_limit(None, 11000.0, floor_w=3000.0) == 11000.0
+
+
+def test_a_live_grid_limit_is_floored_at_what_must_be_served():
+    """Below the load that flows regardless, EMHASS answers "infeasible"
+    instead of answering with a smaller plan."""
+    assert resolve_grid_limit(200.0, 11000.0, floor_w=3000.0) == 3000.0
+
+
+def test_the_floor_never_beats_the_ceiling():
+    """A house forecast above the connection's rating is a separate problem;
+    it must not raise the limit past what the connection can do."""
+    assert resolve_grid_limit(500.0, 4000.0, floor_w=9000.0) == 4000.0
+
+
+def test_a_live_import_limit_reaches_the_payload():
+    payload = build_payload(_inputs(grid_import_limit_w=6800.0)).payload
+    assert payload["maximum_power_from_grid"] == 6800.0
+
+
+def test_a_live_export_limit_reaches_the_payload():
+    payload = build_payload(_inputs(grid_export_limit_w=1500.0)).payload
+    assert payload["maximum_power_to_grid"] == 1500.0
+
+
+def test_grid_limits_fall_back_to_the_configured_numbers():
+    grid = GridConfig(import_max_w=11000.0, export_max_w=10000.0)
+    payload = build_payload(_inputs(grid=grid)).payload
+    assert payload["maximum_power_from_grid"] == 11000.0
+    assert payload["maximum_power_to_grid"] == 10000.0
+
+
+def test_the_import_floor_comes_from_the_forecast_peak():
+    """The peak, not the mean: EMHASS's limit binds one timestep at a time."""
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    load = Series(
+        [Point(now, 400.0), Point(now + HALF_HOUR, 4200.0), Point(now + 2 * HALF_HOUR, 700.0)]
+    )
+    result = build_payload(_inputs(load=load, grid_import_limit_w=100.0))
+    assert result.payload["maximum_power_from_grid"] == 4200.0
+    assert any("4200 W" in warning for warning in result.warnings)
+
+
+def test_the_import_floor_ignores_forecast_points_before_the_run():
+    """A load series commonly starts at local midnight; a peak that has already
+    happened says nothing about what the plan has to serve."""
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    load = Series([Point(now - HALF_HOUR, 9000.0), Point(now, 500.0)])
+    payload = build_payload(_inputs(load=load, grid_import_limit_w=800.0)).payload
+    assert payload["maximum_power_from_grid"] == 800.0
+
+
+def test_the_import_floor_uses_the_live_load_when_there_is_no_forecast():
+    """The load profiles that let EMHASS build its own forecast hand us no
+    series at all, which is exactly when this is the only floor available."""
+    payload = build_payload(_inputs(load_live_w=2500.0, grid_import_limit_w=900.0)).payload
+    assert payload["maximum_power_from_grid"] == 2500.0
+
+
+def test_an_unfloored_live_import_limit_is_not_reported():
+    """The warning marks a limit that could not be honoured, so a sensor doing
+    its job must not produce one on every run."""
+    result = build_payload(_inputs(load_live_w=2500.0, grid_import_limit_w=6800.0))
+    assert not any("import limit" in warning for warning in result.warnings)
 
 
 def test_battery_cycle_costs_are_omitted_with_no_battery():

@@ -161,6 +161,15 @@ CONF_INVERTER_EFFICIENCY_AC_DC: Final = "inverter_efficiency_ac_dc"
 
 CONF_GRID_IMPORT_MAX: Final = "grid_import_max_w"
 CONF_GRID_EXPORT_MAX: Final = "grid_export_max_w"
+# Optional sensors that override the two static limits above at run time, for a
+# connection whose usable limit is not a constant: an unbalanced three-phase
+# service (where the binding constraint is the worst phase's fuse, not the sum),
+# a dynamic-capacity or load-balancing system, a DSO curtailment order. Only
+# ever allowed to *lower* the static number, which stays as the physical
+# ceiling and as the fallback whenever the sensor cannot be read -- see
+# payload.resolve_grid_limit.
+CONF_GRID_IMPORT_LIMIT_ENTITY: Final = "grid_import_limit_entity"
+CONF_GRID_EXPORT_LIMIT_ENTITY: Final = "grid_export_limit_entity"
 # Demand (capacity) charge on the single highest import power over the horizon,
 # in currency per kW. A grid setting, not a battery one: EMHASS prices it off
 # `peak_import`, which exists whether or not a battery does -- deferrable loads

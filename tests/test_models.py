@@ -189,6 +189,30 @@ def test_compute_curtailment_is_read_from_stored_options():
     assert GridConfig.from_dict({"compute_curtailment": False}).compute_curtailment is False
 
 
+def test_grid_limit_sensors_are_unset_by_default():
+    grid = GridConfig.from_dict({})
+    assert grid.import_limit_entity is None
+    assert grid.export_limit_entity is None
+
+
+def test_grid_limit_sensors_are_read_from_stored_options():
+    grid = GridConfig.from_dict(
+        {
+            "grid_import_limit_entity": "sensor.import_limit",
+            "grid_export_limit_entity": "sensor.export_limit",
+        }
+    )
+    assert grid.import_limit_entity == "sensor.import_limit"
+    assert grid.export_limit_entity == "sensor.export_limit"
+
+
+def test_a_cleared_grid_limit_sensor_reads_back_as_none():
+    """The options flow stores a cleared field as an empty string on some
+    paths; an empty entity id would be looked up on every run and never found."""
+    grid = GridConfig.from_dict({"grid_import_limit_entity": ""})
+    assert grid.import_limit_entity is None
+
+
 def _series(*values: float, step_minutes: int = 30) -> Series:
     return Series(
         Point(T0 + timedelta(minutes=step_minutes * i), value) for i, value in enumerate(values)
