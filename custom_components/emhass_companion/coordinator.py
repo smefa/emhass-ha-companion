@@ -45,11 +45,9 @@ from .const import (
     LOAD_BOOTSTRAP_LOOKBACK,
     LOAD_FORECAST_METHOD_LIST,
     LOAD_FORECAST_METHOD_MLFORECASTER,
-    LOAD_FORECAST_METHOD_NAIVE,
     LOAD_FORECAST_METHOD_TYPICAL,
     ML_MIN_HISTORY_DAYS,
     MODE_AUTO,
-    NAIVE_FALLBACK_MIN_HISTORY,
     PROFILE_KEY_LOAD_SENSOR,
     PROFILE_KEY_PV_SOLCAST,
     PROFILE_KIND_LOAD,
@@ -88,6 +86,25 @@ _LOGGER = logging.getLogger(__name__)
 # that recorder history crossing ML_MIN_HISTORY_DAYS is noticed the same day.
 _ML_FIT_RETRY_COOLDOWN = timedelta(hours=1)
 _ML_STORE_VERSION = 1
+
+# How long the coordinator keeps building the load forecast itself after a run
+# that left that job to EMHASS failed.
+#
+# A request carrying no ``load_power_forecast`` is the one shape that sends
+# EMHASS back to Home Assistant for a day of history of its own accord (see
+# _load_forecast_fallback), and everything about that fetch -- which entities,
+# how much history, what it does when they are thin or missing -- lives in
+# EMHASS's own persisted configuration, where this integration can neither see
+# it nor fix it. When such a run fails there is therefore nothing to diagnose
+# from here and no reason to expect the next one to fare better, so the load
+# forecast comes back in-house until the cooldown lapses.
+#
+# An hour is several MPC cycles of running normally on our own series, while
+# still re-testing EMHASS's own path often enough that a transient fault costs
+# one degraded hour rather than lasting until the next restart. Each retry
+# costs exactly one failed run, which is what stops this masking a real
+# misconfiguration forever.
+_NO_LIST_RETRY_COOLDOWN = timedelta(hours=1)
 
 
 @dataclass(slots=True)
@@ -191,6 +208,15 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         self._ml_trained_sensor: str | None = None
         self._ml_last_attempt: datetime | None = None
         self._ml_fit_lock = asyncio.Lock()
+        # When a run that left the load forecast to EMHASS last failed, and
+        # whether the run currently in flight is one of those. Both are plain
+        # attributes rather than anything threaded through _build/_run because
+        # _run_lock already serialises runs end to end, so there is only ever
+        # one in flight to describe. In-memory only: after a restart the first
+        # run tries EMHASS's own path again, which is the right default for a
+        # fault that a restart may well have cleared.
+        self._no_list_run_failed_at: datetime | None = None
+        self._sent_load_list = True
         # One optimisation at a time. Runs arrive from four independent places
         # -- the MPC tick (via async_request_refresh), the day-ahead trigger,
         # the buttons and the services -- and a run is not a pure read: it
@@ -450,19 +476,37 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         async with self._run_lock:
             return await self._async_run(action, notify=notify)
 
+    def _note_failed_run(self) -> None:
+        """Record a failure that EMHASS's own load retrieval could be behind.
+
+        Only a run that sent no load series of its own qualifies: those are
+        the ones where EMHASS fetches a day of history itself, on entities and
+        settings this integration does not control. A run that carried its own
+        series had no such fetch to fail, so whatever went wrong there is not
+        something falling back could fix -- and arming the cooldown for it
+        would quietly disable EMHASS's forecaster over an unrelated fault.
+        """
+        if not self._sent_load_list:
+            self._no_list_run_failed_at = dt_util.utcnow()
+
     async def _async_run(self, action: str, *, notify: bool) -> EmhassData:
         try:
             data = await self._run(action)
         except ProfileError as err:
+            # Deliberately not counted against EMHASS's own load forecast
+            # below: a data source that could not be read is this side's
+            # problem, and the request never reached EMHASS at all.
             self._track_run_failed_issue(True, action, str(err))
             raise UpdateFailed(f"Data source error: {err}") from err
         except EmhassError as err:
+            self._note_failed_run()
             self._track_run_failed_issue(True, action, str(err))
             raise UpdateFailed(f"EMHASS error: {err}") from err
         except UpdateFailed as err:
             # Raised directly by _run() when EMHASS answers 200 but flags the
             # run itself as failed (last_run.status == "error"), rather than
             # rejecting the request outright.
+            self._note_failed_run()
             self._track_run_failed_issue(True, action, str(err))
             raise
 
@@ -703,6 +747,14 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             settings[EMHASS_CONF_LOAD_FORECAST_METHOD] = method
             if load_bootstrap is not None:
                 load = load_bootstrap
+
+        # Whether this request will carry a load series at all -- read off the
+        # same emptiness test payload.build_payload uses to decide whether to
+        # emit ``load_power_forecast``, so the two can never disagree about
+        # what was actually sent. A profile that supplies its own series
+        # (forecast from an entity) counts here exactly like a bootstrap one:
+        # what matters to EMHASS is only whether the key is present.
+        self._sent_load_list = bool(load)
 
         # Sourceless loads (no power sensor, no control entity) get their
         # accumulator advanced from the *previous* run's plan before it is
@@ -960,12 +1012,11 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         """Whether ``entity_id``'s recorder history reaches back ``lookback``.
 
         Mirrors exactly what EMHASS's own forecast-model-fit (for
-        :data:`ML_MIN_HISTORY_DAYS`) or "naive" method (for
-        :data:`NAIVE_FALLBACK_MIN_HISTORY`) would see when it pulls the same
-        sensor's history through this same Home Assistant's history API -- so
-        this never judges "ready" when either would not be, or vice versa (a
-        purge policy shorter than the lookback would make them fail the same
-        way regardless of what this reports).
+        :data:`ML_MIN_HISTORY_DAYS`) would see when it pulls the same sensor's
+        history through this same Home Assistant's history API -- so this
+        never judges "ready" when the fit would not be, or vice versa (a purge
+        policy shorter than the lookback would make them fail the same way
+        regardless of what this reports).
         """
         try:
             instance = get_instance(self.hass)
@@ -1033,27 +1084,40 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
     ) -> tuple[str, Series | None]:
         """What to actually send instead of "mlforecaster" for this run.
 
-        EMHASS's own "naive" method (repeats the sensor's actual last day) is
-        used once the sensor has :data:`NAIVE_FALLBACK_MIN_HISTORY` of real
-        history -- below that it hard-errors rather than degrading (see
-        :data:`NAIVE_FALLBACK_MIN_HISTORY`'s definition), so this builds an
-        equivalent series itself instead: whatever real readings the sensor
-        already has, repeated a day at a time (:meth:`Series.
+        Always a series this integration builds itself: whatever real readings
+        the sensor already has, repeated a day at a time (:meth:`Series.
         extended_with_previous_day`) to cover the horizon, or -- for a sensor
         with no history at all yet -- its single current live reading held
-        flat across the whole horizon. Supplying a load series at all makes
-        EMHASS use it verbatim regardless of the method named here (see
-        payload.build_payload), so the method returned in that case is
+        flat across it. Supplying a load series at all makes EMHASS use it
+        verbatim regardless of the method named here (see
+        payload.build_payload), so the method returned alongside it is
         informational only.
+
+        Deliberately *not* EMHASS's own "naive" method, at any amount of
+        history. Naive means sending no series at all, and a request carrying
+        no ``load_power_forecast`` is precisely the one shape that makes
+        ``naive-mpc-optim`` fetch a day of history from Home Assistant itself
+        (EMHASS skips that fetch only when the load forecast is a list --
+        ``_get_naive_mpc_history`` in its command_line.py). What that fetch
+        asks for, and how it copes when the answer is thin, is decided by
+        EMHASS's own persisted configuration, which this integration neither
+        controls nor can inspect -- and a sensor young enough to still be on
+        this fallback is exactly the one likeliest to come back too sparse to
+        resample onto a full horizon.
+
+        So the rung buys nothing and risks the run: "naive" is EMHASS
+        repeating the last recorded day of the same sensor, out of the same
+        recorder :meth:`_recent_load_series` reads, which is what is computed
+        here anyway. Doing it in-house keeps the request self-contained all
+        the way up to a trained mlforecaster -- and a fallback that needs the
+        rest of the system to be healthy is not a fallback.
 
         Falls all the way back to EMHASS's own "typical" only when there is
         no sensor configured, or the sensor has never reported a usable
-        reading at all.
+        reading at all -- there is nothing left to build a series from.
         """
         if not sensor:
             return LOAD_FORECAST_METHOD_TYPICAL, None
-        if await self._has_history_since(sensor, NAIVE_FALLBACK_MIN_HISTORY):
-            return LOAD_FORECAST_METHOD_NAIVE, None
 
         recent = await self._recent_load_series(sensor, now)
         if not recent:
@@ -1086,7 +1150,22 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         less than :data:`ML_MIN_HISTORY_DAYS` of history (most commonly a
         sensor "Create a house load sensor" only just built) is left alone
         until it has enough -- there is nothing to train on yet.
+
+        Also falls back, whatever the configured method, for
+        :data:`_NO_LIST_RETRY_COOLDOWN` after a run that left the forecast to
+        EMHASS failed -- see :meth:`_note_failed_run`. That check comes first
+        because it is not about mlforecaster in particular: "typical" and
+        "naive" send no series either, and fail the same way for the same
+        reason.
         """
+        if (
+            self._no_list_run_failed_at is not None
+            and now - self._no_list_run_failed_at < _NO_LIST_RETRY_COOLDOWN
+        ):
+            return await self._load_forecast_fallback(
+                settings.get(EMHASS_CONF_SENSOR_LOAD), now, horizon_end
+            )
+
         method = settings.get(EMHASS_CONF_LOAD_FORECAST_METHOD)
         if method != LOAD_FORECAST_METHOD_MLFORECASTER:
             return method, None

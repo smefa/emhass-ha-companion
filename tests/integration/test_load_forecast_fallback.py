@@ -3,18 +3,18 @@
 EMHASS's own "typical" load forecast method, for a sensor mlforecaster has
 never been fit against, reads whatever a stale or mismatched reference pickle
 happens to hold -- not this household's own consumption, and often far off
-from it. EMHASS's own "naive" method is a much better match (it repeats the
-sensor's actual last day), but it hard-errors instead of degrading when there
-is less than a full forecast horizon of retrieved history to slice
-(``df.iloc[-forecast_horizon:]`` assigned straight into a frame shaped for the
-full horizon).
+from it. Its "naive" method describes the household properly (it repeats the
+sensor's actual last day), but reaching it means sending no load series, which
+is the one request shape that makes EMHASS fetch a day of history from Home
+Assistant itself, on terms out of this integration's hands.
 
-``_load_forecast_fallback`` is the tier selection between the two, plus a
-third rung below both: a series built locally out of whatever real readings
-the sensor already has (or, lacking any at all, its single current live
-reading), repeated forward to cover the horizon. See
-test_ml_forecaster_fallback.py for how this plugs into the mlforecaster
-readiness check that calls it.
+So ``_load_forecast_fallback`` builds the series here instead, out of whatever
+real readings the sensor already has (or, lacking any at all, its single
+current live reading), repeated forward to cover the horizon -- which is what
+"naive" would have computed from the same recorder anyway. EMHASS's "typical"
+is left as the last rung, for a sensor that does not exist or has never
+reported. See test_ml_forecaster_fallback.py for how this plugs into the
+mlforecaster readiness check that calls it.
 """
 
 from __future__ import annotations
@@ -76,23 +76,35 @@ async def test_no_sensor_falls_all_the_way_back_to_typical(hass: HomeAssistant) 
     assert bootstrap is None
 
 
-async def test_a_full_day_of_history_prefers_naive(hass: HomeAssistant) -> None:
-    coordinator = await _coordinator(hass)
+async def test_a_full_day_of_history_is_still_sent_as_our_own_series(
+    hass: HomeAssistant,
+) -> None:
+    """Ample history must not hand the job back to EMHASS's "naive".
+
+    Naive means sending no load series, and a request with no load series
+    sends naive-mpc-optim back to Home Assistant for the history itself --
+    including PV and battery sensor names out of EMHASS's own config that this
+    integration never sets. Where those do not exist, EMHASS answers with a
+    bare 500 and the fallback fails exactly when it is needed.
+    """
+    day = Series(
+        [Point(_NOW - timedelta(hours=24) + timedelta(minutes=15 * i), 400.0) for i in range(96)]
+    )
 
     with (
-        patch.object(
-            coordinator, "_has_history_since", AsyncMock(return_value=True)
-        ) as has_history,
-        patch.object(coordinator, "_recent_load_series") as recent,
+        patch.object(coordinator := await _coordinator(hass), "_has_history_since") as has_history,
+        patch.object(coordinator, "_recent_load_series", AsyncMock(return_value=day)),
     ):
         method, bootstrap = await coordinator._load_forecast_fallback(
             LOAD_SENSOR, _NOW, _HORIZON_END
         )
 
-    assert method == "naive"
-    assert bootstrap is None
-    has_history.assert_awaited_once()
-    recent.assert_not_called()
+    assert method == "list"
+    assert bootstrap is not None
+    assert bootstrap.covers(_HORIZON_END)
+    # Not consulted at all any more: what the sensor has is what gets repeated
+    # forward, however much or little of it there is.
+    has_history.assert_not_called()
 
 
 async def test_partial_history_is_repeated_forward_as_a_bootstrap_series(

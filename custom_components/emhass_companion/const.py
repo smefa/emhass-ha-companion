@@ -55,7 +55,6 @@ EMHASS_CONF_LOAD_FORECAST_METHOD: Final = "load_forecast_method"
 # hard crash inside EMHASS's skforecast layer, not a soft error.
 EMHASS_CONF_TIME_STEP: Final = "optimization_time_step"
 LOAD_FORECAST_METHOD_MLFORECASTER: Final = "mlforecaster"
-LOAD_FORECAST_METHOD_NAIVE: Final = "naive"
 LOAD_FORECAST_METHOD_TYPICAL: Final = "typical"
 LOAD_FORECAST_METHOD_LIST: Final = "list"
 
@@ -67,13 +66,7 @@ LOAD_FORECAST_METHOD_LIST: Final = "list"
 # guaranteed-failing request.
 ML_MIN_HISTORY_DAYS: Final = 9
 
-# Below this much real recorder history, EMHASS's own "naive" load forecast
-# method hard-errors instead of degrading -- it slices exactly one horizon's
-# worth of rows out of its own retrieved history (`df.iloc[-forecast_horizon:]`)
-# and crashes on a shape mismatch if there are fewer. Below the floor, the
-# coordinator builds its own bootstrap series instead of asking for "naive".
-NAIVE_FALLBACK_MIN_HISTORY: Final = timedelta(hours=24)
-# How far back to pull real history when building that bootstrap series --
+# How far back to pull real history when building the bootstrap load series --
 # long enough that repeating "the same time a day ago" (Series.
 # extended_with_previous_day) has a real point to copy across a horizon of
 # up to two days.
@@ -668,9 +661,9 @@ ISSUE_RUN_FAILED: Final = "run_failed"
 # degrades safely by assuming zero PV where the forecast ends.
 ISSUE_PV_TAIL_SHORT: Final = "pv_tail_short"
 # The load profile wants mlforecaster but it has not been confirmed trained
-# for the currently configured sensor yet -- runs use "naive" (or a live
-# -reading bootstrap, below NAIVE_FALLBACK_MIN_HISTORY) meanwhile. Clears
-# once an auto- or button-triggered fit against that sensor succeeds.
+# for the currently configured sensor yet -- runs carry a load series built
+# from the sensor's own recorded history meanwhile. Clears once an auto- or
+# button-triggered fit against that sensor succeeds.
 ISSUE_ML_FORECASTER_NOT_READY: Final = "ml_forecaster_not_ready"
 
 # Solcast's day sensors are named today / tomorrow / day_3..day_7 -- "tomorrow"
