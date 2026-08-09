@@ -480,6 +480,12 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
 
     async def _run(self, action: str) -> EmhassData:
         inputs, built = await self._build(action)
+        if (entity_id := self._unreadable_load_sensor(action, built.payload)) is not None:
+            raise UpdateFailed(
+                f"Load sensor {entity_id} is unavailable, so EMHASS has nothing "
+                "to build a load forecast from. Check the integration that "
+                "provides it."
+            )
         last_run, plan = await self.client.async_optimize(action, built.payload)
 
         if last_run.status == "error":
@@ -826,6 +832,34 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
                 state.state,
             )
             return None
+
+    def _unreadable_load_sensor(self, action: str, payload: dict[str, Any]) -> str | None:
+        """The load sensor EMHASS could not read this run, or None if it can.
+
+        Every load method but ``list`` leaves EMHASS to fetch
+        ``sensor_power_load_no_var_loads`` itself, and an MPC run blends that
+        reading into its own first forecast step (see ``build_payload``). With
+        the entity unavailable that blend is NaN, which EMHASS does not guard:
+        it fails inside its forecaster with "cannot convert float NaN to
+        integer" and answers 500 with an HTML error page naming neither the
+        sensor nor the reason. The entity is ours to name, so the run stops
+        here instead. The plan in hand is kept either way -- the difference is
+        that this way the repair says which sensor to go and fix.
+
+        Checked against the built payload rather than the configured profile
+        so that what is verified is exactly what would have been sent.
+        """
+        if action != ACTION_MPC:
+            return None
+        if payload.get(EMHASS_CONF_LOAD_FORECAST_METHOD) == LOAD_FORECAST_METHOD_LIST:
+            return None
+        entity_id = payload.get(EMHASS_CONF_SENSOR_LOAD)
+        if not entity_id:
+            return None
+        state = self.hass.states.get(entity_id)
+        if state is None or state.state in ("unknown", "unavailable", ""):
+            return str(entity_id)
+        return None
 
     def _read_pv_live(self) -> float | None:
         """PV power for blending into the MPC forecast, in watts.
