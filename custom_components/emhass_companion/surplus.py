@@ -284,26 +284,41 @@ def allocate(
     ``reserved`` is what something outside every spec here has already
     claimed from the same series -- currently just the battery's own charge
     toward its target (see ``battery_reserved_series``). It narrows how much
-    *energy* a slot can still give a surplus load, but never whether the slot
-    belongs to the window at all: a slot's membership in the block, and the
-    window sent to EMHASS, are decided from the *gross* series alone, exactly
-    as without ``reserved``. Otherwise the battery would be back to gating
-    *when* a surplus load may run, not just how much of a claimed slot is left
-    over for it -- the bug ``surplus_series`` exists to avoid (see
-    surplus_loads.md).
+    *energy* a qualifying slot can still give a surplus load, and nothing
+    else: it decides neither the block, nor the window, nor whether a slot
+    qualifies in the first place. Those are read off the sun -- ``gross``, and
+    what the higher-priority surplus loads have left of it. Otherwise the
+    battery would be back to gating *when* a surplus load may run, not just
+    how much of a claimed slot is left over for it -- the bug
+    ``surplus_series`` exists to avoid (see surplus_loads.md).
     """
     step_hours = step.total_seconds() / 3600
     if step_hours <= 0:
         return {}
 
     reserved_at = {point.time: point.value for point in reserved} if reserved else {}
-    # [time, gross, net]: gross alone decides block membership and the window;
-    # net -- gross minus whatever is already reserved -- is what a spec may
-    # actually draw and count towards its energy. Each load consumes from its
-    # own ``net`` column in turn, mutated in place.
+    # [time, gross, available, reserved]: three claims on one slot, kept apart
+    # on purpose rather than collapsed into a single net figure.
+    #
+    # ``gross`` is the spare sun itself, and decides block membership and the
+    # window. ``available`` is what is left of it once the higher-priority
+    # surplus loads have taken their draw -- mutated in place as each spec is
+    # served, because another load running really does empty the slot -- and
+    # decides whether a slot qualifies for this one. ``reserved`` is the
+    # battery's claim on the same slot, and caps only how much energy a
+    # qualifying slot can credit.
+    #
+    # Keeping the battery out of the qualification test is what stops the
+    # budget oscillating between cycles. The reservation is read from the
+    # previous plan, and that plan charged the battery on precisely the PV this
+    # load did not take -- so once the load is in the plan, gross minus the
+    # reservation collapses to the load's own draw, which by construction never
+    # clears its own ``run_floor_w + headroom_w``. Gating on that figure
+    # switched the load off every time it switched on: budget, run, collapse to
+    # zero, battery takes the block back, full budget again, one MPC cycle
+    # apart, forever.
     remaining = [
-        [point.time, point.value, max(0.0, point.value - reserved_at.get(point.time, 0.0))]
-        for point in series
+        [point.time, point.value, point.value, reserved_at.get(point.time, 0.0)] for point in series
     ]
     budgets: dict[str, SurplusBudget] = {}
 
@@ -339,7 +354,7 @@ def allocate(
         window_first: datetime | None = None
         window_last: datetime | None = None
         for entry in remaining:
-            when, gross, _ = entry
+            when, gross, _, _ = entry
             if gross < spec.run_floor_w:
                 if not started:
                     continue
@@ -368,13 +383,18 @@ def allocate(
         # hours needed and overstates the power EMHASS may use for them, which
         # trades a short near-ceiling burst -- and the import it causes -- for
         # what should have been a longer run spread across the whole window.
-        # The ceiling itself is sized from ``net``: what is left after the
-        # battery's own claim is the real limit on what this load can draw,
-        # even in a gross-qualifying slot.
+        # The ceiling itself is sized from what a qualifying slot can actually
+        # hand over -- after the higher-priority loads and after the battery's
+        # claim -- because that is the real limit on what this load can draw,
+        # however strong the sun in that slot was.
         nominal_w = spec.nominal_w
         if not spec.semi_continuous:
             qualifying_peak = max(
-                (net for _, gross, net in block if gross >= threshold),
+                (
+                    max(0.0, available - reserve)
+                    for _, _, available, reserve in block
+                    if available >= threshold
+                ),
                 default=0.0,
             )
             if qualifying_peak > 0:
@@ -394,26 +414,40 @@ def allocate(
         credit_wh = 0.0
         steps = 0
         # What each qualifying slot can hand *this* load, in order: the draw
-        # already computed below, which is the slot's own net clipped to the
-        # load's ceiling. Kept separately from ``credit_wh`` because that is
-        # the aggregate credit, deliberately uncapped by what any one slot can
-        # deliver (see above) -- the start-asap rule needs the physical figure,
-        # and needs it before ``entry[2]`` is debited.
+        # already computed below, which is what the slot can still deliver
+        # clipped to the load's ceiling. Kept separately from ``credit_wh``
+        # because that is the aggregate credit, deliberately uncapped by what
+        # any one slot can deliver (see above) -- the start-asap rule needs the
+        # physical figure, and needs it before ``entry[2]`` is debited.
         deliverable: list[tuple[datetime, float]] = []
 
         for entry in block:
-            when, _, net = entry
-            if net < threshold:
+            when, _, available, reserve = entry
+            # The sun test, against what the higher-priority loads left behind.
+            # ``headroom_w`` is margin against the *forecast* being wrong, so it
+            # belongs on the slot itself and not on whatever survives the
+            # battery's claim below -- measuring a forecast margin against a
+            # residual the load's own draw is already inside of is what made
+            # this oscillate (see ``remaining`` above).
+            if available < threshold:
                 continue
 
-            draw = nominal_w if spec.semi_continuous else min(net, nominal_w)
+            # ...and the delivery test, against what the battery leaves. A slot
+            # the battery has taken entirely credits nothing and counts for
+            # nothing -- but it has disqualified neither the slots around it nor
+            # the window, and it is not claimed on this load's behalf either.
+            usable = max(0.0, available - reserve)
+            if usable <= 0:
+                continue
+
+            draw = nominal_w if spec.semi_continuous else min(usable, nominal_w)
             if draw <= 0:
                 continue
 
-            credit_wh += net * step_hours
+            credit_wh += usable * step_hours
             steps += 1
             deliverable.append((when, draw * step_hours))
-            entry[2] = max(0.0, net - draw)
+            entry[2] = max(0.0, available - draw)
 
         # However generous the block, this load can never be asked to run
         # more hours than the qualifying span itself covers -- inclusive of
@@ -442,6 +476,36 @@ def allocate(
         )
         hours = hours_from_block if cap_hours is None else min(hours_from_block, cap_hours)
         energy_wh = hours * nominal_w
+
+        # Below one timestep, there is no run to ask for.
+        #
+        # EMHASS can only place a load in whole timesteps, and
+        # ``payload.operating_timesteps`` floors any non-zero request at one --
+        # "run this for six minutes" turning into "never run" being the worse
+        # answer there. So a budget under a single step's worth of energy does
+        # not buy a shorter run: it buys a *full* step at nominal power, of
+        # which only the fraction below is backed by surplus and the rest is
+        # imported. A load asking for 100 Wh gets a 212 Wh step.
+        #
+        # Which is precisely what a surplus load exists not to do, and the
+        # choice here is only ever between one step of partial import and
+        # nothing at all.
+        #
+        # Only for a budget the *block* sized, though. When ``max_energy_wh``
+        # is what binds, the number came from the user -- "put 300 Wh into the
+        # car" -- and answering a small ask with nothing at all is not this
+        # function's call to make; payload.operating_timesteps already warns
+        # about the rounding. Tested the same way the modulation margin tests
+        # it, so a cap landing just under a step behaves the same in both.
+        #
+        # The window is deliberately left set, exactly as for a block the
+        # battery reserved outright -- the sun really was up, there simply was
+        # not enough of it left over to be worth a timestep. ``is_empty`` reads
+        # off ``hours``, so the load is parked either way.
+        cap_binds = cap_hours is not None and cap_hours < hours_from_block
+        if not cap_binds and 0 < hours < step_hours:
+            hours = 0.0
+            energy_wh = 0.0
 
         # "Start as early as possible" narrows the *window* and nothing else.
         # The budget above is already "however much the surplus supports"; all

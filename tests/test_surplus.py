@@ -381,9 +381,11 @@ def test_reservation_narrows_the_energy_but_not_the_window():
 
     assert budget.window_start == START
     assert budget.window_end == START + 5 * STEP
-    # Net available is 500, 500, 3000, 3000 -- only the last two clear the
-    # 800 W floor.
-    assert budget.steps == 2
+    # All four qualify -- qualifying is about the sun, and the sun cleared the
+    # floor in every one of them. The two reserved-heavy slots simply credit
+    # 500 W each instead of 3000: 1750 Wh in total, capped back to the 1 h the
+    # span has room for.
+    assert budget.steps == 4
     assert budget.energy_wh == 800.0
     assert budget.hours == 1.0
 
@@ -408,8 +410,23 @@ def test_full_reservation_empties_the_budget_but_keeps_the_window():
 
 
 def test_reservation_is_taken_off_before_priority_sharing():
-    """The battery's claim comes off the top, before any surplus load --
-    including the highest-priority one -- gets to see the series."""
+    """The battery's claim comes off every surplus load's energy, in turn.
+
+    The two claims on a slot are not the same kind of claim. A higher-priority
+    load's draw genuinely empties the slot, so it is what the next load's
+    qualification is measured against; the battery's reservation only limits
+    how much a slot that already qualifies can hand over.
+
+    So the second load is not shut out by the reservation here -- 200 W a slot
+    is still spare, and it is credited exactly that: 100 Wh across the two
+    slots. What it must not see is the 800 W the first load took.
+
+    It still ends up empty, but for the other reason and one step further on:
+    100 Wh is under a single timestep's worth at its 800 W, and EMHASS cannot
+    run a load for part of a step (see the sub-step floor in ``allocate``).
+    The distinction is visible in ``steps``, which still counts the two slots
+    that genuinely qualified.
+    """
     budgets = allocate(
         _series(3000, 3000),
         [_spec(subentry_id="first"), _spec(subentry_id="second")],
@@ -417,11 +434,84 @@ def test_reservation_is_taken_off_before_priority_sharing():
         reserved=_series(2000, 2000),
     )
 
-    # Net is 1000, 1000 -- enough for one 800 W load to clear the floor twice,
-    # leaving 200, 200 for the next in line, which is below its own floor.
+    # 3000 gross, 2000 of it the battery's: 1000 a slot for the first load,
+    # which draws 800 and leaves 2200 -- 200 of it still unreserved.
     assert budgets["first"].steps == 2
-    assert budgets["second"].steps == 0
+    assert budgets["first"].energy_wh == 400.0
+    assert budgets["second"].steps == 2
+    assert budgets["second"].energy_wh == 0.0
     assert budgets["second"].is_empty
+
+
+def test_a_budget_under_one_timestep_is_no_budget_at_all():
+    """EMHASS cannot run a load for part of a timestep.
+
+    ``payload.operating_timesteps`` floors any non-zero ask at one whole step,
+    so a sub-step budget does not buy a shorter run -- it buys a full step at
+    nominal power, with only the fraction below it backed by surplus and the
+    rest imported. 100 Wh asked of an 800 W load is a 200 Wh step.
+    """
+    budget = allocate(
+        _series(3000, 3000, 3000, 3000),
+        [_spec()],
+        STEP,
+        # 100 W a slot left over: 100 Wh across the four, an eighth of a step.
+        reserved=_series(2900, 2900, 2900, 2900),
+    )["pool"]
+
+    assert budget.hours == 0.0
+    assert budget.energy_wh == 0.0
+    assert budget.is_empty
+    # The sun was up and the slots did qualify -- there was just nothing left
+    # of them worth a timestep, which is the same thing a fully reserved block
+    # reports.
+    assert budget.steps == 4
+    assert budget.window_start == START
+
+
+def test_the_sub_step_floor_never_overrides_an_energy_cap():
+    """A cap is a number the user typed, and a small one is still an answer.
+
+    Only a *block*-derived budget is floored: "the sun offered you a fifth of
+    a timestep" is worth nothing, but "put 300 Wh into the car" is an
+    instruction, and payload.operating_timesteps already warns about rounding
+    it up to a whole step.
+    """
+    budget = allocate(_series(3000, 3000, 3000, 3000), [_spec(max_energy_wh=100.0)], STEP)["pool"]
+
+    assert budget.energy_wh == 100.0
+    assert budget.hours == 0.125
+    assert not budget.is_empty
+
+
+def test_a_load_already_in_the_plan_keeps_its_budget():
+    """The fixed point the reservation used to oscillate around.
+
+    ``battery_reserved_series`` is read from a plan the load was *in*, and that
+    plan charged the battery on exactly the PV the load did not take -- so
+    every slot the load is running in comes back as "gross minus the battery"
+    == the load's own draw, and never more. Measuring that residual against the
+    load's own floor plus headroom disqualified every one of those slots, so
+    the budget collapsed to zero the cycle after any budget at all, the battery
+    reclaimed the block, and the cycle after that handed back the full budget
+    again.
+
+    The budget a running load derives from its own plan must therefore be the
+    one it already has.
+    """
+    spec = _spec(nominal_w=800.0, run_floor_w=800.0, headroom_w=300.0)
+    gross = _series(3000, 3000, 3000, 3000)
+    # The plan that budget produced: 800 W to the load, the rest to the battery.
+    reserved = _series(2200, 2200, 2200, 2200)
+
+    settled = allocate(gross, [spec], STEP, reserved=reserved)["pool"]
+
+    assert settled.steps == 4
+    assert settled.hours == 1.0
+    assert settled.energy_wh == 800.0
+    # ...and it is genuinely a fixed point: feeding the same plan back gives
+    # the same answer rather than drifting a step at a time.
+    assert allocate(gross, [spec], STEP, reserved=reserved)["pool"] == settled
 
 
 # --- energy cap ---------------------------------------------------------------
