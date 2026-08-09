@@ -114,20 +114,35 @@ function formatCountdown(ms) {
 /* --------------------------------------------------------------- discovery */
 
 /**
- * Find this integration's entities.
+ * Find this integration's entities, keyed by translation key.
  *
- * Matching on the entity registry's platform rather than on entity_id
- * prefixes, because entity ids are renameable and a rename should not
- * silently empty the card.
+ * Not by entity id: an entity id is built from the entity's translated name,
+ * so on a Swedish install -- a translation this repo ships itself --
+ * `should_run` is `binary_sensor.<load>_ska_kora`, and a user renaming an
+ * entity breaks the match the same way.
+ *
+ * Not by unique_id either, however stable it looks from the Python side.
+ * `hass.entities` is the registry's *display* collection, delivered by
+ * `config/entity_registry/list_for_display`, and that payload carries only
+ * entity_id, device_id, platform, translation_key and a few display fields
+ * (`ei`, `di`, `pl`, `tk`, ...). There is no unique_id in it at all, so keying
+ * on one silently matched nothing and left both cards empty on every install.
+ *
+ * The translation key is the only identifier here that is both stable across
+ * renames and languages *and* actually sent to the frontend. It is what
+ * `_attr_translation_key` sets, so it stays in step with strings.json.
  */
 function findEntities(hass) {
+  // Only the hub's own entities: a load's translation keys are scoped to its
+  // device, not to this flat map, so including them would let one load's
+  // entity shadow a hub entity that happens to share a key.
+  const loadDevices = new Set(findLoads(hass).map((load) => load.id));
   const found = {};
   const registry = hass.entities || {};
   for (const [entityId, entry] of Object.entries(registry)) {
     if (entry.platform !== PLATFORM) continue;
-    const uid = entry.unique_id || "";
-    const key = uid.split("_").slice(1).join("_") || entityId;
-    found[key] = entityId;
+    if (entry.device_id && loadDevices.has(entry.device_id)) continue;
+    if (entry.translation_key) found[entry.translation_key] = entityId;
   }
   return found;
 }
@@ -135,14 +150,11 @@ function findEntities(hass) {
 /**
  * Entities of this integration grouped by their device (one per load).
  *
- * Each load's `entities` is a map of unique_id key -> entity id, for the same
- * reason findEntities keys on unique_id: a load entity's unique_id is
- * `{entry_id}_{subentry_id}_{key}`, and only that trailing key is stable.
- * The entity *id* is built from the entity's translated name, so on a Swedish
- * install `should_run` is `binary_sensor.<load>_ska_kora` -- matching English
- * fragments of it found nothing at all, and a user renaming an entity broke it
- * the same way. Neither entry_id nor subentry_id is a ULID containing an
- * underscore, so the key is everything from the third segment on.
+ * Each load's `entities` is a map of translation key -> entity id, for the
+ * same reason findEntities uses one. Note that two of a load's keys are
+ * namespaced away from the hub's in strings.json -- `enabled` is
+ * `load_enabled` and `requested` is `load_requested` -- so those are the names
+ * to look them up by here.
  */
 function findLoads(hass) {
   const devices = hass.devices || {};
@@ -157,8 +169,9 @@ function findLoads(hass) {
     if (!loads.has(entry.device_id)) {
       loads.set(entry.device_id, { id: entry.device_id, name, entities: {} });
     }
-    const key = (entry.unique_id || "").split("_").slice(2).join("_");
-    if (key) loads.get(entry.device_id).entities[key] = entityId;
+    if (entry.translation_key) {
+      loads.get(entry.device_id).entities[entry.translation_key] = entityId;
+    }
   }
 
   // The hub device holds the plan sensors; only per-load devices carry a
@@ -169,9 +182,8 @@ function findLoads(hass) {
   return [...loads.values()].filter((load) => "should_run" in load.entities);
 }
 
-function pick(hass, entities, suffix) {
-  const match = Object.entries(entities).find(([key]) => key.endsWith(suffix));
-  return match ? hass.states[match[1]] : undefined;
+function pick(hass, entities, key) {
+  return hass.states[entities[key] || ""];
 }
 
 /* ------------------------------------------------------------- plan card */
@@ -547,7 +559,7 @@ class EmhassDeferrableCard extends HTMLElement {
     const nextStart = find("next_start");
     const runtime = find("runtime_today");
     const recurrence = find("recurrence");
-    const requested = find("requested");
+    const requested = find("load_requested");
 
     const onDemand = recurrence && recurrence.state === "on_demand";
     const onSurplus = recurrence && recurrence.state === "surplus";
@@ -679,11 +691,11 @@ class EmhassDeferrableCard extends HTMLElement {
     // report unavailable -- so they are left out rather than shown greyed.
     // A surplus load is armed by the same switch but has no deadline to set;
     // what it takes instead is an optional energy cap.
-    let wanted = ["run_now", "enabled"];
+    let wanted = ["run_now", "load_enabled"];
     if (onDemand) {
-      wanted = ["run_now", "enabled", "requested", "run_within"];
+      wanted = ["run_now", "load_enabled", "load_requested", "run_within"];
     } else if (onSurplus) {
-      wanted = ["run_now", "enabled", "requested", "energy_needed"];
+      wanted = ["run_now", "load_enabled", "load_requested", "energy_needed"];
     }
     // Listed in `wanted` order rather than registry order, so the controls
     // sit in the same places on every load's card.

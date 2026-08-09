@@ -487,20 +487,62 @@ def test_brand_icon_has_a_transparent_background():
         assert img.getpixel((0, 0))[3] == 0, "top-left corner is not transparent"
 
 
-def test_cards_match_load_entities_by_unique_id_not_entity_id():
-    """Entity ids are translated and renameable; unique_id keys are neither.
+def test_cards_match_entities_by_translation_key():
+    """Entity ids are translated and renameable; unique_id never reaches the card.
 
     Both cards used to locate a load's entities by English substrings of the
     entity id (`id.includes("should_run")`). An entity id is built from the
     entity's translated name, so on a Swedish install -- a translation this
     repo ships itself -- `should_run` is `binary_sensor.<load>_ska_kora` and
     the match found nothing at all, leaving every per-load card empty. A
-    rename broke it the same way. `findEntities` already keyed on unique_id
-    for exactly this reason; `findLoads` now does too.
+    rename broke it the same way.
+
+    Keying on unique_id instead looked like the fix and was worse: it failed
+    on *every* install, in every language. `hass.entities` is the registry's
+    display collection (`config/entity_registry/list_for_display`), whose
+    entries carry `ei`/`di`/`pl`/`tk` and a few display fields -- and no
+    unique_id whatsoever. Both cards silently found zero entities, so the plan
+    card read "No plan yet" and every deferrable card read "No deferrable
+    load". translation_key is the only identifier that is stable across
+    renames and languages *and* actually delivered to the frontend.
     """
     source = (COMPONENT / "frontend" / "emhass-cards.js").read_text(encoding="utf-8")
     assert "id.includes(" not in source, "entity ids are not a stable key"
+    # Reading it, not the prose above explaining why nothing may.
+    assert ".unique_id" not in source, "unique_id is not in the display registry"
+    assert '["unique_id"]' not in source, "unique_id is not in the display registry"
+    assert "entry.translation_key" in source
     assert '"should_run" in load.entities' in source
+
+
+def test_cards_look_up_load_entities_by_their_real_translation_keys():
+    """A load's key is what strings.json calls it, not what Python calls it.
+
+    Two of a load's entities are namespaced away from the hub's in
+    strings.json: `key="enabled"` is `translation_key="load_enabled"`, and
+    `key="requested"` is `translation_key="load_requested"`. Since the cards
+    now key on translation_key, asking for "enabled" or "requested" finds
+    nothing -- which loses the whole controls row of every deferrable card.
+    """
+    import re
+
+    source = (COMPONENT / "frontend" / "emhass-cards.js").read_text(encoding="utf-8")
+
+    # Every translation key the cards ask a load for must be one a load
+    # actually publishes, per strings.json.
+    strings = _json(COMPONENT / "strings.json")
+    published = {
+        key
+        for domain in ("binary_sensor", "button", "number", "select", "sensor", "switch", "time")
+        for key in strings.get("entity", {}).get(domain, {})
+    }
+    assert {"load_enabled", "load_requested"} <= published, "strings.json changed shape"
+
+    for key in re.findall(r'find\("([a-z_]+)"\)', source):
+        assert key in published, f'the card asks a load for "{key}", which no entity publishes'
+    for match in re.findall(r'wanted = \[([^\]]+)\]', source):
+        for key in re.findall(r'"([a-z_]+)"', match):
+            assert key in published, f'the card asks a load for "{key}", which no entity publishes'
 
 
 def test_cards_attach_their_shadow_root_at_most_once():
