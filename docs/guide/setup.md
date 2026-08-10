@@ -267,6 +267,13 @@ and for writing your own if yours isn't listed.
 
 - **Maximum import power** / **Maximum export power** — your connection's
   limits, in W.
+- **Import limit sensor** / **Export limit sensor** — leave empty unless your
+  usable limit moves. Point them at a sensor giving the limit in W right now
+  and it's used instead of the fixed number above. The common reason is a
+  three-phase connection with uneven phase loading, where the fixed number
+  overstates what you can actually draw — see
+  [Dynamic grid limits](../grid_limits.md) for the template. A sensor can only
+  ever lower the fixed limit, never raise it.
 - **Capacity (demand) charge** — only for network tariffs that bill your
   highest power draw, not just your energy. Enter the price per kW and the
   plan flattens its worst import peak instead of only chasing cheap hours.

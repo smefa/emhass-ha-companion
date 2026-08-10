@@ -45,5 +45,5 @@ def test_dayahead_num_lags_matches_emhass_forecast_dates_sizing(
 
 def test_dayahead_num_lags_uses_defaults_when_unset():
     config = EmhassConfig(url="http://x")
-    # DEFAULT_TIME_STEP=30, DEFAULT_HORIZON_HOURS=24 -> 48 steps/day, one day.
-    assert config.dayahead_num_lags == 48
+    # DEFAULT_TIME_STEP=15, DEFAULT_HORIZON_HOURS=24 -> 96 steps/day, one day.
+    assert config.dayahead_num_lags == 96

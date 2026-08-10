@@ -26,6 +26,7 @@ from custom_components.emhass_companion.payload import (
     build_payload,
     in_window,
     operating_timesteps,
+    resolve_grid_limit,
     resolve_load_window,
     window_to_timesteps,
 )
@@ -342,6 +343,28 @@ def test_mpc_blends_live_pv_into_now_even_when_the_series_starts_earlier():
     assert forecast[now.isoformat()] == 6000.0  # 0.5 * 5000 + 0.5 * 7000
 
 
+def test_power_forecasts_are_sent_as_whole_watts():
+    """Profile math and the live blend both leave long float tails like
+    1575.2129175703624 W. Sub-watt precision means nothing in a forecast and
+    only bloats the request, so both power series go out rounded -- including
+    the step the live value was blended into."""
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    result = build_payload(
+        _inputs(
+            now=now,
+            pv=_series(now, 24, 5000.4),
+            pv_live_w=7000.9,
+            load=_series(now, 24, 1575.2129175703624),
+            load_live_w=1200.3,
+            mix_beta=0.5,
+        )
+    )
+    for key in ("pv_power_forecast", "load_power_forecast"):
+        assert all(isinstance(value, int) for value in result.payload[key].values())
+    assert result.payload["pv_power_forecast"][now.isoformat()] == 6001  # 0.5*5000.4+0.5*7000.9
+    assert result.payload["load_power_forecast"][now.isoformat()] == 1388  # 0.5*1575.2+0.5*1200.3
+
+
 def test_mpc_without_a_live_value_leaves_the_forecast_untouched():
     now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
     result = build_payload(_inputs(pv=_series(now, 24, 5000.0)))
@@ -410,6 +433,66 @@ def test_full_length_forecast_produces_no_warning():
     assert result.warnings == []
 
 
+def test_a_forecast_reaching_the_last_timestep_is_not_called_short():
+    """``now`` is a raw utcnow(), so the horizon it defines is never on the grid.
+
+    Every forecast series is, which used to make the coverage check fail by
+    the seconds ``now`` happened to carry -- reporting "only covers until
+    10:00, short of the 10:00 horizon" on every single run, in the same words
+    used for a price source that stops tonight. The series here ends exactly
+    on the last timestep boundary inside the horizon, which is as far as any
+    grid-aligned source can ever reach.
+    """
+    now = datetime(2026, 7, 28, 10, 0, 37, 123456, tzinfo=UTC)
+    step = timedelta(minutes=30)
+    last = datetime(2026, 7, 28, 10, 0, tzinfo=UTC) + step * DAY_STEPS
+    prices = Series(
+        Point(datetime(2026, 7, 28, 10, 0, tzinfo=UTC) + step * index, 1.5)
+        for index in range(DAY_STEPS + 1)
+    )
+    assert prices.end == last
+
+    result = build_payload(_inputs(now=now, buy_price=prices, sell_price=prices))
+    assert result.warnings == []
+
+
+def test_a_genuinely_short_forecast_still_warns_from_an_off_grid_now():
+    """Tolerating the final partial step must not swallow a real shortfall.
+
+    A day-ahead price source that stops at midnight is short by hours, not by
+    the fraction of a second above -- and that is the case the warning exists
+    for.
+    """
+    now = datetime(2026, 7, 28, 10, 0, 37, 123456, tzinfo=UTC)
+    result = build_payload(_inputs(now=now, buy_price=_series(now, 6, 1.5)))
+
+    assert len(result.warnings) == 1
+    assert "Buy price" in result.warnings[0]
+
+
+def test_an_hourly_price_is_extended_onto_the_payloads_own_grid():
+    """An hourly source under a 30-minute step would otherwise land short.
+
+    ``extended_with_previous_day`` fills at the series' own spacing unless
+    told otherwise, so an hourly price stops on the hour -- up to one whole
+    price interval before a horizon that ends on a half hour, which read as a
+    coverage failure for a source that had in fact been carried the whole way.
+    """
+    now = datetime(2026, 7, 28, 10, 30, 11, tzinfo=UTC)
+    start = datetime(2026, 7, 27, 0, 0, tzinfo=UTC)
+    # Yesterday plus today, hourly, ending at tonight's midnight -- Nord Pool
+    # before its afternoon publication, with a day of history to repeat.
+    hourly = Series(
+        Point(start + timedelta(hours=index), 1.0 + index % 24) for index in range(48)
+    )
+
+    result = build_payload(_inputs(now=now, buy_price=hourly))
+
+    assert len(result.warnings) == 1
+    assert "filled in by repeating the previous day" in result.warnings[0]
+    assert not any("short of the" in warning for warning in result.warnings)
+
+
 def test_battery_disabled_sends_only_the_flag():
     payload = build_payload(_inputs()).payload
     assert payload["set_use_battery"] is False
@@ -436,11 +519,12 @@ def test_battery_enabled_sends_every_limit():
     assert payload["soc_final"] == 0.098
 
 
-def test_battery_cycle_costs_default_to_free_cycling():
-    """EMHASS's own default -- an untouched config must not start pricing wear."""
+def test_battery_cycle_costs_default_to_priced_discharge():
+    """The shipped discharge weight has to reach EMHASS, or a round trip is
+    planned as if the wear it causes were free."""
     battery = BatteryConfig(enabled=True, capacity_wh=25600)
     payload = build_payload(_inputs(battery=battery, soc_init=0.098)).payload
-    assert payload["weight_battery_discharge"] == 0.0
+    assert payload["weight_battery_discharge"] == 0.02
     assert payload["weight_battery_charge"] == 0.0
 
 
@@ -456,13 +540,14 @@ def test_battery_cycle_costs_ride_through_to_emhass():
     assert payload["weight_battery_charge"] == 0.01
 
 
-def test_battery_soc_and_stress_costs_default_to_emhass_own_values():
-    """Every one of these is off or inert at its default, so an existing config
-    entry must keep solving the identical problem after the upgrade."""
+def test_battery_soc_and_stress_costs_default_to_the_shipped_values():
+    """The deficit pair is live at its default and must arrive as a real
+    constraint; the surplus pair and stress cost stay inert (cost 0 means
+    EMHASS never builds their constraints at all)."""
     battery = BatteryConfig(enabled=True, capacity_wh=25600)
     payload = build_payload(_inputs(battery=battery, soc_init=0.5)).payload
-    assert payload["battery_soc_deficit_threshold"] == 0.40
-    assert payload["battery_soc_deficit_cost"] == 0.0
+    assert payload["battery_soc_deficit_threshold"] == 0.10
+    assert payload["battery_soc_deficit_cost"] == 0.05
     assert payload["battery_soc_surplus_threshold"] == 0.90
     assert payload["battery_soc_surplus_cost"] == 0.0
     assert payload["battery_stress_cost"] == 0.0
@@ -525,6 +610,97 @@ def test_compute_curtailment_is_omitted_when_unset():
     """Sending False here would override an add-on-side setting the user never
     asked us to touch -- an unset entry must stay silent instead."""
     assert "compute_curtailment" not in build_payload(_inputs()).payload
+
+
+# --- live grid limits ---------------------------------------------------------
+
+
+def test_a_live_grid_limit_may_lower_the_configured_one():
+    assert resolve_grid_limit(6800.0, 11000.0) == 6800.0
+
+
+def test_a_live_grid_limit_may_never_raise_the_configured_one():
+    """The static number is the connection's physical rating. A sensor built on
+    the wrong fuse size may make the plan cautious; it must not be able to plan
+    through a fuse."""
+    assert resolve_grid_limit(20000.0, 11000.0) == 11000.0
+
+
+def test_no_live_reading_leaves_the_configured_limit_alone():
+    assert resolve_grid_limit(None, 11000.0, floor_w=3000.0) == 11000.0
+
+
+def test_a_live_grid_limit_is_floored_at_what_must_be_served():
+    """Below the load that flows regardless, EMHASS answers "infeasible"
+    instead of answering with a smaller plan."""
+    assert resolve_grid_limit(200.0, 11000.0, floor_w=3000.0) == 3000.0
+
+
+def test_the_floor_never_beats_the_ceiling():
+    """A house forecast above the connection's rating is a separate problem;
+    it must not raise the limit past what the connection can do."""
+    assert resolve_grid_limit(500.0, 4000.0, floor_w=9000.0) == 4000.0
+
+
+def test_grid_limits_are_sent_as_whole_watts():
+    """EMHASS keeps these as integers in its own config; a float only shows up
+    as noise in its log. Rounded down, since the number is a fuse rating."""
+    payload = build_payload(_inputs(grid_import_limit_w=6800.4, grid_export_limit_w=1500.9)).payload
+    assert payload["maximum_power_from_grid"] == 6800
+    assert payload["maximum_power_to_grid"] == 1500
+    assert isinstance(payload["maximum_power_from_grid"], int)
+    assert isinstance(payload["maximum_power_to_grid"], int)
+
+
+def test_a_live_import_limit_reaches_the_payload():
+    payload = build_payload(_inputs(grid_import_limit_w=6800.0)).payload
+    assert payload["maximum_power_from_grid"] == 6800.0
+
+
+def test_a_live_export_limit_reaches_the_payload():
+    payload = build_payload(_inputs(grid_export_limit_w=1500.0)).payload
+    assert payload["maximum_power_to_grid"] == 1500.0
+
+
+def test_grid_limits_fall_back_to_the_configured_numbers():
+    grid = GridConfig(import_max_w=11000.0, export_max_w=10000.0)
+    payload = build_payload(_inputs(grid=grid)).payload
+    assert payload["maximum_power_from_grid"] == 11000.0
+    assert payload["maximum_power_to_grid"] == 10000.0
+
+
+def test_the_import_floor_comes_from_the_forecast_peak():
+    """The peak, not the mean: EMHASS's limit binds one timestep at a time."""
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    load = Series(
+        [Point(now, 400.0), Point(now + HALF_HOUR, 4200.0), Point(now + 2 * HALF_HOUR, 700.0)]
+    )
+    result = build_payload(_inputs(load=load, grid_import_limit_w=100.0))
+    assert result.payload["maximum_power_from_grid"] == 4200.0
+    assert any("4200 W" in warning for warning in result.warnings)
+
+
+def test_the_import_floor_ignores_forecast_points_before_the_run():
+    """A load series commonly starts at local midnight; a peak that has already
+    happened says nothing about what the plan has to serve."""
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    load = Series([Point(now - HALF_HOUR, 9000.0), Point(now, 500.0)])
+    payload = build_payload(_inputs(load=load, grid_import_limit_w=800.0)).payload
+    assert payload["maximum_power_from_grid"] == 800.0
+
+
+def test_the_import_floor_uses_the_live_load_when_there_is_no_forecast():
+    """The load profiles that let EMHASS build its own forecast hand us no
+    series at all, which is exactly when this is the only floor available."""
+    payload = build_payload(_inputs(load_live_w=2500.0, grid_import_limit_w=900.0)).payload
+    assert payload["maximum_power_from_grid"] == 2500.0
+
+
+def test_an_unfloored_live_import_limit_is_not_reported():
+    """The warning marks a limit that could not be honoured, so a sensor doing
+    its job must not produce one on every run."""
+    result = build_payload(_inputs(load_live_w=2500.0, grid_import_limit_w=6800.0))
+    assert not any("import limit" in warning for warning in result.warnings)
 
 
 def test_battery_cycle_costs_are_omitted_with_no_battery():

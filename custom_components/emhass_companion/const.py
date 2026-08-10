@@ -20,7 +20,12 @@ MIN_EMHASS_VERSION: Final = "0.17.9"
 SUPPORTED_PLAN_SCHEMA_MAJOR: Final = 1
 
 DEFAULT_PORT: Final = 5000
-DEFAULT_URL: Final = f"http://localhost:{DEFAULT_PORT}"
+# Deliberately not "localhost": that only ever reaches Home Assistant's own
+# container, never a sibling add-on's, so it is a default that cannot work and
+# fails with a connection error that says nothing about why. This placeholder
+# is prefilled only when add-on discovery finds nothing (_async_addon_url in
+# config_flow.py), and names the one thing the user has to supply.
+DEFAULT_URL: Final = f"http://changetoEMHASSip:{DEFAULT_PORT}"
 # The add-on has no official listing, so it is only ever installed from a
 # third-party repository -- Supervisor always prefixes its slug with a hash of
 # that repository's URL (e.g. "5b918bf2_emhass"), never the bare "emhass".
@@ -55,7 +60,6 @@ EMHASS_CONF_LOAD_FORECAST_METHOD: Final = "load_forecast_method"
 # hard crash inside EMHASS's skforecast layer, not a soft error.
 EMHASS_CONF_TIME_STEP: Final = "optimization_time_step"
 LOAD_FORECAST_METHOD_MLFORECASTER: Final = "mlforecaster"
-LOAD_FORECAST_METHOD_NAIVE: Final = "naive"
 LOAD_FORECAST_METHOD_TYPICAL: Final = "typical"
 LOAD_FORECAST_METHOD_LIST: Final = "list"
 
@@ -67,13 +71,7 @@ LOAD_FORECAST_METHOD_LIST: Final = "list"
 # guaranteed-failing request.
 ML_MIN_HISTORY_DAYS: Final = 9
 
-# Below this much real recorder history, EMHASS's own "naive" load forecast
-# method hard-errors instead of degrading -- it slices exactly one horizon's
-# worth of rows out of its own retrieved history (`df.iloc[-forecast_horizon:]`)
-# and crashes on a shape mismatch if there are fewer. Below the floor, the
-# coordinator builds its own bootstrap series instead of asking for "naive".
-NAIVE_FALLBACK_MIN_HISTORY: Final = timedelta(hours=24)
-# How far back to pull real history when building that bootstrap series --
+# How far back to pull real history when building the bootstrap load series --
 # long enough that repeating "the same time a day ago" (Series.
 # extended_with_previous_day) has a real point to copy across a horizon of
 # up to two days.
@@ -163,6 +161,15 @@ CONF_INVERTER_EFFICIENCY_AC_DC: Final = "inverter_efficiency_ac_dc"
 
 CONF_GRID_IMPORT_MAX: Final = "grid_import_max_w"
 CONF_GRID_EXPORT_MAX: Final = "grid_export_max_w"
+# Optional sensors that override the two static limits above at run time, for a
+# connection whose usable limit is not a constant: an unbalanced three-phase
+# service (where the binding constraint is the worst phase's fuse, not the sum),
+# a dynamic-capacity or load-balancing system, a DSO curtailment order. Only
+# ever allowed to *lower* the static number, which stays as the physical
+# ceiling and as the fallback whenever the sensor cannot be read -- see
+# payload.resolve_grid_limit.
+CONF_GRID_IMPORT_LIMIT_ENTITY: Final = "grid_import_limit_entity"
+CONF_GRID_EXPORT_LIMIT_ENTITY: Final = "grid_export_limit_entity"
 # Demand (capacity) charge on the single highest import power over the horizon,
 # in currency per kW. A grid setting, not a battery one: EMHASS prices it off
 # `peak_import`, which exists whether or not a battery does -- deferrable loads
@@ -281,42 +288,52 @@ CONF_GROUP_MUTUAL_EXCLUSION: Final = "mutual_exclusion"
 
 # --- Defaults ----------------------------------------------------------------
 
-# 30 minutes is EMHASS's own default and keeps the LP small. 15 captures more detail
-# in markets that settle at 15-minute resolution, at roughly double the problem size.
-DEFAULT_TIME_STEP: Final = 30
+# 15 minutes matches the resolution European markets now settle at, and is what
+# the price profiles deliver. EMHASS's own default is 30, which halves the
+# problem size but averages away exactly the intra-hour spread a battery earns
+# on; 30 stays available in the picker for anyone who wants the smaller LP.
+DEFAULT_TIME_STEP: Final = 15
 DEFAULT_MPC_INTERVAL: Final = 15
 DEFAULT_HORIZON_HOURS: Final = 24
 DEFAULT_DAYAHEAD_FALLBACK_TIME: Final = "13:30:00"
 
-DEFAULT_SOC_MIN: Final = 0.10
+DEFAULT_SOC_MIN: Final = 0.05
 DEFAULT_SOC_MAX: Final = 0.95
 # Under the default Optimized end-SOC mode this is only the reserve floor the
 # plan may never end below, not a level to aim for, so it wants to be low: a
-# high floor quietly blocks profitable evening discharge. 20% sits just above
-# the 10% soc_min and leaves a usable backup buffer.
+# high floor quietly blocks profitable evening discharge. 20% sits well above
+# the 5% soc_min and leaves a usable backup buffer.
 DEFAULT_SOC_TARGET: Final = 0.20
 DEFAULT_END_SOC_MODE: Final = END_SOC_OPTIMIZED
 DEFAULT_CHARGE_EFFICIENCY: Final = 0.95
 DEFAULT_DISCHARGE_EFFICIENCY: Final = 0.95
-# EMHASS's own defaults: no cycle cost, so the plan plays the price spread for
-# any profit at all. Left at zero the payload is byte-identical to before.
-DEFAULT_WEIGHT_BATTERY_DISCHARGE: Final = 0.0
+# EMHASS's own default is zero on both, which plays the price spread for any
+# profit at all -- including cycles worth less than the wear they cost. A
+# discharge weight of 0.02 currency/kWh is roughly the throughput cost of a
+# mid-range home battery, so a round trip has to clear about that spread before
+# the plan bothers. Charging is left free: it is already paid for at the import
+# price, and pricing the same cycle twice would double-count the wear.
+DEFAULT_WEIGHT_BATTERY_DISCHARGE: Final = 0.02
 DEFAULT_WEIGHT_BATTERY_CHARGE: Final = 0.0
-# All EMHASS's own defaults. The thresholds are non-zero but inert on their
-# own -- each pair only builds a constraint once its cost is set above zero --
-# so the shipped values simply pre-fill sensible bands rather than change any
-# plan. Stored as 0-1 fractions, like every other SOC field.
-DEFAULT_BATTERY_SOC_DEFICIT_THRESHOLD: Final = 0.40
-DEFAULT_BATTERY_SOC_DEFICIT_COST: Final = 0.0
+# Unlike soc_min, these bend the plan instead of bounding it, so they can never
+# make a problem infeasible. The deficit pair is shipped live (cost above zero):
+# it charges 0.05 per kWh-hour held below 10%, which keeps the plan off the
+# soc_min floor without forbidding a deep discharge that genuinely pays. The
+# surplus pair stays inert -- cost zero means EMHASS skips building the
+# constraint entirely, and its threshold is only a pre-filled band. Stored as
+# 0-1 fractions, like every other SOC field.
+DEFAULT_BATTERY_SOC_DEFICIT_THRESHOLD: Final = 0.10
+DEFAULT_BATTERY_SOC_DEFICIT_COST: Final = 0.05
 DEFAULT_BATTERY_SOC_SURPLUS_THRESHOLD: Final = 0.90
 DEFAULT_BATTERY_SOC_SURPLUS_COST: Final = 0.0
 DEFAULT_BATTERY_STRESS_COST: Final = 0.0
 # 10 piecewise-linear pieces per quadratic curve. More tracks the curve closer
 # at the cost of two extra solver constraints each; EMHASS's own default.
 DEFAULT_BATTERY_STRESS_SEGMENTS: Final = 10
-# EMHASS's own default for both AC/DC conversion directions -- no assumed loss
-# unless the user knows one and states it.
-DEFAULT_INVERTER_EFFICIENCY: Final = 1.0
+# EMHASS's own default is 1.0 -- a lossless converter, which no real inverter
+# is. 0.97 is typical of a modern hybrid in both directions; assuming no loss
+# makes the plan expect more out of every charge than the hardware delivers.
+DEFAULT_INVERTER_EFFICIENCY: Final = 0.97
 DEFAULT_GRID_IMPORT_MAX: Final = 9000
 DEFAULT_GRID_EXPORT_MAX: Final = 9000
 # Zero is a true no-op in EMHASS: the peak_import variable is only created when
@@ -668,9 +685,9 @@ ISSUE_RUN_FAILED: Final = "run_failed"
 # degrades safely by assuming zero PV where the forecast ends.
 ISSUE_PV_TAIL_SHORT: Final = "pv_tail_short"
 # The load profile wants mlforecaster but it has not been confirmed trained
-# for the currently configured sensor yet -- runs use "naive" (or a live
-# -reading bootstrap, below NAIVE_FALLBACK_MIN_HISTORY) meanwhile. Clears
-# once an auto- or button-triggered fit against that sensor succeeds.
+# for the currently configured sensor yet -- runs carry a load series built
+# from the sensor's own recorded history meanwhile. Clears once an auto- or
+# button-triggered fit against that sensor succeeds.
 ISSUE_ML_FORECASTER_NOT_READY: Final = "ml_forecaster_not_ready"
 
 # Solcast's day sensors are named today / tomorrow / day_3..day_7 -- "tomorrow"

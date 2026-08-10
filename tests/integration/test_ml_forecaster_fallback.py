@@ -15,11 +15,16 @@ In the meantime it no longer falls back to EMHASS's own "typical" method,
 which -- for a sensor mlforecaster has never been trained against -- reads
 whatever a stale or mismatched reference pickle happens to hold, not this
 household's own consumption (see docs/on_demand_loads.md-adjacent design
-notes for the investigation). Instead it prefers EMHASS's "naive" method
-(repeats the sensor's actual last day) once there is a full day of real
-history, and below that builds an equivalent series itself out of whatever
-real readings already exist -- see test_load_forecast_fallback.py for that
-piece in isolation. This file covers only the orchestration in
+notes for the investigation). Instead it builds a series itself out of
+whatever real readings already exist, which is what EMHASS's own "naive"
+would have computed from the same recorder -- see
+test_load_forecast_fallback.py for that piece in isolation.
+
+The same fallback also covers a trained mlforecaster whose runs have started
+failing: a request carrying no load series is the one shape that sends EMHASS
+back to Home Assistant for history of its own, so when such a run fails the
+forecast comes back in-house for a cooldown rather than being retried every
+cycle. This file covers only the orchestration in
 _resolve_load_forecast_method: whether and when it asks EMHASS for
 mlforecaster versus deferring to _load_forecast_fallback.
 """
@@ -181,6 +186,74 @@ async def test_no_fallback_logic_for_non_mlforecaster_methods(
     assert result == method
     assert bootstrap is None
     history_check.assert_not_awaited()
+
+
+async def test_only_a_run_that_sent_no_series_arms_the_cooldown(hass: HomeAssistant) -> None:
+    """A run carrying its own load series had no EMHASS-side fetch to blame.
+
+    Arming on it would quietly disable EMHASS's forecaster over an infeasible
+    solve, an unreachable add-on, or anything else that has nothing to do with
+    how the load forecast was obtained.
+    """
+    coordinator = await _coordinator(hass)
+
+    coordinator._sent_load_list = True
+    coordinator._note_failed_run()
+    assert coordinator._no_list_run_failed_at is None
+
+    coordinator._sent_load_list = False
+    coordinator._note_failed_run()
+    assert coordinator._no_list_run_failed_at is not None
+
+
+async def test_a_failed_no_series_run_brings_the_forecast_back_in_house(
+    hass: HomeAssistant,
+) -> None:
+    """Even for a sensor mlforecaster is confirmed trained against.
+
+    Being trained is what makes this reachable at all: without the cooldown a
+    trained model whose runs have started failing is retried every MPC cycle
+    forever, each one failing the same way, with a perfectly good local series
+    available the whole time.
+    """
+    coordinator = await _coordinator(hass)
+    coordinator._ml_trained_sensor = LOAD_SENSOR
+    coordinator._no_list_run_failed_at = _NOW
+
+    with patch.object(
+        coordinator, "_load_forecast_fallback", AsyncMock(return_value=_FALLBACK_SENTINEL)
+    ) as fallback:
+        result = await _resolve(coordinator)
+
+    assert result == _FALLBACK_SENTINEL
+    fallback.assert_awaited_once_with(LOAD_SENSOR, _NOW, _HORIZON_END)
+
+
+async def test_the_cooldown_lapses_back_to_mlforecaster(hass: HomeAssistant) -> None:
+    """Each retry costs one failed run, which is what stops this hiding a real
+    misconfiguration for good."""
+    coordinator = await _coordinator(hass)
+    coordinator._ml_trained_sensor = LOAD_SENSOR
+    coordinator._no_list_run_failed_at = _NOW - timedelta(hours=1, minutes=1)
+
+    result, bootstrap = await _resolve(coordinator)
+
+    assert result == "mlforecaster"
+    assert bootstrap is None
+
+
+async def test_the_cooldown_covers_methods_other_than_mlforecaster(hass: HomeAssistant) -> None:
+    """ "typical" sends no load series either, and fails the same way for it."""
+    coordinator = await _coordinator(hass, method="typical")
+    coordinator._no_list_run_failed_at = _NOW
+
+    with patch.object(
+        coordinator, "_load_forecast_fallback", AsyncMock(return_value=_FALLBACK_SENTINEL)
+    ) as fallback:
+        result = await _resolve(coordinator)
+
+    assert result == _FALLBACK_SENTINEL
+    fallback.assert_awaited_once_with(LOAD_SENSOR, _NOW, _HORIZON_END)
 
 
 async def test_ml_state_round_trips_through_storage(hass: HomeAssistant) -> None:

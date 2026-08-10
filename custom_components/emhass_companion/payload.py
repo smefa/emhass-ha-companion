@@ -25,12 +25,15 @@ from .models import (
     GridConfig,
     HybridInverterConfig,
     Series,
+    floor_to_step,
 )
 from .thermal import build_def_load_config
 
 _LOGGER = logging.getLogger(__name__)
 
 _PRICE_KEYS = ("load_cost_forecast", "prod_price_forecast")
+
+_POWER_KEYS = ("pv_power_forecast", "load_power_forecast")
 
 
 class PayloadError(ValueError):
@@ -333,6 +336,12 @@ class PayloadInputs:
     the old pin-to-start behaviour (see build_payload)."""
     pv_live_w: float | None = None
     load_live_w: float | None = None
+    grid_import_limit_w: float | None = None
+    grid_export_limit_w: float | None = None
+    """Live readings of the optional grid-limit sensors, already fetched by the
+    coordinator. ``None`` means none is configured, or the one that is could
+    not be read -- either way the static limit in ``grid`` is used unchanged.
+    See ``resolve_grid_limit``."""
     mix_beta: float = 0.5
     cost_fun: str = DEFAULT_COST_FUN
     extra_settings: dict[str, Any] = field(default_factory=dict)
@@ -348,10 +357,72 @@ class PayloadResult:
     """Subentry ids in the order they map to EMHASS's ``P_deferrable{k}``."""
 
 
+def resolve_grid_limit(
+    live_w: float | None,
+    ceiling_w: float,
+    floor_w: float = 0.0,
+) -> int:
+    """The grid limit to send, given an optional live reading of it.
+
+    The static number configured on the grid step is the physical rating of
+    the connection, so a sensor may only ever lower it: a template with a
+    wrong fuse size or a stale unit can then make the plan needlessly cautious
+    but can never invite EMHASS to plan through a fuse. An absent reading
+    means no sensor is configured or it could not be read, and leaves the
+    static number untouched.
+
+    ``floor_w`` guards the other end. EMHASS reports an infeasible problem
+    rather than a small one when the limit falls below the load that has to be
+    served regardless -- the household baseline is not deferrable, and no
+    amount of battery is guaranteed to cover it -- so a limit derived from a
+    momentary reading is not allowed to drop below what the horizon already
+    says will be drawn. Clamped rather than rejected: a plan built against a
+    slightly optimistic limit still beats no plan at all, and the caller
+    reports the clamp.
+
+    Whole watts go out: EMHASS's own config carries these as integers, so a
+    ``9000.0`` in the runtime parameters is only noise in its log. Rounded
+    down rather than to nearest, since the number is a fuse rating and the
+    plan must never be invited past it.
+    """
+    if live_w is None:
+        return math.floor(ceiling_w)
+    return math.floor(min(ceiling_w, max(live_w, min(floor_w, ceiling_w))))
+
+
+def _import_floor_w(inputs: PayloadInputs, horizon_end: datetime) -> float:
+    """The lowest import limit that can still serve the baseline house load.
+
+    Deferrable loads are deliberately not counted: they are what the limit is
+    supposed to be able to squeeze out. What must fit is the non-deferrable
+    forecast, taken as its peak over the horizon rather than its mean, since
+    EMHASS's limit binds per timestep.
+
+    Both sources are optional and neither is always present -- the load
+    profiles that let EMHASS build its own forecast hand us no series at all,
+    which is exactly when the live reading is the only thing there is to go on.
+    """
+    candidates = [0.0]
+    if inputs.load:
+        window = inputs.load.window(inputs.now, horizon_end)
+        if window:
+            candidates.append(max(window.values))
+    if inputs.load_live_w is not None:
+        candidates.append(inputs.load_live_w)
+    return max(candidates)
+
+
 def build_payload(inputs: PayloadInputs) -> PayloadResult:
     """Assemble the runtime parameters for one EMHASS request."""
     step = timedelta(minutes=inputs.time_step_minutes)
-    horizon_end = inputs.now + step * inputs.horizon_steps
+    # Floored onto the timestep grid, because ``now`` is a raw utcnow() and so
+    # the horizon it defines lands at some arbitrary fraction of a second past
+    # a boundary. Every forecast series *is* on the grid, so an unfloored
+    # horizon is one no series can ever cover: the coverage checks below would
+    # report a shortfall of seconds on every run, in the same words they use
+    # for a price source that stops tonight. The grid boundary at or before
+    # the horizon already describes the timestep the horizon ends inside.
+    horizon_end = floor_to_step(inputs.now + step * inputs.horizon_steps, step)
     warnings: list[str] = []
 
     payload: dict[str, Any] = {
@@ -390,12 +461,7 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
     ):
         if series is None or not series:
             continue
-        if key == "pv_power_forecast":
-            # Profile math (efficiency factors, unit conversions) leaves tiny
-            # float noise like 210.10000000000002 W; round to whole watts
-            # since sub-watt PV precision is meaningless anyway.
-            series = series.map_values(round)
-        elif key in _PRICE_KEYS:
+        if key in _PRICE_KEYS:
             # Tariff math (multiplier/adder) leaves the same float noise on
             # a per-kWh price; round rather than lose currency precision.
             series = series.map_values(lambda v: round(v, 4))
@@ -410,7 +476,12 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
             # night), flat-lined across all of tomorrow. Repeating
             # yesterday's shape is a far better guess.
             short_until = series.end
-            series = series.extended_with_previous_day(horizon_end)
+            # Filled on the payload's grid rather than the price source's own,
+            # so an hourly source under a 30-minute step lands on the horizon
+            # instead of up to one price interval short of it. value_at holds
+            # last, so each sub-hour point still carries that hour's price --
+            # the extra points add reach, not invented precision.
+            series = series.extended_with_previous_day(horizon_end, step)
             if series.covers(horizon_end):
                 warnings.append(
                     f"{label} only covered until "
@@ -418,7 +489,17 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
                     "remainder was filled in by repeating the previous day's "
                     "prices."
                 )
-        payload[key] = series.to_payload()
+        values = series.to_payload()
+        if key in _POWER_KEYS:
+            # Profile math (efficiency factors, unit conversions) and the live
+            # blend above both leave long float tails like 1575.2129175703624 W.
+            # Sub-watt precision is meaningless in a forecast and only bloats
+            # the request and EMHASS's log, so whole watts go out. Done here
+            # rather than on the Series, whose constructor coerces every value
+            # back to float, and after the blend so the blended step is rounded
+            # too.
+            values = {when: round(value) for when, value in values.items()}
+        payload[key] = values
         if not series.covers(horizon_end):
             # EMHASS forward-fills a timestamped forecast onto its grid, so a
             # short series is extended with its final value instead of raising.
@@ -470,8 +551,29 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
     # -- settings -------------------------------------------------------------
     payload.update(_battery_settings(inputs.battery))
     payload.update(_hybrid_inverter_settings(inputs.hybrid_inverter))
-    payload["maximum_power_from_grid"] = inputs.grid.import_max_w
-    payload["maximum_power_to_grid"] = inputs.grid.export_max_w
+    import_floor = _import_floor_w(inputs, horizon_end)
+    payload["maximum_power_from_grid"] = resolve_grid_limit(
+        inputs.grid_import_limit_w, inputs.grid.import_max_w, import_floor
+    )
+    # Export gets the same override with no floor of its own: nothing has to
+    # leave the property the way the house load has to be served, so a low
+    # limit only costs revenue -- except with EMHASS's own curtailment off,
+    # where surplus PV has nowhere else to go. That case is documented rather
+    # than guessed at, since the surplus depends on a PV forecast the limit
+    # sensor knows nothing about.
+    payload["maximum_power_to_grid"] = resolve_grid_limit(
+        inputs.grid_export_limit_w, inputs.grid.export_max_w
+    )
+    if (
+        inputs.grid_import_limit_w is not None
+        and inputs.grid_import_limit_w < import_floor <= inputs.grid.import_max_w
+    ):
+        warnings.append(
+            f"The grid import limit sensor read "
+            f"{inputs.grid_import_limit_w:.0f} W, below the "
+            f"{import_floor:.0f} W the house is forecast to draw anyway. Raised "
+            "to that value, since a lower limit has no feasible plan."
+        )
     # Demand charge on the horizon's peak import. Sent unconditionally rather
     # than from _battery_settings: EMHASS prices it off the grid variable, so
     # it must keep working for a plant with no battery at all, and that helper

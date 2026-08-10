@@ -355,7 +355,27 @@ def test_every_inverter_profile_defines_the_fallback_action(strings):
 # --- dashboard cards ---------------------------------------------------------
 
 
-def test_card_bundle_parses_as_a_javascript_module():
+BUNDLE = COMPONENT / "frontend" / "emhass-cards.js"
+
+# Every card in the bundle, which is also the list the picker must offer.
+CARDS = (
+    "emhass-plan-card",
+    "emhass-deferrable-card",
+    "emhass-deferrable-swipe-card",
+    "emhass-deferrable-strip-card",
+    "emhass-health-card",
+    "emhass-status-card",
+    "emhass-overview-card",
+)
+
+
+@pytest.fixture(scope="module")
+def bundle() -> str:
+    assert BUNDLE.is_file(), f"card bundle missing at {BUNDLE}"
+    return BUNDLE.read_text(encoding="utf-8")
+
+
+def test_card_bundle_parses_as_a_javascript_module(bundle):
     """Syntax-check the card bundle without needing Node.
 
     The bundle is plain ES2017-compatible JavaScript on purpose: it can then be
@@ -364,25 +384,99 @@ def test_card_bundle_parses_as_a_javascript_module():
     deliberately avoided for the same reason.
     """
     esprima = pytest.importorskip("esprima")
-
-    bundle = COMPONENT / "frontend" / "emhass-cards.js"
-    assert bundle.is_file(), f"card bundle missing at {bundle}"
-    esprima.parseModule(bundle.read_text(encoding="utf-8"))
+    esprima.parseModule(bundle)
 
 
-def test_card_bundle_avoids_syntax_the_parser_cannot_check():
+def test_card_bundle_avoids_syntax_the_parser_cannot_check(bundle):
     """Guard the constraint above, since a lapse silently disables the check."""
-    source = (COMPONENT / "frontend" / "emhass-cards.js").read_text(encoding="utf-8")
-    assert "?." not in source, "optional chaining defeats the syntax check"
-    assert "??" not in source, "nullish coalescing defeats the syntax check"
+    assert "?." not in bundle, "optional chaining defeats the syntax check"
+    assert "??" not in bundle, "nullish coalescing defeats the syntax check"
 
 
-def test_cards_are_registered_with_the_picker():
-    """Without window.customCards the cards never appear in the UI picker."""
-    source = (COMPONENT / "frontend" / "emhass-cards.js").read_text(encoding="utf-8")
-    assert "window.customCards" in source
-    for card in ("emhass-plan-card", "emhass-deferrable-card"):
-        assert f'customElements.define("{card}"' in source
+def test_cards_are_registered_with_the_picker(bundle):
+    """Without window.customCards a card never appears in the UI picker.
+
+    An unregistered card can only be added by hand-writing YAML, which is
+    exactly what shipping cards with the integration exists to avoid.
+    """
+    assert "window.customCards" in bundle
+    for card in CARDS:
+        assert f'customElements.define("{card}"' in bundle
+        assert f'type: "{card}"' in bundle
+
+
+def test_no_card_still_advertises_itself_as_experimental(bundle):
+    """The lab bundle graduated into this one; the labels came with it."""
+    assert "lab)" not in bundle, "a card is still named as an experiment"
+    assert "lab:" not in bundle, "a card is still named as an experiment"
+
+
+def test_cards_look_up_hub_entities_by_their_real_translation_keys(bundle):
+    """A key no entity publishes finds nothing, quietly.
+
+    The later cards read a good deal more of the integration than the first two
+    did -- decisions, stage timings, surplus windows -- so a typo here surfaces
+    as one empty field rather than an empty card.
+    """
+    import re
+
+    strings = _json(COMPONENT / "strings.json")
+    entity = strings.get("entity", {})
+    published = {f"{domain}.{key}" for domain in entity for key in entity.get(domain, {})}
+    load_keys = {key.split(".", 1)[1] for key in published}
+
+    # Hub entities are looked up domain-qualified, since two of them share a
+    # translation key across domains.
+    for key in re.findall(r'hub\["([a-z_]+\.[a-z_]+)"\]', bundle):
+        assert key in published, f'a card asks the hub for "{key}", which nothing publishes'
+    for key in re.findall(r'_entity\("([a-z_]+)"\)', bundle):
+        assert key in load_keys, f'a card asks a load for "{key}", which nothing publishes'
+    # An info box names its entity in a table rather than at the lookup, so the
+    # same typo would slip past the patterns above.
+    for key in re.findall(r'entity: "([a-z_]+\.[a-z_]+)"', bundle):
+        assert key in published, f'an info box is pointed at "{key}", which nothing publishes'
+    for key in re.findall(r'entity: "([a-z_]+)",', bundle):
+        assert key in load_keys, f'a load info box is pointed at "{key}", which nothing publishes'
+
+
+def test_every_card_editor_is_reachable_from_the_card_it_edits(bundle):
+    """A defined editor element nothing returns is an editor nobody can open.
+
+    getConfigElement is the only route the Lovelace dialog takes: without it
+    the card falls back to the YAML box, which is exactly what these editors
+    exist to avoid.
+    """
+    for card in CARDS:
+        assert f'customElements.define("{card}-editor"' in bundle, f"{card} has no editor"
+        assert f'document.createElement("{card}-editor")' in bundle, (
+            f"{card} never returns its editor"
+        )
+
+
+@pytest.mark.parametrize(
+    ("table", "order", "defaults"),
+    [
+        ("HEALTH_METRICS", "HEALTH_METRIC_ORDER", "HEALTH_DEFAULTS"),
+        ("TILE_METRICS", "TILE_ORDER", "TILE_DEFAULTS"),
+        ("LOAD_METRICS", "LOAD_METRIC_ORDER", "LOAD_BOX_DEFAULTS"),
+    ],
+)
+def test_selectable_boxes_only_offer_metrics_that_exist(bundle, table, order, defaults):
+    """A dropdown option with no entry behind it renders an undefined label.
+
+    And a default naming a metric that does not exist is worse: the box is not
+    chosen by anyone, so it is the *shipped* layout that breaks.
+    """
+    import re
+
+    body = bundle.split(f"const {table} = {{", 1)[1].split("\n};", 1)[0]
+    defined = set(re.findall(r"^  ([a-z_]+): \{", body, re.MULTILINE))
+    offered = set(re.findall(r'"([a-z_]+)"', bundle.split(f"const {order} = [", 1)[1].split("];", 1)[0]))
+    assert offered == defined, f"{order} and {table} disagree: {offered ^ defined}"
+
+    written = bundle.split(f"const {defaults} = [", 1)[1].split("];", 1)[0]
+    for key in re.findall(r'"([a-z_]+)"', written):
+        assert key in defined, f'{defaults} names "{key}", which is not a metric'
 
 
 # --- additional translations -------------------------------------------------
@@ -487,20 +581,62 @@ def test_brand_icon_has_a_transparent_background():
         assert img.getpixel((0, 0))[3] == 0, "top-left corner is not transparent"
 
 
-def test_cards_match_load_entities_by_unique_id_not_entity_id():
-    """Entity ids are translated and renameable; unique_id keys are neither.
+def test_cards_match_entities_by_translation_key():
+    """Entity ids are translated and renameable; unique_id never reaches the card.
 
     Both cards used to locate a load's entities by English substrings of the
     entity id (`id.includes("should_run")`). An entity id is built from the
     entity's translated name, so on a Swedish install -- a translation this
     repo ships itself -- `should_run` is `binary_sensor.<load>_ska_kora` and
     the match found nothing at all, leaving every per-load card empty. A
-    rename broke it the same way. `findEntities` already keyed on unique_id
-    for exactly this reason; `findLoads` now does too.
+    rename broke it the same way.
+
+    Keying on unique_id instead looked like the fix and was worse: it failed
+    on *every* install, in every language. `hass.entities` is the registry's
+    display collection (`config/entity_registry/list_for_display`), whose
+    entries carry `ei`/`di`/`pl`/`tk` and a few display fields -- and no
+    unique_id whatsoever. Both cards silently found zero entities, so the plan
+    card read "No plan yet" and every deferrable card read "No deferrable
+    load". translation_key is the only identifier that is stable across
+    renames and languages *and* actually delivered to the frontend.
     """
     source = (COMPONENT / "frontend" / "emhass-cards.js").read_text(encoding="utf-8")
     assert "id.includes(" not in source, "entity ids are not a stable key"
+    # Reading it, not the prose above explaining why nothing may.
+    assert ".unique_id" not in source, "unique_id is not in the display registry"
+    assert '["unique_id"]' not in source, "unique_id is not in the display registry"
+    assert "entry.translation_key" in source
     assert '"should_run" in load.entities' in source
+
+
+def test_cards_look_up_load_entities_by_their_real_translation_keys():
+    """A load's key is what strings.json calls it, not what Python calls it.
+
+    Two of a load's entities are namespaced away from the hub's in
+    strings.json: `key="enabled"` is `translation_key="load_enabled"`, and
+    `key="requested"` is `translation_key="load_requested"`. Since the cards
+    now key on translation_key, asking for "enabled" or "requested" finds
+    nothing -- which loses the whole controls row of every deferrable card.
+    """
+    import re
+
+    source = (COMPONENT / "frontend" / "emhass-cards.js").read_text(encoding="utf-8")
+
+    # Every translation key the cards ask a load for must be one a load
+    # actually publishes, per strings.json.
+    strings = _json(COMPONENT / "strings.json")
+    published = {
+        key
+        for domain in ("binary_sensor", "button", "number", "select", "sensor", "switch", "time")
+        for key in strings.get("entity", {}).get(domain, {})
+    }
+    assert {"load_enabled", "load_requested"} <= published, "strings.json changed shape"
+
+    for key in re.findall(r'find\("([a-z_]+)"\)', source):
+        assert key in published, f'the card asks a load for "{key}", which no entity publishes'
+    for match in re.findall(r"wanted = \[([^\]]+)\]", source):
+        for key in re.findall(r'"([a-z_]+)"', match):
+            assert key in published, f'the card asks a load for "{key}", which no entity publishes'
 
 
 def test_cards_attach_their_shadow_root_at_most_once():

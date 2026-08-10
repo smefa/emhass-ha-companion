@@ -24,6 +24,8 @@ from .const import (
     CONF_CAPACITY_COST_PER_KW,
     CONF_COMPUTE_CURTAILMENT,
     CONF_END_SOC_MODE,
+    CONF_GRID_EXPORT_LIMIT_ENTITY,
+    CONF_GRID_IMPORT_LIMIT_ENTITY,
     CONF_HYBRID_INVERTER,
     CONF_INVERTER_AC_INPUT_MAX,
     CONF_INVERTER_AC_OUTPUT_MAX,
@@ -203,7 +205,7 @@ class Series:
         """
         return bool(self._points) and self.end >= until.astimezone(UTC)
 
-    def extended_with_previous_day(self, until: datetime) -> Series:
+    def extended_with_previous_day(self, until: datetime, step: timedelta | None = None) -> Series:
         """Fill the gap beyond the last known point by repeating the day before.
 
         For a day-ahead price source (e.g. Nord Pool before its ~13:00
@@ -219,11 +221,18 @@ class Series:
         there is no 24h-earlier point left to copy, e.g. more than a day past
         the original coverage, or when the series holds less than a day of
         history to begin with.
+
+        ``step`` names the spacing to extend at, for callers that know the
+        grid they want rather than the one this series happens to have. A
+        series of a single point has no spacing to infer at all -- a brand
+        new load sensor with one reading being exactly that case -- and
+        guessing an hour there would hand EMHASS a forecast four times
+        coarser than the optimisation it feeds.
         """
         if not self._points or self.covers(until):
             return self
         until = until.astimezone(UTC)
-        step = self.step() or timedelta(hours=1)
+        step = step or self.step() or timedelta(hours=1)
         day = timedelta(days=1)
         points = list(self._points)
         cursor = self.end + step
@@ -236,6 +245,63 @@ class Series:
             points.append(Point(cursor, value))
             cursor += step
         return Series(points)
+
+    def resampled(self, step: timedelta) -> Series:
+        """Average onto a wall-clock grid of ``step``-wide buckets.
+
+        Recorder history arrives at whatever rate the sensor happens to
+        report -- a house power sensor updating every few seconds puts tens
+        of thousands of points into a series EMHASS will immediately
+        resample down to its own grid anyway. Doing it here instead keeps
+        the request proportional to the horizon rather than to the sensor's
+        update rate.
+
+        Each bucket carries the *time-weighted* mean across it, holding each
+        point's value until the next one -- the same piecewise-constant
+        reading of a series that :meth:`value_at` uses. A plain mean over
+        the samples falling in a bucket would be wrong for recorder data,
+        which only emits a row when a sensor *changes*: a value that held
+        steady for ten minutes would count for no more than one that held
+        for five seconds.
+
+        Bucket timestamps are floored to a multiple of ``step`` from the
+        Unix epoch, so for any step dividing an hour they land on whole
+        wall-clock boundaries -- no stray seconds, and a grid that lines up
+        with both EMHASS's own (anchored the same way) and the forecast
+        sources whose points already arrive on the hour or half-hour. That
+        alignment is what lets :meth:`extended_with_previous_day` find a
+        real point exactly 24h back, and what stops :meth:`__init__`
+        treating 17:06:00 and 17:06:04.871334 as two separate readings.
+        """
+        if not self._points or step <= timedelta(0):
+            return self
+        size = step.total_seconds()
+        totals: dict[int, float] = {}
+        spans: dict[int, float] = {}
+        for index, point in enumerate(self._points):
+            begin = point.time.timestamp()
+            if index + 1 < len(self._points):
+                finish = self._points[index + 1].time.timestamp()
+            else:
+                # The final reading has nothing after it to bound its span;
+                # let it carry to the end of its own bucket so that a series
+                # of a single point still resamples to that one point.
+                finish = (begin // size + 1) * size
+            while begin < finish:
+                bucket = int(begin // size)
+                edge = min((bucket + 1) * size, finish)
+                weight = edge - begin
+                totals[bucket] = totals.get(bucket, 0.0) + point.value * weight
+                spans[bucket] = spans.get(bucket, 0.0) + weight
+                begin = edge
+        return Series(
+            Point(
+                datetime.fromtimestamp(bucket * size, UTC),
+                totals[bucket] / spans[bucket],
+            )
+            for bucket in sorted(totals)
+            if spans[bucket] > 0
+        )
 
     def step(self) -> timedelta | None:
         """The most common spacing between points, or None if indeterminate."""
@@ -371,6 +437,13 @@ class GridConfig:
     setting: nothing is sent and EMHASS keeps whatever it has, which is the
     only way to avoid switching off an add-on-side setting nobody asked us to
     touch."""
+    import_limit_entity: str | None = None
+    export_limit_entity: str | None = None
+    """Sensors read on every run whose value replaces the matching static limit
+    above, for a connection whose usable limit moves. Never raises the static
+    number -- that stays the physical ceiling. Held here rather than beside
+    ``soc_entity`` on EmhassConfig so that everything the grid step collects
+    travels together into ``payload.resolve_grid_limit``."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> GridConfig:
@@ -382,6 +455,8 @@ class GridConfig:
             capacity_cost_per_kw=float(
                 data.get(CONF_CAPACITY_COST_PER_KW, DEFAULT_CAPACITY_COST_PER_KW)
             ),
+            import_limit_entity=data.get(CONF_GRID_IMPORT_LIMIT_ENTITY) or None,
+            export_limit_entity=data.get(CONF_GRID_EXPORT_LIMIT_ENTITY) or None,
             compute_curtailment=(
                 None if compute_curtailment is None else bool(compute_curtailment)
             ),
@@ -741,6 +816,42 @@ def parse_utc(value: Any) -> datetime:
     if parsed.tzinfo is None:
         raise SeriesError(f"Timestamp without timezone: {value!r}")
     return parsed.astimezone(UTC)
+
+
+def ceil_to_step(when: datetime, step: timedelta) -> datetime:
+    """The grid boundary at or after ``when``, on the same grid as :meth:`Series.resampled`.
+
+    A horizon end is ``now`` plus a whole number of timesteps, so it inherits
+    whatever fraction of a second ``now`` carried and almost never lands on a
+    boundary itself. Asking a grid-aligned series to cover it verbatim would
+    always leave it one boundary short -- reported as a coverage warning on
+    every run, and filled by EMHASS holding the last value flat -- for a
+    series that in truth reaches the end of the last timestep anyone asked
+    about.
+    """
+    size = step.total_seconds()
+    if size <= 0:
+        return when.astimezone(UTC)
+    stamp = when.astimezone(UTC).timestamp()
+    return datetime.fromtimestamp(math.ceil(stamp / size) * size, UTC)
+
+
+def floor_to_step(when: datetime, step: timedelta) -> datetime:
+    """The grid boundary at or before ``when``, on :meth:`Series.resampled`'s grid.
+
+    The counterpart to :func:`ceil_to_step`, for the other side of the same
+    problem. Where that one moves a *fill target* forward so a series reaches
+    past an off-grid horizon, this moves the *requirement* back onto the grid:
+    a point at the last boundary at or before the horizon already describes
+    the timestep the horizon ends inside, so demanding a later one asks for a
+    price nobody publishes and reports a shortfall of seconds as if it were
+    a missing day.
+    """
+    size = step.total_seconds()
+    if size <= 0:
+        return when.astimezone(UTC)
+    stamp = when.astimezone(UTC).timestamp()
+    return datetime.fromtimestamp(math.floor(stamp / size) * size, UTC)
 
 
 def _as_float(value: Any) -> float | None:

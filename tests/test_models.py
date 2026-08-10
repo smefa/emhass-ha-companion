@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from custom_components.emhass_companion.config_flow import _battery_storage_from_input
+from custom_components.emhass_companion.const import DEFAULT_INVERTER_EFFICIENCY
 from custom_components.emhass_companion.models import (
     BatteryConfig,
     GridConfig,
@@ -17,6 +18,7 @@ from custom_components.emhass_companion.models import (
     Point,
     Series,
     SeriesError,
+    ceil_to_step,
     parse_utc,
 )
 
@@ -29,8 +31,8 @@ T0 = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
 def test_hybrid_inverter_config_defaults_to_disabled():
     config = HybridInverterConfig.from_dict(None)
     assert config.enabled is False
-    assert config.efficiency_dc_ac == 1.0
-    assert config.efficiency_ac_dc == 1.0
+    assert config.efficiency_dc_ac == 0.97
+    assert config.efficiency_ac_dc == 0.97
 
 
 def test_ac_input_max_falls_back_to_ac_output_max_when_blank():
@@ -66,7 +68,7 @@ def test_ac_input_max_is_kept_when_genuinely_different():
 
 
 @pytest.mark.parametrize("stored_efficiency", [None, 0, 0.0])
-def test_efficiency_falls_back_to_one_when_blank_or_zero(stored_efficiency):
+def test_efficiency_falls_back_to_the_default_when_blank_or_zero(stored_efficiency):
     """A 0 efficiency would mean 100% conversion loss -- clearly never what a
     user meant by leaving the field unset."""
     data = {"hybrid_inverter": True}
@@ -74,8 +76,8 @@ def test_efficiency_falls_back_to_one_when_blank_or_zero(stored_efficiency):
         data["inverter_efficiency_dc_ac"] = stored_efficiency
         data["inverter_efficiency_ac_dc"] = stored_efficiency
     config = HybridInverterConfig.from_dict(data)
-    assert config.efficiency_dc_ac == 1.0
-    assert config.efficiency_ac_dc == 1.0
+    assert config.efficiency_dc_ac == DEFAULT_INVERTER_EFFICIENCY
+    assert config.efficiency_ac_dc == DEFAULT_INVERTER_EFFICIENCY
 
 
 def test_efficiency_is_kept_when_genuinely_set():
@@ -89,11 +91,11 @@ def test_efficiency_is_kept_when_genuinely_set():
 # --- BatteryConfig -------------------------------------------------------------
 
 
-def test_battery_cycle_costs_default_to_zero():
-    """A config entry stored before these fields existed must keep planning the
-    way it did, so the fallback has to be EMHASS's own default of no wear cost."""
+def test_battery_cycle_costs_default_to_priced_discharge_and_free_charge():
+    """Discharge carries the shipped throughput cost; charge stays free so the
+    same cycle is not paid for twice (it is already bought at the import price)."""
     config = BatteryConfig.from_dict({"use_battery": True, "capacity_wh": 25600})
-    assert config.weight_battery_discharge == 0.0
+    assert config.weight_battery_discharge == 0.02
     assert config.weight_battery_charge == 0.0
 
 
@@ -128,10 +130,13 @@ def test_battery_cycle_costs_survive_the_form_round_trip():
     assert config.soc_min == 0.10
 
 
-def test_battery_soc_and_stress_defaults_match_emhass():
+def test_battery_soc_and_stress_defaults():
+    """The deficit pair ships live -- it keeps the plan off the soc_min floor
+    without ever making a problem infeasible. The surplus pair and the stress
+    cost stay at EMHASS's own inert defaults."""
     config = BatteryConfig.from_dict({"use_battery": True})
-    assert config.soc_deficit_threshold == 0.40
-    assert config.soc_deficit_cost == 0.0
+    assert config.soc_deficit_threshold == 0.10
+    assert config.soc_deficit_cost == 0.05
     assert config.soc_surplus_threshold == 0.90
     assert config.soc_surplus_cost == 0.0
     assert config.stress_cost == 0.0
@@ -183,6 +188,30 @@ def test_compute_curtailment_is_unset_for_an_entry_that_predates_it():
 def test_compute_curtailment_is_read_from_stored_options():
     assert GridConfig.from_dict({"compute_curtailment": True}).compute_curtailment is True
     assert GridConfig.from_dict({"compute_curtailment": False}).compute_curtailment is False
+
+
+def test_grid_limit_sensors_are_unset_by_default():
+    grid = GridConfig.from_dict({})
+    assert grid.import_limit_entity is None
+    assert grid.export_limit_entity is None
+
+
+def test_grid_limit_sensors_are_read_from_stored_options():
+    grid = GridConfig.from_dict(
+        {
+            "grid_import_limit_entity": "sensor.import_limit",
+            "grid_export_limit_entity": "sensor.export_limit",
+        }
+    )
+    assert grid.import_limit_entity == "sensor.import_limit"
+    assert grid.export_limit_entity == "sensor.export_limit"
+
+
+def test_a_cleared_grid_limit_sensor_reads_back_as_none():
+    """The options flow stores a cleared field as an empty string on some
+    paths; an empty entity id would be looked up on every run and never found."""
+    grid = GridConfig.from_dict({"grid_import_limit_entity": ""})
+    assert grid.import_limit_entity is None
 
 
 def _series(*values: float, step_minutes: int = 30) -> Series:
@@ -244,6 +273,110 @@ def test_covers_detects_a_short_series():
 def test_step_finds_the_dominant_spacing():
     assert _series(1.0, 2.0, 3.0, step_minutes=15).step() == timedelta(minutes=15)
     assert Series.empty().step() is None
+
+
+def test_resampled_sizes_a_series_by_the_grid_not_the_sensor():
+    """A chatty sensor must not set the size of the payload.
+
+    Half an hour of 5-second readings is 360 points; on a 15-minute grid
+    that is two, whatever the sensor's update rate happens to be.
+    """
+    start = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    chatty = Series(Point(start + timedelta(seconds=5 * i), 100.0) for i in range(360))
+    assert len(chatty.resampled(timedelta(minutes=15))) == 2
+
+
+def test_resampled_lands_on_whole_timestep_boundaries():
+    """No stray seconds, whatever the readings' own offsets.
+
+    EMHASS reindexes onto a grid anchored to whole timesteps, and
+    extended_with_previous_day can only find a point exactly 24h back when
+    this side is anchored the same way.
+    """
+    ragged = Series(
+        [
+            Point(datetime(2026, 7, 28, 17, 6, 4, 871334, tzinfo=UTC), 857.4),
+            Point(datetime(2026, 7, 28, 17, 6, 9, 938016, tzinfo=UTC), 857.9),
+            Point(datetime(2026, 7, 28, 17, 22, 31, 12345, tzinfo=UTC), 900.0),
+        ]
+    )
+    resampled = ragged.resampled(timedelta(minutes=15))
+    assert [p.time for p in resampled] == [
+        datetime(2026, 7, 28, 17, 0, tzinfo=UTC),
+        datetime(2026, 7, 28, 17, 15, tzinfo=UTC),
+    ]
+    assert all(p.time.second == 0 and p.time.microsecond == 0 for p in resampled)
+
+
+def test_resampled_weights_a_bucket_by_time_not_by_sample_count():
+    """Recorder rows appear on *change*, so samples are not evenly spaced.
+
+    Here 1000 W holds for 14 of the bucket's 15 minutes and 0 W for the
+    last one. A plain mean over the two samples would say 500 W; the
+    honest answer is 933.3 W.
+    """
+    start = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    series = Series(
+        [
+            Point(start, 1000.0),
+            Point(start + timedelta(minutes=14), 0.0),
+        ]
+    )
+    resampled = series.resampled(timedelta(minutes=15))
+    assert len(resampled) == 1
+    assert resampled.values[0] == pytest.approx(1000.0 * 14 / 15)
+
+
+def test_resampled_keeps_a_lone_reading():
+    """A brand new sensor has exactly one reading; it must survive."""
+    series = Series([Point(datetime(2026, 7, 28, 10, 7, 33, tzinfo=UTC), 420.0)])
+    resampled = series.resampled(timedelta(minutes=15))
+    assert resampled.values == (420.0,)
+    assert resampled.start == datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+
+
+def test_resampled_is_a_no_op_on_an_empty_series():
+    assert not Series.empty().resampled(timedelta(minutes=15))
+
+
+def test_resampling_makes_the_previous_day_extension_walk_the_grid():
+    """The two together are what bound the payload.
+
+    Left un-resampled, extended_with_previous_day walks forward in the
+    series' own modal spacing -- five seconds -- and fills the horizon with
+    thousands of points instead of one per timestep.
+    """
+    start = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    chatty = Series(Point(start + timedelta(seconds=5 * i), 100.0) for i in range(720))
+    until = start + timedelta(hours=2)
+    grid = timedelta(minutes=15)
+
+    extended = chatty.resampled(grid).extended_with_previous_day(until)
+
+    assert extended.covers(until)
+    assert extended.step() == grid
+    assert len(extended) == 9  # 2h of quarter-hours, inclusive of both ends
+
+
+def test_ceil_to_step_reaches_the_boundary_past_an_off_grid_horizon():
+    """A horizon end inherits now's stray microseconds and rarely lands on a
+    boundary; a grid-aligned series must still be asked to cover past it."""
+    off_grid = datetime(2026, 7, 28, 15, 30, 36, 916483, tzinfo=UTC)
+    assert ceil_to_step(off_grid, timedelta(minutes=15)) == datetime(
+        2026, 7, 28, 15, 45, tzinfo=UTC
+    )
+    on_grid = datetime(2026, 7, 28, 15, 45, tzinfo=UTC)
+    assert ceil_to_step(on_grid, timedelta(minutes=15)) == on_grid
+
+
+def test_extension_takes_an_explicit_step_when_the_series_has_none():
+    """One reading has no spacing to infer, and guessing an hour would hand
+    EMHASS a forecast four times coarser than the optimisation it feeds."""
+    start = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    lone = Series([Point(start, 420.0)])
+    extended = lone.extended_with_previous_day(start + timedelta(hours=1), timedelta(minutes=15))
+    assert extended.step() == timedelta(minutes=15)
+    assert extended.values == (420.0,) * 5
 
 
 def test_extended_with_previous_day_is_a_no_op_when_already_covering():

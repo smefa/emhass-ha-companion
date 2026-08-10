@@ -24,7 +24,7 @@ from homeassistant.const import (
     UnitOfTemperature,
     UnitOfTime,
 )
-from homeassistant.core import Event, EventStateChangedData, HomeAssistant, callback
+from homeassistant.core import Event, EventStateChangedData, HomeAssistant, State, callback
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.util import dt as dt_util
@@ -192,6 +192,34 @@ DIAGNOSTIC_SENSORS: tuple[EmhassSensorDescription, ...] = (
 )
 
 
+def _deferred_watts(
+    loads: Iterable[DeferrableRuntime], state_of: Callable[[str], State | None]
+) -> float:
+    """What ``loads`` are drawing right now, counting each source exactly once.
+
+    Several loads can legitimately share one running source: an EV set up as
+    both a scheduled charge and a surplus-only charge is the ordinary case,
+    and both point at the charger's single meter. A meter measures everything
+    behind it once, so summing per load subtracts that draw twice -- enough to
+    hold NetHouseLoadSensor on its zero clamp for as long as the load runs,
+    and to write a day of false zeros into the history a load forecast is
+    later built from.
+
+    Where loads sharing a source disagree about what its state means -- an
+    on/off source is read as each load's own nominal power -- the largest
+    reading wins. The source is one physical thing, so the most any of them
+    claims it could be drawing is the honest reading of it.
+    """
+    by_source: dict[str, float] = {}
+    for load in loads:
+        source = load.running_source
+        if source is None:
+            continue
+        watts = load.state_to_power(state_of(source)) or 0.0
+        by_source[source] = max(by_source.get(source, 0.0), watts)
+    return sum(by_source.values())
+
+
 def _run_attributes(data: EmhassData) -> dict[str, Any]:
     if data.last_run is None:
         return {}
@@ -357,12 +385,7 @@ class NetHouseLoadSensor(EmhassEntity, SensorEntity):
         if total is None:
             return None
 
-        deferred = 0.0
-        for load in self._loads:
-            source = load.running_source
-            if source is None:
-                continue
-            deferred += load.state_to_power(self.hass.states.get(source)) or 0.0
+        deferred = _deferred_watts(self._loads, self.hass.states.get)
 
         # Clamped rather than left negative: the total and each deferrable's
         # power sensor update on their own schedules, not in lockstep, so a
@@ -381,8 +404,17 @@ class NetHouseLoadSensor(EmhassEntity, SensorEntity):
 
     @property
     def native_value(self) -> float | None:
+        # Whole watts, matching the resolution a house power sensor actually
+        # measures at. This entity rewrites on every change of every source
+        # it watches -- several times a minute for a live power sensor -- and
+        # an unrounded average differs somewhere around the twelfth decimal
+        # every single time, so the recorder stores a row for each one even
+        # when the load has not moved. Rounding keeps the frequent updates
+        # the forecast history needs while letting genuinely unchanged
+        # readings collapse into no-ops.
         now = dt_util.utcnow()
-        return self._average.average(now, self._window)
+        average = self._average.average(now, self._window)
+        return None if average is None else round(average)
 
 
 class LoadDeferrableNumberSensor(EmhassLoadEntity, SensorEntity):
@@ -440,8 +472,10 @@ class LoadScheduledPowerSensor(EmhassLoadEntity, SensorEntity):
     @property
     def native_value(self) -> float:
         # No plan yet or before the first point still means "nothing
-        # scheduled", which is a real 0 W, not an unknown state.
-        return self._series().value_at(dt_util.utcnow()) or 0.0
+        # scheduled", which is a real 0 W, not an unknown state. Whole watts:
+        # the solver's own arithmetic leaves noise like 210.10000000000002,
+        # which payload.py already rounds away on the way out.
+        return round(self._series().value_at(dt_util.utcnow()) or 0.0)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -477,7 +511,10 @@ class LoadPlannedTemperatureSensor(EmhassLoadEntity, SensorEntity):
 
     @property
     def native_value(self) -> float | None:
-        return self._series().value_at(dt_util.utcnow())
+        # Two decimals: finer than any thermal model this plans against can
+        # honestly claim, and enough to keep a slow ramp visibly moving.
+        planned = self._series().value_at(dt_util.utcnow())
+        return None if planned is None else round(planned, 2)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -640,7 +677,9 @@ class SolarSurplusSensor(SolarSurplusBase, SensorEntity):
 
     @property
     def native_value(self) -> float | None:
-        return self._series().value_at(dt_util.utcnow())
+        # Whole watts, as for every other power figure this device reports.
+        surplus = self._series().value_at(dt_util.utcnow())
+        return None if surplus is None else round(surplus)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -681,7 +720,9 @@ class SolarSurplusEnergySensor(SolarSurplusBase, SensorEntity):
         if not series:
             return 0.0
         step = self._step(series)
-        return total_energy_wh(current_block(series, step), step) / 1000
+        # To the watt-hour: a kWh budget carried to full float precision is
+        # spurious detail on a figure derived from a forecast.
+        return round(total_energy_wh(current_block(series, step), step) / 1000, 3)
 
 
 class SolarSurplusStartSensor(SolarSurplusBase, SensorEntity):
@@ -741,7 +782,10 @@ class LoadSurplusBudgetSensor(EmhassLoadEntity, SensorEntity):
 
     @property
     def native_value(self) -> float | None:
-        return self.load.surplus_budget.hours
+        # Four decimals, as LoadRuntimeTodaySensor uses for the same unit --
+        # well under a second of runtime.
+        hours = self.load.surplus_budget.hours
+        return None if hours is None else round(hours, 4)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

@@ -69,12 +69,13 @@ Once per run, in `surplus.py`, from the **previous** run's plan:
    and everything below would be sized against a "day" that is really two
    days with a night spliced out of the middle.
 3. **Qualifying timesteps**, within that block. Those where the surplus is at
-   least the run floor plus *headroom* — on the gross series, before the
-   battery's own reservation is taken off (see below).
+   least the run floor plus *headroom* — measured after any higher-priority
+   surplus load has taken its draw, but before the battery's own reservation
+   is taken off (see below).
 4. **The window.** First to last *gross*-qualifying timestep *in the block*,
    sent as an absolute `start_at`/`end_at` pair rather than a wall-clock one.
 5. **The budget.** `hours = credited energy / nominal power`, capped at the
-   qualifying span itself. Each net-qualifying timestep's *full* surplus is
+   qualifying span itself. Each qualifying timestep's *full* surplus is
    credited (not clipped at what the load can draw in that one slot), so a
    run of strong slots can cover for a few that only just clear the bar —
    but the total can never ask for more hours than the span physically has
@@ -103,12 +104,13 @@ kilowatt-hour to the pool as well, selling it twice.
 
 ### The budget cap
 
-Each net-qualifying timestep's full surplus is credited toward `hours`, not
-just what the load could draw in that one slot — a 3 kW timestep credits an
-800 W pool the full 750 Wh, not 200 Wh. That lets a run of strong slots make
-up for a few that only just clear the bar, or for a slot the battery reserved
-most of, rather than every single timestep having to individually justify
-itself before it counts at all.
+Each qualifying timestep credits what it can still hand over — everything the
+sun offered there, less the battery's reservation and less what the
+higher-priority surplus loads already took — and not just what this load could
+draw in that one slot: a 3 kW timestep credits an 800 W pool the full 750 Wh,
+not 200 Wh. That lets a run of strong slots make up for a few that only just
+clear the bar, or for a slot the battery reserved most of, rather than every
+single timestep having to individually justify itself before it counts at all.
 
 The total is then capped at the qualifying span itself: the load can never be
 asked to run more hours than the span has timesteps for, because there would
@@ -128,6 +130,17 @@ number of weak or reserved slots inside an otherwise strong block no longer
 shrink `hours` at all, they just get absorbed by it. On a thin day it still
 falls back to something close to the old per-slot count, because there is
 no surplus elsewhere in the span to borrow from.
+
+And below one timestep, the budget is dropped outright. EMHASS can only place
+a load in whole timesteps — `payload.operating_timesteps` floors any non-zero
+request at one — so a sub-step budget does not buy a shorter run, it buys a
+*full* step at nominal power with only the fraction below it backed by
+surplus. The rest is imported, which is the one thing a surplus load exists
+not to do, so the choice is between one partial step and nothing at all. The
+window is still reported: the sun was up, there was simply nothing left of it
+worth a timestep. An explicit `max_energy_wh` is exempt — a small number the
+user typed is still an instruction, and the rounding is warned about
+separately.
 
 ## Start as early as possible
 
@@ -328,16 +341,30 @@ both simpler and more faithful than re-deriving "energy still needed to reach
 70 %" from SOC and capacity here and risking it disagreeing with what EMHASS
 actually intends to do.
 
-This narrows `hours`, never the window: a slot the battery is charging hard on
-is still gross-qualifying, so it still counts towards *when* the load may run,
-it just may contribute little or nothing towards *how much*. Keeping the two
-separate is what stops this turning back into the `-p_grid` bug — a battery
-that is still short of its target must not be able to push the load's start
-out, only to leave it fewer hours once it's running.
+This narrows `hours`, never the window and never which timesteps qualify: a
+slot the battery is charging hard on is still qualifying, so it still counts
+towards *when* the load may run, it just may contribute little or nothing
+towards *how much*. Keeping the two separate is what stops this turning back
+into the `-p_grid` bug — a battery that is still short of its target must not
+be able to push the load's start out, only to leave it fewer hours once it's
+running.
 
-Sharing among multiple surplus loads (priority order, see above) still comes
-out of what is left *after* the reservation: the battery's claim is taken off
-the top before the highest-priority surplus load even sees the series.
+That separation is also what keeps the budget from oscillating, and it is a
+subtler point than it looks. The reservation is read from a plan the load was
+already *in*, and that plan charged the battery on precisely the PV the load
+did not take — so in every slot the load is running, gross minus the
+reservation comes back as the load's own draw and nothing more. Qualify a slot
+on that residual and it can never clear the load's own run floor *plus
+headroom*, so the whole block drops out, the budget collapses to zero, the
+battery reclaims the block, and the next cycle hands back a full budget again:
+a two-cycle oscillation between "all of it" and "none of it". Headroom is
+margin against the *forecast* being wrong; measuring it against a residual the
+load's own consumption is already inside of is a category error.
+
+Sharing among multiple surplus loads (priority order, see above) is the claim
+that *does* gate qualification, because a load that is running really has
+emptied the slot. Each load in turn is measured against what its seniors left,
+and credits what is left of that after the reservation.
 
 ### A currently-running unbroken load whose window moved on
 

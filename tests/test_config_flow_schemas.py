@@ -27,6 +27,8 @@ from custom_components.emhass_companion.config_flow import (
 from custom_components.emhass_companion.const import (
     CONF_CAPACITY_COST_PER_KW,
     CONF_COMPUTE_CURTAILMENT,
+    CONF_GRID_EXPORT_LIMIT_ENTITY,
+    CONF_GRID_IMPORT_LIMIT_ENTITY,
     CONF_MULTIPLIER,
     CONF_TIME_STEP,
     LOAD_PROFILE_CREATE_SENTINEL,
@@ -133,6 +135,35 @@ def test_collect_grid_keeps_the_capacity_charge():
     collected = _collect_grid(submitted)
     assert collected[CONF_CAPACITY_COST_PER_KW] == 45.0
     assert collected[CONF_COMPUTE_CURTAILMENT] is True
+
+
+def test_collect_grid_keeps_the_limit_sensors():
+    submitted = {
+        "grid_import_max_w": 9000,
+        "grid_export_max_w": 9000,
+        CONF_CAPACITY_COST_PER_KW: 0.0,
+        CONF_COMPUTE_CURTAILMENT: False,
+        CONF_GRID_IMPORT_LIMIT_ENTITY: "sensor.phase_balanced_import_limit",
+        CONF_GRID_EXPORT_LIMIT_ENTITY: "sensor.export_limit",
+    }
+    collected = _collect_grid(submitted)
+    assert collected[CONF_GRID_IMPORT_LIMIT_ENTITY] == "sensor.phase_balanced_import_limit"
+    assert collected[CONF_GRID_EXPORT_LIMIT_ENTITY] == "sensor.export_limit"
+
+
+def test_a_blank_limit_sensor_is_stored_as_none():
+    """_optional_blank drops the key entirely; storing None rather than nothing
+    is what makes clearing the field in the options flow actually clear it."""
+    collected = _collect_grid(
+        {
+            "grid_import_max_w": 9000,
+            "grid_export_max_w": 9000,
+            CONF_CAPACITY_COST_PER_KW: 0.0,
+            CONF_COMPUTE_CURTAILMENT: False,
+        }
+    )
+    assert collected[CONF_GRID_IMPORT_LIMIT_ENTITY] is None
+    assert collected[CONF_GRID_EXPORT_LIMIT_ENTITY] is None
 
 
 # --- time step: the dropdown offers presets plus whatever was detected -------

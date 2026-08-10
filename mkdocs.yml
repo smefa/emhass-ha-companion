@@ -65,10 +65,12 @@ nav:
           - Load groups: load_groups.md
           - Request-run service (planned): request_run_service.md
       - Dashboard cards: dashboard_cards.md
+      - Lab cards (experimental): lab_cards.md
       - Entities: entities.md
       - Handing over control: handing_over_control.md
       - Inverter control: inverter_control.md
       - Data sources: data_sources.md
+      - Dynamic grid limits: grid_limits.md
       - Template additions: template_additions.md
       - Writing a profile: profiles.md
       - Inverter profile roadmap: inverter_profile_roadmap.md
