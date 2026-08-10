@@ -19,10 +19,12 @@ from custom_components.emhass_companion.config_flow import _suggested_entities
 from custom_components.emhass_companion.profiles import BUILTIN_ROOT, Profile
 from custom_components.emhass_companion.profiles.engine import (
     action_variables,
+    async_execute_steps,
     async_resolve_series,
     convert_curtail_power,
     convert_power,
     render,
+    render_action,
 )
 from custom_components.emhass_companion.profiles.schema import ProfileError, validate_document
 
@@ -703,3 +705,67 @@ def test_an_option_whose_suggestions_all_miss_is_left_blank(hass: HomeAssistant)
         key="inverter/test", path="<test>", kind="inverter", name="Test", document=document
     )
     assert _suggested_entities(hass, profile) == {}
+
+
+# --- executing rendered steps -------------------------------------------------
+
+
+@pytest.fixture
+def service_calls(hass: HomeAssistant) -> list:
+    """Record the calls a rendered action actually makes."""
+    recorded: list = []
+
+    async def _record(call) -> None:
+        recorded.append(call)
+
+    for domain, service in (("script", "turn_on"), ("homeassistant", "update_entity")):
+        hass.services.async_register(domain, service, _record)
+    return recorded
+
+
+async def test_an_unset_script_option_skips_its_step_instead_of_failing(
+    hass: HomeAssistant, service_calls: list
+) -> None:
+    """The generic-script profile invites leaving a mode's script unset.
+
+    Only self_consume is required. Rendering `idle` without an idle script
+    produces `entity_id: ""`, which Home Assistant rejects outright -- so
+    sending it anyway would turn a documented configuration into an error on
+    every apply, not a no-op.
+    """
+    profile = _builtin("inverter/generic_script")
+    options = {"self_consume_script": "script.self_consume"}
+
+    steps = render_action(hass, profile, options, "idle", power_w=0, soc=50, soc_target=80)
+    await async_execute_steps(hass, steps)
+    await hass.async_block_till_done()
+
+    assert steps[0]["target"] == {"entity_id": ""}
+    assert service_calls == []
+
+
+async def test_a_step_whose_option_is_set_still_runs(
+    hass: HomeAssistant, service_calls: list
+) -> None:
+    profile = _builtin("inverter/generic_script")
+    options = {"self_consume_script": "script.self_consume"}
+
+    steps = render_action(hass, profile, options, "self_consume", power_w=0, soc=50, soc_target=80)
+    await async_execute_steps(hass, steps)
+    await hass.async_block_till_done()
+
+    assert [call.data["entity_id"] for call in service_calls] == ["script.self_consume"]
+
+
+async def test_a_step_that_targets_nothing_at_all_is_left_alone(
+    hass: HomeAssistant, service_calls: list
+) -> None:
+    """Skipping is about an *empty* aim, not about having no aim.
+
+    A service that takes no target is an ordinary thing for a profile to
+    call, and must not be swept up by the guard above.
+    """
+    await async_execute_steps(hass, [{"service": "homeassistant.update_entity"}])
+    await hass.async_block_till_done()
+
+    assert len(service_calls) == 1

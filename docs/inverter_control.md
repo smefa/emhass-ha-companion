@@ -51,10 +51,11 @@ Point four script entities of your own at the four battery actions:
 | Idle script | Neither charging nor discharging |
 
 Each script receives `power_w` (the requested power, in watts), plus `soc`
-and `soc_target` as percentages, as script variables. Leave a script unset
-only if your inverter genuinely has no such mode — the self-consumption
-script in particular is worth providing, since the executor calls it
-whenever the plan goes stale.
+and `soc_target` as percentages, as script variables. Only the
+self-consumption script is required, since the executor calls it whenever
+the plan goes stale; leave any of the other three unset if your inverter
+genuinely has no such mode, and that action is skipped instead of being
+called with nothing to call.
 
 ## Entities
 
