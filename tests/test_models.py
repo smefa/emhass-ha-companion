@@ -271,12 +271,13 @@ def test_window_covering_keeps_the_point_in_force_at_the_start():
     sensors unknown for the whole timestep in progress after every run.
     """
     series = _series(1.0, 2.0, step_minutes=60)
-    windowed = series.window_covering(
-        T0 + timedelta(minutes=15), T0 + timedelta(minutes=90)
+    windowed = series.window_covering(T0 + timedelta(minutes=15), T0 + timedelta(minutes=90))
+    assert (
+        series.window(T0 + timedelta(minutes=15), T0 + timedelta(minutes=90)).value_at(
+            T0 + timedelta(minutes=20)
+        )
+        is None
     )
-    assert series.window(T0 + timedelta(minutes=15), T0 + timedelta(minutes=90)).value_at(
-        T0 + timedelta(minutes=20)
-    ) is None
     assert windowed.value_at(T0 + timedelta(minutes=20)) == 1.0
     # Re-stamped to the cut, so the result spans exactly the window asked for.
     assert windowed.start == T0 + timedelta(minutes=15)

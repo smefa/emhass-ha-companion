@@ -482,9 +482,7 @@ def test_an_hourly_price_is_extended_onto_the_payloads_own_grid():
     start = datetime(2026, 7, 27, 0, 0, tzinfo=UTC)
     # Yesterday plus today, hourly, ending at tonight's midnight -- Nord Pool
     # before its afternoon publication, with a day of history to repeat.
-    hourly = Series(
-        Point(start + timedelta(hours=index), 1.0 + index % 24) for index in range(48)
-    )
+    hourly = Series(Point(start + timedelta(hours=index), 1.0 + index % 24) for index in range(48))
 
     result = build_payload(_inputs(now=now, buy_price=hourly))
 

@@ -471,7 +471,9 @@ def test_selectable_boxes_only_offer_metrics_that_exist(bundle, table, order, de
 
     body = bundle.split(f"const {table} = {{", 1)[1].split("\n};", 1)[0]
     defined = set(re.findall(r"^  ([a-z_]+): \{", body, re.MULTILINE))
-    offered = set(re.findall(r'"([a-z_]+)"', bundle.split(f"const {order} = [", 1)[1].split("];", 1)[0]))
+    offered = set(
+        re.findall(r'"([a-z_]+)"', bundle.split(f"const {order} = [", 1)[1].split("];", 1)[0])
+    )
     assert offered == defined, f"{order} and {table} disagree: {offered ^ defined}"
 
     written = bundle.split(f"const {defaults} = [", 1)[1].split("];", 1)[0]
