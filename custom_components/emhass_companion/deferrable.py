@@ -79,6 +79,7 @@ from .const import (
     SUBENTRY_TYPE_THERMAL,
 )
 from .models import DeferrableLoad, Plan, PlanRow, Series
+from .stored_time import parse_stored_time
 from .surplus import SurplusBudget, SurplusSpec, allocate, battery_reserved_series, surplus_series
 from .thermal import (
     DEFAULT_COMFORT_END,
@@ -724,7 +725,7 @@ class DeferrableRegistry:
             data = dict(subentry.data)
             if (existing := self._loads.get(subentry_id)) is None:
                 self._loads[subentry_id] = _from_subentry(
-                    subentry_id, subentry.subentry_type, subentry.title, data
+                    self.hass, subentry_id, subentry.subentry_type, subentry.title, data
                 )
             else:
                 _apply_subentry_fields(existing, subentry.subentry_type, subentry.title, data)
@@ -984,7 +985,7 @@ class DeferrableRegistry:
 
 
 def _from_subentry(
-    subentry_id: str, subentry_type: str, title: str, data: dict
+    hass: HomeAssistant, subentry_id: str, subentry_type: str, title: str, data: dict
 ) -> DeferrableRuntime:
     load = DeferrableRuntime(subentry_id=subentry_id, name=title)
     _apply_subentry_fields(load, subentry_type, title, data)
@@ -992,8 +993,10 @@ def _from_subentry(
     load.nominal_power_w = float(data.get(CONF_NOMINAL_POWER, 0) or 0)
     load.minimum_power_w = float(data.get(CONF_MINIMUM_POWER, 0) or 0)
     load.operating_hours = float(data.get(CONF_OPERATING_HOURS, 0) or 0)
-    load.earliest_start = _parse_time(data.get(CONF_EARLIEST_START))
-    load.latest_end = _parse_time(data.get(CONF_LATEST_END))
+    load.earliest_start = _parse_time(
+        hass, data.get(CONF_EARLIEST_START), load=title, field="earliest start"
+    )
+    load.latest_end = _parse_time(hass, data.get(CONF_LATEST_END), load=title, field="latest end")
     load.use_time_window = load.earliest_start is not None or load.latest_end is not None
     load.semi_continuous = bool(data.get(CONF_SEMI_CONTINUOUS, True))
     load.single_constant = bool(data.get(CONF_SINGLE_CONSTANT, False))
@@ -1022,8 +1025,14 @@ def _from_subentry(
             data.get(CONF_SETBACK_TEMPERATURE, DEFAULT_SETBACK_TEMPERATURE)
         )
         load.max_temperature = float(data.get(CONF_MAX_TEMPERATURE, DEFAULT_MAX_TEMPERATURE))
-        load.comfort_start = _parse_time(data.get(CONF_COMFORT_START)) or DEFAULT_COMFORT_START
-        load.comfort_end = _parse_time(data.get(CONF_COMFORT_END)) or DEFAULT_COMFORT_END
+        load.comfort_start = (
+            _parse_time(hass, data.get(CONF_COMFORT_START), load=title, field="comfort start")
+            or DEFAULT_COMFORT_START
+        )
+        load.comfort_end = (
+            _parse_time(hass, data.get(CONF_COMFORT_END), load=title, field="comfort end")
+            or DEFAULT_COMFORT_END
+        )
     return load
 
 
@@ -1070,12 +1079,15 @@ def supported_control_entity(entity_id: str | None) -> str | None:
     return entity_id
 
 
-def _parse_time(value) -> time | None:
-    if value in (None, ""):
-        return None
-    if isinstance(value, time):
-        return value
-    return time.fromisoformat(str(value))
+def _parse_time(hass: HomeAssistant, value, *, load: str, field: str) -> time | None:
+    """A stored window/comfort time, or None if it will not parse.
+
+    Unreadable is treated as unset -- the load keeps its default window or
+    comfort band -- rather than taking ``async_setup_entry`` down over one
+    corrupted subentry. ``load``/``field`` are what turn that into a repair the
+    user can act on; see :mod:`.stored_time`.
+    """
+    return parse_stored_time(hass, value, label=f"{load}: {field}")
 
 
 def resolve_should_run(mode: str, scheduled: bool) -> bool:

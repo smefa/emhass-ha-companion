@@ -632,6 +632,10 @@
     "script_control_entity": {
       "title": "{count} load(s) use a script as their control entity",
       "description": "A script cannot be used to follow the plan: its state is on only while it runs, so it would be re-triggered on every apply, and turning it off would cancel the script instead of stopping the appliance. These loads are therefore not being switched at all:\n\n{details}\n\nEdit each load (Settings > Devices & services > EMHASS Companion > the load > Configure) and pick a switch or input_boolean instead, or clear the field and keep the load advisory-only, switching it from your own automation on its `should_run` sensor."
+    },
+    "bad_stored_time": {
+      "title": "{count} stored time(s) could not be read",
+      "description": "Home Assistant could not make sense of these stored times of day, so the default was used instead:\n\n{details}\n\nThis normally means the configuration was hand-edited or restored from a backup written by a different version. Open Settings > Devices & services > EMHASS Companion (or the load in question) and set the time again to clear this."
     }
   },
   "services": {

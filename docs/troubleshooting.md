@@ -93,6 +93,13 @@ response_variable: result
 Call it from an administrator account — the response carries the profile's
 resolved EMHASS settings, so it is gated the same way diagnostics are.
 
+**A stored time could not be read.** A repair naming the setting (the day-ahead
+fallback time, or a load's window or comfort band) means the value in the
+configuration store was not a time this could parse — almost always a
+hand-edited `.storage` or a backup restored from a different version. The
+default is used meanwhile; open the relevant options or load form, set the time
+again, and the repair clears itself.
+
 **A plan looks wrong.** Enable the *Last request to EMHASS* sensor (disabled
 by default) — its `payload` attribute is precisely what EMHASS was asked to
 solve, and its `warnings` attribute flags problems such as a forecast that

@@ -703,6 +703,11 @@ ISSUE_ML_FORECASTER_NOT_READY: Final = "ml_forecaster_not_ready"
 # switch, which is better than firing the script over and over; see
 # CONTROL_ENTITY_DOMAINS for why.
 ISSUE_SCRIPT_CONTROL_ENTITY: Final = "script_control_entity"
+# A stored time of day would not parse -- a hand-edited .storage, a restored
+# backup, a schema change. The value falls back to its default rather than
+# taking setup down with a traceback, so the user has to be told which field
+# was ignored and what it now reads as.
+ISSUE_BAD_STORED_TIME: Final = "bad_stored_time"
 
 # Solcast's day sensors are named today / tomorrow / day_3..day_7 -- "tomorrow"
 # *is* day 2, there is no forecast_day_2. Day 3 is the first sensor past the

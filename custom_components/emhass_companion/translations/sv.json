@@ -632,6 +632,10 @@
     "script_control_entity": {
       "title": "{count} last(er) använder ett skript som styrenhet",
       "description": "Ett skript kan inte användas för att följa planen: dess tillstånd är på bara medan det körs, så det skulle utlösas på nytt vid varje tillämpning, och att stänga av det avbryter skriptet i stället för att stoppa apparaten. Dessa laster styrs därför inte alls:\n\n{details}\n\nRedigera varje last (Inställningar > Enheter och tjänster > EMHASS Companion > lasten > Konfigurera) och välj en switch eller input_boolean i stället, eller töm fältet och låt lasten enbart vara rådgivande och styr den från din egen automation via dess `should_run`-sensor."
+    },
+    "bad_stored_time": {
+      "title": "{count} sparad(e) tid(er) kunde inte läsas",
+      "description": "Home Assistant kunde inte tolka dessa sparade klockslag, så standardvärdet användes i stället:\n\n{details}\n\nDet beror oftast på att konfigurationen redigerats för hand eller återställts från en säkerhetskopia skriven av en annan version. Öppna Inställningar > Enheter och tjänster > EMHASS Companion (eller den aktuella lasten) och ställ in tiden igen för att rensa detta."
     }
   },
   "services": {

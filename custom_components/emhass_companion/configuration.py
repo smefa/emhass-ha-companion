@@ -42,6 +42,7 @@ from .const import (
     STALE_PLAN_FACTOR,
 )
 from .models import BatteryConfig, GridConfig, HybridInverterConfig
+from .stored_time import parse_stored_time
 from .tariff import Tariff
 
 
@@ -113,6 +114,14 @@ class EmhassConfig:
     def from_entry(cls, hass: HomeAssistant, entry: ConfigEntry) -> EmhassConfig:
         options = entry.options or {}
         raw_time = options.get(CONF_DAYAHEAD_FALLBACK_TIME, DEFAULT_DAYAHEAD_FALLBACK_TIME)
+        # Never raises: a stored time this cannot read costs the user that one
+        # setting and a repair issue, not the whole setup. See stored_time.
+        fallback_time = parse_stored_time(
+            hass,
+            raw_time,
+            label="Day-ahead fallback time",
+            default=time.fromisoformat(DEFAULT_DAYAHEAD_FALLBACK_TIME),
+        ) or time.fromisoformat(DEFAULT_DAYAHEAD_FALLBACK_TIME)
         load = ProfileSelection.from_dict(options.get(CONF_LOAD))
         house_load_total_entity = options.get(CONF_HOUSE_LOAD_TOTAL_ENTITY)
         if house_load_total_entity and load.key == PROFILE_KEY_LOAD_SENSOR:
@@ -122,7 +131,7 @@ class EmhassConfig:
             time_step_minutes=int(options.get(CONF_TIME_STEP, DEFAULT_TIME_STEP)),
             mpc_interval_minutes=int(options.get(CONF_MPC_INTERVAL, DEFAULT_MPC_INTERVAL)),
             horizon_hours=int(options.get(CONF_HORIZON_HOURS, DEFAULT_HORIZON_HOURS)),
-            dayahead_fallback_time=time.fromisoformat(str(raw_time)),
+            dayahead_fallback_time=fallback_time,
             price=ProfileSelection.from_dict(options.get(CONF_PRICE)),
             pv=ProfileSelection.from_dict(options.get(CONF_PV)),
             load=load,
