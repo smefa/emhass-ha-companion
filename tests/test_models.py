@@ -264,6 +264,35 @@ def test_value_at_returns_none_before_the_series_starts():
     assert _series(1.0).value_at(T0 - timedelta(minutes=1)) is None
 
 
+def test_window_covering_keeps_the_point_in_force_at_the_start():
+    """An hourly price cut at a quarter-hour boundary must survive the cut.
+
+    Plain window() drops it for having begun earlier, which left the price
+    sensors unknown for the whole timestep in progress after every run.
+    """
+    series = _series(1.0, 2.0, step_minutes=60)
+    windowed = series.window_covering(
+        T0 + timedelta(minutes=15), T0 + timedelta(minutes=90)
+    )
+    assert series.window(T0 + timedelta(minutes=15), T0 + timedelta(minutes=90)).value_at(
+        T0 + timedelta(minutes=20)
+    ) is None
+    assert windowed.value_at(T0 + timedelta(minutes=20)) == 1.0
+    # Re-stamped to the cut, so the result spans exactly the window asked for.
+    assert windowed.start == T0 + timedelta(minutes=15)
+
+
+def test_window_covering_matches_window_when_a_point_sits_on_the_start():
+    series = _series(1.0, 2.0, 3.0)
+    start, end = T0 + timedelta(minutes=30), T0 + timedelta(minutes=90)
+    assert list(series.window_covering(start, end)) == list(series.window(start, end))
+
+
+def test_window_covering_has_nothing_to_carry_before_the_series_starts():
+    series = _series(1.0, 2.0)
+    assert series.window_covering(T0 - timedelta(hours=1), T0).to_attribute() == []
+
+
 def test_covers_detects_a_short_series():
     series = _series(1.0, 2.0)
     assert series.covers(T0 + timedelta(minutes=30))

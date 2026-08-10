@@ -179,6 +179,36 @@ class Series:
         start, end = start.astimezone(UTC), end.astimezone(UTC)
         return Series(p for p in self._points if start <= p.time < end)
 
+    def window_covering(self, start: datetime, end: datetime) -> Series:
+        """:meth:`window`, keeping the point that is in force *at* ``start``.
+
+        ``window`` drops everything before ``start``, which discards the one
+        point that says what holds at ``start`` itself whenever the series is
+        coarser than the boundary it is cut on: hourly prices cut at a
+        quarter-hour boundary lose the hour they are inside, and
+        :meth:`value_at` -- which deliberately refuses to extrapolate backwards
+        -- then answers None until the next hour begins. For a series published
+        next to a plan that starts at ``start``, that is a sensor reading
+        "unknown" across the very window it is describing.
+
+        The covering point is re-stamped to ``start`` rather than kept at its
+        own timestamp. Its value is untouched and stays true, since hold-last
+        semantics mean it is in force at ``start``; the re-stamping is what
+        keeps the result spanning exactly ``[start, end)``, so a series
+        published alongside a plan shares that plan's extent instead of
+        overhanging it on the left by up to one point.
+
+        A series that already has a point exactly on ``start`` is returned
+        unchanged -- the re-stamp is then a no-op, and this is plain
+        :meth:`window`.
+        """
+        start, end = start.astimezone(UTC), end.astimezone(UTC)
+        covering = [point for point in self._points if point.time <= start]
+        return Series(
+            ([Point(start, covering[-1].value)] if covering else [])
+            + [point for point in self._points if start < point.time < end]
+        )
+
     # -- queries --------------------------------------------------------------
 
     def value_at(self, when: datetime) -> float | None:
