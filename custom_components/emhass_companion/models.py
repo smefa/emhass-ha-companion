@@ -8,6 +8,7 @@ so no part of this integration ever relies on an implicit local timezone.
 
 from __future__ import annotations
 
+from bisect import bisect_right
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, time, timedelta
@@ -75,7 +76,7 @@ class Series:
     engine (which transforms it) and the payload builder (which serialises it).
     """
 
-    __slots__ = ("_points",)
+    __slots__ = ("_points", "_times")
 
     def __init__(self, points: Iterable[Point]) -> None:
         # Later entries win on duplicate timestamps. That matters when a profile
@@ -87,7 +88,13 @@ class Series:
             if when.tzinfo is None:
                 raise SeriesError(f"Naive datetime in series: {when!r}")
             merged[when.astimezone(UTC)] = float(point.value)
-        self._points = tuple(Point(when, merged[when]) for when in sorted(merged))
+        times = tuple(sorted(merged))
+        self._points = tuple(Point(when, merged[when]) for when in times)
+        # Kept alongside the points purely so the hold-last lookups can binary
+        # search. Every plan-derived entity calls value_at at each clock tick,
+        # and a linear walk over ~96 points times ten loads times their sensors
+        # is thousands of redundant comparisons a tick on a Raspberry Pi.
+        self._times = times
 
     # -- construction ---------------------------------------------------------
 
@@ -161,12 +168,7 @@ class Series:
         """
         if not self._points:
             return self
-        when = when.astimezone(UTC)
-        index = None
-        for i, point in enumerate(self._points):
-            if point.time > when:
-                break
-            index = i
+        index = self._index_at(when)
         if index is None:
             return self
         target = self._points[index]
@@ -217,13 +219,18 @@ class Series:
         Returns ``None`` before the first point rather than extrapolating
         backwards, so callers can distinguish "no data yet" from a real zero.
         """
-        when = when.astimezone(UTC)
-        found: float | None = None
-        for point in self._points:
-            if point.time > when:
-                break
-            found = point.value
-        return found
+        index = self._index_at(when)
+        return None if index is None else self._points[index].value
+
+    def _index_at(self, when: datetime) -> int | None:
+        """Index of the last point at or before ``when``, or None if there is none.
+
+        ``bisect_right`` over the parallel timestamps built in ``__init__``:
+        the points are sorted and de-duplicated there, which is exactly the
+        precondition a binary search needs.
+        """
+        position = bisect_right(self._times, when.astimezone(UTC))
+        return position - 1 if position else None
 
     def covers(self, until: datetime) -> bool:
         """Whether the series extends to ``until``.
@@ -714,6 +721,30 @@ class Plan:
     schema_version: str
     rows: list[PlanRow] = field(default_factory=list)
 
+    # Lookup caches. A plan is read far more often than it is built: the clock
+    # fires async_update_listeners every timestep and every plan-derived entity
+    # re-reads at that moment, so row_at and series() are called hundreds of
+    # times per tick against rows that never change in between. Rebuilt
+    # whenever ``rows`` is replaced or grows -- see :meth:`_cache`.
+    _cached_for: list[PlanRow] | None = field(default=None, init=False, repr=False, compare=False)
+    _timestamps: tuple[datetime, ...] = field(default=(), init=False, repr=False, compare=False)
+    _series_cache: dict[str, Series] = field(
+        default_factory=dict, init=False, repr=False, compare=False
+    )
+
+    def _cache(self) -> tuple[datetime, ...]:
+        """The rows' timestamps, rebuilt only when ``rows`` changed identity or length.
+
+        Rows are treated as immutable once a plan is parsed (nothing in this
+        integration edits one in place), so identity plus length is enough to
+        tell a fresh plan from the one already cached.
+        """
+        if self._cached_for is not self.rows or len(self._timestamps) != len(self.rows):
+            self._cached_for = self.rows
+            self._timestamps = tuple(row.timestamp for row in self.rows)
+            self._series_cache = {}
+        return self._timestamps
+
     @classmethod
     def from_response(cls, payload: dict[str, Any]) -> Plan | None:
         """Parse a ``/api/v1/plan`` response, or None if no run has happened."""
@@ -746,7 +777,8 @@ class Plan:
         Anything earlier than that really is uncovered and still returns None.
         """
         when = when.astimezone(UTC)
-        if not self.rows:
+        timestamps = self._cache()
+        if not timestamps:
             return None
 
         first = self.rows[0]
@@ -756,19 +788,24 @@ class Plan:
                 return first
             return None
 
-        found: PlanRow | None = None
-        for row in self.rows:
-            if row.timestamp > when:
-                break
-            found = row
-        return found
+        position = bisect_right(timestamps, when)
+        return self.rows[position - 1] if position else None
 
     def series(self, attribute: str) -> Series:
-        return Series(
-            Point(row.timestamp, value)
-            for row in self.rows
-            if (value := getattr(row, attribute)) is not None
-        )
+        """One column of the plan as a series, memoised per attribute.
+
+        Several sensors publish the same column, and each rebuilds it on every
+        update; a Series costs a sort and a dict pass to construct, which is
+        wasted work for a plan that cannot change between runs.
+        """
+        self._cache()
+        if (cached := self._series_cache.get(attribute)) is None:
+            cached = self._series_cache[attribute] = Series(
+                Point(row.timestamp, value)
+                for row in self.rows
+                if (value := getattr(row, attribute)) is not None
+            )
+        return cached
 
     def deferrable_series(self, index: int) -> Series:
         return Series(
