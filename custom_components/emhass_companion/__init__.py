@@ -28,11 +28,14 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 from .api import EmhassClient, EmhassError
 from .const import (
+    CONF_CONTROL_ENTITY,
     CONF_HOUSE_LOAD_TOTAL_ENTITY,
     CONF_URL,
+    CONTROL_ENTITY_DOMAINS,
     DOMAIN,
     ISSUE_BAD_PROFILE,
     ISSUE_EMHASS_VERSION,
+    ISSUE_SCRIPT_CONTROL_ENTITY,
     LOAD_SUBENTRY_TYPES,
     MIN_EMHASS_VERSION,
     NET_HOUSE_LOAD_KEY,
@@ -115,6 +118,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
 
     loads = DeferrableRegistry(hass, entry)
     loads.sync()
+    _report_unusable_control_entities(hass, entry)
 
     if entry.options.get(CONF_HOUSE_LOAD_TOTAL_ENTITY):
         # Registered here, ahead of both the config sync below and the sensor
@@ -202,6 +206,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
             return
         if change_type != ConfigEntryChange.UPDATED or entry.runtime_data is None:
             return
+        # Editing a load in place does not reload the entry, so the repair
+        # below would otherwise stay up until the next restart even after the
+        # user has done exactly what it asked.
+        _report_unusable_control_entities(hass, entry)
         current = {
             subentry_id
             for subentry_id, subentry in entry.subentries.items()
@@ -285,6 +293,44 @@ def _check_version(hass: HomeAssistant, version: str | None) -> None:
         )
     else:
         ir.async_delete_issue(hass, DOMAIN, ISSUE_EMHASS_VERSION)
+
+
+@callback
+def _report_unusable_control_entities(hass: HomeAssistant, entry: EmhassConfigEntry) -> None:
+    """Name the loads whose control entity this cannot drive.
+
+    Only scripts can be in here in practice: the form offered them alongside
+    switches in earlier versions, and a script is the one thing that looks like a
+    control entity without behaving like one (see CONTROL_ENTITY_DOMAINS).
+    Such a load is now left alone entirely rather than having its script
+    re-fired on every apply, which is a change the user has to know about --
+    the load is not being switched by anything until they pick a switch.
+    """
+    offenders = {
+        subentry.title: control
+        for subentry in entry.subentries.values()
+        if subentry.subentry_type in LOAD_SUBENTRY_TYPES
+        and (control := subentry.data.get(CONF_CONTROL_ENTITY))
+        and control.partition(".")[0] not in CONTROL_ENTITY_DOMAINS
+    }
+    if not offenders:
+        ir.async_delete_issue(hass, DOMAIN, ISSUE_SCRIPT_CONTROL_ENTITY)
+        return
+
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        ISSUE_SCRIPT_CONTROL_ENTITY,
+        is_fixable=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key=ISSUE_SCRIPT_CONTROL_ENTITY,
+        translation_placeholders={
+            "count": str(len(offenders)),
+            "details": "\n".join(
+                f"- **{name}**: `{control}`" for name, control in sorted(offenders.items())
+            ),
+        },
+    )
 
 
 def _report_profile_errors(hass: HomeAssistant, coordinator: EmhassCoordinator) -> None:

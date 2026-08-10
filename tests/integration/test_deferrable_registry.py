@@ -9,6 +9,7 @@ from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.emhass_companion.const import (
+    CONF_CONTROL_ENTITY,
     CONF_NOMINAL_POWER,
     CONF_OPERATING_HOURS,
     CONF_POWER_SENSOR,
@@ -377,3 +378,86 @@ async def test_a_sourceless_load_disarms_on_the_runtime_the_plan_credits_it(
     registry.check_auto_disarm(now + timedelta(minutes=30))
 
     assert load.requested is False
+
+
+async def test_a_script_control_entity_is_ignored_entirely(hass: HomeAssistant) -> None:
+    """The form accepted scripts once; a script is not switchable.
+
+    Dropping it here covers both uses in one place: the executor has nothing
+    to fire on every apply, and `running_source` does not report the load as
+    idle merely because its script is not executing right now.
+    """
+    entry = _entry(
+        {
+            "title": "Dishwasher",
+            "data": {
+                CONF_NOMINAL_POWER: 2000,
+                CONF_CONTROL_ENTITY: "script.start_dishwasher",
+            },
+        }
+    )
+    entry.add_to_hass(hass)
+
+    registry = DeferrableRegistry(hass, entry)
+    registry.sync()
+
+    load = registry.all()[0]
+    assert load.control_entity is None
+    assert load.running_source is None
+
+
+async def test_a_switch_control_entity_is_kept(hass: HomeAssistant) -> None:
+    entry = _entry(
+        {
+            "title": "Dishwasher",
+            "data": {
+                CONF_NOMINAL_POWER: 2000,
+                CONF_CONTROL_ENTITY: "input_boolean.dishwasher",
+            },
+        }
+    )
+    entry.add_to_hass(hass)
+
+    registry = DeferrableRegistry(hass, entry)
+    registry.sync()
+
+    assert registry.all()[0].control_entity == "input_boolean.dishwasher"
+
+
+async def test_a_script_control_entity_raises_a_repair(hass: HomeAssistant) -> None:
+    """Silently ignoring it would leave the user with a load nothing switches."""
+    from homeassistant.helpers import issue_registry as ir
+
+    from custom_components.emhass_companion import _report_unusable_control_entities
+    from custom_components.emhass_companion.const import ISSUE_SCRIPT_CONTROL_ENTITY
+
+    entry = _entry(
+        {
+            "title": "Dishwasher",
+            "data": {
+                CONF_NOMINAL_POWER: 2000,
+                CONF_CONTROL_ENTITY: "script.start_dishwasher",
+            },
+        }
+    )
+    entry.add_to_hass(hass)
+
+    _report_unusable_control_entities(hass, entry)
+
+    registry = ir.async_get(hass)
+    issue = registry.async_get_issue(DOMAIN, ISSUE_SCRIPT_CONTROL_ENTITY)
+    assert issue is not None
+    assert "Dishwasher" in issue.translation_placeholders["details"]
+    assert "script.start_dishwasher" in issue.translation_placeholders["details"]
+
+    # And clears as soon as the load points at something switchable, without
+    # waiting for a restart -- editing a load in place does not reload.
+    subentry_id = next(iter(entry.subentries))
+    hass.config_entries.async_update_subentry(
+        entry,
+        entry.subentries[subentry_id],
+        data={CONF_NOMINAL_POWER: 2000, CONF_CONTROL_ENTITY: "switch.dishwasher"},
+    )
+    _report_unusable_control_entities(hass, entry)
+
+    assert registry.async_get_issue(DOMAIN, ISSUE_SCRIPT_CONTROL_ENTITY) is None

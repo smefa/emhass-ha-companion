@@ -161,6 +161,7 @@ async def _build(
     *,
     with_load: bool = False,
     inverter: bool = True,
+    control_entity: str = LOAD_SWITCH,
 ) -> tuple[Executor, EmhassCoordinator]:
     subentries = []
     if with_load:
@@ -169,7 +170,7 @@ async def _build(
                 "subentry_type": SUBENTRY_TYPE_DEFERRABLE,
                 "title": "Dishwasher",
                 "unique_id": "dishwasher",
-                "data": {CONF_NOMINAL_POWER: 2000, CONF_CONTROL_ENTITY: LOAD_SWITCH},
+                "data": {CONF_NOMINAL_POWER: 2000, CONF_CONTROL_ENTITY: control_entity},
             }
         )
 
@@ -439,6 +440,42 @@ async def test_a_load_without_a_control_entity_is_advisory_only(
     await hass.async_block_till_done()
 
     assert not any(call.service in ("turn_on", "turn_off") for call in calls)
+
+
+async def test_a_script_left_over_as_a_control_entity_is_never_fired(
+    hass: HomeAssistant, calls: list[ServiceCall]
+) -> None:
+    """The form used to accept a script here, and a script cannot be one.
+
+    Its state is "on" only while it executes, so a short one reads "off"
+    again immediately and would be re-triggered on every single apply for the
+    whole scheduled window -- while `script.turn_off` would only ever cancel
+    the script, leaving the appliance running. Doing nothing is the honest
+    outcome; the repair (ISSUE_SCRIPT_CONTROL_ENTITY) is what tells the user.
+    """
+    script = "script.start_dishwasher"
+
+    async def _record(call: ServiceCall) -> None:
+        calls.append(call)
+
+    for service in ("turn_on", "turn_off"):
+        hass.services.async_register("script", service, _record)
+    hass.states.async_set(script, "off")
+
+    executor, coordinator = await _build(hass, with_load=True, control_entity=script)
+    coordinator.control_enabled = True
+    coordinator.data = EmhassData(
+        plan=_plan(0, deferrable=2000),
+        last_success=dt_util.utcnow(),
+        load_order=[next(iter(coordinator.config_entry.subentries))],
+    )
+
+    decision = await executor.async_apply()
+    await hass.async_block_till_done()
+
+    assert not any(call.domain == "script" for call in calls)
+    # The plan itself is unaffected -- the load is advisory, not excluded.
+    assert decision.loads == {next(iter(coordinator.config_entry.subentries)): True}
 
 
 # --- degradation -------------------------------------------------------------

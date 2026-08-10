@@ -628,6 +628,10 @@
     "ml_forecaster_not_ready": {
       "title": "Maskininlärningsprognosen för förbrukning är inte tränad än",
       "description": "Lastprofilen är satt till \"Maskininlärningsprognos\", men den är inte bekräftat tränad för den just nu konfigurerade sensorn. Optimeringskörningar använder sensorns egna verkliga senaste mätvärden under tiden (föregående dygn i verkligheten när det finns, annars dess aktuella värde upprepat) så att de fortsätter lyckas och ligger nära ditt hushålls faktiska förbrukning.\n\nOm sensorn har minst {days} dagars historik triggas en träningskörning automatiskt -- inget behöver göras. En helt ny sensor (till exempel en som just skapats av \"Skapa en hushållslastsensor\") behöver {days} dagars verklig historik först. Du kan även trycka på \"Träna lastprognos\" själv när den har det. Detta löser sig automatiskt när en träning lyckas."
+    },
+    "script_control_entity": {
+      "title": "{count} last(er) använder ett skript som styrenhet",
+      "description": "Ett skript kan inte användas för att följa planen: dess tillstånd är på bara medan det körs, så det skulle utlösas på nytt vid varje tillämpning, och att stänga av det avbryter skriptet i stället för att stoppa apparaten. Dessa laster styrs därför inte alls:\n\n{details}\n\nRedigera varje last (Inställningar > Enheter och tjänster > EMHASS Companion > lasten > Konfigurera) och välj en switch eller input_boolean i stället, eller töm fältet och låt lasten enbart vara rådgivande och styr den från din egen automation via dess `should_run`-sensor."
     }
   },
   "services": {

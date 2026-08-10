@@ -64,6 +64,7 @@ from .const import (
     CONF_SURPLUS_PRIORITY,
     CONF_TEMPERATURE_SENSOR,
     CONF_THERMAL_INERTIA,
+    CONTROL_ENTITY_DOMAINS,
     DEFAULT_SURPLUS_HEADROOM_W,
     DEFAULT_SURPLUS_PRIORITY,
     LOAD_MODE_AUTO,
@@ -1042,9 +1043,31 @@ def _apply_subentry_fields(
         LOAD_TYPE_THERMAL if subentry_type == SUBENTRY_TYPE_THERMAL else LOAD_TYPE_STANDARD
     )
     load.power_sensor = data.get(CONF_POWER_SENSOR) or None
-    load.control_entity = data.get(CONF_CONTROL_ENTITY) or None
+    load.control_entity = supported_control_entity(data.get(CONF_CONTROL_ENTITY))
     load.temperature_sensor = data.get(CONF_TEMPERATURE_SENSOR) or None
     load.sense = data.get(CONF_SENSE) or SENSE_HEAT
+
+
+def supported_control_entity(entity_id: str | None) -> str | None:
+    """The stored control entity, unless it is one we must not drive.
+
+    The form only offers :data:`CONTROL_ENTITY_DOMAINS` now, but subentries
+    created while it also offered scripts still hold one. Ignoring it here
+    covers both uses in a single place: the executor stops re-firing the
+    script on every apply, and ``running_source`` stops reporting a load as
+    idle purely because its script is not currently executing. The user is
+    told, rather than left wondering -- see ISSUE_SCRIPT_CONTROL_ENTITY.
+    """
+    if not entity_id:
+        return None
+    if entity_id.partition(".")[0] not in CONTROL_ENTITY_DOMAINS:
+        _LOGGER.warning(
+            "Ignoring control entity %s: only %s can be switched on and off to follow a plan",
+            entity_id,
+            " and ".join(CONTROL_ENTITY_DOMAINS),
+        )
+        return None
+    return entity_id
 
 
 def _parse_time(value) -> time | None:

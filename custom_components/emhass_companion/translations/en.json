@@ -628,6 +628,10 @@
     "ml_forecaster_not_ready": {
       "title": "Machine-learning load forecaster is not trained yet",
       "description": "The load profile is set to \"Machine-learning forecaster\", but it has not been confirmed trained for the currently configured sensor. Optimisation runs are using the sensor's own real recent readings meanwhile (its actual last day once there is one, its live reading repeated until then) so they keep succeeding and stay close to your household's actual consumption.\n\nIf the sensor has at least {days} days of history, a training run is triggered automatically -- no action needed. A brand new sensor (for example one just built by \"Create a house load sensor\") needs {days} days of real history to accumulate first. You can also press \"Train load forecaster\" yourself once it does. This resolves automatically once a fit succeeds."
+    },
+    "script_control_entity": {
+      "title": "{count} load(s) use a script as their control entity",
+      "description": "A script cannot be used to follow the plan: its state is on only while it runs, so it would be re-triggered on every apply, and turning it off would cancel the script instead of stopping the appliance. These loads are therefore not being switched at all:\n\n{details}\n\nEdit each load (Settings > Devices & services > EMHASS Companion > the load > Configure) and pick a switch or input_boolean instead, or clear the field and keep the load advisory-only, switching it from your own automation on its `should_run` sensor."
     }
   },
   "services": {

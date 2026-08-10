@@ -282,12 +282,14 @@ def test_services_yaml_matches_registered_services(strings):
 
 
 def test_every_repair_issue_has_translations(strings):
-    from custom_components.emhass_companion.const import (
-        ISSUE_BAD_PROFILE,
-        ISSUE_EMHASS_VERSION,
-    )
+    """Every ISSUE_* constant, not a hand-kept list -- an untranslated repair
+    renders as a slug in the one place the user goes when something is wrong."""
+    from custom_components.emhass_companion import const
 
-    for issue in (ISSUE_BAD_PROFILE, ISSUE_EMHASS_VERSION):
+    issues = [value for name, value in vars(const).items() if name.startswith("ISSUE_")]
+    assert issues
+
+    for issue in issues:
         assert issue in strings["issues"], f"issue '{issue}' has no translation"
         assert strings["issues"][issue].get("title")
         assert strings["issues"][issue].get("description")

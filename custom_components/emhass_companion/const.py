@@ -233,6 +233,15 @@ CONF_USE_TIME_WINDOW: Final = "use_time_window"
 # Optional: what the executor switches to actually run the load. Without it the
 # load is advisory only and the user automates on should_run themselves.
 CONF_CONTROL_ENTITY: Final = "control_entity"
+# What a control entity is allowed to be. Two requirements, and a script meets
+# neither: the executor switches it *off* again when the plan says so, and its
+# state doubles as the running signal when there is no power sensor. A script's
+# state is "on" only for as long as it is executing, so a short script reads
+# "off" immediately -- it would be re-fired on every apply for the whole
+# scheduled window, never observed as running, and script.turn_off would cancel
+# the script rather than stop the appliance. Scripts were offered here in
+# earlier versions; ISSUE_SCRIPT_CONTROL_ENTITY tells anyone who took the offer.
+CONTROL_ENTITY_DOMAINS: Final = ("switch", "input_boolean")
 
 # Surplus loads. The margin a timestep's surplus must clear *above* the load's
 # own draw before it counts towards the budget. Its whole job is to absorb PV
@@ -689,6 +698,11 @@ ISSUE_PV_TAIL_SHORT: Final = "pv_tail_short"
 # from the sensor's own recorded history meanwhile. Clears once an auto- or
 # button-triggered fit against that sensor succeeds.
 ISSUE_ML_FORECASTER_NOT_READY: Final = "ml_forecaster_not_ready"
+# One or more loads still point their control entity at a script, from when the
+# form accepted one. The load is left uncontrolled until the user picks a
+# switch, which is better than firing the script over and over; see
+# CONTROL_ENTITY_DOMAINS for why.
+ISSUE_SCRIPT_CONTROL_ENTITY: Final = "script_control_entity"
 
 # Solcast's day sensors are named today / tomorrow / day_3..day_7 -- "tomorrow"
 # *is* day 2, there is no forecast_day_2. Day 3 is the first sensor past the

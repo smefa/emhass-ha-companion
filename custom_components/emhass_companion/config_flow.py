@@ -95,6 +95,7 @@ from .const import (
     CONF_URL,
     CONF_WEIGHT_BATTERY_CHARGE,
     CONF_WEIGHT_BATTERY_DISCHARGE,
+    CONTROL_ENTITY_DOMAINS,
     DEFAULT_BATTERY_SOC_DEFICIT_COST,
     DEFAULT_BATTERY_SOC_DEFICIT_THRESHOLD,
     DEFAULT_BATTERY_SOC_SURPLUS_COST,
@@ -1038,7 +1039,7 @@ def deferrable_schema(
                 )
             ),
             _optional_blank(CONF_CONTROL_ENTITY, defaults): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain=["switch", "input_boolean", "script"])
+                selector.EntitySelectorConfig(domain=list(CONTROL_ENTITY_DOMAINS))
             ),
         }
     )
@@ -1161,7 +1162,7 @@ def thermal_schema(
                 )
             ),
             _optional_blank(CONF_CONTROL_ENTITY, defaults): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain=["switch", "input_boolean", "script"])
+                selector.EntitySelectorConfig(domain=list(CONTROL_ENTITY_DOMAINS))
             ),
         }
     )
