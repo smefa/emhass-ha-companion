@@ -27,7 +27,7 @@ import re
 import sys
 from typing import Any, Final
 
-from homeassistant.components.diagnostics import async_redact_data
+from homeassistant.components.diagnostics import REDACTED, async_redact_data
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import __version__ as HA_VERSION
 from homeassistant.core import HomeAssistant
@@ -49,6 +49,17 @@ _PROBE_TIMEOUT = 5
 # is matched by pattern rather than enumerated by name.
 _REDACT_EXACT_KEYS: Final = {"latitude", "longitude", "alt", "altitude"}
 _REDACT_KEY_PATTERN: Final = re.compile(r"password|token|api_key|secret|authorization", re.I)
+
+# `key: value` in a profile YAML, matched textually rather than through the
+# parser -- see _redact_secret_lines for why. The key is captured separately
+# so the same pattern used everywhere else decides whether it is a credential.
+_SECRET_LINE_RE: Final = re.compile(
+    r"^(?P<prefix>\s*(?:-\s+)?[\"']?(?P<key>[^\s:\"']+)[\"']?\s*:\s*)(?P<value>\S.*)?$"
+)
+
+# `key: |`, `key: >-`, ... -- the value is not on this line but in the more
+# indented block beneath it, which has to be redacted too.
+_BLOCK_SCALAR_RE: Final = re.compile(r"^[|>][0-9+-]*\s*$")
 
 # Deliberately the same simple shape the plan calls out rather than
 # homeassistant.helpers.config_validation's entity-id validator: this walks
@@ -128,7 +139,12 @@ async def async_get_config_entry_diagnostics(
         ),
         # The exact request is the single most useful artefact when a plan looks
         # wrong, since EMHASS's own configuration screen does not reflect it.
-        "last_payload": data.payload,
+        # Redacted despite that: build_payload ends by merging in the `emhass:`
+        # block of every selected profile, which is an unconstrained mapping, so
+        # a credential a profile sets for EMHASS (`solcast_api_key`, say) lands
+        # here -- and would otherwise survive in plain text a few lines above
+        # the same key being redacted out of `backend.config`.
+        "last_payload": _redact_config(data.payload or {}),
         "warnings": data.warnings,
         "deferrable_order": data.load_order,
         "environment": environment_section,
@@ -167,8 +183,11 @@ def _keys_matching_pattern(value: Any) -> set[str]:
 def _redact_config(data: Mapping[str, Any]) -> dict[str, Any]:
     """Redact coordinates and anything that looks like a credential.
 
-    Deliberately not applied to entity ids, tariff prices, battery capacity,
-    load names or the payload -- redacting those would defeat the feature.
+    Deliberately not applied to entity ids, tariff prices, battery capacity or
+    load names -- redacting those would defeat the feature. The payload *is*
+    run through this, unlike when this module was written: it is assembled
+    partly from profile-contributed EMHASS settings, so "nothing in it is a
+    secret" stopped being true once profiles could name any key they liked.
     """
     return async_redact_data(data, _REDACT_EXACT_KEYS | _keys_matching_pattern(data))
 
@@ -363,6 +382,58 @@ def _entities_section(hass: HomeAssistant, entry: ConfigEntry) -> list[dict[str,
 # -- custom profiles ------------------------------------------------------------
 
 
+def _redact_secret_lines(content: str) -> str:
+    """Blank the value of any ``key: value`` whose key looks like a credential.
+
+    A line scrub rather than parse-redact-reserialise on purpose. This section
+    exists so a *broken* profile can be read without SSH access to the machine,
+    and a broken profile is exactly the one ``load_yaml`` refuses -- redacting
+    through the parser would blank the file in the one case it is most needed.
+    Round-tripping would also drop the comments and formatting, which is much
+    of what makes somebody else's profile readable.
+
+    Line count is preserved, including inside a redacted block scalar, so line
+    numbers in a "failed to load" error still point where they did on disk.
+
+    A credential inside an inline flow mapping (``{api_key: hunter2}``) is not
+    caught. No profile this repo ships or documents is written that way, and
+    catching it means parsing, which costs the broken-file case above.
+    """
+    out: list[str] = []
+    block_indent: int | None = None
+
+    for line in content.splitlines(keepends=True):
+        text = line.rstrip("\r\n")
+        newline = line[len(text) :]
+        indent = len(text) - len(text.lstrip())
+
+        # Inside the indented block beneath a redacted `key: |`.
+        if block_indent is not None:
+            if not text.strip():
+                out.append(line)
+                continue
+            if indent > block_indent:
+                out.append(" " * indent + REDACTED + newline)
+                continue
+            block_indent = None
+
+        match = _SECRET_LINE_RE.match(text)
+        if match and _REDACT_KEY_PATTERN.search(match["key"]):
+            value = match["value"] or ""
+            out.append(match["prefix"] + REDACTED + newline)
+            # Nothing on this line means the value is the indented block under
+            # it -- either a block scalar or a whole mapping. Both go, which is
+            # what `_redact_config` does with a matching key elsewhere: it
+            # replaces the entire subtree, not just a scalar leaf.
+            if not value or _BLOCK_SCALAR_RE.match(value):
+                block_indent = indent
+            continue
+
+        out.append(line)
+
+    return "".join(out)
+
+
 def _read_custom_profiles(root: Path) -> list[dict[str, Any]]:
     profiles: list[dict[str, Any]] = []
     if not root.is_dir():
@@ -371,7 +442,9 @@ def _read_custom_profiles(root: Path) -> list[dict[str, Any]]:
         try:
             stat = path.stat()
             raw = path.read_bytes()
-            content = raw[:_MAX_PROFILE_BYTES].decode("utf-8", errors="replace")
+            content = _redact_secret_lines(
+                raw[:_MAX_PROFILE_BYTES].decode("utf-8", errors="replace")
+            )
             profiles.append(
                 {
                     "path": str(path.relative_to(root)),

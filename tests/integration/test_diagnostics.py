@@ -265,3 +265,59 @@ async def test_the_log_handler_is_removed_when_the_entry_is_unloaded(hass: HomeA
     await hass.async_block_till_done()
 
     assert handler not in logger.handlers
+
+
+async def test_a_credential_in_a_custom_profile_is_not_dumped_verbatim(
+    hass: HomeAssistant, tmp_path
+) -> None:
+    """Profiles are the likeliest place in this integration for a secret.
+
+    Their `emhass:` block is an unconstrained mapping, so a profile using
+    EMHASS's own Solcast method has to put the key in the file -- and this
+    section otherwise puts every byte of that file into a download users are
+    told to attach to a public issue.
+    """
+    profiles = tmp_path / "emhass_companion" / "profiles" / "pv"
+    profiles.mkdir(parents=True)
+    (profiles / "mine.yaml").write_text(
+        "kind: pv\n"
+        "name: Mine\n"
+        "# the comment survives\n"
+        "emhass:\n"
+        "  solcast_api_key: hunter2\n"
+        "  solcast_rooftop_id: not-a-secret\n"
+        "  weather_forecast_method: solcast\n"
+    )
+    hass.config.config_dir = str(tmp_path)
+
+    entry = await _setup_entry(hass)
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    profile = next(item for item in diagnostics["custom_profiles"] if "content" in item)
+    assert "hunter2" not in profile["content"]
+    assert REDACTED in profile["content"]
+    # Everything that is not a credential still reads exactly as on disk --
+    # the point of shipping the file at all is that somebody can read it.
+    assert "# the comment survives" in profile["content"]
+    assert "solcast_rooftop_id: not-a-secret" in profile["content"]
+    assert "weather_forecast_method: solcast" in profile["content"]
+
+
+async def test_a_credential_a_profile_contributed_to_the_payload_is_redacted(
+    hass: HomeAssistant,
+) -> None:
+    """build_payload merges every selected profile's `emhass:` block in whole.
+
+    So the payload can carry the same key that is redacted out of
+    `backend.config` a few lines below it in the same bundle.
+    """
+    entry = await _setup_entry(hass)
+    payload = entry.runtime_data.coordinator.data.payload
+    payload["solcast_api_key"] = "hunter2"
+    payload["optimization_time_step"] = 15
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert diagnostics["last_payload"]["solcast_api_key"] == REDACTED
+    # Redaction must not cost the payload's actual troubleshooting value.
+    assert diagnostics["last_payload"]["optimization_time_step"] == 15
