@@ -67,6 +67,7 @@ from .models import (
     Point,
     Series,
     ceil_to_step,
+    floor_to_step,
 )
 from .payload import PayloadInputs, PayloadResult, build_payload
 from .profiles import (
@@ -570,15 +571,28 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         # p_grid, p_batt all come from opt_res, capped at horizon_steps rows),
         # which is what stretched the dashboard cards' time window out past
         # where the plan itself stops.
-        horizon_end = inputs.now + timedelta(minutes=inputs.time_step_minutes) * inputs.horizon_steps
+        #
+        # Cut on the timestep boundary rather than on the wall-clock instant the
+        # run happened to start: EMHASS aligns row zero of its plan to that
+        # boundary, so cutting at `now` (a few seconds later) left the price
+        # series starting one whole timestep after the plan did, and the price
+        # sensors reading "unknown" for the entire timestep in progress -- every
+        # run, indefinitely, since the next run arrives before the gap closes.
+        step = timedelta(minutes=inputs.time_step_minutes)
+        window_start = floor_to_step(inputs.now, step)
+        horizon_end = window_start + step * inputs.horizon_steps
 
         return EmhassData(
             plan=plan,
             last_run=last_run,
-            buy_price=inputs.buy_price.window(inputs.now, horizon_end)
+            # ...and window_covering, not window, so that a price series coarser
+            # than the timestep (hourly prices are still the norm in most
+            # markets) keeps the point in force at the boundary instead of
+            # dropping it for having begun earlier.
+            buy_price=inputs.buy_price.window_covering(window_start, horizon_end)
             if inputs.buy_price
             else Series.empty(),
-            sell_price=inputs.sell_price.window(inputs.now, horizon_end)
+            sell_price=inputs.sell_price.window_covering(window_start, horizon_end)
             if inputs.sell_price
             else Series.empty(),
             pv_forecast=inputs.pv or Series.empty(),
