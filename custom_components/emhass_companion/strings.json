@@ -645,7 +645,7 @@
     },
     "test_profile": {
       "name": "Test a data source profile",
-      "description": "Resolves a profile and returns what it produced, for diagnosing a source that returns nothing or the wrong values.",
+      "description": "Resolves a profile and returns what it produced, for diagnosing a source that returns nothing or the wrong values. Administrators only: the response includes the profile's resolved EMHASS settings.",
       "fields": {
         "profile": {
           "name": "Profile",
@@ -653,7 +653,7 @@
         },
         "options": {
           "name": "Options",
-          "description": "Options to resolve the profile with. Defaults to the configured ones."
+          "description": "Options to resolve the profile with, validated against the profile's own options. Defaults to the configured ones."
         },
         "limit": {
           "name": "Limit",

@@ -645,7 +645,7 @@
     },
     "test_profile": {
       "name": "Testa en datakällsprofil",
-      "description": "Kör en profil och returnerar vad den gav, för att felsöka en källa som inte ger något eller ger fel värden.",
+      "description": "Kör en profil och returnerar vad den gav, för att felsöka en källa som inte ger något eller ger fel värden. Endast för administratörer: svaret innehåller profilens färdiga EMHASS-inställningar.",
       "fields": {
         "profile": {
           "name": "Profil",
@@ -653,7 +653,7 @@
         },
         "options": {
           "name": "Alternativ",
-          "description": "Alternativ att köra profilen med. Standard är de konfigurerade."
+          "description": "Alternativ att köra profilen med, validerade mot profilens egna alternativ. Standard är de konfigurerade."
         },
         "limit": {
           "name": "Gräns",

@@ -90,6 +90,9 @@ data:
 response_variable: result
 ```
 
+Call it from an administrator account — the response carries the profile's
+resolved EMHASS settings, so it is gated the same way diagnostics are.
+
 **A plan looks wrong.** Enable the *Last request to EMHASS* sensor (disabled
 by default) — its `payload` attribute is precisely what EMHASS was asked to
 solve, and its `warnings` attribute flags problems such as a forecast that

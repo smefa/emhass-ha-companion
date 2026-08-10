@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from homeassistant.core import (
@@ -11,13 +12,14 @@ from homeassistant.core import (
     SupportsResponse,
     callback,
 )
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import ServiceValidationError, Unauthorized
 from homeassistant.helpers import config_validation as cv
 from homeassistant.util import dt as dt_util
 import voluptuous as vol
 
 from .const import ACTION_DAYAHEAD, ACTION_MPC, DOMAIN
 from .profiles import ProfileError, async_resolve_series, resolve_settings
+from .profiles.schema import humanize_error
 from .typical_load import typical_day_records
 
 SERVICE_RUN_DAYAHEAD = "run_dayahead"
@@ -39,6 +41,20 @@ TYPICAL_LOAD_FORECAST_SCHEMA = vol.Schema(
         vol.Required("average_w"): vol.All(vol.Coerce(float), vol.Range(min=0)),
     }
 )
+
+
+async def _require_admin(hass: HomeAssistant, call: ServiceCall) -> None:
+    """Reject a non-admin caller of a diagnostic action.
+
+    ``context.user_id`` is None for anything Home Assistant itself triggered --
+    an automation, a script, another integration -- and those stay allowed;
+    only a real, non-admin user is turned away.
+    """
+    if call.context.user_id is None:
+        return
+    user = await hass.auth.async_get_user(call.context.user_id)
+    if user is not None and not user.is_admin:
+        raise Unauthorized(context=call.context)
 
 
 def _coordinator(hass: HomeAssistant):
@@ -66,7 +82,15 @@ def async_register_services(hass: HomeAssistant) -> None:
         A YAML profile that silently yields nothing is far harder to debug than
         a Python one that raises. This turns "my prices are wrong" into a single
         call that shows exactly which records came back.
+
+        Admin-only, unlike the run actions: the response renders the profile's
+        ``emhass:`` block, which for a user profile is where a forecast API key
+        lives. Home Assistant does not restrict action calls by user, so the
+        check has to be here. A call with no user (an automation, a script,
+        anything internal) keeps working.
         """
+        await _require_admin(hass, call)
+
         coordinator = _coordinator(hass)
         key = call.data["profile"]
 
@@ -75,13 +99,29 @@ def async_register_services(hass: HomeAssistant) -> None:
             raise ServiceValidationError(f"Unknown profile '{key}'. Available: {available}")
 
         options: dict[str, Any] = dict(call.data["options"])
-        if not options:
+        if options:
+            # Caller-supplied options are rendered into the profile's own
+            # templates, so they are held to the schema the config flow would
+            # have shown rather than accepted as an arbitrary mapping -- with
+            # the Solcast profile, an unchecked ``entities`` list is a way to
+            # read the attributes of any entity by name.
+            try:
+                options = vol.Schema(profile.selector_schema())(options)
+            except vol.Invalid as err:
+                raise ServiceValidationError(
+                    f"Invalid options for profile '{key}': {humanize_error(err)}"
+                ) from err
+        else:
             # Fall back to whatever this profile is configured with, so the
-            # common case needs no arguments at all.
+            # common case needs no arguments at all. Not re-validated: these
+            # came from the config flow, and a profile whose options have since
+            # changed shape should still be diagnosable.
             for selection in (
                 coordinator.config.price,
                 coordinator.config.pv,
                 coordinator.config.load,
+                coordinator.config.temperature,
+                coordinator.config.inverter,
             ):
                 if selection.key == key:
                     options = dict(selection.options)
@@ -91,7 +131,9 @@ def async_register_services(hass: HomeAssistant) -> None:
             "profile": key,
             "name": profile.name,
             "kind": profile.kind,
-            "path": profile.path,
+            # Filename only: which file this is remains obvious, without
+            # handing out the layout of the config directory.
+            "file": Path(profile.path).name,
             "is_builtin": profile.is_builtin,
             "options_used": options,
         }
