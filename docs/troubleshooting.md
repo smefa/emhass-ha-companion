@@ -61,14 +61,23 @@ warnings), it now also carries:
 **What is redacted.** Latitude, longitude and altitude (EMHASS's own config
 carries these) are replaced with `**REDACTED**`, as is any field whose name
 looks like a credential (`password`, `token`, `api_key`, `secret`,
-`Authorization`). The EMHASS URL keeps its scheme, host and port -- "wrong
-port" is a real, common misconfiguration and needs to stay visible -- but
-loses any userinfo or query string a reverse proxy might have added.
+`Authorization`) -- wherever it appears, including in the request payload and
+in the text of a custom profile. The EMHASS URL keeps its scheme, host and
+port -- "wrong port" is a real, common misconfiguration and needs to stay
+visible -- but loses any userinfo or query string a reverse proxy might have
+added.
+
+In a custom profile the redaction is a line scrub of `key: value` rather than
+a reparse, so the file arrives with its comments, formatting and line
+numbering intact even when it is too broken for the YAML parser to read. A
+credential written inside an inline flow mapping (`{api_key: hunter2}`) is
+the one shape this does not catch.
 
 **What is deliberately not redacted**, because redacting it would defeat the
-point of the bundle: entity ids, tariff prices, battery capacity, deferrable
-load names, and the EMHASS request payload itself. None of that is a secret,
-and it is exactly what a maintainer needs to see.
+point of the bundle: entity ids, tariff prices, battery capacity and
+deferrable load names, along with every non-credential field of the EMHASS
+request payload. None of that is a secret, and it is exactly what a
+maintainer needs to see.
 
 **A source returns nothing, or the wrong values.** Call the
 `emhass_companion.test_profile` action. It resolves the profile and returns
