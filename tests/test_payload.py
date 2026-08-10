@@ -433,6 +433,66 @@ def test_full_length_forecast_produces_no_warning():
     assert result.warnings == []
 
 
+def test_a_forecast_reaching_the_last_timestep_is_not_called_short():
+    """``now`` is a raw utcnow(), so the horizon it defines is never on the grid.
+
+    Every forecast series is, which used to make the coverage check fail by
+    the seconds ``now`` happened to carry -- reporting "only covers until
+    10:00, short of the 10:00 horizon" on every single run, in the same words
+    used for a price source that stops tonight. The series here ends exactly
+    on the last timestep boundary inside the horizon, which is as far as any
+    grid-aligned source can ever reach.
+    """
+    now = datetime(2026, 7, 28, 10, 0, 37, 123456, tzinfo=UTC)
+    step = timedelta(minutes=30)
+    last = datetime(2026, 7, 28, 10, 0, tzinfo=UTC) + step * DAY_STEPS
+    prices = Series(
+        Point(datetime(2026, 7, 28, 10, 0, tzinfo=UTC) + step * index, 1.5)
+        for index in range(DAY_STEPS + 1)
+    )
+    assert prices.end == last
+
+    result = build_payload(_inputs(now=now, buy_price=prices, sell_price=prices))
+    assert result.warnings == []
+
+
+def test_a_genuinely_short_forecast_still_warns_from_an_off_grid_now():
+    """Tolerating the final partial step must not swallow a real shortfall.
+
+    A day-ahead price source that stops at midnight is short by hours, not by
+    the fraction of a second above -- and that is the case the warning exists
+    for.
+    """
+    now = datetime(2026, 7, 28, 10, 0, 37, 123456, tzinfo=UTC)
+    result = build_payload(_inputs(now=now, buy_price=_series(now, 6, 1.5)))
+
+    assert len(result.warnings) == 1
+    assert "Buy price" in result.warnings[0]
+
+
+def test_an_hourly_price_is_extended_onto_the_payloads_own_grid():
+    """An hourly source under a 30-minute step would otherwise land short.
+
+    ``extended_with_previous_day`` fills at the series' own spacing unless
+    told otherwise, so an hourly price stops on the hour -- up to one whole
+    price interval before a horizon that ends on a half hour, which read as a
+    coverage failure for a source that had in fact been carried the whole way.
+    """
+    now = datetime(2026, 7, 28, 10, 30, 11, tzinfo=UTC)
+    start = datetime(2026, 7, 27, 0, 0, tzinfo=UTC)
+    # Yesterday plus today, hourly, ending at tonight's midnight -- Nord Pool
+    # before its afternoon publication, with a day of history to repeat.
+    hourly = Series(
+        Point(start + timedelta(hours=index), 1.0 + index % 24) for index in range(48)
+    )
+
+    result = build_payload(_inputs(now=now, buy_price=hourly))
+
+    assert len(result.warnings) == 1
+    assert "filled in by repeating the previous day" in result.warnings[0]
+    assert not any("short of the" in warning for warning in result.warnings)
+
+
 def test_battery_disabled_sends_only_the_flag():
     payload = build_payload(_inputs()).payload
     assert payload["set_use_battery"] is False

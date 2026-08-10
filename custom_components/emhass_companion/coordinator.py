@@ -562,11 +562,25 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         if plan is not None and not self._schema_supported(plan):
             plan = None
 
+        # Trimmed to the horizon that was actually requested: profiles fetch
+        # whatever their source publishes (a day-ahead tariff commonly hands
+        # back tomorrow's prices too), which is longer than what got solved
+        # whenever the horizon is shorter than a day. Left untrimmed, the
+        # price sensors run past every plan-derived one (p_pv, p_load,
+        # p_grid, p_batt all come from opt_res, capped at horizon_steps rows),
+        # which is what stretched the dashboard cards' time window out past
+        # where the plan itself stops.
+        horizon_end = inputs.now + timedelta(minutes=inputs.time_step_minutes) * inputs.horizon_steps
+
         return EmhassData(
             plan=plan,
             last_run=last_run,
-            buy_price=inputs.buy_price or Series.empty(),
-            sell_price=inputs.sell_price or Series.empty(),
+            buy_price=inputs.buy_price.window(inputs.now, horizon_end)
+            if inputs.buy_price
+            else Series.empty(),
+            sell_price=inputs.sell_price.window(inputs.now, horizon_end)
+            if inputs.sell_price
+            else Series.empty(),
             pv_forecast=inputs.pv or Series.empty(),
             load_forecast=inputs.load or Series.empty(),
             payload=built.payload,

@@ -25,6 +25,7 @@ from .models import (
     GridConfig,
     HybridInverterConfig,
     Series,
+    floor_to_step,
 )
 from .thermal import build_def_load_config
 
@@ -414,7 +415,14 @@ def _import_floor_w(inputs: PayloadInputs, horizon_end: datetime) -> float:
 def build_payload(inputs: PayloadInputs) -> PayloadResult:
     """Assemble the runtime parameters for one EMHASS request."""
     step = timedelta(minutes=inputs.time_step_minutes)
-    horizon_end = inputs.now + step * inputs.horizon_steps
+    # Floored onto the timestep grid, because ``now`` is a raw utcnow() and so
+    # the horizon it defines lands at some arbitrary fraction of a second past
+    # a boundary. Every forecast series *is* on the grid, so an unfloored
+    # horizon is one no series can ever cover: the coverage checks below would
+    # report a shortfall of seconds on every run, in the same words they use
+    # for a price source that stops tonight. The grid boundary at or before
+    # the horizon already describes the timestep the horizon ends inside.
+    horizon_end = floor_to_step(inputs.now + step * inputs.horizon_steps, step)
     warnings: list[str] = []
 
     payload: dict[str, Any] = {
@@ -468,7 +476,12 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
             # night), flat-lined across all of tomorrow. Repeating
             # yesterday's shape is a far better guess.
             short_until = series.end
-            series = series.extended_with_previous_day(horizon_end)
+            # Filled on the payload's grid rather than the price source's own,
+            # so an hourly source under a 30-minute step lands on the horizon
+            # instead of up to one price interval short of it. value_at holds
+            # last, so each sub-hour point still carries that hour's price --
+            # the extra points add reach, not invented precision.
+            series = series.extended_with_previous_day(horizon_end, step)
             if series.covers(horizon_end):
                 warnings.append(
                     f"{label} only covered until "

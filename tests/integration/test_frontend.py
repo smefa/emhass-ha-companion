@@ -34,7 +34,7 @@ async def lovelace(hass: HomeAssistant):
 def _no_static_paths():
     """The http static path registration is not what these tests are about."""
     with patch(
-        "custom_components.emhass_companion.frontend._async_register_static_path",
+        "custom_components.emhass_companion.frontend._async_register_static_paths",
         AsyncMock(),
     ):
         yield
@@ -49,10 +49,25 @@ async def test_the_card_bundle_is_shipped() -> None:
     bundle = Path(frontend.__file__).parent / "frontend" / frontend.CARDS_FILENAME
     assert bundle.is_file(), f"card bundle missing at {bundle}"
     text = bundle.read_text(encoding="utf-8")
-    # Both cards must actually be defined, or the resource registers a module
+    # The cards must actually be defined, or the resource registers a module
     # that silently provides nothing.
     assert 'customElements.define("emhass-plan-card"' in text
     assert 'customElements.define("emhass-deferrable-card"' in text
+
+
+async def test_every_declared_bundle_exists() -> None:
+    """A bundle listed but not shipped registers a resource that 404s.
+
+    Which is worse than not registering it: Lovelace then logs a failed
+    module load on every page view, for every user, forever.
+    """
+    from pathlib import Path
+
+    import custom_components.emhass_companion.frontend as frontend
+
+    for filename, _ in frontend.BUNDLES:
+        bundle = Path(frontend.__file__).parent / "frontend" / filename
+        assert bundle.is_file(), f"card bundle missing at {bundle}"
 
 
 async def test_resource_is_registered_once(hass: HomeAssistant, lovelace) -> None:
@@ -74,6 +89,39 @@ async def test_a_new_version_updates_in_place(hass: HomeAssistant, lovelace) -> 
     ours = [r for r in lovelace.resources.async_items() if CARDS_URL in r["url"]]
     assert len(ours) == 1
     assert ours[0]["url"] == f"{CARDS_URL}?v=1.1.0"
+
+
+async def test_each_bundle_gets_its_own_resource(hass: HomeAssistant, lovelace) -> None:
+    """One resource per declared bundle, and none mistaken for another.
+
+    Bundle URLs share a prefix, so a prefix match would let a sibling bundle
+    look like a stale copy of this one -- and each run would rewrite whichever
+    it saw first, leaving exactly one working bundle.
+    """
+    await async_setup_frontend(hass, "1.0.0")
+    await async_setup_frontend(hass, "1.1.0")
+
+    import custom_components.emhass_companion.frontend as frontend
+
+    urls = {r["url"] for r in lovelace.resources.async_items()}
+    assert urls == {f"{url}?v=1.1.0" for _, url in frontend.BUNDLES}
+
+
+async def test_a_withdrawn_bundle_is_unregistered(hass: HomeAssistant, lovelace) -> None:
+    """A resource outlives the file it points at, and 404s forever after.
+
+    The experimental bundle was served for a while and then folded into the
+    shipping one; every install that ran that version has its URL written into
+    Lovelace's own storage, where nothing else will ever remove it.
+    """
+    await lovelace.resources.async_create_item(
+        {"res_type": "module", "url": "/emhass_companion/emhass-cards-lab.js?v=0.9.3.1"}
+    )
+
+    await async_setup_frontend(hass, "1.0.0")
+
+    urls = {r["url"] for r in lovelace.resources.async_items()}
+    assert urls == {f"{CARDS_URL}?v=1.0.0"}
 
 
 async def test_other_resources_are_left_alone(hass: HomeAssistant, lovelace) -> None:

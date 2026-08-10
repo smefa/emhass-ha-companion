@@ -836,6 +836,24 @@ def ceil_to_step(when: datetime, step: timedelta) -> datetime:
     return datetime.fromtimestamp(math.ceil(stamp / size) * size, UTC)
 
 
+def floor_to_step(when: datetime, step: timedelta) -> datetime:
+    """The grid boundary at or before ``when``, on :meth:`Series.resampled`'s grid.
+
+    The counterpart to :func:`ceil_to_step`, for the other side of the same
+    problem. Where that one moves a *fill target* forward so a series reaches
+    past an off-grid horizon, this moves the *requirement* back onto the grid:
+    a point at the last boundary at or before the horizon already describes
+    the timestep the horizon ends inside, so demanding a later one asks for a
+    price nobody publishes and reports a shortfall of seconds as if it were
+    a missing day.
+    """
+    size = step.total_seconds()
+    if size <= 0:
+        return when.astimezone(UTC)
+    stamp = when.astimezone(UTC).timestamp()
+    return datetime.fromtimestamp(math.floor(stamp / size) * size, UTC)
+
+
 def _as_float(value: Any) -> float | None:
     if value is None or value == "":
         return None

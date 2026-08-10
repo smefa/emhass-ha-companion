@@ -65,6 +65,7 @@ nav:
           - Load groups: load_groups.md
           - Request-run service (planned): request_run_service.md
       - Dashboard cards: dashboard_cards.md
+      - Lab cards (experimental): lab_cards.md
       - Entities: entities.md
       - Handing over control: handing_over_control.md
       - Inverter control: inverter_control.md
