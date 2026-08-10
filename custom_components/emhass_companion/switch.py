@@ -269,6 +269,23 @@ class EmhassControlSwitch(EmhassEntity, SwitchEntity, RestoreEntity):
         self._is_on = value
         self._publish()
         self.async_write_ha_state()
+        # This switch is the stop button, so it has to act like one. Without
+        # this the gate is only *noticed* on the next apply, which the
+        # coordinator drives once per timestep -- someone who sees the battery
+        # force-charging into the peak and flips this off would watch it keep
+        # charging for up to fifteen minutes. Unload and Home Assistant
+        # shutdown already hand the inverter back immediately; so does this.
+        #
+        # Deliberately async_apply and not async_restore: the executor's own
+        # gate branch already restores when the gate is off and applies
+        # normally when it is on, so both directions stay on one path and
+        # switching *on* is equally prompt.
+        self.coordinator.config_entry.async_create_background_task(
+            self.hass,
+            self.coordinator.config_entry.runtime_data.executor.async_apply(),
+            "emhass_apply_gate",
+            eager_start=False,
+        )
 
     def _publish(self) -> None:
         # The executor reads this from the coordinator rather than parsing the

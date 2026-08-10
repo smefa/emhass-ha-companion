@@ -30,6 +30,13 @@ load. Leave it empty and the load stays advisory:
 `binary_sensor.<load>_should_run` still tracks the plan, and acting on it
 remains your automation's job.
 
+A control entity is a `switch` or an `input_boolean` — something that is
+turned *off* again as well as on, and whose state says whether the load is
+on right now. A script is neither: it reports `on` only while it is
+executing, and turning it off cancels the script rather than the appliance.
+If a script is what you need, leave the control entity empty and trigger the
+script from your own automation on `binary_sensor.<load>_should_run`.
+
 Safety behaviours, each covered by a test:
 
 - **Staleness watchdog.** If a plan stops being refreshed for more than
