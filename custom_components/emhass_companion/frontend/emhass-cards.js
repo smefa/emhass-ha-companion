@@ -506,6 +506,28 @@ function stateOf(hass, entityId) {
   return entityId ? hass.states[entityId] : undefined;
 }
 
+/**
+ * The sensor the Companion was told measures what one of its own sensors plans.
+ *
+ * A card cannot read the integration's configuration -- `findHub` discovers its
+ * entities and nothing else -- so each planned sensor carries a pointer to its
+ * measured counterpart in its own attributes. That is what lets one answer, in
+ * the integration's settings, serve every card at once. Before this, the same
+ * battery power sensor had to be named on the plan card, the overview card and
+ * the status card, under two different option names, with its sign convention
+ * declared separately on each of the two that asked at all.
+ *
+ * Returns null when nothing is configured, and `invert` is a boolean only when
+ * the convention is actually known -- see the callers, which say direction only
+ * then.
+ */
+function measuredBy(hass, hub, plannedKey) {
+  const planned = stateOf(hass, hub ? hub[plannedKey] : null);
+  const attrs = planned && planned.attributes ? planned.attributes : null;
+  if (!attrs || !attrs.measured_entity) return null;
+  return { entity: attrs.measured_entity, invert: attrs.measured_invert === true };
+}
+
 function callService(hass, domain, service, data) {
   return hass.callService(domain, service, data);
 }
@@ -1383,12 +1405,21 @@ class EmhassPlanCard extends HTMLElement {
   _history(hass, hub, now) {
     const wanted = {};
     const invert = [];
+    // This card's own option wins where it is set -- pointing one card at a
+    // different meter is a deliberate choice -- and the Companion's configured
+    // sensor is the default under it.
+    const measured = measuredBy(hass, hub, "sensor.battery_power");
     for (const [name, key, option] of PLAN_HISTORY) {
       const chosen = option ? this._config[option] : null;
-      wanted[name] = chosen || hub[key];
-      if (name === "battery" && chosen && this._config.invert_battery === true) {
-        invert.push(name);
+      if (name === "battery") {
+        const source = chosen
+          ? { entity: chosen, invert: this._config.invert_battery === true }
+          : measured;
+        wanted[name] = source ? source.entity : hub[key];
+        if (source && source.invert) invert.push(name);
+        continue;
       }
+      wanted[name] = chosen || hub[key];
     }
     return readHistory(this, hass, wanted, invert, this._historyMs(), now);
   }
@@ -3238,15 +3269,24 @@ function valueBox(parent, key) {
 }
 
 /**
+ * The level at and below which the rail stops being informative and starts
+ * warning -- for the fill, and for the trough the plan is heading into.
+ */
+const SOC_LOW_PCT = 20;
+
+/**
  * The planned battery level, with where the battery actually is on it.
  *
  * A lone fill answers "how full is it", which is the one thing a battery
  * owner can already read off their inverter. What a *plan* bar is for is the
- * comparison, so this draws three things on one rail: the level the plan has
+ * comparison, so this draws four things on one rail: the level the plan has
  * for right now (the fill), the peak the plan is steering towards (a lighter
- * band carrying on from it), and the measured level as a marker. A visible
- * gap between the marker and the fill is a plan running on a stale SOC --
- * which is invisible on any single-value display.
+ * band carrying on from it), the lowest level it dips to on the way (a quiet
+ * tick), and the measured level as a marker. A visible gap between the marker
+ * and the fill is a plan running on a stale SOC -- which is invisible on any
+ * single-value display. The low is the other half of the same question: a plan
+ * that ends the day full can still empty the battery at 3pm, and neither the
+ * fill nor the peak band ever says so.
  */
 function socBar(parent, label) {
   const root = tag("div", "soc", parent);
@@ -3256,21 +3296,26 @@ function socBar(parent, label) {
   const rail = tag("div", "rail", root);
   const reach = tag("div", "reach", rail);
   const fill = tag("div", "fill", rail);
+  const dip = tag("div", "dip", rail);
   const mark = tag("div", "mark", rail);
   const key = tag("div", "soc-key", root);
 
   const legend = (swatch) => {
     const item = tag("span", "leg", key);
-    tag("i", `sw ${swatch}`, item);
+    const sw = tag("i", `sw ${swatch}`, item);
     const text = tag("span", null, item, "");
-    item.set = (content) => {
+    item.set = (content, colour) => {
       text.textContent = content || "";
       item.style.display = content ? "" : "none";
+      // Only the low swatch ever tints, and only to warn; the empty string
+      // hands it back to the stylesheet rather than freezing today's colour.
+      sw.style.background = colour || "";
     };
     return item;
   };
   const legNow = legend("now");
   const legPlan = legend("plan");
+  const legLow = legend("low");
   const legPeak = legend("peak");
 
   const clamp = (value) => Math.max(0, Math.min(100, value));
@@ -3278,14 +3323,30 @@ function socBar(parent, label) {
   root.set = (info) => {
     const planned = info.planned;
     const peak = info.peak;
+    const low = info.low;
     const measured = info.measured;
     const hasPlan = Number.isFinite(planned);
+    // The same line the fill goes red on, so the rail never warns about the
+    // level now while staying calm about an identical level an hour out.
+    const isDeep = Number.isFinite(low) && low < SOC_LOW_PCT;
 
     fill.style.width = hasPlan ? `${clamp(planned)}%` : "0%";
     // The band only means anything as *headroom beyond the fill*; without a
     // plan there is nothing for it to extend from.
     reach.style.width = hasPlan && Number.isFinite(peak) ? `${clamp(peak)}%` : "0%";
-    fill.style.background = hasPlan && planned < 20 ? "var(--emh-bad)" : "var(--emh-battery)";
+    fill.style.background =
+      hasPlan && planned < SOC_LOW_PCT ? "var(--emh-bad)" : "var(--emh-battery)";
+
+    if (Number.isFinite(low)) {
+      dip.style.left = `${clamp(low)}%`;
+      dip.style.display = "";
+      // A trough that goes deep is worth reading as a warning rather than as
+      // one more tick, and its colour is the only thing carrying that on the
+      // rail itself, since the fill is drawn from the level *now*.
+      dip.style.background = isDeep ? "var(--emh-bad)" : "";
+    } else {
+      dip.style.display = "none";
+    }
 
     if (Number.isFinite(measured)) {
       mark.style.left = `${clamp(measured)}%`;
@@ -3297,6 +3358,10 @@ function socBar(parent, label) {
     value.textContent = hasPlan ? `${planned.toFixed(0)} %` : "no plan";
     legNow.set(Number.isFinite(measured) ? `now ${measured.toFixed(0)} %` : "");
     legPlan.set(hasPlan ? `plan ${planned.toFixed(0)} %` : "");
+    legLow.set(
+      Number.isFinite(low) ? `low ${low.toFixed(0)} %${info.lowAt ? ` · ${info.lowAt}` : ""}` : "",
+      isDeep ? "var(--emh-bad)" : "",
+    );
     legPeak.set(
       Number.isFinite(peak)
         ? `peak ${peak.toFixed(0)} %${info.peakAt ? ` · ${info.peakAt}` : ""}`
@@ -3317,7 +3382,7 @@ function socBar(parent, label) {
 const STATUS_SECTIONS = [
   ["show_banner", "Control banner", "Whether the Companion is actually in charge"],
   ["show_decision", "Battery decision", "What it decided, why, and at what power"],
-  ["show_soc", "Planned battery level", "The plan's level, its peak, and the measured one"],
+  ["show_soc", "Planned battery level", "The plan's level, its low and peak, and the measured one"],
   ["show_battery", "Battery tiles", "The numbers under the rail"],
   ["show_system", "System tiles", "Mode, cost function, curtailment, loads, timing"],
   ["show_rules", "Why it decided that", "The executor's own rule trace"],
@@ -3617,27 +3682,42 @@ class EmhassStatusCard extends LiveCard {
                 : "Nothing to send"
       }${reason ? ` · ${reason}` : ""}`;
 
-      // `power_w` is the *target* a command carries, and a self-consumption
-      // decision has none: the whole point of it is handing the battery back
-      // to the inverter to follow the house, so the executor sends a zero that
-      // means "not my number". Printing it as the battery's power reads as a
-      // battery doing nothing, at the moment it is usually working hardest.
-      // So when the decision names no power, show what the battery is actually
-      // doing instead -- the live sensor when the card has been pointed at
-      // one, and the plan's own figure when it has not.
+      // What the battery is measurably doing wins, whenever the card has been
+      // pointed at a sensor for it. The two runners-up are both accounts of an
+      // intention rather than an outcome: `power_w` is the *target* the last
+      // command carried, and a target outlives the command -- a decision taken
+      // at the top of the quarter hour is still the last decision after the
+      // executor has stopped the battery, so a stale "2.7 kW" sits next to a
+      // battery at rest. `power_w` is also absent by design for a
+      // self-consumption decision, whose whole point is handing the battery
+      // back to the inverter to follow the house: the executor sends a zero
+      // meaning "not my number", which printed as power reads as a battery
+      // doing nothing at the moment it is usually working hardest.
+      //
+      // Direction is stated only when the sign convention is actually known,
+      // which is exactly when the Companion is the source: it is told which
+      // way its battery power sensor counts, and a sensor named on the card is
+      // not. Guessing it labels a charging battery as discharging, which is
+      // worse than saying only how hard.
       const targetW = Number(attrs.power_w);
-      const liveW = num(stateOf(hass, this._config.power_entity));
+      // The card's own option wins, but a sensor named here says nothing about
+      // which way round it counts -- only the Companion's own setting carries
+      // that, which is why direction below is stated only when it is the source.
+      const live = this._config.power_entity
+        ? { entity: this._config.power_entity }
+        : measuredBy(hass, hub, "sensor.battery_power");
+      const liveW = num(stateOf(hass, live ? live.entity : null));
       let powerText = "";
       let powerNote = "";
-      if (Number.isFinite(targetW) && Math.abs(targetW) >= 1) {
+      if (Number.isFinite(liveW)) {
+        powerText = formatPower(Math.abs(liveW));
+        const signed = typeof live.invert === "boolean" ? (live.invert ? -liveW : liveW) : NaN;
+        // NaN falls through both comparisons to the bare "now", which is the
+        // honest answer when the convention is unknown.
+        powerNote = signed > 1 ? "discharging now" : signed < -1 ? "charging now" : "now";
+      } else if (Number.isFinite(targetW) && Math.abs(targetW) >= 1) {
         powerText = formatPower(Math.abs(targetW));
         powerNote = "target";
-      } else if (Number.isFinite(liveW)) {
-        // Magnitude only: whether positive means charging is that sensor's own
-        // convention, and guessing it wrong labels a charging battery as
-        // discharging, which is worse than not saying.
-        powerText = formatPower(Math.abs(liveW));
-        powerNote = "now";
       } else if (Number.isFinite(watts)) {
         powerText = formatPower(Math.abs(watts));
         powerNote = watts > 1 ? "planned out" : watts < -1 ? "planned in" : "planned";
@@ -3661,12 +3741,19 @@ class EmhassStatusCard extends LiveCard {
       if (!high || point.v > high.v) high = point;
     }
 
-    const measured = num(stateOf(hass, this._config.soc_entity));
+    // The Companion already has to know this one -- it is what it sends EMHASS
+    // as the plan's starting level -- so the card asks it rather than making
+    // the same sensor be named twice. The card option stays as an override.
+    const socEntity =
+      this._config.soc_entity || (measuredBy(hass, hub, "sensor.battery_soc") || {}).entity;
+    const measured = num(stateOf(hass, socEntity));
     if (ui.soc) {
       ui.soc.set({
         planned: isUsable(soc) ? num(soc) : NaN,
         peak: high ? high.v : NaN,
         peakAt: high ? formatTime(high.t, hass) : "",
+        low: low ? low.v : NaN,
+        lowAt: low ? formatTime(low.t, hass) : "",
         measured,
       });
     }
@@ -3680,7 +3767,7 @@ class EmhassStatusCard extends LiveCard {
       ui.box.show_level,
       Number.isFinite(measured) ? `${measured.toFixed(0)} %` : "–",
       !Number.isFinite(measured)
-        ? "set soc_entity"
+        ? "no battery level sensor set"
         : !Number.isFinite(drift)
           ? ""
           : Math.abs(drift) < 1
@@ -3845,6 +3932,12 @@ EmhassStatusCard.css = `
   .soc .reach { background: rgba(77, 182, 172, .32);
                 background: color-mix(in srgb, var(--emh-battery) 32%, transparent); }
   .soc .fill { background: var(--emh-battery); }
+  /* The trough is a tick like the measured level, one step quieter, because it
+     has to stay readable wherever it lands -- inside the fill, inside the
+     lighter band, or on the bare rail when the plan only climbs from here. */
+  .soc .dip { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px;
+              border-radius: 1px; background: var(--emh-dim);
+              transition: left 500ms var(--emh-ease), background 300ms; }
   /* The measured level rides on top of both bands: the whole point of it is
      to be readable against the planned one it disagrees with. */
   .soc .mark { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px;
@@ -3856,6 +3949,7 @@ EmhassStatusCard.css = `
   .soc-key .sw { width: 8px; height: 8px; border-radius: 2px; }
   .soc-key .sw.now { background: var(--primary-text-color); }
   .soc-key .sw.plan { background: var(--emh-battery); }
+  .soc-key .sw.low { background: var(--emh-dim); }
   .soc-key .sw.peak { background: rgba(77, 182, 172, .32);
                       background: color-mix(in srgb, var(--emh-battery) 32%, transparent); }
 
@@ -4169,14 +4263,18 @@ class EmhassOverviewCard extends LiveCard {
    * happened".
    */
   _history(hass, hub, now) {
+    // Card option first, then whatever the Companion itself was configured
+    // with, then the plan's own figure.
+    const battery = this._config.battery_entity
+      ? { entity: this._config.battery_entity, invert: this._config.invert_battery === true }
+      : measuredBy(hass, hub, "sensor.battery_power");
     const wanted = {
       solar: this._config.solar_entity || hub["sensor.pv_forecast"],
-      battery: this._config.battery_entity || hub["sensor.battery_power"],
+      battery: battery ? battery.entity : hub["sensor.battery_power"],
     };
     // Only an outside sensor can have the other sign convention: the plan's
     // own battery series is positive while discharging by definition.
-    const invert =
-      this._config.battery_entity && this._config.invert_battery === true ? ["battery"] : [];
+    const invert = battery && battery.invert ? ["battery"] : [];
     return readHistory(this, hass, wanted, invert, this._historyMs(), now);
   }
 
@@ -4717,8 +4815,10 @@ const PLAN_HELPERS = {
   solar_entity: "Left empty, the past is drawn from the forecast the plan used.",
   house_entity: "Left empty, the past is drawn from the plan's own consumption forecast.",
   grid_entity: "Left empty, the past is drawn from the plan's own grid figure.",
-  battery_entity: "Left empty, the past is drawn from the plan's own battery power.",
-  invert_battery: "The chart draws positive as discharge, which is the plan's convention.",
+  battery_entity:
+    "Left empty, the Companion's own battery power sensor is used, and the plan's figure if it has none. Set here only to draw this card from a different meter.",
+  invert_battery:
+    "Only read when a sensor is named above; the Companion carries its own convention. The chart draws positive as discharge, which is the plan's convention.",
 };
 for (const section of PLAN_SECTIONS) {
   PLAN_LABELS[section[0]] = section[1];
@@ -4942,8 +5042,10 @@ const OVERVIEW_LABELS = {
 const OVERVIEW_HELPERS = {
   history_hours: "How far back the window reaches. 0 starts the card at now.",
   solar_entity: "Left empty, the past is drawn from the forecast the plan used.",
-  battery_entity: "Left empty, the past is drawn from the plan's own battery power.",
-  invert_battery: "The card draws positive as discharge, which is the plan's convention.",
+  battery_entity:
+    "Left empty, the Companion's own battery power sensor is used, and the plan's figure if it has none. Set here only to draw this card from a different meter.",
+  invert_battery:
+    "Only read when a sensor is named above; the Companion carries its own convention. The card draws positive as discharge, which is the plan's convention.",
 };
 for (const section of OVERVIEW_SECTIONS) {
   OVERVIEW_LABELS[section[0]] = section[1];
@@ -5051,8 +5153,10 @@ const STATUS_LABELS = {
   power_entity: "Battery power sensor",
 };
 const STATUS_HELPERS = {
-  soc_entity: "Your battery's own state-of-charge sensor, read live",
-  power_entity: "Your battery's own power sensor, for what it is doing right now",
+  soc_entity:
+    "Left empty, the Companion's own battery level sensor is used -- it already has one, since it is what the plan starts from.",
+  power_entity:
+    "Left empty, the Companion's own battery power sensor is used, which also lets this card say whether the battery is charging or discharging rather than only how hard.",
 };
 for (const section of STATUS_SECTIONS) {
   STATUS_LABELS[section[0]] = section[1];
@@ -5261,52 +5365,52 @@ window.customCards = window.customCards || [];
 window.customCards.push(
   {
     type: "emhass-plan-card",
-    name: "EMHASS plan",
+    name: "EMHASS Companion plan",
     description:
       "The optimisation plan: solar, consumption, grid, battery, prices and scheduled loads.",
-    preview: false,
+    preview: true,
     documentationURL: DOCS,
   },
   {
     type: "emhass-overview-card",
-    name: "EMHASS overview",
+    name: "EMHASS Companion overview",
     description: "Prices, solar, the battery and every load on one shared time axis.",
-    preview: false,
+    preview: true,
     documentationURL: DOCS,
   },
   {
     type: "emhass-health-card",
-    name: "EMHASS health",
+    name: "EMHASS Companion health",
     description: "Optimiser health: freshness, timings, warnings and re-run buttons.",
-    preview: false,
+    preview: true,
     documentationURL: DOCS,
   },
   {
     type: "emhass-status-card",
-    name: "EMHASS status",
+    name: "EMHASS Companion status",
     description: "Is it in charge, what it is doing to the battery, and on what settings.",
-    preview: false,
+    preview: true,
     documentationURL: DOCS,
   },
   {
     type: "emhass-deferrable-card",
-    name: "EMHASS deferrable load",
+    name: "EMHASS Companion deferrable load",
     description: "One deferrable load: whether it should run, and when the plan has it running.",
-    preview: false,
+    preview: true,
     documentationURL: DOCS,
   },
   {
     type: "emhass-deferrable-swipe-card",
-    name: "EMHASS load (swipe)",
+    name: "EMHASS Companion load (swipe)",
     description: "One load, three swipeable pages: now, control, plan.",
-    preview: false,
+    preview: true,
     documentationURL: DOCS,
   },
   {
     type: "emhass-deferrable-strip-card",
-    name: "EMHASS load (strip)",
+    name: "EMHASS Companion load (strip)",
     description: "One load in a single compact row, with the whole day behind it.",
-    preview: false,
+    preview: true,
     documentationURL: DOCS,
   },
 );

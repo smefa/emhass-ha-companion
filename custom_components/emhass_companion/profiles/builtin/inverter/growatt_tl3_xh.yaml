@@ -1,0 +1,321 @@
+name: Growatt MOD / MID TL3-XH hybrid (solax_modbus)
+kind: inverter
+version: 2
+
+brand: Growatt
+
+models:
+  - MOD 3000TL3-XH
+  - MOD 4000TL3-XH
+  - MOD 5000TL3-XH
+  - MOD 6000TL3-XH
+  - MOD 7000TL3-XH
+  - MOD 8000TL3-XH
+  - MOD 10KTL3-XH
+  - MID 11KTL3-XH
+  - MID 15KTL3-XH
+  - MID 17KTL3-XH
+  - MID 20KTL3-XH
+  - MID 25KTL3-XH
+  - MID 30KTL3-XH
+
+requires: wills106/homeassistant-solax-modbus (HACS) over local RS485 — the core growatt_server integration is cloud-based and cannot write for this family
+
+docs: https://github.com/wills106/homeassistant-solax-modbus
+
+untested: true
+
+description: >-
+  Growatt GEN4 hybrids, driven by dedicating one time-of-use slot to the plan
+  and moving its priority mode.
+
+notes: >-
+  MOD and MID are the same profile: the integration gates every control entity
+  on the GEN4 hybrid family rather than on the model, and both lines land
+  there.
+
+  **This hardware has no power setpoint.** There is no "charge at 1500 W"
+  register. Control is a priority mode (Load First / Battery First / Grid
+  First) that only applies inside a time-of-use period, plus a charge and
+  discharge rate expressed as a **percentage of rated power**.
+
+  **So this profile takes over one time-of-use slot.** Pick a slot you are not
+  using — slot 9 by default — and this profile will rewrite it to cover the
+  whole day and flip its priority mode as the plan changes. Your other eight
+  slots are left alone, but be aware that if one of them overlaps and the
+  firmware gives it precedence, the plan will lose. Handing control back
+  disables this slot rather than deleting it.
+
+  **Set the rated power below.** The rates are percentages, so this profile
+  needs your inverter's rating to turn the plan's watts into one. A MOD 10KTL3
+  is 10000; a MID 25KTL3 is 25000. Get it wrong and every command is scaled
+  by the same factor.
+
+  **Enable the EMS rate entities first.** `ems_charging_rate` and
+  `ems_discharging_rate` are disabled by default in the entity registry — find
+  them on the device page and enable them, or this profile can set a direction
+  but never a magnitude.
+
+  **The time-of-use fields are cached, not written.** Setting the mode, the
+  enable flag and the times only updates Home Assistant's own copy; they reach
+  the inverter as one packed write when the slot's update button is pressed.
+  That button is a required field below, and every action here ends with it.
+
+  **Idle is a best guess.** Battery First with the charge rate at zero should
+  leave the battery alone, but the firmware's behaviour there is not
+  documented anywhere this profile could be checked against. Watch it before
+  relying on it.
+
+  **No curtailment.** The integration exposes two candidate export limits — a
+  percentage at one register and a peak-shaving cap in kilowatts at another —
+  and which one this family actually honours is unresolved. Rather than write
+  kilowatts into something expecting percent, this profile does not offer
+  curtailment at all.
+
+  This route needs a direct RS485 connection to the inverter's COM port
+  through an RS485-to-Ethernet gateway. It does not go through a ShineWiFi-X
+  or ShineLAN-X dongle, and only one Modbus master can hold the bus — leaving
+  a Shine dongle attached to the same bus causes read errors. Default baud is
+  9600, though some units need 38400.
+
+control:
+  archetype: tou_rewrite
+  power_unit: percent_of_rated
+  rated_power_w: "{{ options.rated_power_w }}"
+  signed: false
+  invert_sign: false
+  charge_boost: 1.0
+  round_to: 1
+  lifetime: persistent
+  duration_min: 30
+  deadband_w: 200
+  # Five or six sequential writes per action over RS485, ending in a packed
+  # multi-register commit.
+  min_write_interval_s: 10
+  restore_required: true
+
+options:
+  rated_power_w:
+    name: Rated AC power
+    description: Used to turn the plan's watts into the percentage this hardware wants. Your inverter's nameplate rating.
+    default: 10000
+    selector:
+      number:
+        min: 1000
+        max: 40000
+        step: 100
+        unit_of_measurement: W
+        mode: box
+
+  tou_mode_select:
+    name: Time-of-use slot priority mode
+    description: The "Time N Mode" select for the slot you are dedicating to the plan. Slot 9 is suggested because it is the least likely to be in use.
+    suggest:
+      - select.growatt_time_9_mode
+      - select.time_9_mode
+    selector:
+      entity:
+        domain: select
+
+  tou_enabled_select:
+    name: Time-of-use slot active
+    suggest:
+      - select.growatt_time_9_enabled
+      - select.time_9_enabled
+    selector:
+      entity:
+        domain: select
+
+  tou_begin_time:
+    name: Time-of-use slot start
+    suggest:
+      - time.growatt_time_9_begin
+      - time.time_9_begin
+    selector:
+      entity:
+        domain: time
+
+  tou_end_time:
+    name: Time-of-use slot end
+    suggest:
+      - time.growatt_time_9_end
+      - time.time_9_end
+    selector:
+      entity:
+        domain: time
+
+  tou_update_button:
+    name: Time-of-use slot update
+    description: Required. The mode, times and enable flag above are only cached in Home Assistant until this is pressed.
+    suggest:
+      - button.growatt_time_9_update
+      - button.time_9_update
+    selector:
+      entity:
+        domain: button
+
+  grid_charge_select:
+    name: Allow grid charge
+    description: The prerequisite for charging from the grid rather than from PV surplus.
+    suggest:
+      - select.growatt_charger_switch
+      - select.charger_switch
+    selector:
+      entity:
+        domain: select
+
+  charging_rate_number:
+    name: EMS charging rate
+    description: Disabled by default in the entity registry — enable it on the device page first.
+    suggest:
+      - number.growatt_ems_charging_rate
+      - number.ems_charging_rate
+    selector:
+      entity:
+        domain: number
+
+  discharging_rate_number:
+    name: EMS discharging rate
+    description: Disabled by default in the entity registry — enable it on the device page first.
+    suggest:
+      - number.growatt_ems_discharging_rate
+      - number.ems_discharging_rate
+    selector:
+      entity:
+        domain: number
+
+  mode_battery_first:
+    name: Mode — battery first option name
+    default: Battery First
+    selector:
+      text: {}
+
+  mode_grid_first:
+    name: Mode — grid first option name
+    default: Grid First
+    selector:
+      text: {}
+
+  mode_load_first:
+    name: Mode — load first option name
+    default: Load First
+    selector:
+      text: {}
+
+  slot_enabled:
+    name: Slot active — enabled option name
+    default: Enabled
+    selector:
+      text: {}
+
+  slot_disabled:
+    name: Slot active — disabled option name
+    default: Disabled
+    selector:
+      text: {}
+
+  grid_charge_enabled:
+    name: Allow grid charge — enabled option name
+    default: Enabled
+    selector:
+      text: {}
+
+  grid_charge_disabled:
+    name: Allow grid charge — disabled option name
+    default: Disabled
+    selector:
+      text: {}
+
+sensors:
+  battery_soc: sensor.growatt_battery_soc
+  # The integration also publishes unsigned charge and discharge power
+  # separately; this combined one is positive = charging, which is the
+  # opposite of EMHASS's convention.
+  battery_power: sensor.growatt_battery_combined_power
+  # grid_power: the signed register's polarity is not documented -- prefer the
+  # separate import/export sensors if you need a reliable direction.
+  pv_power: sensor.growatt_pv_power_total
+  load_power: sensor.growatt_total_load_power
+
+limits:
+  # ac_output_max_w is the rated_power_w option above; capacity and the
+  # charge/discharge ceilings depend on the APX or ARK stack fitted.
+
+actions:
+  force_charge:
+    - service: select.select_option
+      target: { entity_id: "{{ options.grid_charge_select }}" }
+      data: { option: "{{ options.grid_charge_enabled }}" }
+    - service: number.set_value
+      target: { entity_id: "{{ options.charging_rate_number }}" }
+      data: { value: "{{ power }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.tou_mode_select }}" }
+      data: { option: "{{ options.mode_battery_first }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.tou_enabled_select }}" }
+      data: { option: "{{ options.slot_enabled }}" }
+    - service: time.set_value
+      target: { entity_id: "{{ options.tou_begin_time }}" }
+      data: { time: "00:00:00" }
+    - service: time.set_value
+      target: { entity_id: "{{ options.tou_end_time }}" }
+      data: { time: "23:59:00" }
+    # Everything above this line is cached in Home Assistant until here.
+    - service: button.press
+      target: { entity_id: "{{ options.tou_update_button }}" }
+
+  force_discharge:
+    - service: select.select_option
+      target: { entity_id: "{{ options.grid_charge_select }}" }
+      data: { option: "{{ options.grid_charge_disabled }}" }
+    - service: number.set_value
+      target: { entity_id: "{{ options.discharging_rate_number }}" }
+      data: { value: "{{ power }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.tou_mode_select }}" }
+      data: { option: "{{ options.mode_grid_first }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.tou_enabled_select }}" }
+      data: { option: "{{ options.slot_enabled }}" }
+    - service: time.set_value
+      target: { entity_id: "{{ options.tou_begin_time }}" }
+      data: { time: "00:00:00" }
+    - service: time.set_value
+      target: { entity_id: "{{ options.tou_end_time }}" }
+      data: { time: "23:59:00" }
+    - service: button.press
+      target: { entity_id: "{{ options.tou_update_button }}" }
+
+  idle:
+    # Battery First with nothing allowed in: the battery should sit while the
+    # house is served by PV and grid. Least confident action in this profile.
+    - service: select.select_option
+      target: { entity_id: "{{ options.grid_charge_select }}" }
+      data: { option: "{{ options.grid_charge_disabled }}" }
+    - service: number.set_value
+      target: { entity_id: "{{ options.charging_rate_number }}" }
+      data: { value: 0 }
+    - service: select.select_option
+      target: { entity_id: "{{ options.tou_mode_select }}" }
+      data: { option: "{{ options.mode_battery_first }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.tou_enabled_select }}" }
+      data: { option: "{{ options.slot_enabled }}" }
+    - service: button.press
+      target: { entity_id: "{{ options.tou_update_button }}" }
+
+  self_consume:
+    # Stand the slot down rather than clearing it, so the inverter falls back
+    # to its own behaviour and the slot is still there to be re-armed.
+    - service: select.select_option
+      target: { entity_id: "{{ options.grid_charge_select }}" }
+      data: { option: "{{ options.grid_charge_disabled }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.tou_mode_select }}" }
+      data: { option: "{{ options.mode_load_first }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.tou_enabled_select }}" }
+      data: { option: "{{ options.slot_disabled }}" }
+    - service: button.press
+      target: { entity_id: "{{ options.tou_update_button }}" }

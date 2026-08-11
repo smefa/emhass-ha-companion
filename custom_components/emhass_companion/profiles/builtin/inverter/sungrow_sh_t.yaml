@@ -1,0 +1,222 @@
+name: Sungrow SH-T Hybrid 15–25 kW (SHx Modbus)
+kind: inverter
+version: 2
+
+brand: Sungrow
+
+models:
+  - SH15T
+  - SH20T
+  - SH25T
+
+requires: Sungrow SHx Inverter Modbus (HACS, mkaiser) — not the core Sungrow integration
+
+docs: https://github.com/mkaiser/Sungrow-SHx-Inverter-Modbus-Home-Assistant
+
+untested: true
+
+description: >-
+  Sungrow SH15T/SH20T/SH25T three-phase hybrids via mkaiser's local Modbus TCP
+  package.
+
+notes: >-
+  Same package, same registers and the same entity ids as the SH-RT profile —
+  mkaiser's modbus_sungrow.yaml is one file for the whole SH line, and it
+  recognises these three by device code (0x0E25/0x0E26/0x0E28). This is a
+  separate entry only because nobody has run it against a T-series unit yet,
+  and because of the three traps below.
+
+  **Raise the package's power ceiling first.** The package caps
+  number.battery_forced_charge_discharge_power at the secret
+  `sungrow_modbus_battery_max_power`, which defaults to 5000 W — sized for the
+  RT models. On a 15–25 kW unit that silently clamps every forced charge to
+  5 kW, and nothing reports it. Set it to your battery's real power in
+  secrets.yaml before turning control on.
+
+  **Check the export limit before relying on curtailment.** The export-limit
+  register (13074) has had a factor-of-ten scaling bug on SH15T specifically
+  (issue #616). The forced charge/discharge power register this profile writes
+  for the battery is a different one and is not implicated — but if you use
+  curtailment, watch the first cap land and confirm the inverter limits to the
+  watts you asked for rather than ten times more or less.
+
+  **SBH battery packs are a different Modbus path.** The larger T units are
+  often paired with SBH packs, which the package reaches over a forwarded
+  WiNet-S unit id rather than the internal COM1 slave address used for SBR.
+  If your battery sensors read unavailable, that is the reason, and the
+  control registers above will not work either until it is sorted.
+
+  Forced charge/discharge only takes effect while the EMS mode select is on
+  "Forced mode"; on "Self-consumption mode (default)" the direction select and
+  power number are inert — which is also why `idle` sets EMS mode to Forced
+  rather than only the direction select. Sungrow's protocol spec V1.1.9 lists
+  these models in the same register table as the RT series and gives register
+  13052 as Watts at 1 W resolution, which is what this profile assumes. Entity
+  ids below are the package's defaults (no per-device prefix) — confirm against
+  your own install if you changed the object ids.
+
+control:
+  archetype: mode_and_magnitude
+  power_unit: w
+  signed: false
+  invert_sign: false
+  charge_boost: 1.0
+  round_to: 100
+  lifetime: persistent
+  duration_min: 30
+  deadband_w: 100
+  min_write_interval_s: 0
+  restore_required: true
+  # The export limit is a plain feed-in cap in watts -- PV still serves load
+  # and battery underneath it.
+  curtail_mode: export_limit
+  curtail_unit: w
+
+options:
+  ems_mode_select:
+    name: EMS mode
+    description: Arms forced mode. Must be "Forced mode" for the direction select and power number to take effect.
+    suggest:
+      - select.ems_mode
+    selector:
+      entity:
+        domain: select
+
+  direction_select:
+    name: Battery forced charge discharge
+    suggest:
+      - select.battery_forced_charge_discharge
+    selector:
+      entity:
+        domain: select
+
+  power_number:
+    name: Battery forced charge discharge power
+    description: Capped by the package's sungrow_modbus_battery_max_power secret, which defaults to 5000 W — raise it for a 15–25 kW unit.
+    suggest:
+      - number.battery_forced_charge_discharge_power
+    selector:
+      entity:
+        domain: number
+
+  ems_mode_self_consume:
+    name: EMS mode — self-consumption option name
+    default: Self-consumption mode (default)
+    selector:
+      text: {}
+
+  ems_mode_forced:
+    name: EMS mode — forced option name
+    default: Forced mode
+    selector:
+      text: {}
+
+  direction_stop:
+    name: Direction — stop option name
+    default: Stop (default)
+    selector:
+      text: {}
+
+  direction_charge:
+    name: Direction — forced charge option name
+    default: Forced charge
+    selector:
+      text: {}
+
+  direction_discharge:
+    name: Direction — forced discharge option name
+    default: Forced discharge
+    selector:
+      text: {}
+
+  export_limit_switch:
+    name: Export limit switch
+    description: Arms the export power limit set below. Part of the same Modbus package as the fields above.
+    suggest:
+      - switch.export_power_limit
+    selector:
+      entity:
+        domain: switch
+
+  export_limit_number:
+    name: Export limit power
+    suggest:
+      - number.export_power_limit
+    selector:
+      entity:
+        domain: number
+
+sensors:
+  battery_soc: sensor.battery_level
+  # The wide signed 32-bit register (5214-5215), not the uint16 at 13023 that
+  # read a constant 0 on SH15T + SBR128 -- negative = charging, positive =
+  # discharging, which matches EMHASS.
+  battery_power: sensor.battery_power
+  grid_power: sensor.total_active_power      # sign convention (import vs export) not confirmed from the package source — verify against your own meter before relying on it
+  pv_power: sensor.total_dc_power            # aggregate across all three MPPTs on these models
+  load_power: sensor.load_power
+
+limits:
+  # battery_capacity_wh: depends on the SBR/SBH pack fitted — let the user type it in
+  # charge_power_max_w: "{{ states('number.battery_max_charge_power') | float }}"
+  # discharge_power_max_w: "{{ states('number.battery_max_discharge_power') | float }}"
+
+actions:
+  force_charge:
+    - service: number.set_value
+      target: { entity_id: "{{ options.power_number }}" }
+      data: { value: "{{ power }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.ems_mode_select }}" }
+      data: { option: "{{ options.ems_mode_forced }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.direction_select }}" }
+      data: { option: "{{ options.direction_charge }}" }
+
+  force_discharge:
+    - service: number.set_value
+      target: { entity_id: "{{ options.power_number }}" }
+      data: { value: "{{ power }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.ems_mode_select }}" }
+      data: { option: "{{ options.ems_mode_forced }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.direction_select }}" }
+      data: { option: "{{ options.direction_discharge }}" }
+
+  idle:
+    # Idle on this hardware is Forced mode at 0 W, not self-consumption -- a
+    # real third state where the battery is held while PV and grid do whatever
+    # they do. Must set EMS mode itself: the direction select and power number
+    # are inert unless it is "Forced mode".
+    - service: number.set_value
+      target: { entity_id: "{{ options.power_number }}" }
+      data: { value: 0 }
+    - service: select.select_option
+      target: { entity_id: "{{ options.ems_mode_select }}" }
+      data: { option: "{{ options.ems_mode_forced }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.direction_select }}" }
+      data: { option: "{{ options.direction_stop }}" }
+
+  self_consume:
+    - service: select.select_option
+      target: { entity_id: "{{ options.ems_mode_select }}" }
+      data: { option: "{{ options.ems_mode_self_consume }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.direction_select }}" }
+      data: { option: "{{ options.direction_stop }}" }
+    - service: number.set_value
+      target: { entity_id: "{{ options.power_number }}" }
+      data: { value: 0 }
+
+  curtail:
+    - service: switch.turn_on
+      target: { entity_id: "{{ options.export_limit_switch }}" }
+    - service: number.set_value
+      target: { entity_id: "{{ options.export_limit_number }}" }
+      data: { value: "{{ curtail_w }}" }
+
+  uncurtail:
+    - service: switch.turn_off
+      target: { entity_id: "{{ options.export_limit_switch }}" }

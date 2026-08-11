@@ -158,9 +158,12 @@ entity, so the settings are one tap away rather than absent.
   is not re-sent every run, so "already in effect" and "not sent" are
   different states and the card says which.
 - **Planned battery level** on one rail: the plan's level now as the fill, the
-  peak still to come as a lighter band beyond it, and the *measured* level as
-  a marker. A visible gap between marker and fill is a plan running on a stale
-  SOC, which no single-value display can show.
+  peak still to come as a lighter band beyond it, the lowest level still to
+  come as a tick, and the *measured* level as a marker. A visible gap between
+  marker and fill is a plan running on a stale SOC, which no single-value
+  display can show; the low tick is the other half of the same question, since
+  a plan that ends the day full can still empty the battery on the way, and it
+  turns red when the trough goes under 20 %.
 - Value boxes under **Battery** — the measured level with its gap to the
   plan, battery power with its charge/discharge sense, the end SOC target
   against where the plan actually ends, and the planned low and high with the
@@ -192,26 +195,39 @@ the banner names which one it is instead of saying "nothing to apply":
 
 The big figure beside the decision is labelled with *which* power it is:
 
-- **target** — the power the command carries, for a forced charge or discharge.
-- **now** — the live reading from `power_entity:`, if you have set one.
+- **charging now / discharging now / now** — the live reading from the battery's
+  own power sensor. Preferred over everything below it, and the direction is
+  named whenever the Companion is the one that was told which sensor to read,
+  since only then is its sign convention known.
+- **target** — the power the last command carried, for a forced charge or
+  discharge, when there is no live sensor to read.
 - **planned in / planned out** — the plan's own figure for this moment, as a
   last resort.
 
-The distinction exists because a **self-consumption** decision carries no target
-at all: the point of it is handing the battery back to the inverter to follow
-the house, so the executor sends a zero that means "not my number". Showing that
-zero read as a battery doing nothing at the moment it was usually working
-hardest, so the card falls back to what the battery is *actually* doing instead.
+Live first, because the two below it describe an intention rather than an
+outcome. A target outlives its command: the decision taken at the top of the
+quarter hour is still the last decision after the executor has stopped the
+battery, so a stale "2.7 kW" would sit beside a battery at rest. And a
+**self-consumption** decision carries no target at all — the point of it is
+handing the battery back to the inverter to follow the house, so the executor
+sends a zero that means "not my number", which printed as power reads as a
+battery doing nothing at the moment it is usually working hardest.
 
-#### Entities the card has to be told about
+#### Measured entities: usually nothing to set
 
-Neither is published by the integration — it is configured with them, but does
-not mirror them — so both are pickers in the visual editor:
+The card draws the measured battery against the planned one, so it needs to know
+which of your sensors those are. It asks the Companion, not you: the integration
+is already configured with both — **Battery SOC sensor** and **Battery power
+sensor**, under Settings → Battery — and publishes them as attributes on its own
+planned sensors, where every card can find them.
+
+So on a configured install this section is empty. The two options below exist to
+override that per card, for pointing one card at a different meter:
 
 | Option | Used for |
 | --- | --- |
-| `soc_entity` | The measured level: the marker on the rail, the "now" legend, and the gap in **Level now**. Left out, the marker is not drawn. |
-| `power_entity` | The live battery power, for the decision's power when no target was commanded. Only its magnitude is shown, since the sign convention of an outside sensor is that sensor's own. |
+| `soc_entity` | The measured level: the marker on the rail, the "now" legend, and the gap in **Level now**. Left unset, the Companion's own SOC sensor is used; with neither, the marker is not drawn. |
+| `power_entity` | The live battery power, for the decision's power. Left unset, the Companion's own battery power sensor is used — which is also what lets the card say *charging* or *discharging* rather than only how hard, since the Companion is told which way that sensor counts and a card option is not. |
 
 Both are read directly, so they update live rather than at the optimiser's
 cadence.
@@ -224,8 +240,6 @@ default, so the config stays short:
 
 ```yaml
 type: custom:emhass-status-card
-soc_entity: sensor.battery_state_of_charge
-power_entity: sensor.inverter_battery_power
 show_rules: false
 ```
 
@@ -377,8 +391,8 @@ invert_battery: true
 | --- | --- | --- |
 | `history_hours` | `2` | how far back the window reaches; `0` starts at now |
 | `solar_entity` | — | measured solar power for the historic side |
-| `battery_entity` | — | measured battery power for the historic side |
-| `invert_battery` | `false` | for a sensor that is positive while *charging* — the card draws positive as discharge, following the plan |
+| `battery_entity` | the Companion's **Battery power sensor** | measured battery power for the historic side; set only to draw this card from a different meter |
+| `invert_battery` | `false` | for a sensor that is positive while *charging* — the card draws positive as discharge, following the plan. Read only when `battery_entity` is set; the Companion carries its own convention |
 
 Each lane's tooltip names which record its shaded side is, since a forecast and
 a meter reading look identical once they are drawn. A sensor the recorder

@@ -24,6 +24,7 @@ from .const import (
     ACTION_DAYAHEAD,
     ACTION_FORECAST_FIT,
     ACTION_MPC,
+    COMPLETION_NEVER_STARTED,
     CONF_GROUP_LOAD_IDS,
     CONF_GROUP_MAX_POWER,
     CONF_GROUP_MUTUAL_EXCLUSION,
@@ -37,6 +38,7 @@ from .const import (
     EMHASS_CONF_TIME_STEP,
     EMHASS_CONF_VAR_MODEL,
     END_SOC_OPTIMIZED,
+    ISSUE_LOAD_NEVER_STARTED,
     ISSUE_ML_FORECASTER_NOT_READY,
     ISSUE_OPTIMIZATION_INFEASIBLE,
     ISSUE_PLAN_SCHEMA,
@@ -372,8 +374,18 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         Exposed (unlike the private ``_settings`` used for the other kinds)
         because both the "train forecaster" button and the config sync step
         need to know what the load profile resolves to before any run happens.
+
+        A profile that no longer resolves degrades to ``{}`` here rather than
+        raising, unlike the run path: every caller of this runs at setup
+        (button platform, config sync), where a hard failure would cost the
+        whole integration. The next run still fails loudly on the same
+        condition -- see :meth:`_settings`.
         """
-        return self._settings(self.config.load)
+        try:
+            return self._settings(self.config.load, PROFILE_KIND_LOAD)
+        except ProfileError as err:
+            _LOGGER.warning("Load profile settings unavailable at setup: %s", err)
+            return {}
 
     @property
     def uses_mlforecaster(self) -> bool:
@@ -663,6 +675,38 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             translation_placeholders={"action": action},
         )
 
+    def _track_never_started_issues(self) -> None:
+        """Raise or clear the per-load "it never started" repair.
+
+        One issue per load, like :meth:`LoadNumber._check_thermal_reachability`:
+        only that appliance is affected, and the fix is its own -- a dishwasher
+        whose own start button was never pressed, a plug that does not resume
+        the program on power-up, a breaker left off.
+
+        Read off ``last_completion_reason`` rather than raised from inside
+        ``check_auto_disarm``, so that the runtime stays free of Home Assistant
+        plumbing and the issue survives being recomputed every cycle: it is
+        cleared by the next run that ends any other way, which is the only
+        evidence that whatever was wrong has been dealt with.
+        """
+        for load in self.loads.all():
+            issue_id = f"{ISSUE_LOAD_NEVER_STARTED}_{load.subentry_id}"
+            if load.last_completion_reason != COMPLETION_NEVER_STARTED:
+                ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+                continue
+            ir.async_create_issue(
+                self.hass,
+                DOMAIN,
+                issue_id,
+                is_fixable=False,
+                severity=ir.IssueSeverity.ERROR,
+                translation_key=ISSUE_LOAD_NEVER_STARTED,
+                translation_placeholders={
+                    "name": load.name,
+                    "hours": f"{load.operating_hours:g}",
+                },
+            )
+
     def _track_run_failed_issue(self, failed: bool, action: str, message: str) -> None:
         """Raise or clear the whole-integration run-failed repair.
 
@@ -770,12 +814,16 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             buy, sell = config.tariff.compose(self.hass, spot)
 
         settings: dict[str, Any] = {}
-        for selection in (config.price, config.pv, config.load):
-            settings.update(self._settings(selection))
+        for selection, kind in (
+            (config.price, PROFILE_KIND_PRICE),
+            (config.pv, PROFILE_KIND_PV),
+            (config.load, PROFILE_KIND_LOAD),
+        ):
+            settings.update(self._settings(selection, kind))
         if self.loads.has_thermal:
             # A temperature profile may contribute settings instead of a series
             # (EMHASS built-in lets EMHASS fetch Open-Meteo itself).
-            settings.update(self._settings(config.temperature))
+            settings.update(self._settings(config.temperature, PROFILE_KIND_TEMPERATURE))
         if EMHASS_CONF_LOAD_FORECAST_METHOD in settings:
             method, load_bootstrap = await self._resolve_load_forecast_method(
                 settings, now, horizon_end
@@ -805,7 +853,8 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         # ones that plan could speak for. Ordered between the two calls because
         # it reads the accumulator assume_from_plan just advanced, and writes
         # the armed flag apply_surplus below reads back.
-        self.loads.check_auto_disarm(now)
+        self.loads.check_auto_disarm(now, config.time_step_minutes)
+        self._track_never_started_issues()
         if self.data is not None:
             # Re-derive each surplus load's hours and window from the spare PV
             # the previous plan predicted. Must run *after*
@@ -874,8 +923,18 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             return Series.empty()
         return await async_resolve_series(self.hass, profile, selection.options)
 
-    def _settings(self, selection: ProfileSelection) -> dict[str, Any]:
-        if (profile := self.profiles.get(selection.key or "")) is None:
+    def _settings(self, selection: ProfileSelection, kind: str) -> dict[str, Any]:
+        """The ``emhass:`` settings one configured profile contributes.
+
+        Routed through :meth:`_profile` for the same reason :meth:`_series` is:
+        a settings-only profile that no longer resolves (deleted, renamed)
+        would otherwise contribute nothing *silently*, and the run would go out
+        with EMHASS falling back to its own persisted config -- precisely what
+        :meth:`async_sync_emhass_config` exists to prevent. Failing here means
+        ``_async_run``'s ProfileError handler names the missing profile.
+        """
+        profile = self._profile(selection, kind)
+        if profile is None:
             return {}
         return resolve_settings(self.hass, profile, selection.options)
 

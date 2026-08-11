@@ -17,6 +17,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
 from .const import (
+    CONF_BATTERY_POWER_ENTITY,
+    CONF_BATTERY_POWER_INVERT,
     CONF_DAYAHEAD_FALLBACK_TIME,
     CONF_HORIZON_HOURS,
     CONF_HOUSE_LOAD_TOTAL_ENTITY,
@@ -42,6 +44,7 @@ from .const import (
     STALE_PLAN_FACTOR,
 )
 from .models import BatteryConfig, GridConfig, HybridInverterConfig
+from .stored_time import parse_stored_time
 from .tariff import Tariff
 
 
@@ -106,6 +109,10 @@ class EmhassConfig:
     grid: GridConfig = field(default_factory=GridConfig)
     hybrid_inverter: HybridInverterConfig = field(default_factory=HybridInverterConfig)
     soc_entity: str | None = None
+    # Read by nothing here: it is published for the cards, which draw measured
+    # battery power against the planned figure. See CONF_BATTERY_POWER_ENTITY.
+    battery_power_entity: str | None = None
+    battery_power_invert: bool = False
     pv_live_entity: str | None = None
     house_load_total_entity: str | None = None
 
@@ -113,6 +120,14 @@ class EmhassConfig:
     def from_entry(cls, hass: HomeAssistant, entry: ConfigEntry) -> EmhassConfig:
         options = entry.options or {}
         raw_time = options.get(CONF_DAYAHEAD_FALLBACK_TIME, DEFAULT_DAYAHEAD_FALLBACK_TIME)
+        # Never raises: a stored time this cannot read costs the user that one
+        # setting and a repair issue, not the whole setup. See stored_time.
+        fallback_time = parse_stored_time(
+            hass,
+            raw_time,
+            label="Day-ahead fallback time",
+            default=time.fromisoformat(DEFAULT_DAYAHEAD_FALLBACK_TIME),
+        ) or time.fromisoformat(DEFAULT_DAYAHEAD_FALLBACK_TIME)
         load = ProfileSelection.from_dict(options.get(CONF_LOAD))
         house_load_total_entity = options.get(CONF_HOUSE_LOAD_TOTAL_ENTITY)
         if house_load_total_entity and load.key == PROFILE_KEY_LOAD_SENSOR:
@@ -122,7 +137,7 @@ class EmhassConfig:
             time_step_minutes=int(options.get(CONF_TIME_STEP, DEFAULT_TIME_STEP)),
             mpc_interval_minutes=int(options.get(CONF_MPC_INTERVAL, DEFAULT_MPC_INTERVAL)),
             horizon_hours=int(options.get(CONF_HORIZON_HOURS, DEFAULT_HORIZON_HOURS)),
-            dayahead_fallback_time=time.fromisoformat(str(raw_time)),
+            dayahead_fallback_time=fallback_time,
             price=ProfileSelection.from_dict(options.get(CONF_PRICE)),
             pv=ProfileSelection.from_dict(options.get(CONF_PV)),
             load=load,
@@ -136,6 +151,8 @@ class EmhassConfig:
             # to share it with.
             hybrid_inverter=HybridInverterConfig.from_dict(options.get("battery")),
             soc_entity=options.get(CONF_SOC_ENTITY),
+            battery_power_entity=options.get(CONF_BATTERY_POWER_ENTITY),
+            battery_power_invert=bool(options.get(CONF_BATTERY_POWER_INVERT)),
             house_load_total_entity=house_load_total_entity,
             pv_live_entity=options.get(CONF_PV_ENTITY),
         )

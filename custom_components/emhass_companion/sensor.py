@@ -29,6 +29,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.util import dt as dt_util
 
+from .configuration import EmhassConfig
 from .const import BATTERY_ACTIONS, NET_HOUSE_LOAD_KEY
 from .coordinator import EmhassCoordinator, EmhassData
 from .deferrable import DeferrableRuntime, state_to_watts
@@ -47,6 +48,13 @@ class EmhassSensorDescription(SensorEntityDescription):
     value_fn: Callable[[EmhassData, datetime], Any]
     series_fn: Callable[[EmhassData], Series] | None = None
     attrs_fn: Callable[[EmhassData], dict[str, Any]] | None = None
+    # Attributes read off the configuration rather than the plan: which of the
+    # user's own sensors measures what this one plans. The dashboard cards draw
+    # the two against each other and cannot see config entry options at all --
+    # they discover this integration's entities and read their attributes -- so
+    # the planned sensor is where the pointer to its measured counterpart
+    # belongs. See CONF_BATTERY_POWER_ENTITY.
+    measured_fn: Callable[[EmhassConfig], dict[str, Any]] | None = None
 
 
 def _plan_value(attribute: str) -> Callable[[EmhassData, datetime], Any]:
@@ -106,6 +114,12 @@ BATTERY_SENSORS: tuple[EmhassSensorDescription, ...] = (
         # Positive is discharge, negative is charge.
         value_fn=_plan_value("p_batt"),
         series_fn=_plan_series("p_batt"),
+        measured_fn=lambda config: {
+            "measured_entity": config.battery_power_entity,
+            # Whether that sensor is positive while charging, i.e. the opposite
+            # of the convention this sensor's own value follows.
+            "measured_invert": config.battery_power_invert,
+        },
     ),
     EmhassSensorDescription(
         key="battery_soc",
@@ -118,6 +132,7 @@ BATTERY_SENSORS: tuple[EmhassSensorDescription, ...] = (
         # in the model.
         value_fn=_plan_value("soc_percent"),
         series_fn=lambda data: data.plan.series("soc_percent") if data.plan else Series.empty(),
+        measured_fn=lambda config: {"measured_entity": config.soc_entity},
     ),
     EmhassSensorDescription(
         key="end_soc_target",
@@ -315,6 +330,9 @@ class EmhassSensor(EmhassEntity, SensorEntity):
 
         if self.entity_description.attrs_fn is not None:
             attributes.update(self.entity_description.attrs_fn(data))
+
+        if self.entity_description.measured_fn is not None:
+            attributes.update(self.entity_description.measured_fn(self.coordinator.config))
 
         return attributes or None
 
@@ -825,6 +843,15 @@ class EmhassDecisionSensor(EmhassEntity, SensorEntity):
 
     def __init__(self, coordinator: EmhassCoordinator) -> None:
         super().__init__(coordinator, "battery_action")
+
+    async def async_added_to_hass(self) -> None:
+        # The coordinator's own notification is not enough here: it is what
+        # *starts* the apply, so it always fires while `last_decision` is still
+        # the previous one. Without this the published action trails the
+        # commands actually sent to the inverter by a whole clock tick.
+        await super().async_added_to_hass()
+        executor = self.coordinator.config_entry.runtime_data.executor
+        self.async_on_remove(executor.add_listener(self.async_write_ha_state))
 
     @property
     def native_value(self) -> str | None:

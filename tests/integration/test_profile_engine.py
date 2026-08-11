@@ -19,10 +19,12 @@ from custom_components.emhass_companion.config_flow import _suggested_entities
 from custom_components.emhass_companion.profiles import BUILTIN_ROOT, Profile
 from custom_components.emhass_companion.profiles.engine import (
     action_variables,
+    async_execute_steps,
     async_resolve_series,
     convert_curtail_power,
     convert_power,
     render,
+    render_action,
 )
 from custom_components.emhass_companion.profiles.schema import ProfileError, validate_document
 
@@ -703,3 +705,174 @@ def test_an_option_whose_suggestions_all_miss_is_left_blank(hass: HomeAssistant)
         key="inverter/test", path="<test>", kind="inverter", name="Test", document=document
     )
     assert _suggested_entities(hass, profile) == {}
+
+
+# --- executing rendered steps -------------------------------------------------
+
+
+@pytest.fixture
+def service_calls(hass: HomeAssistant) -> list:
+    """Record the calls a rendered action actually makes."""
+    recorded: list = []
+
+    async def _record(call) -> None:
+        recorded.append(call)
+
+    for domain, service in (("script", "turn_on"), ("homeassistant", "update_entity")):
+        hass.services.async_register(domain, service, _record)
+    return recorded
+
+
+async def test_an_unset_script_option_skips_its_step_instead_of_failing(
+    hass: HomeAssistant, service_calls: list
+) -> None:
+    """The generic-script profile invites leaving a mode's script unset.
+
+    Only self_consume is required. Rendering `idle` without an idle script
+    produces `entity_id: ""`, which Home Assistant rejects outright -- so
+    sending it anyway would turn a documented configuration into an error on
+    every apply, not a no-op.
+    """
+    profile = _builtin("inverter/generic_script")
+    options = {"self_consume_script": "script.self_consume"}
+
+    steps = render_action(hass, profile, options, "idle", power_w=0, soc=50, soc_target=80)
+    await async_execute_steps(hass, steps)
+    await hass.async_block_till_done()
+
+    assert steps[0]["target"] == {"entity_id": ""}
+    assert service_calls == []
+
+
+async def test_a_step_whose_option_is_set_still_runs(
+    hass: HomeAssistant, service_calls: list
+) -> None:
+    profile = _builtin("inverter/generic_script")
+    options = {"self_consume_script": "script.self_consume"}
+
+    steps = render_action(hass, profile, options, "self_consume", power_w=0, soc=50, soc_target=80)
+    await async_execute_steps(hass, steps)
+    await hass.async_block_till_done()
+
+    assert [call.data["entity_id"] for call in service_calls] == ["script.self_consume"]
+
+
+async def test_a_step_that_targets_nothing_at_all_is_left_alone(
+    hass: HomeAssistant, service_calls: list
+) -> None:
+    """Skipping is about an *empty* aim, not about having no aim.
+
+    A service that takes no target is an ordinary thing for a profile to
+    call, and must not be swept up by the guard above.
+    """
+    await async_execute_steps(hass, [{"service": "homeassistant.update_entity"}])
+    await hass.async_block_till_done()
+
+    assert len(service_calls) == 1
+
+
+# --- the shipped inverter profiles -------------------------------------------
+#
+# These assert the two things about a real profile that are silently
+# catastrophic rather than merely broken: a setpoint written with the wrong
+# sign charges when the plan said discharge, and a SolaX command that never
+# reaches the trigger button looks like it worked while changing nothing.
+
+
+def _options(profile: Profile) -> dict:
+    """Every option at its declared default, as the config flow would store it."""
+    return {
+        key: option["default"] for key, option in profile.options.items() if "default" in option
+    }
+
+
+@pytest.mark.parametrize(
+    ("action", "power_w", "expected"),
+    [
+        # SolaX calls charging positive; EMHASS calls discharging positive.
+        # Getting this backwards buys power at the peak and sells at the trough.
+        ("force_charge", -3000, 3000),
+        ("force_discharge", 3000, -3000),
+        ("idle", 0, 0),
+    ],
+)
+def test_solax_writes_battery_power_with_solax_own_sign(
+    hass: HomeAssistant, action: str, power_w: float, expected: float
+) -> None:
+    profile = _builtin("inverter/solax_gen4_gen5")
+    options = {**_options(profile), "active_power_number": "number.ap"}
+    steps = render_action(hass, profile, options, action, power_w=power_w)
+    written = [
+        step["data"]["value"]
+        for step in steps
+        if step["service"] == "number.set_value"
+        and step.get("target", {}).get("entity_id") == "number.ap"
+    ]
+    assert written == [expected]
+
+
+@pytest.mark.parametrize("action", ["force_charge", "force_discharge", "idle", "self_consume"])
+def test_solax_presses_the_trigger_last(hass: HomeAssistant, action: str) -> None:
+    """Every remote-control write is cached in Home Assistant until the button
+    is pressed, so an action that does not end with it is a silent no-op."""
+    profile = _builtin("inverter/solax_gen4_gen5")
+    options = {**_options(profile), "trigger_button": "button.go"}
+    steps = render_action(hass, profile, options, action, power_w=-1000)
+    assert steps[-1]["service"] == "button.press"
+    assert steps[-1]["target"]["entity_id"] == "button.go"
+
+
+@pytest.mark.parametrize(
+    ("action", "power_w"),
+    [("force_charge", -2000), ("force_discharge", 2000)],
+)
+def test_huawei_asks_for_a_duration_it_will_outlive(
+    hass: HomeAssistant, action: str, power_w: float
+) -> None:
+    """Huawei's forced charge expires on its own, so the duration it carries
+    has to cover the slot the executor will re-issue within."""
+    profile = _builtin("inverter/huawei_sun2000")
+    options = {**_options(profile), "battery_device": "dev1"}
+    steps = render_action(hass, profile, options, action, power_w=power_w)
+    forced = [step for step in steps if step["service"].startswith("huawei_solar.forcible")]
+    assert len(forced) == 1
+    assert forced[0]["data"]["power"] == 2000
+    assert forced[0]["data"]["duration"] == profile.control["duration_min"]
+
+
+def test_deye_converts_the_plan_into_a_current_limit(hass: HomeAssistant) -> None:
+    """The plan is in watts and this hardware only caps amps, so the profile
+    divides by the pack voltage -- and must never exceed the everyday ceiling."""
+    profile = _builtin("inverter/deye_sg01hp3")
+    options = {
+        **_options(profile),
+        "charge_current_number": "number.charge",
+        "discharge_current_number": "number.discharge",
+    }
+    steps = render_action(hass, profile, options, "force_charge", power_w=-4000)
+    written = {
+        step["target"]["entity_id"]: step["data"]["value"]
+        for step in steps
+        if step["service"] == "number.set_value"
+    }
+    # 4000 W over the default 400 V pack, and discharge held at zero so the
+    # house cannot pull straight back out of a battery the plan is filling.
+    assert written == {"number.charge": 10, "number.discharge": 0}
+
+
+def test_deye_clamps_a_huge_plan_to_the_everyday_ceiling(hass: HomeAssistant) -> None:
+    profile = _builtin("inverter/deye_sg01hp3")
+    options = {
+        **_options(profile),
+        "charge_current_number": "number.charge",
+        "discharge_current_number": "number.discharge",
+    }
+    steps = render_action(hass, profile, options, "force_charge", power_w=-999_000)
+    written = {
+        step["target"]["entity_id"]: step["data"]["value"]
+        for step in steps
+        if step["service"] == "number.set_value"
+    }
+    # The schema stores an option default as a string, which is exactly why
+    # every profile template here coerces before using one arithmetically.
+    assert written["number.charge"] == int(profile.options["max_current_a"]["default"])

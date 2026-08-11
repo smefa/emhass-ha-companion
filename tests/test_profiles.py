@@ -530,3 +530,16 @@ def test_the_inverter_template_demonstrates_every_control_key():
     assert set(DEFAULT_CONTROL) <= set(raw["control"]), (
         "the template's control block no longer shows every option"
     )
+
+
+def test_the_script_profile_only_requires_the_script_it_falls_back_to():
+    """Its own notes tell the user to leave a mode's script unset.
+
+    Marking every option required contradicts that: the form would refuse to
+    submit, and the documented configuration would be unreachable.
+    self_consume stays required because the executor calls it whenever a plan
+    goes stale, which is the one thing that must always work.
+    """
+    document = validate_document(load_yaml(str(BUILTIN_ROOT / "inverter" / "generic_script.yaml")))
+    required = {key for key, option in document["options"].items() if option.get("required", True)}
+    assert required == {"self_consume_script"}

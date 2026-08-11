@@ -22,21 +22,28 @@ options:
     selector:
       entity:
         domain: script
+  # The other three are optional because the notes above say they are: an
+  # inverter with no idle mode has no idle script to point at. An action whose
+  # script is unset renders a step with an empty target, which the engine skips
+  # instead of calling.
   force_charge_script:
     name: Charge script
     description: Receives power_w, the charge power in watts.
+    required: false
     selector:
       entity:
         domain: script
   force_discharge_script:
     name: Discharge script
     description: Receives power_w, the discharge power in watts.
+    required: false
     selector:
       entity:
         domain: script
   idle_script:
     name: Idle script
     description: Neither charging nor discharging.
+    required: false
     selector:
       entity:
         domain: script

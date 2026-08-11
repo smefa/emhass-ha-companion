@@ -224,6 +224,8 @@ response_variable: result
 
 It returns the resolved series, the point count, the detected step, the settings contributed, and any error. Use it rather than guessing: a YAML source that silently yields nothing is much harder to diagnose than a Python one that raises.
 
+Two things to know when calling it by hand. It is **administrators only**, because the settings it returns include whatever your profile put in its `emhass:` block — an API key included; an automation or script calling it is unaffected. And any `options:` you pass are checked against the profile's own `options:` declaration, so a typo comes back as a clear error instead of rendering as an empty string somewhere inside a template.
+
 ## Contributing a profile
 
 1. Put the file in `custom_components/emhass_companion/profiles/builtin/<kind>/`.

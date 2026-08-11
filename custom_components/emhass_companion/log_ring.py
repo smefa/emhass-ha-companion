@@ -43,17 +43,29 @@ class LogRingHandler(logging.Handler):
         self._records: collections.deque[dict[str, Any]] = collections.deque(maxlen=MAX_RECORDS)
 
     def emit(self, record: logging.LogRecord) -> None:
-        message = record.getMessage()
-        if len(message) > MAX_MESSAGE_CHARS:
-            dropped = len(message) - MAX_MESSAGE_CHARS
-            message = f"{message[:MAX_MESSAGE_CHARS]}... [{dropped} more characters]"
-        self._records.append(
-            {
-                "ts": datetime.fromtimestamp(record.created, tz=UTC).isoformat(),
-                "level": record.levelname,
-                "message": message,
-            }
-        )
+        # Every stdlib handler wraps its own emit body like this, because
+        # ``logging.Handler.handle`` does not catch on the handler's behalf --
+        # an exception here propagates out of whatever *called* the logger.
+        # This handler is attached to the package logger, so it sees every
+        # record from every submodule: one ``_LOGGER.debug("%s", a, b)`` typo
+        # anywhere would otherwise stop a coordinator run or an executor apply
+        # mid-flight, when without the handler the same typo is a stderr line
+        # and nothing more. Collecting the support bundle's log tail must
+        # never be able to cost more than the log tail.
+        try:
+            message = record.getMessage()
+            if len(message) > MAX_MESSAGE_CHARS:
+                dropped = len(message) - MAX_MESSAGE_CHARS
+                message = f"{message[:MAX_MESSAGE_CHARS]}... [{dropped} more characters]"
+            self._records.append(
+                {
+                    "ts": datetime.fromtimestamp(record.created, tz=UTC).isoformat(),
+                    "level": record.levelname,
+                    "message": message,
+                }
+            )
+        except Exception:  # noqa: BLE001 - logging must never break its caller
+            self.handleError(record)
 
     def snapshot(self) -> list[dict[str, Any]]:
         """Records oldest first -- the order a maintainer reads a log in."""

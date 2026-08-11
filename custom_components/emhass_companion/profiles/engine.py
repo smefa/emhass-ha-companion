@@ -444,18 +444,48 @@ def render_action(
     return [render(hass, step, scope) for step in steps]
 
 
+def _is_blank(value: Any) -> bool:
+    """Whether a rendered fragment carries nothing at all.
+
+    An unset profile option renders to an empty string, so this is how a step
+    aimed at ``{{ options.idle_script }}`` looks when the user genuinely has no
+    idle script -- which the profile's own notes invite.
+    """
+    if isinstance(value, dict):
+        return all(_is_blank(item) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return all(_is_blank(item) for item in value)
+    return value is None or (isinstance(value, str) and not value.strip())
+
+
 async def async_execute_steps(hass: HomeAssistant, steps: list[dict[str, Any]]) -> None:
-    """Execute rendered service calls in order."""
+    """Execute rendered service calls in order.
+
+    A step that aims somewhere, but whose aim renders to nothing, is skipped
+    rather than sent. Home Assistant validates ``entity_id: ""`` and rejects
+    it, so sending one anyway turns an option the profile's own notes invite
+    the user to leave unset into an error on every single apply. A step with
+    no aim at all is left alone -- a service that takes no target is a
+    perfectly ordinary thing for a profile to call.
+    """
     for step in steps:
         domain, _, service = str(step["service"]).partition(".")
         if not domain or not service:
             raise ProfileError(f"Invalid service name: {step['service']!r}")
+        data = step.get("data") or {}
+        target = step.get("target") or {}
+        # Where the call is aimed: `target:`, or the older
+        # `data: {entity_id: ...}` form a hand-written profile may still use.
+        aim = target or ({"entity_id": data["entity_id"]} if "entity_id" in data else None)
+        if aim is not None and _is_blank(aim):
+            _LOGGER.debug("Skipping %s: nothing to aim it at (unset option?)", step["service"])
+            continue
         await hass.services.async_call(
             domain,
             service,
-            step.get("data") or {},
+            data,
             blocking=True,
-            target=step.get("target") or {},
+            target=target,
         )
 
 

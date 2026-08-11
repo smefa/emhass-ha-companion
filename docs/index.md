@@ -62,7 +62,7 @@ The add-on's address is filled in automatically if it is running.
 - **[Dashboard cards](dashboard_cards.md)** — the plan overview and per-load cards that register automatically.
 - **[Entities](entities.md)** — the full list of sensors, switches and controls.
 - **[Handing over control](handing_over_control.md)** — the migration path and safety behaviours.
-- **[Inverter control](inverter_control.md)** — configuring battery control: profiles available today, and the scripts fallback for any inverter.
+- **[Inverter control](inverter_control.md)** — configuring battery control: profiles available today, and the scripts fallback for any inverter. Fronius GEN24 owners want the [scripts recipe](fronius_gen24_scripts.md).
 - **[Data sources](data_sources.md)** and **[Writing a profile](profiles.md)** — what ships built in, and how to add your own.
 - **[Troubleshooting](troubleshooting.md)** — isolating a data source, diagnosing a wrong-looking plan, resolving an infeasible optimisation.
 

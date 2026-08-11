@@ -106,6 +106,25 @@ def _set_minimum_off_time(load: DeferrableRuntime, value: float) -> None:
     load.minimum_off_time_minutes = value
 
 
+def _set_idle_power(load: DeferrableRuntime, value: float) -> None:
+    load.idle_power_w = value
+
+
+def _set_idle_time(load: DeferrableRuntime, value: float) -> None:
+    load.idle_minutes = value
+
+
+def _has_meter(load: DeferrableRuntime) -> bool:
+    """Whether completion detection has anything to detect with.
+
+    Without a power sensor the load's running source is the control entity,
+    which reads as on because the integration just switched it on -- there is
+    no reading that could ever say "finished", so the settings that would tune
+    one are not created at all.
+    """
+    return not load.is_thermal and load.metered
+
+
 def _set_comfort_temperature(load: DeferrableRuntime, value: float) -> None:
     load.comfort_temperature = value
 
@@ -378,6 +397,37 @@ LOAD_NUMBERS: tuple[LoadNumberDescription, ...] = (
         entity_category=EntityCategory.CONFIG,
         get_fn=lambda load: load.minimum_off_time_minutes,
         set_fn=_set_minimum_off_time,
+    ),
+    LoadNumberDescription(
+        key="idle_power",
+        translation_key="idle_power",
+        native_unit_of_measurement=UnitOfPower.WATT,
+        native_min_value=0,
+        native_max_value=1000,
+        native_step=1,
+        mode=NumberMode.BOX,
+        entity_category=EntityCategory.CONFIG,
+        get_fn=lambda load: load.idle_power_w,
+        set_fn=_set_idle_power,
+        applies_fn=_has_meter,
+        # Only an on-demand run ends by being finished. A daily load is judged
+        # on the work its meter saw, and a surplus load is idle whenever a
+        # cloud passes, which proves nothing about the car being charged.
+        available_fn=lambda load: load.on_demand,
+    ),
+    LoadNumberDescription(
+        key="idle_time",
+        translation_key="idle_time",
+        native_unit_of_measurement=UnitOfTime.MINUTES,
+        native_min_value=0,
+        native_max_value=240,
+        native_step=1,
+        mode=NumberMode.BOX,
+        entity_category=EntityCategory.CONFIG,
+        get_fn=lambda load: load.idle_minutes,
+        set_fn=_set_idle_time,
+        applies_fn=_has_meter,
+        available_fn=lambda load: load.on_demand,
     ),
 )
 

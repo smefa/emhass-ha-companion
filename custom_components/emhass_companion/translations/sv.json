@@ -113,6 +113,8 @@
           "end_soc_mode": "Slutladdningsnivå",
           "self_consume_threshold_w": "Tröskel för övergång till egenanvändning",
           "soc_entity": "Sensor för batteriets laddningsnivå",
+          "battery_power_entity": "Sensor för batteriets effekt",
+          "battery_power_invert": "Sensorn är positiv vid laddning",
           "pv_entity": "Sensor för aktuell soleffekt"
         },
         "data_description": {
@@ -121,6 +123,8 @@
           "soc_target": "Där optimeringen siktar på att lämna batteriet vid horisontens slut. Med slutladdningsnivå \"Optimerad\" är detta i stället reservgolvet som det beräknade målet aldrig planerar under; med \"Fast %-reglage\" är detta exakt den nivå den siktar på.",
           "self_consume_threshold_w": "När planens näteffekt ligger inom detta antal watt från noll lämnas batteriet till växelriktarens egen egenanvändningsläge istället för planens tvingade laddning/urladdning -- även en stor planerad laddning eller urladdning åsidosätts, eftersom egenanvändning följer verklig sol- och lastdata bättre än en prognos vid små obalanser. När läget väl har lämnats över måste näteffekten överstiga dubbla detta värde innan planen kan tvinga batteriet igen, så att läget inte växlar fram och tillbaka vid varje omräkning. Inte samma sak som laddningsnivåerna ovan, som bara begränsar vad optimeringen får planera mellan.",
           "soc_entity": "Läses vid varje körning så att planen utgår från verkligheten.",
+          "battery_power_entity": "Vad batteriet gör just nu, så att korten kan rita det mot planen. Ingenting i optimeringen läser den.",
+          "battery_power_invert": "Lämna av om sensorn är positiv vid urladdning, vilket är planens egen konvention. Fel håll gör att ett batteri som laddas visas som att det laddas ur.",
           "pv_entity": "Valfritt. Blandas in i det första steget av varje MPC-prognos, viktat av reglaget \"Live-värdets vikt\". Last blandas in på samma sätt automatiskt, med sensorn vald under Husets förbrukning > Sensor för husets last -- ingen separat sensor behövs där.",
           "end_soc_mode": "Hur batterinivån som planen siktar på vid horisontens slut väljs. \"Optimerad\" beräknas varje körning ur sol-, pris- och lastprognoserna bortom horisonten; \"Samma som start\" planerar alltid tillbaka till nuvarande nivå; \"Fast %-reglage\" siktar alltid på önskad laddningsnivå ovan. Kräver EMHASS 0.18 eller nyare.",
           "weight_battery_discharge": "Vad en kWh ur batteriet kostar dig i slitage, i samma valuta som dina priser. Optimeringen lägger på den vid varje urladdning, så batteriet töms bara när prisskillnaden den jagar överstiger kostnaden. 0 betyder cykla fritt; en grov utgångspunkt är batteriets pris delat med dess garanterade livstidsgenomströmning, ofta 0,02-0,10 per kWh.",
@@ -256,6 +260,8 @@
           "end_soc_mode": "Slutladdningsnivå",
           "self_consume_threshold_w": "Tröskel för övergång till egenanvändning",
           "soc_entity": "Sensor för batteriets laddningsnivå",
+          "battery_power_entity": "Sensor för batteriets effekt",
+          "battery_power_invert": "Sensorn är positiv vid laddning",
           "pv_entity": "Sensor för aktuell soleffekt"
         },
         "data_description": {
@@ -271,7 +277,9 @@
           "battery_soc_surplus_threshold": "Nivån över vilken batteriet debiteras en hållkostnad, om en sådan är satt nedan. Att stå fulladdat åldrar ett litiumbatteri snabbare, så detta motverkar att det parkeras där i timmar.",
           "battery_soc_surplus_cost": "Debiteras per kWh över den bekväma nivån, per timme där. Använd det för att få planen att fylla batteriet sent i stället för tidigt när båda kostar lika mycket. 0 stänger av detta, vilket är standard.",
           "battery_stress_segments": "Hur fint den kvadratiska kostnadskurvan nedan approximeras. Högre följer den verkliga kostnaden närmare men gör varje optimering något långsammare; 10 är en bra avvägning och spelar bara roll när en effektkostnad är satt nedan.",
-          "battery_stress_cost": "Motverkar snabb laddning och urladdning. Kostnaden växer med effekten i kvadrat, så halv effekt kostar en fjärdedel, och planen sprider en laddning över flera timmar i stället för att pressa in den i den billigaste. Prissatt per kW vid full effekt, per timme. 0 stänger av detta, vilket är standard."
+          "battery_stress_cost": "Motverkar snabb laddning och urladdning. Kostnaden växer med effekten i kvadrat, så halv effekt kostar en fjärdedel, och planen sprider en laddning över flera timmar i stället för att pressa in den i den billigaste. Prissatt per kW vid full effekt, per timme. 0 stänger av detta, vilket är standard.",
+          "battery_power_entity": "Vad batteriet gör just nu, så att korten kan rita det mot planen. Ingenting i optimeringen läser den.",
+          "battery_power_invert": "Lämna av om sensorn är positiv vid urladdning, vilket är planens egen konvention. Fel håll gör att ett batteri som laddas visas som att det laddas ur."
         }
       },
       "grid": {
@@ -579,6 +587,12 @@
       },
       "minimum_off_time": {
         "name": "18. Minsta tid av"
+      },
+      "idle_power": {
+        "name": "19. Räknas som klar under"
+      },
+      "idle_time": {
+        "name": "20. Klar efter overksam i"
       }
     },
     "time": {
@@ -628,6 +642,18 @@
     "ml_forecaster_not_ready": {
       "title": "Maskininlärningsprognosen för förbrukning är inte tränad än",
       "description": "Lastprofilen är satt till \"Maskininlärningsprognos\", men den är inte bekräftat tränad för den just nu konfigurerade sensorn. Optimeringskörningar använder sensorns egna verkliga senaste mätvärden under tiden (föregående dygn i verkligheten när det finns, annars dess aktuella värde upprepat) så att de fortsätter lyckas och ligger nära ditt hushålls faktiska förbrukning.\n\nOm sensorn har minst {days} dagars historik triggas en träningskörning automatiskt -- inget behöver göras. En helt ny sensor (till exempel en som just skapats av \"Skapa en hushållslastsensor\") behöver {days} dagars verklig historik först. Du kan även trycka på \"Träna lastprognos\" själv när den har det. Detta löser sig automatiskt när en träning lyckas."
+    },
+    "script_control_entity": {
+      "title": "{count} last(er) använder ett skript som styrenhet",
+      "description": "Ett skript kan inte användas för att följa planen: dess tillstånd är på bara medan det körs, så det skulle utlösas på nytt vid varje tillämpning, och att stänga av det avbryter skriptet i stället för att stoppa apparaten. Dessa laster styrs därför inte alls:\n\n{details}\n\nRedigera varje last (Inställningar > Enheter och tjänster > EMHASS Companion > lasten > Konfigurera) och välj en switch eller input_boolean i stället, eller töm fältet och låt lasten enbart vara rådgivande och styr den från din egen automation via dess `should_run`-sensor."
+    },
+    "bad_stored_time": {
+      "title": "{count} sparad(e) tid(er) kunde inte läsas",
+      "description": "Home Assistant kunde inte tolka dessa sparade klockslag, så standardvärdet användes i stället:\n\n{details}\n\nDet beror oftast på att konfigurationen redigerats för hand eller återställts från en säkerhetskopia skriven av en annan version. Öppna Inställningar > Enheter och tjänster > EMHASS Companion (eller den aktuella lasten) och ställ in tiden igen för att rensa detta."
+    },
+    "load_never_started": {
+      "title": "{name} startade aldrig",
+      "description": "{name} begärdes och fick sina hela {hours} h, men effektsensorn såg den aldrig dra något. Begäran har rensats, så inget väntar på den -- men körningen blev inte av.\n\nVanliga orsaker: apparaten behöver att man trycker på dess egen startknapp efter att den slagits på, den återupptar inte programmet när strömmen kommer tillbaka, eller så fick den aldrig ström via uttaget.\n\nDetta försvinner nästa gång lasten slutför en körning."
     }
   },
   "services": {
@@ -641,7 +667,7 @@
     },
     "test_profile": {
       "name": "Testa en datakällsprofil",
-      "description": "Kör en profil och returnerar vad den gav, för att felsöka en källa som inte ger något eller ger fel värden.",
+      "description": "Kör en profil och returnerar vad den gav, för att felsöka en källa som inte ger något eller ger fel värden. Endast för administratörer: svaret innehåller profilens färdiga EMHASS-inställningar.",
       "fields": {
         "profile": {
           "name": "Profil",
@@ -649,7 +675,7 @@
         },
         "options": {
           "name": "Alternativ",
-          "description": "Alternativ att köra profilen med. Standard är de konfigurerade."
+          "description": "Alternativ att köra profilen med, validerade mot profilens egna alternativ. Standard är de konfigurerade."
         },
         "limit": {
           "name": "Gräns",

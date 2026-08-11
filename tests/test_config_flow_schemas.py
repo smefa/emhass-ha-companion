@@ -14,10 +14,13 @@ import voluptuous as vol
 
 from custom_components.emhass_companion.config_flow import (
     STANDARD_TIME_STEPS,
+    UNTESTED_NOTICE,
     _collect_grid,
     _collect_tariff,
     _default_profile_options,
+    _inverter_profile_selector,
     _load_profile_selector,
+    _profile_notes,
     _profile_selector,
     _tariff_side_schema,
     _time_step_options,
@@ -270,6 +273,84 @@ def test_profile_selector_ranks_preferred_profiles_first():
         "price/nordpool_custom",
         "price/entsoe",
     ]
+
+
+def test_profile_selector_marks_an_untested_profile_in_its_label():
+    """The picker is where the choice is made, so the warning has to be there.
+
+    By the time the profile's notes are on screen the inverter has already
+    been picked.
+    """
+    profiles = [
+        Profile(
+            key="inverter/tried",
+            path="a.yaml",
+            kind="inverter",
+            name="Validated One",
+            document={},
+        ),
+        Profile(
+            key="inverter/untried",
+            path="b.yaml",
+            kind="inverter",
+            name="Unvalidated One",
+            document={"untested": True},
+        ),
+    ]
+    labels = [option["label"] for option in _profile_selector(profiles).config["options"]]
+    assert labels == ["Validated One", "Unvalidated One — UNTESTED"]
+
+
+def test_untested_profile_notes_lead_with_the_warning():
+    profile = Profile(
+        key="inverter/untried",
+        path="b.yaml",
+        kind="inverter",
+        name="Unvalidated One",
+        document={"untested": True, "notes": "Pick the EMS mode select."},
+    )
+    notes = _profile_notes(profile)
+    assert notes.startswith(UNTESTED_NOTICE)
+    assert notes.endswith("Pick the EMS mode select.")
+
+
+def test_a_tested_profile_gets_its_notes_unchanged():
+    profile = Profile(
+        key="inverter/tried",
+        path="a.yaml",
+        kind="inverter",
+        name="Validated One",
+        document={"notes": "Pick the EMS mode select."},
+    )
+    assert _profile_notes(profile) == "Pick the EMS mode select."
+
+
+def test_inverter_picker_sorts_hardware_alphabetically_with_scripts_last():
+    """The script fallback is what you reach for having failed to find your own
+    inverter, so it belongs under the list rather than inside it."""
+    profiles = [
+        Profile(key="inverter/sungrow", path="a", kind="inverter", name="Sungrow", document={}),
+        Profile(
+            key="inverter/generic_script",
+            path="b",
+            kind="inverter",
+            name="Scripts (works with any inverter)",
+            document={},
+        ),
+        Profile(key="inverter/deye", path="c", kind="inverter", name="Deye", document={}),
+    ]
+    values = [option["value"] for option in _inverter_profile_selector(profiles).config["options"]]
+    assert values == ["inverter/deye", "inverter/sungrow", "inverter/generic_script"]
+
+
+def test_inverter_picker_still_marks_untested_profiles():
+    profiles = [
+        Profile(
+            key="inverter/deye", path="c", kind="inverter", name="Deye", document={"untested": True}
+        ),
+    ]
+    labels = [option["label"] for option in _inverter_profile_selector(profiles).config["options"]]
+    assert labels == ["Deye — UNTESTED"]
 
 
 def test_profile_selector_with_no_order_keeps_the_given_order():

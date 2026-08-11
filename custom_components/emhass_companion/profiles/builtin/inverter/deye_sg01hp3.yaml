@@ -1,0 +1,294 @@
+name: Deye SUN-5K–25K-SG01HP3-EU hybrid (Solarman)
+kind: inverter
+version: 2
+
+brand: Deye
+
+models:
+  - SUN-5K-SG01HP3-EU
+  - SUN-6K-SG01HP3-EU
+  - SUN-8K-SG01HP3-EU
+  - SUN-10K-SG01HP3-EU
+  - SUN-12K-SG01HP3-EU
+  - SUN-15K-SG01HP3-EU
+  - SUN-20K-SG01HP3-EU
+  - SUN-25K-SG01HP3-EU
+
+requires: davidrapan/ha-solarman (HACS) with the deye_p3 definition; the older StephanJoubert Solarman repo does not cover this model
+
+docs: https://github.com/davidrapan/ha-solarman
+
+untested: true
+
+description: >-
+  Deye three-phase high-voltage hybrids, steered through work mode and the
+  battery current limits rather than a power setpoint.
+
+notes: >-
+  **This hardware has no instantaneous power setpoint.** There is no "charge at
+  1500 W now" register anywhere in Deye's map — control is normally done by
+  rewriting one of the six time-of-use programs, which is a poor fit for a plan
+  that changes every half hour and would take over the whole TOU schedule you
+  configured.
+
+  So this profile does not touch your TOU programs at all. It steers the
+  battery with the controls that *do* act immediately: the energy pattern
+  (Battery First / Load First), the work mode (Export First / Zero Export), the
+  global grid-charge switch, and the maximum charge and discharge **currents**.
+  A forced charge becomes "Battery First, grid charging allowed, charge current
+  capped at the plan's power"; a forced discharge becomes "Export First with
+  the discharge current capped"; idle becomes "both currents zero", which on
+  this hardware is a genuine hold.
+
+  **It is a cap, not a setpoint.** The inverter will charge or discharge *up
+  to* the current this profile sets, not exactly at it. Expect the plan to be
+  followed in direction and magnitude-ceiling, not tracked watt for watt.
+
+  **Set the nominal battery voltage below.** The limits are in Amps and the
+  plan is in Watts, so this profile divides by the voltage you give it. A
+  wrong value scales every command proportionally. Use your pack's nominal
+  voltage (high-voltage packs are typically 350–450 V), not its momentary
+  reading.
+
+  **Your TOU programs still run underneath.** If a program is active and set to
+  charge from grid, it can still act while this profile thinks the battery
+  should be idle. Whether the global grid-charge switch overrides a per-program
+  grid-charge bit, or the other way round, is firmware behaviour that is not
+  visible in the integration's source — so if you see charging you did not
+  plan, that interaction is the first place to look.
+
+  **Do not trust the battery/grid power sign without checking.** The two
+  integrations that read this hardware disagree about it: ha-solarman passes
+  the raw register through and offers a negated copy as an attribute, while
+  kellerza/sunsynk bakes in a sign flip. Watch the sensor while the battery is
+  known to be charging and confirm before relying on it. Reads over the
+  Solarman stick logger have also been seen to glitch to nonsense values on
+  this exact model family, so treat a single wild reading as noise.
+
+control:
+  archetype: mode_and_magnitude
+  power_unit: w
+  signed: false
+  invert_sign: false
+  charge_boost: 1.0
+  round_to: 1
+  lifetime: persistent
+  duration_min: 30
+  deadband_w: 200
+  # Each action writes four or five registers through a stick logger that does
+  # not enjoy being hammered.
+  min_write_interval_s: 10
+  restore_required: true
+  curtail_mode: export_limit
+  curtail_unit: w
+
+options:
+  energy_pattern_select:
+    name: Energy pattern
+    description: Battery First / Load First. Called "Priority load" by kellerza/sunsynk.
+    suggest:
+      - select.energy_pattern
+      - select.deye_energy_pattern
+    selector:
+      entity:
+        domain: select
+
+  work_mode_select:
+    name: Work mode
+    description: Export First / Zero Export To Load / Zero Export To CT. Called "Load limit" by kellerza/sunsynk.
+    suggest:
+      - select.work_mode
+      - select.deye_work_mode
+    selector:
+      entity:
+        domain: select
+
+  grid_charge_switch:
+    name: Grid charging switch
+    description: The global "charge battery from grid" enable (register 130). Without it a forced charge can only use PV surplus.
+    suggest:
+      - switch.battery_grid_charging
+      - switch.grid_charge_enabled
+    selector:
+      entity:
+        domain: switch
+
+  charge_current_number:
+    name: Battery max charging current
+    suggest:
+      - number.battery_max_charging_current
+      - number.battery_max_charge_current
+    selector:
+      entity:
+        domain: number
+
+  discharge_current_number:
+    name: Battery max discharging current
+    suggest:
+      - number.battery_max_discharging_current
+      - number.battery_max_discharge_current
+    selector:
+      entity:
+        domain: number
+
+  battery_nominal_voltage:
+    name: Battery nominal voltage
+    description: Used to turn the plan's watts into a current limit. Get this wrong and every command is scaled by the same factor.
+    default: 400
+    selector:
+      number:
+        min: 40
+        max: 1000
+        step: 1
+        unit_of_measurement: V
+        mode: box
+
+  max_current_a:
+    name: Unrestricted current
+    description: What the charge and discharge current limits are set back to when this profile hands control over — your normal everyday ceiling.
+    default: 100
+    selector:
+      number:
+        min: 1
+        max: 400
+        step: 1
+        unit_of_measurement: A
+        mode: box
+
+  energy_pattern_battery_first:
+    name: Energy pattern — battery first option name
+    default: Battery First
+    selector:
+      text: {}
+
+  energy_pattern_load_first:
+    name: Energy pattern — load first option name
+    default: Load First
+    selector:
+      text: {}
+
+  work_mode_export:
+    name: Work mode — export first option name
+    default: Export First
+    selector:
+      text: {}
+
+  work_mode_zero_export:
+    name: Work mode — zero export option name
+    description: What this profile returns the work mode to. Use "Zero Export To CT" if your meter is on the grid connection point rather than the load side.
+    default: Zero Export To Load
+    selector:
+      text: {}
+
+  export_limit_number:
+    name: Export surplus power
+    description: Optional, for curtailment only. Called "Max sell power" on some firmware and "Export limit power" by kellerza/sunsynk.
+    required: false
+    suggest:
+      - number.export_surplus_power
+      - number.export_limit_power
+    selector:
+      entity:
+        domain: number
+
+  export_limit_max_w:
+    name: Unrestricted export power
+    description: What the export limit is set back to when curtailment ends.
+    default: 25000
+    selector:
+      number:
+        min: 0
+        max: 100000
+        step: 100
+        unit_of_measurement: W
+        mode: box
+
+sensors:
+  battery_soc: sensor.battery
+  battery_power: sensor.battery_power   # sign NOT confirmed — see the notes above
+  grid_power: sensor.grid_power         # sign NOT confirmed — see the notes above
+  pv_power: sensor.pv_power
+  load_power: sensor.load_power
+
+limits:
+  # Capacity depends on the pack stack fitted; the charge/discharge ceilings
+  # are in Amps here rather than Watts, so neither converts cleanly into the
+  # battery settings without the pack voltage. Left for the user to type in.
+
+actions:
+  force_charge:
+    - service: switch.turn_on
+      target: { entity_id: "{{ options.grid_charge_switch }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.energy_pattern_select }}" }
+      data: { option: "{{ options.energy_pattern_battery_first }}" }
+    - service: number.set_value
+      target: { entity_id: "{{ options.charge_current_number }}" }
+      data:
+        value: >-
+          {{ [ (magnitude_w / (options.battery_nominal_voltage | float(400))) | round | int,
+               options.max_current_a | int ] | min }}
+    # Holding discharge at zero is what stops the house load pulling straight
+    # back out of a battery the plan is paying to fill.
+    - service: number.set_value
+      target: { entity_id: "{{ options.discharge_current_number }}" }
+      data: { value: 0 }
+
+  force_discharge:
+    - service: switch.turn_off
+      target: { entity_id: "{{ options.grid_charge_switch }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.energy_pattern_select }}" }
+      data: { option: "{{ options.energy_pattern_load_first }}" }
+    # Zero Export To Load caps discharge at the house load, so exporting the
+    # plan's watts needs the work mode moved as well.
+    - service: select.select_option
+      target: { entity_id: "{{ options.work_mode_select }}" }
+      data: { option: "{{ options.work_mode_export }}" }
+    - service: number.set_value
+      target: { entity_id: "{{ options.discharge_current_number }}" }
+      data:
+        value: >-
+          {{ [ (magnitude_w / (options.battery_nominal_voltage | float(400))) | round | int,
+               options.max_current_a | int ] | min }}
+    - service: number.set_value
+      target: { entity_id: "{{ options.charge_current_number }}" }
+      data: { value: 0 }
+
+  idle:
+    # Both limits at zero is a real hold on this hardware -- the battery sits
+    # while PV and grid serve the house between them.
+    - service: switch.turn_off
+      target: { entity_id: "{{ options.grid_charge_switch }}" }
+    - service: number.set_value
+      target: { entity_id: "{{ options.charge_current_number }}" }
+      data: { value: 0 }
+    - service: number.set_value
+      target: { entity_id: "{{ options.discharge_current_number }}" }
+      data: { value: 0 }
+
+  self_consume:
+    - service: switch.turn_off
+      target: { entity_id: "{{ options.grid_charge_switch }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.energy_pattern_select }}" }
+      data: { option: "{{ options.energy_pattern_load_first }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.work_mode_select }}" }
+      data: { option: "{{ options.work_mode_zero_export }}" }
+    - service: number.set_value
+      target: { entity_id: "{{ options.charge_current_number }}" }
+      data: { value: "{{ options.max_current_a | int }}" }
+    - service: number.set_value
+      target: { entity_id: "{{ options.discharge_current_number }}" }
+      data: { value: "{{ options.max_current_a | int }}" }
+
+  curtail:
+    - service: number.set_value
+      target: { entity_id: "{{ options.export_limit_number }}" }
+      data: { value: "{{ curtail_w }}" }
+
+  uncurtail:
+    - service: number.set_value
+      target: { entity_id: "{{ options.export_limit_number }}" }
+      data: { value: "{{ options.export_limit_max_w | int }}" }

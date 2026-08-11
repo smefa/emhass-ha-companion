@@ -37,6 +37,11 @@ from homeassistant.util import dt as dt_util
 from homeassistant.util.unit_conversion import PowerConverter, TemperatureConverter
 
 from .const import (
+    COMPLETION_CANCELLED,
+    COMPLETION_COMPLETED,
+    COMPLETION_CUT_SHORT,
+    COMPLETION_FINISHED_EARLY,
+    COMPLETION_NEVER_STARTED,
     CONF_COMFORT_END,
     CONF_COMFORT_START,
     CONF_COMFORT_TEMPERATURE,
@@ -64,8 +69,12 @@ from .const import (
     CONF_SURPLUS_PRIORITY,
     CONF_TEMPERATURE_SENSOR,
     CONF_THERMAL_INERTIA,
+    CONTROL_ENTITY_DOMAINS,
+    DEFAULT_IDLE_MINUTES,
+    DEFAULT_IDLE_POWER_W,
     DEFAULT_SURPLUS_HEADROOM_W,
     DEFAULT_SURPLUS_PRIORITY,
+    DEFAULT_TIME_STEP,
     LOAD_MODE_AUTO,
     LOAD_MODE_FORCE_ON,
     LOAD_SUBENTRY_TYPES,
@@ -78,6 +87,7 @@ from .const import (
     SUBENTRY_TYPE_THERMAL,
 )
 from .models import DeferrableLoad, Plan, PlanRow, Series
+from .stored_time import parse_stored_time
 from .surplus import SurplusBudget, SurplusSpec, allocate, battery_reserved_series, surplus_series
 from .thermal import (
     DEFAULT_COMFORT_END,
@@ -166,6 +176,16 @@ class DeferrableRuntime:
     minimum_on_time_minutes: float = 0.0
     minimum_off_time_minutes: float = 0.0
     mode: str = LOAD_MODE_AUTO
+    # When Run now was last pressed. Only a backstop for ending a forced run;
+    # like ``mode`` itself it does not survive a restart, which already returns
+    # the load to auto.
+    forced_at: datetime | None = None
+
+    # What counts as "finished" for an on-demand run, and for how long it has to
+    # read that way. Only consulted for a load with a real power sensor -- see
+    # :attr:`metered`. 0 minutes means one optimisation timestep.
+    idle_power_w: float = DEFAULT_IDLE_POWER_W
+    idle_minutes: float = DEFAULT_IDLE_MINUTES
 
     # Whether this load wants its operating_hours every day (the only
     # behaviour before this field existed) or only once armed by a request --
@@ -218,6 +238,45 @@ class DeferrableRuntime:
     # whole target -- running the load twice.
     requested_at: datetime | None = None
     request_runtime: timedelta = timedelta()
+
+    # The commanded clock, and the two observations that judge it.
+    #
+    # An on-demand run is measured by how long it was *told* to run, not by how
+    # long its meter saw it draw. The meter under-counts every appliance that
+    # duty-cycles -- a dishwasher spends a third of its program filling, soaking
+    # and draining below any sensible running threshold -- so a request judged
+    # on measured time can outlive a finished cycle indefinitely, and keeps
+    # asking EMHASS for hours it has already been given. Commanded time is also
+    # what a load with no power sensor has always been judged on (state_to_power
+    # reports nominal whenever the control entity is on), so this makes the
+    # metered and unmetered paths agree rather than inventing a third rule.
+    #
+    # It is *commanded* time and not wall clock: a plan that splits a run across
+    # two blocks must not be credited with the gap between them.
+    commanded_since: datetime | None = None
+    command_runtime: timedelta = timedelta()
+    # Whether the executor has said anything about this load yet. False for the
+    # whole of a restart until the first apply, and the difference between "we
+    # are not commanding this load" and "we have not heard yet" -- readings
+    # arriving in that gap must not be allowed to throw away a restored idle
+    # window on the strength of a command nobody has issued.
+    commands_seen: bool = field(default=False, repr=False)
+    # Latched by the first reading at or above the running threshold since the
+    # request was armed. Its absence is what separates "the appliance finished"
+    # from "the appliance never started", which otherwise read identically: no
+    # power now. Also what stops the fill phase at the very start of a program
+    # being mistaken for the end of one.
+    seen_running: bool = False
+    # Continuously idle since -- idle meaning a *reading* below idle_power_w
+    # while the load is being told to run. Both halves matter. An unavailable
+    # sensor is not a reading, and a load nobody is asking to run is expected to
+    # draw nothing; treating either as idle would call an interrupted run
+    # finished.
+    idle_since: datetime | None = None
+
+    # Why the last run ended, and when. Outlives the request -- see cancel().
+    last_completion_reason: str | None = None
+    last_completion_at: datetime | None = None
 
     # How far the plan-trusting fallback below has already replayed. Only ever
     # advanced for a load with no running_source; irrelevant otherwise.
@@ -281,6 +340,41 @@ class DeferrableRuntime:
         until either its energy cap is met or the switch is turned off.
         """
         return self.on_demand or self.on_surplus
+
+    @property
+    def metered(self) -> bool:
+        """Whether this load has a meter of its own to be believed.
+
+        Gated on the configured sensor and deliberately *not* on
+        :attr:`running_source` or :attr:`is_running`: without a power sensor
+        those fall back to the control entity, which is on because we just
+        switched it on. That reading is our own intent handed back to us, and
+        every completion rule below would be reading its own command as
+        evidence -- "still drawing" would be permanently true, and the load
+        would hold past its target every single run.
+        """
+        return self.power_sensor is not None
+
+    @property
+    def idle_threshold_w(self) -> float:
+        """The reading below which this load counts as finished, not merely quiet.
+
+        Clamped below the running threshold: an idle floor at or above the
+        point where the load counts as running would make a load both running
+        and finished at once, and the number entity's own maximum can be
+        outrun by a later change to nominal_power_w.
+        """
+        return min(self.idle_power_w, self.running_threshold_w)
+
+    def idle_window(self, step_minutes: int) -> timedelta:
+        """How long a load must read idle before the run is called finished.
+
+        One optimisation timestep by default, which is comfortably longer than
+        the gaps a program leaves between its own phases and short enough to
+        free the appliance within one planning cycle.
+        """
+        minutes = self.idle_minutes if self.idle_minutes > 0 else step_minutes
+        return timedelta(minutes=minutes)
 
     @property
     def surplus_run_floor_w(self) -> float:
@@ -420,36 +514,118 @@ class DeferrableRuntime:
             total += now - max(self.running_since, self.requested_at)
         return total
 
+    def elapsed_commanded(self, now: datetime) -> timedelta:
+        """How long this load has been told to run since the request was armed.
+
+        The clock an on-demand run is judged against, on both sides of the
+        question: it decides when the run is over *and* how many timesteps the
+        payload credits as already done, so the disarm and EMHASS can never
+        disagree about how far along the same run is.
+        """
+        total = self.command_runtime
+        if self.commanded_since is not None:
+            anchor = self.commanded_since
+            if self.requested_at is not None:
+                anchor = max(anchor, self.requested_at)
+            total += now - anchor
+        return total
+
     def elapsed_towards_target(self, now: datetime) -> timedelta:
         """Progress against whatever this load's target currently is.
 
-        Per-request for a pending on-demand run, per-day otherwise -- the two
-        differ precisely when a request outlives midnight, which is the case
-        deadlines make ordinary rather than rare.
+        Commanded time for a pending on-demand run, measured time otherwise.
+        The split is deliberate rather than an inconsistency. An on-demand run
+        is a deal -- "you get 1.25 h of cheap electricity" -- and only the deal
+        can say when it has been honoured; a daily load is asking a different
+        question, "has this appliance done today's work", where a cycle the user
+        started by hand counts and a commanded hour that never reached the
+        appliance does not.
+
+        A surplus load keeps measured time too: its target is an energy cap, not
+        a run length, and commanded time cannot be compared against it.
 
         An armed request with no anchor falls back to the day. That pairing is
         not reachable through :meth:`request`, but a request restored from
         before anchors existed is exactly that, and per-day accounting is the
         behaviour it was armed under.
         """
-        if self.armable and self.requested and self.requested_at is not None:
-            return self.elapsed_since_request(now)
+        if self.requested and self.requested_at is not None:
+            if self.on_demand:
+                return self.elapsed_commanded(now)
+            if self.armable:
+                return self.elapsed_since_request(now)
         return self.elapsed_today(now)
+
+    def observe_command(self, commanded: bool, now: datetime) -> None:
+        """Fold the executor's decision for this load into the commanded clock.
+
+        Called with what was actually commanded, from the one place that knows
+        it was applied -- a decision computed while the control switch is off
+        commands nothing, and must not be credited as run time.
+        """
+        self.commands_seen = True
+        if commanded:
+            if self.commanded_since is None:
+                self.commanded_since = now
+            return
+        if self.commanded_since is None:
+            return
+        anchor = self.commanded_since
+        if self.requested_at is not None:
+            anchor = max(anchor, self.requested_at)
+        self.command_runtime += max(now - anchor, timedelta())
+        self.commanded_since = None
+        # Not being asked to run is not evidence of having finished.
+        self.idle_since = None
+
+    @property
+    def is_commanded(self) -> bool:
+        return self.commanded_since is not None
+
+    @property
+    def idle_counts(self) -> bool:
+        """Whether an idle reading right now could mean the appliance finished.
+
+        Only while the load is being told to run: a gap the plan itself left
+        between two blocks of the same run is idle for a reason that has
+        nothing to do with the appliance. The "not heard from yet" case counts
+        as well, so that the readings arriving between a restart and the first
+        executor apply cannot discard an idle window restored from before it.
+        """
+        return self.is_commanded or not self.commands_seen
 
     def observe_power(self, watts: float | None, now: datetime) -> None:
         """Fold a power reading into the runtime accumulator."""
         if watts is None:
             # Treat an unavailable sensor as "stop counting" rather than
-            # guessing; an unbounded open interval would inflate runtime.
+            # guessing; an unbounded open interval would inflate runtime. It is
+            # not an idle reading either -- a plug that dropped off the network
+            # tells us nothing about whether the appliance behind it finished.
             self._stop(now)
+            self.idle_since = None
             return
 
         if watts >= self.running_threshold_w:
+            self.seen_running = True
             if self.running_since is None:
                 self.running_since = now
                 self.off_since = None
         else:
             self._stop(now)
+
+        if watts >= self.idle_threshold_w or not self.idle_counts:
+            # Above the idle floor the appliance is doing *something*, even if
+            # too little to count as running -- a drying phase is not a finished
+            # program. Uncommanded, an idle reading is only what we asked for.
+            self.idle_since = None
+        elif self.idle_since is None:
+            self.idle_since = now
+
+    def idle_for(self, now: datetime) -> timedelta:
+        """How long this load has read idle while being told to run."""
+        if self.idle_since is None:
+            return timedelta()
+        return max(now - self.idle_since, timedelta())
 
     def _stop(self, now: datetime) -> None:
         if self.running_since is None:
@@ -496,54 +672,146 @@ class DeferrableRuntime:
         self.requested = True
         self.requested_at = now
         self.request_runtime = timedelta()
+        # A fresh run is judged on its own evidence. Carrying the previous run's
+        # commanded time or its latch forward would have the new request start
+        # already spent, or already believing an appliance it has not yet
+        # switched on has drawn power.
+        self.command_runtime = timedelta()
+        self.commanded_since = now if self.is_commanded else None
+        self.seen_running = False
+        self.idle_since = None
 
-    def cancel(self) -> None:
-        """Clear a request, fulfilled or abandoned, along with its anchor."""
+    def cancel(self, reason: str = COMPLETION_CANCELLED, now: datetime | None = None) -> None:
+        """Clear a request, fulfilled or abandoned, along with its anchor.
+
+        The reason is recorded outside everything this clears, because "why did
+        it stop" is asked precisely when the switch is already off. Defaults to
+        the user's own doing: every caller that is *not* the user reaching for
+        the switch has a more specific reason to pass.
+        """
         self.requested = False
         self.requested_at = None
         self.request_runtime = timedelta()
+        self.command_runtime = timedelta()
+        self.commanded_since = None
+        self.seen_running = False
+        self.idle_since = None
+        self.last_completion_reason = reason
+        self.last_completion_at = now or dt_util.utcnow()
 
-    def force_run(self) -> None:
+    def force_run(self, now: datetime | None = None) -> None:
         """Arm a direct run right now, bypassing both the plan and any request.
 
         Unlike ``request``, this has no anchor of its own: it disarms against
         ``elapsed_today`` in :meth:`check_auto_disarm`, the same target EMHASS
         itself is solving the load's day around, rather than a fresh window
         counted from the button press.
+
+        ``forced_at`` is only a backstop for that rule -- see
+        :meth:`check_auto_disarm` -- not a second target.
         """
         self.mode = LOAD_MODE_FORCE_ON
+        self.forced_at = now or dt_util.utcnow()
+        if not self.requested:
+            # Same reasoning as request(): a run is judged on its own evidence.
+            # Guarded, because a forced top-up of an already-armed request must
+            # not throw away what that request has seen.
+            self.seen_running = False
+            self.idle_since = None
 
-    def check_auto_disarm(self, now: datetime) -> bool:
-        """Clear a fulfilled request or forced run. Returns True if either changed.
+    def in_completion_hold(self, now: datetime) -> bool:
+        """Whether this run is over on paper but the appliance is still drawing.
 
-        No user automation can build this reliably: it needs the same elapsed
-        accounting the payload itself is built from. A daily load has no
-        request to clear, and an on-demand load's request -- like a forced
-        run -- stays armed until it has actually run its operating_hours,
-        so reaching only part of the target leaves it armed rather than
-        clearing it too soon.
+        The reason the run is not simply ended at ``operating_hours``: the plan
+        stops asking for the load the moment its target is met, and obeying
+        that would cut power mid-program to any appliance whose cycle outlasts
+        the hours it was given. The executor keeps such a load on -- for at most
+        one more timestep, after which :meth:`check_auto_disarm` takes it away
+        as ``cut_short``.
 
-        A surplus load has no operating-hours target to finish, so there is
-        nothing for the on-demand rule to measure and it deliberately does not
-        apply: an uncapped one stays armed until the switch is turned off,
-        which is the whole point of the recurrence. Given an energy cap it does
-        have an end, and reaching it disarms the load through the same path.
+        Only a metered load can be held. Without a meter "still drawing" is our
+        own command read back, so every run would hold to the hard cut.
         """
-        changed = False
-        if self.mode == LOAD_MODE_FORCE_ON and self.elapsed_today(now) >= timedelta(
-            hours=self.operating_hours
-        ):
-            self.mode = LOAD_MODE_AUTO
-            changed = True
-        if (
+        return (
             self.on_demand
             and self.requested
+            and self.metered
+            and self.is_running
             and self.elapsed_towards_target(now) >= timedelta(hours=self.operating_hours)
+        )
+
+    def check_auto_disarm(self, now: datetime, step_minutes: int = DEFAULT_TIME_STEP) -> bool:
+        """End a finished request or forced run. Returns True if either changed.
+
+        No user automation can build this reliably: it needs the same elapsed
+        accounting the payload itself is built from.
+
+        An on-demand run ends on whichever of these comes first:
+
+        * the appliance reads idle for a whole idle window, having been seen to
+          draw power at least once -- the normal ending, and the only one that
+          is right without anyone configuring a run length correctly;
+        * the run had its whole target and the appliance is not drawing;
+        * the run had its whole target and never drew a watt -- ``never_started``,
+          the one ending that means the user's dishes are still dirty;
+        * one timestep past the target, whatever the appliance is doing --
+          ``cut_short``, the signal that operating_hours is set shorter than
+          the program actually needs.
+
+        A daily load has none of this: it has no request to clear, and "has
+        today's work been done" is a question about the appliance, not about a
+        deal, so it stays on measured time. A surplus load keeps its energy cap
+        for the same reason its idle time proves nothing -- being idle under a
+        cloud is what a surplus load *does*.
+        """
+        changed = False
+        target = timedelta(hours=self.operating_hours)
+        idle_done = (
+            self.metered
+            and self.seen_running
+            and self.idle_for(now) >= self.idle_window(step_minutes)
+        )
+
+        if self.mode == LOAD_MODE_FORCE_ON and (
+            self.elapsed_today(now) >= target
+            or idle_done
+            # Backstop. Without it a forced run on a metered load that stalls
+            # short of its target -- a duty-cycling appliance, or one that never
+            # started at all -- holds the load on indefinitely, with no way back
+            # to auto short of restarting Home Assistant.
+            or (
+                self.forced_at is not None
+                and now - self.forced_at >= target + timedelta(minutes=step_minutes)
+            )
         ):
-            self.cancel()
+            self.mode = LOAD_MODE_AUTO
+            self.forced_at = None
             changed = True
+
+        if self.on_demand and self.requested:
+            # Not elapsed_commanded directly: a request restored from before
+            # anchors existed has no anchor for a commanded clock to start
+            # from, and elapsed_towards_target keeps the per-day accounting
+            # that such a request was armed under.
+            elapsed = self.elapsed_towards_target(now)
+            reason: str | None = None
+            if elapsed >= target + timedelta(minutes=step_minutes):
+                reason = COMPLETION_CUT_SHORT
+            elif idle_done:
+                # Idle *and* fully paid up is not an early finish, just a
+                # punctual one.
+                reason = COMPLETION_COMPLETED if elapsed >= target else COMPLETION_FINISHED_EARLY
+            elif elapsed >= target:
+                if self.metered and not self.seen_running:
+                    reason = COMPLETION_NEVER_STARTED
+                elif not (self.metered and self.is_running):
+                    reason = COMPLETION_COMPLETED
+            if reason is not None:
+                self.cancel(reason, now)
+                changed = True
+
         if self.on_surplus and self.requested and self.remaining_energy_wh(now) == 0:
-            self.cancel()
+            self.cancel(COMPLETION_COMPLETED, now)
             changed = True
         return changed
 
@@ -710,6 +978,10 @@ class DeferrableRegistry:
         self.entry = entry
         self._loads: dict[str, DeferrableRuntime] = {}
         self._unsubscribes: list[Callable[[], None]] = []
+        # Remembered from the last coordinator-driven disarm check so the state
+        # listener -- which has no access to the config -- judges idle windows
+        # against the same timestep the optimisation runs on.
+        self._step_minutes = DEFAULT_TIME_STEP
 
     # -- lifecycle ------------------------------------------------------------
 
@@ -723,7 +995,7 @@ class DeferrableRegistry:
             data = dict(subentry.data)
             if (existing := self._loads.get(subentry_id)) is None:
                 self._loads[subentry_id] = _from_subentry(
-                    subentry_id, subentry.subentry_type, subentry.title, data
+                    self.hass, subentry_id, subentry.subentry_type, subentry.title, data
                 )
             else:
                 _apply_subentry_fields(existing, subentry.subentry_type, subentry.title, data)
@@ -934,7 +1206,7 @@ class DeferrableRegistry:
                 continue
             load.assume_from_plan(plan.rows, index, now)
 
-    def check_auto_disarm(self, now: datetime) -> None:
+    def check_auto_disarm(self, now: datetime, step_minutes: int = DEFAULT_TIME_STEP) -> None:
         """Clear every request and forced run that has had what it asked for.
 
         Called once per run for *every* load, which is the whole point: this
@@ -951,8 +1223,9 @@ class DeferrableRegistry:
         Safe to call unconditionally because the check is idempotent and only
         ever clears -- a request short of its target is left exactly as it was.
         """
+        self._step_minutes = step_minutes
         for load in self._loads.values():
-            if load.check_auto_disarm(now):
+            if load.check_auto_disarm(now, step_minutes):
                 load.notify()
 
     # -- events ---------------------------------------------------------------
@@ -968,7 +1241,17 @@ class DeferrableRegistry:
                 load.observe(state, now)
                 if load.is_running != was_running:
                     if not load.is_running:
-                        load.check_auto_disarm(now)
+                        load.check_auto_disarm(now, self._step_minutes)
+                    load.notify()
+                elif load.idle_since is not None and load.check_auto_disarm(
+                    now, self._step_minutes
+                ):
+                    # An idle window ends without any transition to fire on: the
+                    # appliance stopped long ago and the meter has been
+                    # reporting the same nothing ever since. Re-checking on each
+                    # reading while idle is what notices the window elapsing,
+                    # rather than waiting for the next optimisation to come
+                    # round to it.
                     load.notify()
 
     @callback
@@ -983,7 +1266,7 @@ class DeferrableRegistry:
 
 
 def _from_subentry(
-    subentry_id: str, subentry_type: str, title: str, data: dict
+    hass: HomeAssistant, subentry_id: str, subentry_type: str, title: str, data: dict
 ) -> DeferrableRuntime:
     load = DeferrableRuntime(subentry_id=subentry_id, name=title)
     _apply_subentry_fields(load, subentry_type, title, data)
@@ -991,8 +1274,10 @@ def _from_subentry(
     load.nominal_power_w = float(data.get(CONF_NOMINAL_POWER, 0) or 0)
     load.minimum_power_w = float(data.get(CONF_MINIMUM_POWER, 0) or 0)
     load.operating_hours = float(data.get(CONF_OPERATING_HOURS, 0) or 0)
-    load.earliest_start = _parse_time(data.get(CONF_EARLIEST_START))
-    load.latest_end = _parse_time(data.get(CONF_LATEST_END))
+    load.earliest_start = _parse_time(
+        hass, data.get(CONF_EARLIEST_START), load=title, field="earliest start"
+    )
+    load.latest_end = _parse_time(hass, data.get(CONF_LATEST_END), load=title, field="latest end")
     load.use_time_window = load.earliest_start is not None or load.latest_end is not None
     load.semi_continuous = bool(data.get(CONF_SEMI_CONTINUOUS, True))
     load.single_constant = bool(data.get(CONF_SINGLE_CONSTANT, False))
@@ -1021,8 +1306,14 @@ def _from_subentry(
             data.get(CONF_SETBACK_TEMPERATURE, DEFAULT_SETBACK_TEMPERATURE)
         )
         load.max_temperature = float(data.get(CONF_MAX_TEMPERATURE, DEFAULT_MAX_TEMPERATURE))
-        load.comfort_start = _parse_time(data.get(CONF_COMFORT_START)) or DEFAULT_COMFORT_START
-        load.comfort_end = _parse_time(data.get(CONF_COMFORT_END)) or DEFAULT_COMFORT_END
+        load.comfort_start = (
+            _parse_time(hass, data.get(CONF_COMFORT_START), load=title, field="comfort start")
+            or DEFAULT_COMFORT_START
+        )
+        load.comfort_end = (
+            _parse_time(hass, data.get(CONF_COMFORT_END), load=title, field="comfort end")
+            or DEFAULT_COMFORT_END
+        )
     return load
 
 
@@ -1042,17 +1333,42 @@ def _apply_subentry_fields(
         LOAD_TYPE_THERMAL if subentry_type == SUBENTRY_TYPE_THERMAL else LOAD_TYPE_STANDARD
     )
     load.power_sensor = data.get(CONF_POWER_SENSOR) or None
-    load.control_entity = data.get(CONF_CONTROL_ENTITY) or None
+    load.control_entity = supported_control_entity(data.get(CONF_CONTROL_ENTITY))
     load.temperature_sensor = data.get(CONF_TEMPERATURE_SENSOR) or None
     load.sense = data.get(CONF_SENSE) or SENSE_HEAT
 
 
-def _parse_time(value) -> time | None:
-    if value in (None, ""):
+def supported_control_entity(entity_id: str | None) -> str | None:
+    """The stored control entity, unless it is one we must not drive.
+
+    The form only offers :data:`CONTROL_ENTITY_DOMAINS` now, but subentries
+    created while it also offered scripts still hold one. Ignoring it here
+    covers both uses in a single place: the executor stops re-firing the
+    script on every apply, and ``running_source`` stops reporting a load as
+    idle purely because its script is not currently executing. The user is
+    told, rather than left wondering -- see ISSUE_SCRIPT_CONTROL_ENTITY.
+    """
+    if not entity_id:
         return None
-    if isinstance(value, time):
-        return value
-    return time.fromisoformat(str(value))
+    if entity_id.partition(".")[0] not in CONTROL_ENTITY_DOMAINS:
+        _LOGGER.warning(
+            "Ignoring control entity %s: only %s can be switched on and off to follow a plan",
+            entity_id,
+            " and ".join(CONTROL_ENTITY_DOMAINS),
+        )
+        return None
+    return entity_id
+
+
+def _parse_time(hass: HomeAssistant, value, *, load: str, field: str) -> time | None:
+    """A stored window/comfort time, or None if it will not parse.
+
+    Unreadable is treated as unset -- the load keeps its default window or
+    comfort band -- rather than taking ``async_setup_entry`` down over one
+    corrupted subentry. ``load``/``field`` are what turn that into a repair the
+    user can act on; see :mod:`.stored_time`.
+    """
+    return parse_stored_time(hass, value, label=f"{load}: {field}")
 
 
 def resolve_should_run(mode: str, scheduled: bool) -> bool:

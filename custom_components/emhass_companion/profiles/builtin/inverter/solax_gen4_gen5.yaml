@@ -1,0 +1,268 @@
+name: SolaX X3-Hybrid G4 / X3-Ultra (solax_modbus)
+kind: inverter
+version: 2
+
+brand: SolaX
+
+models:
+  - X3-Hybrid G4
+  - X1-Hybrid G4
+  - X3-Ultra
+  - X3-Hybrid G5
+
+requires: wills106/homeassistant-solax-modbus (HACS) — the core "solax" integration is read-only and cannot write setpoints
+
+docs: https://github.com/wills106/homeassistant-solax-modbus
+
+untested: true
+
+description: >-
+  SolaX GEN4 and GEN5 hybrids through the Modbus remote-control (mode 1)
+  entities, driving battery power directly.
+
+notes: >-
+  One profile covers X3-Hybrid G4 and X3-Ultra: the integration serves both
+  from the same plugin and the remote-control entities are identical in name,
+  options and semantics. Only the battery power *sensor* differs (the Ultra
+  reads it from a different register under the name "Total Battery Power
+  Charge"), so check that one entity id if you are on an Ultra.
+
+  **Nothing is written until the trigger button is pressed.** This is the big
+  one. The remote-control number and select entities do not touch Modbus at
+  all — they only fill an in-memory cache in the integration. Every action here
+  therefore ends with a press of the trigger button, and the button is a
+  required field below. If you leave it blank this profile will appear to work
+  and change nothing on your inverter.
+
+  **"Enabled Battery Control" is deliberate.** The same number means different
+  things in different modes: under "Enabled Power Control" it is SolaX's own
+  mixed quantity (battery charge minus PV), under "Enabled Grid Control" it is
+  grid power. Only "Enabled Battery Control" makes the number a true
+  PV-independent battery target, which is what the plan produces.
+
+  **Positive is charging on this hardware**, the opposite of EMHASS's
+  convention, so this profile inverts the sign before writing. Do not
+  cross-check it against SolaX's mode 8/9 "push mode" entities — those use the
+  opposite convention again.
+
+  **The command reverts on its own.** The autorepeat duration is set to half
+  again the plan's slot length, so the integration keeps re-sending the target
+  (recomputing it against live PV and load each poll) and then writes
+  "Disabled" by itself when it runs out. That means a Home Assistant that dies
+  mid-plan leaves the inverter forced for at most one extra slot, rather than
+  indefinitely.
+
+  **Set your fastest scan group to a few seconds.** The autorepeat loop
+  recomputes on each poll; the project's own documentation warns that a slow
+  poll makes the target lag badly. Three to five seconds is the suggested
+  range.
+
+  **Check the entity ids before trusting this.** The integration stopped
+  assigning entity ids from its internal keys, so they are now generated from
+  the display names — which currently carry a "(mode 1)" suffix that the
+  project's own older examples predate. A recent install may well have
+  `select.solax_remotecontrol_power_control_mode_1` rather than the clean name
+  suggested below. Confirm in Developer Tools before turning control on.
+
+  A PocketLAN dongle cannot do Modbus at all; PocketWiFi 3.0 or later, or a
+  wired RS485 connection, is the minimum.
+
+control:
+  archetype: signed_power
+  power_unit: w
+  # One number carries magnitude and direction.
+  signed: true
+  # SolaX calls charging positive; EMHASS calls discharging positive.
+  invert_sign: true
+  charge_boost: 1.0
+  # The number entity's own step.
+  round_to: 100
+  lifetime: watchdog
+  duration_min: 30
+  deadband_w: 100
+  min_write_interval_s: 5
+  restore_required: true
+  curtail_mode: export_limit
+  curtail_unit: w
+
+options:
+  power_control_select:
+    name: Remote control mode
+    description: The "Remotecontrol Power Control" select. A recent install may have a "(mode 1)" suffix in the entity id.
+    suggest:
+      - select.solax_remotecontrol_power_control
+      - select.solax_remotecontrol_power_control_mode_1
+    selector:
+      entity:
+        domain: select
+
+  active_power_number:
+    name: Remote control active power
+    suggest:
+      - number.solax_remotecontrol_active_power
+      - number.solax_remotecontrol_active_power_mode_1
+    selector:
+      entity:
+        domain: number
+
+  autorepeat_duration_number:
+    name: Remote control autorepeat duration
+    description: How long the integration keeps re-sending the target before writing "Disabled" by itself. This profile sets it per command.
+    suggest:
+      - number.solax_remotecontrol_autorepeat_duration
+      - number.solax_remotecontrol_autorepeat_duration_mode_1
+    selector:
+      entity:
+        domain: number
+
+  trigger_button:
+    name: Remote control trigger
+    description: Required. Setting the fields above changes nothing until this is pressed — they are cached in Home Assistant, not written to the inverter.
+    suggest:
+      - button.solax_remotecontrol_trigger
+      - button.solax_remotecontrol_trigger_mode_1
+    selector:
+      entity:
+        domain: button
+
+  import_limit_number:
+    name: Remote control import limit
+    description: Optional. A ceiling in watts on total grid import while forced. A forced charge cannot draw more than this minus the house load, so leaving it at a low value quietly caps cheap-hours charging.
+    required: false
+    suggest:
+      - number.solax_remotecontrol_import_limit
+      - number.solax_remotecontrol_import_limit_mode_1
+    selector:
+      entity:
+        domain: number
+
+  import_limit_w:
+    name: Grid import ceiling
+    description: What the import limit above is set to while charging. Your main fuse capacity, not the charge power.
+    default: 11000
+    selector:
+      number:
+        min: 0
+        max: 30000
+        step: 100
+        unit_of_measurement: W
+        mode: box
+
+  mode_battery_control:
+    name: Mode — battery control option name
+    default: Enabled Battery Control
+    selector:
+      text: {}
+
+  mode_disabled:
+    name: Mode — disabled option name
+    default: Disabled
+    selector:
+      text: {}
+
+  export_limit_number:
+    name: Export control user limit
+    description: Optional, for curtailment only. This one is a real register write to EEPROM, so this profile only touches it when the curtailment target actually changes.
+    required: false
+    suggest:
+      - number.solax_export_control_user_limit
+    selector:
+      entity:
+        domain: number
+
+  export_limit_max_w:
+    name: Unrestricted export power
+    description: What the export limit is set back to when curtailment ends.
+    default: 15000
+    selector:
+      number:
+        min: 0
+        max: 60000
+        step: 100
+        unit_of_measurement: W
+        mode: box
+
+sensors:
+  battery_soc: sensor.solax_battery_capacity
+  # G4 reads this from register 0x16, the Ultra from 0x38 under the name
+  # "Total Battery Power Charge" -- positive = charging either way, which is
+  # the opposite of EMHASS's convention.
+  battery_power: sensor.solax_battery_power_charge
+  grid_power: sensor.solax_measured_power   # positive = import, negative = export
+  pv_power: sensor.solax_pv_power_total
+  load_power: sensor.solax_house_load
+
+limits:
+  # The true charge/discharge ceiling is the per-SKU export/import maximum the
+  # integration detects from the model, not something readable as one entity.
+
+actions:
+  force_charge:
+    - service: number.set_value
+      target: { entity_id: "{{ options.import_limit_number }}" }
+      data: { value: "{{ options.import_limit_w | int }}" }
+    - service: number.set_value
+      target: { entity_id: "{{ options.active_power_number }}" }
+      data: { value: "{{ power }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.power_control_select }}" }
+      data: { option: "{{ options.mode_battery_control }}" }
+    # Half again the slot, so the inverter's own countdown outlives the
+    # re-issue and hands itself back if this integration stops.
+    - service: number.set_value
+      target: { entity_id: "{{ options.autorepeat_duration_number }}" }
+      data: { value: "{{ (duration_min * 90) | int }}" }
+    # Nothing above reaches the inverter until this runs.
+    - service: button.press
+      target: { entity_id: "{{ options.trigger_button }}" }
+
+  force_discharge:
+    - service: number.set_value
+      target: { entity_id: "{{ options.active_power_number }}" }
+      data: { value: "{{ power }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.power_control_select }}" }
+      data: { option: "{{ options.mode_battery_control }}" }
+    - service: number.set_value
+      target: { entity_id: "{{ options.autorepeat_duration_number }}" }
+      data: { value: "{{ (duration_min * 90) | int }}" }
+    - service: button.press
+      target: { entity_id: "{{ options.trigger_button }}" }
+
+  idle:
+    # A battery target of zero is a genuine hold: PV and grid serve the house
+    # between them and the battery is left alone.
+    - service: number.set_value
+      target: { entity_id: "{{ options.active_power_number }}" }
+      data: { value: 0 }
+    - service: select.select_option
+      target: { entity_id: "{{ options.power_control_select }}" }
+      data: { option: "{{ options.mode_battery_control }}" }
+    - service: number.set_value
+      target: { entity_id: "{{ options.autorepeat_duration_number }}" }
+      data: { value: "{{ (duration_min * 90) | int }}" }
+    - service: button.press
+      target: { entity_id: "{{ options.trigger_button }}" }
+
+  self_consume:
+    # Hands the battery back to the inverter's own logic, whatever charger use
+    # mode the user has set. Stopping the autorepeat first keeps the loop from
+    # re-arming the target after the disable is written.
+    - service: number.set_value
+      target: { entity_id: "{{ options.autorepeat_duration_number }}" }
+      data: { value: 0 }
+    - service: select.select_option
+      target: { entity_id: "{{ options.power_control_select }}" }
+      data: { option: "{{ options.mode_disabled }}" }
+    - service: button.press
+      target: { entity_id: "{{ options.trigger_button }}" }
+
+  curtail:
+    - service: number.set_value
+      target: { entity_id: "{{ options.export_limit_number }}" }
+      data: { value: "{{ curtail_w }}" }
+
+  uncurtail:
+    - service: number.set_value
+      target: { entity_id: "{{ options.export_limit_number }}" }
+      data: { value: "{{ options.export_limit_max_w | int }}" }

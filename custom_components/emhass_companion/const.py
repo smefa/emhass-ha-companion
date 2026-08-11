@@ -185,6 +185,17 @@ CONF_CAPACITY_COST_PER_KW: Final = "capacity_cost_per_kw"
 CONF_COMPUTE_CURTAILMENT: Final = "compute_curtailment"
 
 CONF_SOC_ENTITY: Final = "soc_entity"
+# The battery's own power sensor. Nothing in the optimisation needs it --
+# EMHASS *plans* battery power rather than measuring it -- so this is asked
+# for on behalf of the dashboard cards, which were each collecting it
+# separately, under two different option names and with the sign convention
+# declared once per card. Declared here it is answered once, and every card
+# that draws measured battery power draws it the same way round.
+CONF_BATTERY_POWER_ENTITY: Final = "battery_power_entity"
+# Whether that sensor is positive while charging. EMHASS's convention is the
+# opposite (positive is discharge), and there is no way to tell from the
+# sensor itself: guessing wrong labels a charging battery as discharging.
+CONF_BATTERY_POWER_INVERT: Final = "battery_power_invert"
 CONF_LOAD_ENTITY: Final = "load_entity"
 # The live PV power reading blended into the first naive-mpc-optim forecast
 # step (payload.build_payload), weighted by number.MixBetaNumber. No PV
@@ -233,6 +244,15 @@ CONF_USE_TIME_WINDOW: Final = "use_time_window"
 # Optional: what the executor switches to actually run the load. Without it the
 # load is advisory only and the user automates on should_run themselves.
 CONF_CONTROL_ENTITY: Final = "control_entity"
+# What a control entity is allowed to be. Two requirements, and a script meets
+# neither: the executor switches it *off* again when the plan says so, and its
+# state doubles as the running signal when there is no power sensor. A script's
+# state is "on" only for as long as it is executing, so a short script reads
+# "off" immediately -- it would be re-fired on every apply for the whole
+# scheduled window, never observed as running, and script.turn_off would cancel
+# the script rather than stop the appliance. Scripts were offered here in
+# earlier versions; ISSUE_SCRIPT_CONTROL_ENTITY tells anyone who took the offer.
+CONTROL_ENTITY_DOMAINS: Final = ("switch", "input_boolean")
 
 # Surplus loads. The margin a timestep's surplus must clear *above* the load's
 # own draw before it counts towards the budget. Its whole job is to absorb PV
@@ -473,6 +493,54 @@ ATTR_REQUESTED_AT: Final = "requested_at"
 ATTR_DEADLINE_AT: Final = "deadline_at"
 ATTR_REQUEST_RUNTIME_SECONDS: Final = "request_runtime_seconds"
 
+# The rest of one on-demand run's state, carried on the same switch and for the
+# same reason: the run has to survive a restart as one unit. command_runtime is
+# the clock the run is judged against (see DeferrableRuntime.elapsed_commanded),
+# seen_running latches the first watt actually drawn, and idle_since is how long
+# the load has read idle while being told to run. Losing any of the three to a
+# restart restarts the judgement: an appliance that finished just before one
+# would wait a fresh idle window to be noticed, and one that never started would
+# look like it had merely not started *yet*.
+ATTR_COMMAND_RUNTIME_SECONDS: Final = "command_runtime_seconds"
+ATTR_SEEN_RUNNING: Final = "seen_running"
+ATTR_IDLE_SINCE: Final = "idle_since"
+# Why the last run ended, and when. Deliberately outlives the request itself --
+# cancel() clears the flag, the anchor and the progress, and "why did it stop"
+# is a question asked precisely when the switch is already off.
+ATTR_COMPLETION_REASON: Final = "last_completion_reason"
+ATTR_COMPLETION_AT: Final = "last_completion_at"
+
+# How an on-demand run ended.
+#
+# The distinction that matters is COMPLETED vs CUT_SHORT: both mean the run had
+# its full operating_hours, but the first ended with the appliance idle and the
+# second had power taken away from an appliance still drawing it -- the signal
+# that operating_hours is set shorter than the program actually needs.
+#
+# FINISHED_EARLY is the normal ending for a metered load, and the only one that
+# needs no configuration to be right. An unmetered load can only ever reach
+# COMPLETED: with no meter, "still drawing" and "finished" are the same reading.
+COMPLETION_FINISHED_EARLY: Final = "finished_early"
+COMPLETION_COMPLETED: Final = "completed"
+COMPLETION_CUT_SHORT: Final = "cut_short"
+COMPLETION_NEVER_STARTED: Final = "never_started"
+COMPLETION_CANCELLED: Final = "cancelled"
+
+# What counts as "the appliance is off" for completion, and for how long.
+#
+# Deliberately *not* running_threshold_w. That one answers "is this load doing
+# meaningful work" and errs towards ignoring a marginal draw; this one answers
+# "has it finished" and must err the other way, because a false yes takes power
+# from a live appliance. A dishwasher passes through 70-80 W between phases and
+# can spend twenty minutes drying at 30 W -- all of it under a 110 W running
+# threshold, none of it finished. So the default is "essentially off" instead,
+# the same floor a standby draw already fails to clear.
+#
+# 0 minutes means one optimisation timestep, the same "0 is the sensible
+# default" convention run_within_hours and max_startups already use.
+DEFAULT_IDLE_POWER_W: Final = 10.0
+DEFAULT_IDLE_MINUTES: Final = 0.0
+
 # --- Profiles ----------------------------------------------------------------
 
 PROFILE_KIND_PRICE: Final = "price"
@@ -527,6 +595,13 @@ PRICE_PROFILE_ORDER: Final = (
     "price/nordpool_custom",
 )
 PV_PROFILE_ORDER: Final = ("pv/solcast",)
+
+# The inverter picker is a plain alphabetical list of hardware -- the user
+# knows what is bolted to their wall, so there is nothing to rank. The one
+# exception is the universal script fallback, which is pinned to the bottom:
+# it is what you reach for having failed to find your own inverter above it,
+# and alphabetical order would otherwise bury it between two brands.
+INVERTER_FALLBACK_PROFILE: Final = "inverter/generic_script"
 
 # The temperature picker: a Home Assistant weather entity is the option most
 # users with a weather integration already have, followed by the generic
@@ -689,6 +764,23 @@ ISSUE_PV_TAIL_SHORT: Final = "pv_tail_short"
 # from the sensor's own recorded history meanwhile. Clears once an auto- or
 # button-triggered fit against that sensor succeeds.
 ISSUE_ML_FORECASTER_NOT_READY: Final = "ml_forecaster_not_ready"
+# One or more loads still point their control entity at a script, from when the
+# form accepted one. The load is left uncontrolled until the user picks a
+# switch, which is better than firing the script over and over; see
+# CONTROL_ENTITY_DOMAINS for why.
+ISSUE_SCRIPT_CONTROL_ENTITY: Final = "script_control_entity"
+# A stored time of day would not parse -- a hand-edited .storage, a restored
+# backup, a schema change. The value falls back to its default rather than
+# taking setup down with a traceback, so the user has to be told which field
+# was ignored and what it now reads as.
+ISSUE_BAD_STORED_TIME: Final = "bad_stored_time"
+# Suffixed with the load's subentry_id, like ISSUE_THERMAL_UNREACHABLE: an
+# on-demand load was given its whole run and never drew a watt. Per-load because
+# only that appliance is affected and only its owner can fix it -- a dishwasher
+# that needs its own start button pressed, a plug that does not resume the
+# program on power-up, a breaker left off. An error rather than a warning: the
+# user asked for a run, the run did not happen, and nothing else will say so.
+ISSUE_LOAD_NEVER_STARTED: Final = "load_never_started"
 
 # Solcast's day sensors are named today / tomorrow / day_3..day_7 -- "tomorrow"
 # *is* day 2, there is no forecast_day_2. Day 3 is the first sensor past the

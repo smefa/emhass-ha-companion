@@ -28,6 +28,8 @@ import voluptuous as vol
 from .api import EmhassClient, EmhassError
 from .const import (
     CONF_ADDER,
+    CONF_BATTERY_POWER_ENTITY,
+    CONF_BATTERY_POWER_INVERT,
     CONF_BATTERY_SOC_DEFICIT_COST,
     CONF_BATTERY_SOC_DEFICIT_THRESHOLD,
     CONF_BATTERY_SOC_SURPLUS_COST,
@@ -95,6 +97,7 @@ from .const import (
     CONF_URL,
     CONF_WEIGHT_BATTERY_CHARGE,
     CONF_WEIGHT_BATTERY_DISCHARGE,
+    CONTROL_ENTITY_DOMAINS,
     DEFAULT_BATTERY_SOC_DEFICIT_COST,
     DEFAULT_BATTERY_SOC_DEFICIT_THRESHOLD,
     DEFAULT_BATTERY_SOC_SURPLUS_COST,
@@ -122,6 +125,7 @@ from .const import (
     DEFAULT_WEIGHT_BATTERY_DISCHARGE,
     DOMAIN,
     END_SOC_MODES,
+    INVERTER_FALLBACK_PROFILE,
     LOAD_PROFILE_CREATE_SENTINEL,
     LOAD_PROFILE_ORDER,
     LOAD_SUBENTRY_TYPES,
@@ -307,6 +311,31 @@ def _rank_profiles(profiles: list[Profile], order: tuple[str, ...]) -> list[Prof
     return sorted(profiles, key=lambda profile: rank.get(profile.key, len(rank)))
 
 
+def _profile_label(profile: Profile) -> str:
+    """The picker label, marking a profile nobody has run on real hardware.
+
+    The marker belongs in the label rather than only in the profile's notes
+    because the picker is where the choice is actually made -- by the time the
+    notes are on screen the inverter has already been chosen.
+    """
+    return f"{profile.name} — UNTESTED" if profile.untested else profile.name
+
+
+UNTESTED_NOTICE = (
+    "**This profile is untested.** It was written from the integration's source "
+    "and the inverter's register map, but nobody has confirmed it against this "
+    "hardware yet. Check the entities below, and watch the first few plans "
+    "closely — the Control enabled switch hands it back at any time. Please "
+    "report back either way so it can be marked as working.\n\n"
+)
+
+
+def _profile_notes(profile: Profile) -> str:
+    """What the setup form shows above the entity fields."""
+    notes = profile.notes or ""
+    return f"{UNTESTED_NOTICE}{notes}" if profile.untested else notes
+
+
 def _profile_selector(
     profiles: list[Profile], order: tuple[str, ...] = ()
 ) -> selector.SelectSelector:
@@ -314,8 +343,31 @@ def _profile_selector(
         selector.SelectSelectorConfig(
             mode=selector.SelectSelectorMode.LIST,
             options=[
-                selector.SelectOptionDict(value=profile.key, label=profile.name)
+                selector.SelectOptionDict(value=profile.key, label=_profile_label(profile))
                 for profile in _rank_profiles(profiles, order)
+            ],
+        )
+    )
+
+
+def _inverter_profile_selector(profiles: list[Profile]) -> selector.SelectSelector:
+    """The inverter picker: hardware A-Z, with the script fallback last.
+
+    Alphabetical rather than ranked, because the user knows what they own and
+    there is nothing to guess at. ``_rank_profiles`` cannot express this -- it
+    moves names to the *front*, and what this list needs is one entry held at
+    the back however many brands get added in front of it.
+    """
+    ranked = sorted(
+        profiles,
+        key=lambda profile: (profile.key == INVERTER_FALLBACK_PROFILE, profile.name.lower()),
+    )
+    return selector.SelectSelector(
+        selector.SelectSelectorConfig(
+            mode=selector.SelectSelectorMode.LIST,
+            options=[
+                selector.SelectOptionDict(value=profile.key, label=_profile_label(profile))
+                for profile in ranked
             ],
         )
     )
@@ -636,7 +688,7 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema(schema),
             description_placeholders={
                 "profile": profile.name,
-                "notes": profile.notes or "",
+                "notes": _profile_notes(profile),
             },
         )
 
@@ -654,6 +706,11 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
             self._options["battery"] = _battery_storage_from_input(user_input)
             if soc := user_input.get(CONF_SOC_ENTITY):
                 self._options[CONF_SOC_ENTITY] = soc
+            if battery_power := user_input.get(CONF_BATTERY_POWER_ENTITY):
+                self._options[CONF_BATTERY_POWER_ENTITY] = battery_power
+                self._options[CONF_BATTERY_POWER_INVERT] = bool(
+                    user_input.get(CONF_BATTERY_POWER_INVERT)
+                )
             if pv_live := user_input.get(CONF_PV_ENTITY):
                 self._options[CONF_PV_ENTITY] = pv_live
             return await self.async_step_inverter()
@@ -683,7 +740,9 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="inverter",
-            data_schema=vol.Schema({vol.Optional(CONF_PROFILE): _profile_selector(choices)}),
+            data_schema=vol.Schema(
+                {vol.Optional(CONF_PROFILE): _inverter_profile_selector(choices)}
+            ),
         )
 
     async def async_step_inverter_options(
@@ -700,7 +759,7 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=self.add_suggested_values_to_schema(
                 vol.Schema(profile.selector_schema()), _suggested_entities(self.hass, profile)
             ),
-            description_placeholders={"profile": profile.name, "notes": profile.notes or ""},
+            description_placeholders={"profile": profile.name, "notes": _profile_notes(profile)},
         )
 
     async def async_step_grid(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -794,7 +853,7 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema(profile.selector_schema()),
             description_placeholders={
                 "profile": profile.name,
-                "notes": profile.notes or "",
+                "notes": _profile_notes(profile),
             },
         )
 
@@ -1038,7 +1097,7 @@ def deferrable_schema(
                 )
             ),
             _optional_blank(CONF_CONTROL_ENTITY, defaults): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain=["switch", "input_boolean", "script"])
+                selector.EntitySelectorConfig(domain=list(CONTROL_ENTITY_DOMAINS))
             ),
         }
     )
@@ -1161,7 +1220,7 @@ def thermal_schema(
                 )
             ),
             _optional_blank(CONF_CONTROL_ENTITY, defaults): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain=["switch", "input_boolean", "script"])
+                selector.EntitySelectorConfig(domain=list(CONTROL_ENTITY_DOMAINS))
             ),
         }
     )
@@ -1412,7 +1471,13 @@ def _battery_storage_from_input(user_input: dict[str, Any]) -> dict[str, Any]:
     return {
         key: value / 100 if key in _SOC_PERCENT_FIELDS else value
         for key, value in user_input.items()
-        if key not in (CONF_SOC_ENTITY, CONF_PV_ENTITY)
+        if key
+        not in (
+            CONF_SOC_ENTITY,
+            CONF_BATTERY_POWER_ENTITY,
+            CONF_BATTERY_POWER_INVERT,
+            CONF_PV_ENTITY,
+        )
     }
 
 
@@ -1609,6 +1674,17 @@ def battery_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
         _optional_blank(CONF_SOC_ENTITY, defaults): selector.EntitySelector(
             selector.EntitySelectorConfig(domain="sensor", device_class="battery")
         ),
+        # Nothing in the optimisation reads this pair; the dashboard cards do.
+        # Asked for here rather than on each card so that the sensor and, more
+        # to the point, which way round it counts are answered once. See
+        # CONF_BATTERY_POWER_ENTITY.
+        _optional_blank(CONF_BATTERY_POWER_ENTITY, defaults): selector.EntitySelector(
+            selector.EntitySelectorConfig(domain="sensor", device_class="power")
+        ),
+        vol.Optional(
+            CONF_BATTERY_POWER_INVERT,
+            default=defaults.get(CONF_BATTERY_POWER_INVERT, False),
+        ): selector.BooleanSelector(),
         # Not a battery setting -- there is no PV-specific step in either flow
         # to put it in (the setup flow's PV step is profile selection only,
         # and PV has no options-flow step at all), so it rides along with
@@ -1841,7 +1917,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
             data_schema=self.add_suggested_values_to_schema(vol.Schema(schema), stored),
             description_placeholders={
                 "profile": profile.name,
-                "notes": profile.notes or "",
+                "notes": _profile_notes(profile),
             },
         )
 
@@ -1866,7 +1942,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
             ),
             description_placeholders={
                 "profile": profile.name,
-                "notes": profile.notes or "",
+                "notes": _profile_notes(profile),
             },
         )
 
@@ -1935,7 +2011,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
             ),
             description_placeholders={
                 "profile": profile.name,
-                "notes": profile.notes or "",
+                "notes": _profile_notes(profile),
             },
         )
 
@@ -1995,7 +2071,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
             ),
             description_placeholders={
                 "profile": profile.name,
-                "notes": profile.notes or "",
+                "notes": _profile_notes(profile),
             },
         )
 
@@ -2029,7 +2105,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
                 {
                     vol.Optional(
                         CONF_PROFILE, description={"suggested_value": current}
-                    ): _profile_selector(choices)
+                    ): _inverter_profile_selector(choices)
                 }
             ),
         )
@@ -2059,7 +2135,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
             ),
             description_placeholders={
                 "profile": profile.name,
-                "notes": profile.notes or "",
+                "notes": _profile_notes(profile),
             },
         )
 
@@ -2070,12 +2146,16 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
         if user_input is not None:
             options["battery"] = _battery_storage_from_input(user_input)
             options[CONF_SOC_ENTITY] = user_input.get(CONF_SOC_ENTITY) or None
+            options[CONF_BATTERY_POWER_ENTITY] = user_input.get(CONF_BATTERY_POWER_ENTITY) or None
+            options[CONF_BATTERY_POWER_INVERT] = bool(user_input.get(CONF_BATTERY_POWER_INVERT))
             options[CONF_PV_ENTITY] = user_input.get(CONF_PV_ENTITY) or None
             return self.async_create_entry(data=options)
 
         defaults = {
             **options.get("battery", {}),
             CONF_SOC_ENTITY: options.get(CONF_SOC_ENTITY) or "",
+            CONF_BATTERY_POWER_ENTITY: options.get(CONF_BATTERY_POWER_ENTITY) or "",
+            CONF_BATTERY_POWER_INVERT: bool(options.get(CONF_BATTERY_POWER_INVERT)),
             CONF_PV_ENTITY: options.get(CONF_PV_ENTITY) or "",
         }
         return self.async_show_form(

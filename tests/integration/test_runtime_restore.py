@@ -78,7 +78,15 @@ async def _sensor(hass: HomeAssistant, *, hours: float, when) -> LoadRuntimeToda
 
 async def test_todays_hours_are_restored(hass: HomeAssistant) -> None:
     """A restart mid-afternoon must not forget what already ran this morning."""
-    sensor = await _sensor(hass, hours=1.5, when=dt_util.utcnow() - timedelta(minutes=20))
+    # Anchored to the local day rather than to `utcnow() - 20 minutes`. The
+    # guard compares *local* dates and the test harness runs hass in
+    # US/Pacific, so a UTC-relative timestamp falls on the previous local day
+    # whenever the suite runs within 20 minutes after local midnight -- 07:00
+    # to 07:20 UTC while Pacific is on DST, which is exactly where CI caught
+    # it. Local midnight is never in the future, so this is always earlier
+    # today.
+    this_morning = dt_util.start_of_local_day() + timedelta(minutes=1)
+    sensor = await _sensor(hass, hours=1.5, when=this_morning)
 
     assert sensor.load.runtime_today == timedelta(hours=1.5)
 

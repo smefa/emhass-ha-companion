@@ -308,6 +308,13 @@ PROFILE_SCHEMA = vol.All(
             vol.Optional("models", default=[]): vol.All(cv.ensure_list, [cv.string]),
             vol.Optional("requires"): cv.string,
             vol.Optional("docs"): cv.string,
+            # Set on a profile written from the integration's source and the
+            # inverter's register map, but never run against the hardware. It
+            # is carried into the picker label and the top of the setup form,
+            # because the alternative -- a profile that looks exactly as
+            # trustworthy as a validated one -- makes the first person to try
+            # it an unwitting tester of writes to their own battery.
+            vol.Optional("untested", default=False): cv.boolean,
             # Inverter profiles are always offered; the user picks their own
             # hardware. `detect` remains for source profiles, where "is Solcast
             # installed" is a question the integration domain genuinely answers.
@@ -394,6 +401,16 @@ class Profile:
     def requires(self) -> str | None:
         """The integration this profile needs, shown next to its name."""
         return self.document.get("requires")
+
+    @property
+    def untested(self) -> bool:
+        """Whether this profile has never been run against real hardware.
+
+        Written from the integration's source and the register map, but not
+        confirmed by anyone who owns the inverter. Surfaced in the picker and
+        on the setup form so that trying it is a choice rather than a surprise.
+        """
+        return bool(self.document.get("untested"))
 
     @property
     def control(self) -> dict[str, Any]:

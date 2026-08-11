@@ -271,12 +271,13 @@ def test_window_covering_keeps_the_point_in_force_at_the_start():
     sensors unknown for the whole timestep in progress after every run.
     """
     series = _series(1.0, 2.0, step_minutes=60)
-    windowed = series.window_covering(
-        T0 + timedelta(minutes=15), T0 + timedelta(minutes=90)
+    windowed = series.window_covering(T0 + timedelta(minutes=15), T0 + timedelta(minutes=90))
+    assert (
+        series.window(T0 + timedelta(minutes=15), T0 + timedelta(minutes=90)).value_at(
+            T0 + timedelta(minutes=20)
+        )
+        is None
     )
-    assert series.window(T0 + timedelta(minutes=15), T0 + timedelta(minutes=90)).value_at(
-        T0 + timedelta(minutes=20)
-    ) is None
     assert windowed.value_at(T0 + timedelta(minutes=20)) == 1.0
     # Re-stamped to the cut, so the result spans exactly the window asked for.
     assert windowed.start == T0 + timedelta(minutes=15)
@@ -713,3 +714,57 @@ def test_temperature_series_reads_one_thermal_loads_trajectory():
     )
     assert plan.temperature_series(1).values == (20.0, 21.0, 22.0)
     assert not plan.temperature_series(0)
+
+
+# --- lookup caching -----------------------------------------------------------
+#
+# value_at, row_at and blend_at used to walk from the start of the series on
+# every call, and Plan.series() rebuilt (sorted, de-duplicated) a whole Series
+# each time. The clock fires async_update_listeners every timestep and every
+# plan-derived entity then re-reads: 96 rows x ten loads x their sensors is a
+# few thousand redundant traversals a tick, on hardware that is often a Pi.
+# The binary search and the memoisation must not change a single answer.
+
+
+def test_binary_search_agrees_with_a_linear_scan_everywhere():
+    """Including exactly on a point, between points, and outside both ends."""
+    series = Series(Point(T0 + timedelta(minutes=15 * i), float(i)) for i in range(96))
+
+    def linear(when):
+        found = None
+        for point in series:
+            if point.time > when:
+                break
+            found = point.value
+        return found
+
+    for minutes in range(-30, 96 * 15 + 30, 7):
+        when = T0 + timedelta(minutes=minutes)
+        assert series.value_at(when) == linear(when)
+
+
+def test_a_lookup_exactly_on_a_point_takes_that_point_not_the_one_before():
+    series = _series(1.0, 2.0, 3.0)
+    assert series.value_at(T0 + timedelta(minutes=30)) == 2.0
+
+
+def test_plan_series_is_memoised_but_still_correct():
+    plan = Plan.from_response(PLAN_RESPONSE)
+    first = plan.series("p_load")
+    second = plan.series("p_load")
+
+    assert first is second
+    assert first.values == (2826.0, 2900.0)
+
+
+def test_replacing_a_plan_rows_invalidates_the_caches():
+    """Nothing edits a parsed plan today; the guard is what keeps it safe if
+    something ever does."""
+    plan = Plan.from_response(PLAN_RESPONSE)
+    assert plan.series("p_load").values == (2826.0, 2900.0)
+    later = datetime(2026, 7, 29, 10, 0, tzinfo=UTC)
+
+    plan.rows = [PlanRow(timestamp=later, p_load=1.0)]
+
+    assert plan.series("p_load").values == (1.0,)
+    assert plan.row_at(later).p_load == 1.0

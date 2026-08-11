@@ -114,7 +114,22 @@ through `yarl.URL` to drop userinfo and query string while keeping scheme,
 host and port — "wrong port" is a real bug and we need to be able to see it.
 
 Deliberately **not** redacted: entity ids, tariff prices, battery capacity,
-load names, the payload. Redacting those would defeat the feature.
+load names. Redacting those would defeat the feature.
+
+The payload was originally on that list, on the grounds that nothing in it is
+a secret. That was true while it was assembled only from typed options, and
+stopped being true once `build_payload` began merging in the `emhass:` block
+of each selected profile — an unconstrained mapping, so a profile configuring
+EMHASS's own Solcast method puts `solcast_api_key` straight into the payload.
+It now goes through `_redact_config` like every other section; the settings a
+maintainer actually reads are untouched, since none of them is named like a
+credential.
+
+Custom profile text gets a line scrub (`_redact_secret_lines`) rather than a
+parse-redact-reserialise. The section exists so a profile too broken for
+`load_yaml` can still be read out of the bundle, and redacting through the
+parser would blank the file in exactly that case; a scrub also keeps the
+comments, formatting and line numbers.
 
 ### 3. `scripts/inspect_bundle.py`
 

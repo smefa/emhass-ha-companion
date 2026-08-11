@@ -1,0 +1,271 @@
+name: Sigenergy SigenStor (Sigenergy-Local-Modbus)
+kind: inverter
+version: 2
+
+brand: Sigenergy
+
+models:
+  - SigenStor EC
+  - SigenStor Home
+  - Sigen Hybrid
+
+requires: TypQxQ/Sigenergy-Local-Modbus (HACS) with read-only mode turned off; Modbus TCP must be enabled on the device by the installer
+
+docs: https://github.com/TypQxQ/Sigenergy-Local-Modbus
+
+untested: true
+
+description: >-
+  Sigenergy SigenStor plants, commanded through remote EMS with the direction
+  from the control mode and the magnitude from the ESS power limits.
+
+notes: >-
+  **Turn two gates off before this can write anything.** The integration ships
+  read-only: open Settings → Devices & Services → Sigenergy → Configure and
+  disable read-only mode. Then enable the individual control entities — most of
+  them are disabled in the entity registry by default, so they will not even
+  appear in the fields below until you turn them on from the device page. On
+  the device itself, Modbus TCP has to have been enabled by the installer (and
+  saved), on firmware SPC109 or newer.
+
+  **This profile deliberately does not use "Active Power Fixed Adjustment".**
+  That is the obvious-looking signed kilowatt setpoint, and there are two good
+  reasons to leave it alone. Its sign is stated nowhere — not in the
+  integration's source and not in Sigenergy's own Modbus protocol document —
+  so shipping it would mean guessing which way a battery charges. And it
+  commands the **PCS AC output**, not the battery: with PV producing, the
+  battery would move by the setpoint minus whatever the array is making, which
+  is not what the plan asked for.
+
+  So direction comes from the control mode select instead, and magnitude from
+  the ESS charging and discharging limits. Neither has a sign to get wrong.
+
+  **The magnitude is a ceiling, not a target.** In Command Charging the plant
+  charges as hard as it can up to the limit this profile sets, rather than
+  tracking the planned watts exactly. Expect the direction and the ceiling to
+  be followed, not a watt-for-watt match.
+
+  **The limits are global.** Sigenergy's own documentation says the ESS
+  charging and discharging limits take effect regardless of EMS mode — so
+  leaving one low would throttle ordinary self-consumption too. Handing control
+  back therefore restores both to the everyday ceilings you set below; make
+  sure those match what you actually want when this profile is not driving.
+
+  **Nothing expires by itself.** There is no watchdog anywhere in the protocol,
+  so whatever was last written stays written. That is why remote EMS is turned
+  off again when control is handed back, on shutdown as well as on the switch.
+
+  **Grid charging needs no separate permission** — it is implied by the
+  charging mode. "Command Charging (PV First)" uses the array first and tops up
+  from the grid, which is what you usually want; switch it to the Grid First
+  option below if you would rather it did not wait for PV.
+
+  Entity ids below assume the plant kept its default name, "Sigen Plant". If
+  you renamed it during setup, every one of them changes to match.
+
+control:
+  archetype: mode_and_magnitude
+  power_unit: kw
+  signed: false
+  invert_sign: false
+  charge_boost: 1.0
+  # 0.1 kW granularity: the registers carry three decimals, but writing a
+  # limit to the watt on every plan tick is noise, not precision.
+  round_to: 0.1
+  lifetime: persistent
+  duration_min: 30
+  deadband_w: 200
+  min_write_interval_s: 5
+  restore_required: true
+  curtail_mode: export_limit
+  curtail_unit: kw
+
+options:
+  remote_ems_switch:
+    name: Remote EMS switch
+    description: "\"Remote EMS (Controlled by Home Assistant)\". Nothing else here takes effect until it is on, and turning it off is how control is handed back."
+    suggest:
+      - switch.sigen_plant_remote_ems_controlled_by_home_assistant
+    selector:
+      entity:
+        domain: switch
+
+  control_mode_select:
+    name: Remote EMS control mode
+    suggest:
+      - select.sigen_plant_remote_ems_control_mode
+    selector:
+      entity:
+        domain: select
+
+  charge_limit_number:
+    name: ESS max charging limit
+    suggest:
+      - number.sigen_plant_ess_max_charging_limit
+    selector:
+      entity:
+        domain: number
+
+  discharge_limit_number:
+    name: ESS max discharging limit
+    suggest:
+      - number.sigen_plant_ess_max_discharging_limit
+    selector:
+      entity:
+        domain: number
+
+  max_charge_kw:
+    name: Everyday charging ceiling
+    description: What the charging limit is restored to when this profile hands control back. The limit is global, so this is also your normal self-consumption ceiling.
+    default: 12
+    selector:
+      number:
+        min: 0
+        max: 100
+        step: 0.5
+        unit_of_measurement: kW
+        mode: box
+
+  max_discharge_kw:
+    name: Everyday discharging ceiling
+    default: 12
+    selector:
+      number:
+        min: 0
+        max: 100
+        step: 0.5
+        unit_of_measurement: kW
+        mode: box
+
+  mode_charge:
+    name: Mode — forced charge option name
+    description: '"Command Charging (PV First)" tops up from the grid after using the array. Use "Command Charging (Grid First)" to draw from the grid first.'
+    default: Command Charging (PV First)
+    selector:
+      text: {}
+
+  mode_discharge:
+    name: Mode — forced discharge option name
+    default: Command Discharging (ESS First)
+    selector:
+      text: {}
+
+  mode_standby:
+    name: Mode — standby option name
+    default: Standby
+    selector:
+      text: {}
+
+  mode_self_consume:
+    name: Mode — self-consumption option name
+    default: Maximum Self Consumption
+    selector:
+      text: {}
+
+  export_limit_number:
+    name: Grid export limitation
+    description: Optional, for curtailment only. Needs a grid sensor fitted. In kilowatts.
+    required: false
+    suggest:
+      - number.sigen_plant_grid_export_limitation
+    selector:
+      entity:
+        domain: number
+
+  export_limit_max_kw:
+    name: Unrestricted export power
+    default: 100
+    selector:
+      number:
+        min: 0
+        max: 100
+        step: 0.5
+        unit_of_measurement: kW
+        mode: box
+
+sensors:
+  battery_soc: sensor.sigen_plant_battery_state_of_charge
+  # Sigenergy documents this one explicitly: negative = discharging, positive
+  # = charging -- the opposite of EMHASS's convention.
+  battery_power: sensor.sigen_plant_battery_power
+  grid_power: sensor.sigen_plant_grid_active_power   # positive = buying, negative = selling
+  pv_power: sensor.sigen_plant_sigen_pv_power        # disabled by default; enable it on the device page
+  load_power: sensor.sigen_plant_total_load_power
+
+limits:
+  # Capacity and the true power ceilings depend on the stack fitted, and the
+  # limit registers here are settings rather than ratings -- so reading them
+  # back would just report whatever this profile last wrote.
+
+actions:
+  prepare:
+    # Once per session: without remote EMS on, the mode select is unavailable
+    # and every write below is inert.
+    - service: switch.turn_on
+      target: { entity_id: "{{ options.remote_ems_switch }}" }
+
+  force_charge:
+    - service: switch.turn_on
+      target: { entity_id: "{{ options.remote_ems_switch }}" }
+    - service: number.set_value
+      target: { entity_id: "{{ options.charge_limit_number }}" }
+      data: { value: "{{ power }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.control_mode_select }}" }
+      data: { option: "{{ options.mode_charge }}" }
+
+  force_discharge:
+    - service: switch.turn_on
+      target: { entity_id: "{{ options.remote_ems_switch }}" }
+    - service: number.set_value
+      target: { entity_id: "{{ options.discharge_limit_number }}" }
+      data: { value: "{{ power }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.control_mode_select }}" }
+      data: { option: "{{ options.mode_discharge }}" }
+
+  idle:
+    # Standby is a real hold on this hardware, so it does not need the limits
+    # taken to zero -- which matters, because they are global and would
+    # otherwise still be throttling things after control is handed back.
+    - service: switch.turn_on
+      target: { entity_id: "{{ options.remote_ems_switch }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.control_mode_select }}" }
+      data: { option: "{{ options.mode_standby }}" }
+
+  self_consume:
+    # Put the global limits back before dropping out of remote EMS, or the
+    # plant is left self-consuming through whatever ceiling the last forced
+    # command happened to leave behind.
+    - service: number.set_value
+      target: { entity_id: "{{ options.charge_limit_number }}" }
+      data: { value: "{{ options.max_charge_kw | float }}" }
+    - service: number.set_value
+      target: { entity_id: "{{ options.discharge_limit_number }}" }
+      data: { value: "{{ options.max_discharge_kw | float }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.control_mode_select }}" }
+      data: { option: "{{ options.mode_self_consume }}" }
+
+  restore:
+    # Everything self_consume does, and then remote EMS off -- back to the
+    # plant's own EMS work mode, whatever the owner has it set to.
+    - service: number.set_value
+      target: { entity_id: "{{ options.charge_limit_number }}" }
+      data: { value: "{{ options.max_charge_kw | float }}" }
+    - service: number.set_value
+      target: { entity_id: "{{ options.discharge_limit_number }}" }
+      data: { value: "{{ options.max_discharge_kw | float }}" }
+    - service: switch.turn_off
+      target: { entity_id: "{{ options.remote_ems_switch }}" }
+
+  curtail:
+    - service: number.set_value
+      target: { entity_id: "{{ options.export_limit_number }}" }
+      data: { value: "{{ curtail_w }}" }
+
+  uncurtail:
+    - service: number.set_value
+      target: { entity_id: "{{ options.export_limit_number }}" }
+      data: { value: "{{ options.export_limit_max_kw | float }}" }
