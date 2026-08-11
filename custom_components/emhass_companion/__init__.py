@@ -45,6 +45,7 @@ from .deferrable import DeferrableRegistry
 from .executor import Executor
 from .frontend import async_setup_frontend
 from .log_ring import LogRingHandler
+from .naming import async_apply_standard_names
 from .schedule import Scheduler
 from .services import async_register_services, async_unregister_services
 from .util import version_at_least
@@ -146,6 +147,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
     # Entities are created before the first optimisation so that a failed or
     # slow first run leaves a diagnosable integration rather than none at all.
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    # After the platforms, not before: only now is every sensor this house
+    # actually has registered and findable by unique id. See naming.py.
+    await async_apply_standard_names(hass, entry)
     async_register_services(hass)
 
     entry.async_on_unload(scheduler.async_stop)

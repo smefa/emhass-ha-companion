@@ -45,6 +45,7 @@ from .const import (
     CONF_COOLING_CONSTANT,
     CONF_DAYAHEAD_FALLBACK_TIME,
     CONF_EARLIEST_START,
+    CONF_EMHASS_STANDARD_NAMES,
     CONF_END_SOC_MODE,
     CONF_ENERGY_NEEDED,
     CONF_GRID_EXPORT_LIMIT_ENTITY,
@@ -146,6 +147,7 @@ from .const import (
     SUBENTRY_TYPE_THERMAL,
     TEMPERATURE_PROFILE_ORDER,
 )
+from .naming import async_taken_standard_ids
 from .profiles import (
     Profile,
     ProfileError,
@@ -776,9 +778,7 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
                     )
                 }
             )
-            return self.async_create_entry(
-                title="EMHASS Companion", data=self._data, options=self._options
-            )
+            return await self.async_step_compatibility()
 
         detected = await _async_detect_time_step(
             self.hass, self._profiles, self._options.get(CONF_PRICE) or {}
@@ -796,6 +796,47 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
                 if detected
                 else ""
             },
+        )
+
+    # -- compatibility --------------------------------------------------------
+
+    async def async_step_compatibility(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Offer EMHASS's own entity ids -- but only to someone migrating.
+
+        Shown only when those entities are already present, which is the one
+        situation where the answer is not obviously "no": this user has
+        dashboards, templates or automations written against those ids, and
+        this option is what keeps them working. Everybody else finishes at the
+        previous step and never sees this, and can still turn it on later from
+        the options menu.
+        """
+        existing = async_taken_standard_ids(self.hass)
+        if not existing:
+            return self._async_finish()
+
+        if user_input is not None:
+            self._options[CONF_EMHASS_STANDARD_NAMES] = user_input[CONF_EMHASS_STANDARD_NAMES]
+            return self._async_finish()
+
+        return self.async_show_form(
+            step_id="compatibility",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_EMHASS_STANDARD_NAMES, default=False
+                    ): selector.BooleanSelector()
+                }
+            ),
+            description_placeholders={
+                "existing": "\n".join(f"- `{entity_id}`" for entity_id in existing)
+            },
+        )
+
+    def _async_finish(self) -> ConfigFlowResult:
+        return self.async_create_entry(
+            title="EMHASS Companion", data=self._data, options=self._options
         )
 
     # -- shared profile plumbing ---------------------------------------------
@@ -1824,7 +1865,54 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         return self.async_show_menu(
             step_id="init",
-            menu_options=["load", "pv", "battery", "grid", "tariff", "inverter", "temperature"],
+            menu_options=[
+                "load",
+                "pv",
+                "battery",
+                "grid",
+                "tariff",
+                "inverter",
+                "temperature",
+                "compatibility",
+            ],
+        )
+
+    async def async_step_compatibility(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Whether to publish under EMHASS's own entity ids.
+
+        Its own menu entry rather than a field on an existing step: every other
+        entry here describes the house -- its battery, its prices, its
+        inverter -- while this one only changes how the integration presents
+        itself to Home Assistant. Folding it into `grid`, the nearest thing to
+        a miscellaneous step, would make that step a junk drawer.
+        """
+        options = dict(self.config_entry.options)
+        if user_input is not None:
+            options[CONF_EMHASS_STANDARD_NAMES] = user_input[CONF_EMHASS_STANDARD_NAMES]
+            return self.async_create_entry(data=options)
+
+        taken = async_taken_standard_ids(self.hass, self.config_entry)
+        return self.async_show_form(
+            step_id="compatibility",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_EMHASS_STANDARD_NAMES,
+                        default=options.get(CONF_EMHASS_STANDARD_NAMES, False),
+                    ): selector.BooleanSelector()
+                }
+            ),
+            description_placeholders={
+                "conflicts": (
+                    "\n\n**These ids are already taken**, most likely by EMHASS's own "
+                    "publishing. Those sensors would keep their current names until you "
+                    "turn that off:\n" + "\n".join(f"- `{entity_id}`" for entity_id in taken)
+                )
+                if taken
+                else ""
+            },
         )
 
     async def async_step_load(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:

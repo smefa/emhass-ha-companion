@@ -175,6 +175,16 @@
           "dayahead_fallback_time": "En fullständig dygnsplan byggs normalt om automatiskt så snart nya priser kommer. Den här tiden används bara som reserv om det aldrig sker.",
           "capacity_cost_per_kw": "Om ditt nätavtal debiterar den högsta effekt du tar ut, inte bara energin, ange det priset per kW här. Planen jämnar då ut sin värsta importtopp -- sprider ut laster och laddar ur batteriet över den -- i stället för att bara jaga billiga timmar. Debiteras en gång på toppen, inte per timme. 0 stänger av detta, vilket är standard."
         }
+      },
+      "compatibility": {
+        "title": "EMHASS entitetsnamn",
+        "description": "Home Assistant har redan EMHASS-sensorer:\n\n{existing}\n\nOm dina paneler, mallar eller automationer är skrivna mot de namnen kan EMHASS Companion publicera sina egna plansensorer under samma entitets-id, så att de fortsätter fungera.\n\nLåt det vara av om du inte behöver det -- Companions egna namn är tydligare, och du kan slå på det senare under Konfigurera.",
+        "data": {
+          "emhass_standard_names": "Använd EMHASS entitetsnamn"
+        },
+        "data_description": {
+          "emhass_standard_names": "Byter namn på nio plansensorer till p_pv_forecast, p_load_forecast, p_grid_forecast, p_batt_forecast, soc_batt_forecast, optim_status, total_cost_fun_value, unit_load_cost och unit_prod_price, och publicerar även deras prognosserier i EMHASS format. Sensorer per last byter inte namn. Går att ångra."
+        }
       }
     },
     "error": {
@@ -198,7 +208,8 @@
           "grid": "Nät och schema",
           "tariff": "Köp- och säljpriser",
           "inverter": "Växelriktarstyrning",
-          "temperature": "Utetemperatur"
+          "temperature": "Utetemperatur",
+          "compatibility": "EMHASS entitetsnamn"
         }
       },
       "load": {
@@ -341,6 +352,16 @@
       "temperature_options": {
         "title": "Konfigurera {profile}",
         "description": "{notes}"
+      },
+      "compatibility": {
+        "title": "EMHASS entitetsnamn",
+        "description": "Publicera plansensorerna under de entitets-id som EMHASS själv använder, så att paneler, mallar och andra integrationer skrivna för EMHASS fortsätter fungera. Av som standard; slår du av det igen återställs de namn sensorerna hade innan.{conflicts}",
+        "data": {
+          "emhass_standard_names": "Använd EMHASS entitetsnamn"
+        },
+        "data_description": {
+          "emhass_standard_names": "Byter namn på nio plansensorer till p_pv_forecast, p_load_forecast, p_grid_forecast, p_batt_forecast, soc_batt_forecast, optim_status, total_cost_fun_value, unit_load_cost och unit_prod_price, och publicerar även deras prognosserier i EMHASS format. Sensorer per last behåller sina egna namn -- EMHASS numrerar dem P_deferrable0, P_deferrable1 och så vidare efter lastordning, och ett entitets-id flyttar sig aldrig när det väl satts, så att lägga till eller byta namn på en last skulle lämna numret pekande på fel apparat."
+        }
       }
     }
   },
@@ -652,6 +673,10 @@
     "load_never_started": {
       "title": "{name} startade aldrig",
       "description": "{name} begärdes och fick sina hela {hours} h, men effektsensorn såg den aldrig dra något. Begäran har rensats, så inget väntar på den -- men körningen blev inte av.\n\nVanliga orsaker: apparaten behöver att man trycker på dess egen startknapp efter att den slagits på, den återupptar inte programmet när strömmen kommer tillbaka, eller så fick den aldrig ström via uttaget.\n\nDetta försvinner nästa gång lasten slutför en körning."
+    },
+    "standard_names_taken": {
+      "title": "{count} EMHASS-entitetsnamn är redan upptagna",
+      "description": "EMHASS Companion ombads publicera under EMHASS egna entitets-id, men dessa används redan:\n\n{details}\n\nNästan alltid är det EMHASS-tillägget som publicerar dem själv. De sensorerna behåller sina Companion-namn tills vidare. För att slutföra bytet: stäng av publiceringen i EMHASS (töm `publish_prefix`, eller sluta anropa dess publish-data), ta bort de kvarvarande entiteterna och ladda om EMHASS Companion. För att sluta försöka: slå av alternativet under Inställningar > Enheter och tjänster > EMHASS Companion > Konfigurera > EMHASS entitetsnamn."
     }
   },
   "services": {

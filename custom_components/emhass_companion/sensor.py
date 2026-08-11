@@ -35,6 +35,11 @@ from .coordinator import EmhassCoordinator, EmhassData
 from .deferrable import DeferrableRuntime, state_to_watts
 from .entity import EmhassEntity, EmhassLoadEntity
 from .models import Series
+from .naming import (
+    emhass_series_payload,
+    standard_names_enabled,
+    standard_series_attribute,
+)
 from .smoothing import TimeWeightedAverage
 from .surplus import current_block, total_energy_wh, window_of
 
@@ -327,6 +332,7 @@ class EmhassSensor(EmhassEntity, SensorEntity):
             # carrying it as an attribute is what lets a card draw the plan.
             series = self.entity_description.series_fn(data)
             attributes["forecast"] = series.to_attribute()
+            self._add_standard_series(attributes, series)
 
         if self.entity_description.attrs_fn is not None:
             attributes.update(self.entity_description.attrs_fn(data))
@@ -335,6 +341,32 @@ class EmhassSensor(EmhassEntity, SensorEntity):
             attributes.update(self.entity_description.measured_fn(self.coordinator.config))
 
         return attributes or None
+
+    def _add_standard_series(self, attributes: dict[str, Any], series: Series) -> None:
+        """Also carry the series in EMHASS's own shape, when asked to.
+
+        Matching the entity id is only half of what a consumer written against
+        EMHASS needs: it reads ``forecasts`` (or one of the per-quantity names)
+        holding ``{"date": ..., "<object_id>": "<value>"}``, not this
+        integration's ``forecast`` of ``{"time": ..., "value": ...}``. Added
+        beside the native attribute rather than replacing it -- the cards read
+        ``forecast``, and a user who turns this on to help a third party should
+        not lose their own dashboard doing it.
+        """
+        if not standard_names_enabled(self.coordinator.config_entry):
+            return
+        standard = standard_series_attribute(self.entity_description.key)
+        if standard is None:
+            return
+        attribute, value_key, decimals = standard
+        # From the current timestep onward, as EMHASS slices it: a consumer
+        # reading element 0 expects now, not the start of a day-ahead plan.
+        now = dt_util.utcnow()
+        attributes[attribute] = emhass_series_payload(
+            [(point.time.isoformat(), point.value) for point in series if point.time >= now],
+            value_key,
+            decimals,
+        )
 
 
 class NetHouseLoadSensor(EmhassEntity, SensorEntity):

@@ -635,6 +635,67 @@ TEMPERATURE_PROFILE_ORDER: Final = (
 # entity id back out of the registry) so the two can never drift apart.
 NET_HOUSE_LOAD_KEY: Final = "net_house_load"
 
+# --- EMHASS-standard entity names --------------------------------------------
+#
+# Off by default. Turned on, the plan sensors below take the entity ids EMHASS
+# publishes the same quantities under, so a dashboard, template sensor or
+# third-party integration written against a bare EMHASS install keeps working
+# when the Companion takes over the optimisation.
+#
+# Deliberately limited to the quantities whose EMHASS name is a fixed string.
+# The per-load ones are P_deferrable{k}, numbered by load order
+# (DeferrableRegistry.index_of, which sorts by name) -- but an entity id is
+# assigned once and never moves on its own, so renaming or adding a load would
+# leave sensor.p_deferrable0 pointing at a different appliance for good, with
+# nothing to warn the user. A wrong number on a silent sensor is worse than no
+# sensor, so those are left out.
+CONF_EMHASS_STANDARD_NAMES: Final = "emhass_standard_names"
+# The entity ids these sensors had before the option was first switched on.
+# Kept so that switching it off restores exactly what the user had, rather than
+# whatever Home Assistant would generate today -- a friendly name or a
+# translation may have changed in between, and silently landing on a third id
+# would break their dashboards a second time.
+CONF_ENTITY_IDS_BEFORE_STANDARD: Final = "entity_ids_before_standard_names"
+
+# Sensor key (EmhassSensorDescription.key, which is also the tail of the
+# unique_id) -> the object id EMHASS uses. Mirrors the default_passed_dict in
+# EMHASS's utils.py:build_params.
+EMHASS_STANDARD_OBJECT_IDS: Final[dict[str, str]] = {
+    "pv_forecast": "p_pv_forecast",
+    "load_forecast": "p_load_forecast",
+    "grid_forecast": "p_grid_forecast",
+    "battery_power": "p_batt_forecast",
+    "battery_soc": "soc_batt_forecast",
+    "optimization_status": "optim_status",
+    "plan_cost": "total_cost_fun_value",
+    "buy_price": "unit_load_cost",
+    "sell_price": "unit_prod_price",
+}
+
+# Matching the entity id alone is not enough for a consumer that reads the
+# forward-looking series: EMHASS carries it under a different attribute name
+# per quantity, and in a different shape from this integration's own
+# ``forecast`` -- a list of {"date": <iso>, "<object_id>": "<value>"}, values
+# as strings, starting at the current timestep rather than at the plan's start
+# (EMHASS retrieve_hass.get_attr_data_dict). With the option on, that shape is
+# published *alongside* ``forecast``; the native attribute stays because the
+# dashboard cards read it.
+EMHASS_STANDARD_SERIES_ATTRIBUTES: Final[dict[str, str]] = {
+    "pv_forecast": "forecasts",
+    "load_forecast": "forecasts",
+    "grid_forecast": "forecasts",
+    "battery_power": "battery_scheduled_power",
+    "battery_soc": "battery_scheduled_soc",
+    "buy_price": "unit_load_cost_forecasts",
+    "sell_price": "unit_prod_price_forecasts",
+}
+# EMHASS rounds prices to four decimals and everything else to two.
+EMHASS_STANDARD_SERIES_DECIMALS: Final[dict[str, int]] = {
+    "buy_price": 4,
+    "sell_price": 4,
+}
+DEFAULT_STANDARD_SERIES_DECIMALS: Final = 2
+
 # The profile schema is a public API for contributors and for users writing local
 # profiles. Bump only with a documented migration.
 #
@@ -796,6 +857,12 @@ ISSUE_BAD_STORED_TIME: Final = "bad_stored_time"
 # program on power-up, a breaker left off. An error rather than a warning: the
 # user asked for a run, the run did not happen, and nothing else will say so.
 ISSUE_LOAD_NEVER_STARTED: Final = "load_never_started"
+# The EMHASS-standard entity ids the user asked for are already taken, almost
+# always by EMHASS's own publish-data writing them. Renaming into an occupied
+# id is refused by the entity registry, so the affected sensors keep their
+# Companion ids and the user is told which ones and why -- silently leaving
+# half the option unapplied would look like it simply did not work.
+ISSUE_STANDARD_NAMES_TAKEN: Final = "standard_names_taken"
 
 # Solcast's day sensors are named today / tomorrow / day_3..day_7 -- "tomorrow"
 # *is* day 2, there is no forecast_day_2. Day 3 is the first sensor past the

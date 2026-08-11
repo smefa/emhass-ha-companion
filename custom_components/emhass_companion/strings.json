@@ -175,6 +175,16 @@
           "dayahead_fallback_time": "A full day-ahead plan is normally rebuilt automatically as soon as new prices arrive. This time is only used as a backstop if that never happens.",
           "capacity_cost_per_kw": "If your network tariff bills the highest power you draw, not just the energy, enter that price per kW here. The plan then flattens its single worst import peak -- shifting loads apart and discharging the battery across it -- instead of only chasing cheap hours. Charged once on the peak, not per hour. 0 turns this off, which is the default."
         }
+      },
+      "compatibility": {
+        "title": "EMHASS entity names",
+        "description": "Home Assistant already has EMHASS sensors:\n\n{existing}\n\nIf your dashboards, templates or automations are written against those names, EMHASS Companion can publish its own plan sensors under the same entity ids, so they keep working.\n\nLeave this off unless you need it -- the Companion's own names are clearer, and you can turn it on later under Configure.",
+        "data": {
+          "emhass_standard_names": "Use EMHASS's entity names"
+        },
+        "data_description": {
+          "emhass_standard_names": "Renames nine plan sensors to p_pv_forecast, p_load_forecast, p_grid_forecast, p_batt_forecast, soc_batt_forecast, optim_status, total_cost_fun_value, unit_load_cost and unit_prod_price, and also publishes their forecast series in EMHASS's format. Per-load sensors are not renamed. Reversible."
+        }
       }
     },
     "error": {
@@ -198,7 +208,8 @@
           "grid": "Grid and schedule",
           "tariff": "Buy and sell prices",
           "inverter": "Inverter control",
-          "temperature": "Outdoor temperature"
+          "temperature": "Outdoor temperature",
+          "compatibility": "EMHASS entity names"
         }
       },
       "load": {
@@ -341,6 +352,16 @@
       "temperature_options": {
         "title": "Configure {profile}",
         "description": "{notes}"
+      },
+      "compatibility": {
+        "title": "EMHASS entity names",
+        "description": "Publish the plan sensors under the entity ids EMHASS itself uses, so dashboards, templates and other integrations written for EMHASS keep working. Off by default; turning it back off restores the names the sensors had before.{conflicts}",
+        "data": {
+          "emhass_standard_names": "Use EMHASS's entity names"
+        },
+        "data_description": {
+          "emhass_standard_names": "Renames nine plan sensors to p_pv_forecast, p_load_forecast, p_grid_forecast, p_batt_forecast, soc_batt_forecast, optim_status, total_cost_fun_value, unit_load_cost and unit_prod_price, and also publishes their forecast series in EMHASS's format. Per-load sensors keep their own names -- EMHASS numbers those P_deferrable0, P_deferrable1 and so on by load order, and an entity id never moves once assigned, so adding or renaming a load would leave the number pointing at the wrong appliance."
+        }
       }
     }
   },
@@ -652,6 +673,10 @@
     "load_never_started": {
       "title": "{name} never started",
       "description": "{name} was requested and given its full {hours} h, but its power sensor never saw it draw anything. The request has been cleared, so nothing is waiting on it -- but the run did not happen.\n\nUsual causes: the appliance needs its own start button pressed after being switched on, it does not resume its program when power returns, or the plug never actually powered it.\n\nThis clears itself the next time the load completes a run."
+    },
+    "standard_names_taken": {
+      "title": "{count} EMHASS entity name(s) already taken",
+      "description": "EMHASS Companion was asked to publish under EMHASS's own entity ids, but these are already in use:\n\n{details}\n\nAlmost always this is the EMHASS add-on publishing them itself. Those sensors keep their Companion names for now. To finish the switch, turn off publishing in EMHASS (unset `publish_prefix`, or stop calling its publish-data action), delete the leftover entities, then reload EMHASS Companion. To stop trying, turn the option off under Settings > Devices & services > EMHASS Companion > Configure > EMHASS entity names."
     }
   },
   "services": {
