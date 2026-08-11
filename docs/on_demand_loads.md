@@ -108,6 +108,67 @@ Progress toward a deadline is tracked per request, not reset at midnight —
 so a dishwasher loaded at 23:00 keeps its progress and its deadline across
 the day boundary instead of being told it needs to start over.
 
+## How a run ends
+
+A request is measured by **how long the load was told to run**, not by how
+long its meter saw it draw power. That distinction matters for any appliance
+that duty-cycles: a dishwasher spends much of its program filling, soaking and
+draining well below the threshold that counts as running, so a request judged
+on measured power can outlive a finished cycle indefinitely — and keeps asking
+EMHASS for hours it has already been given.
+
+A load with no power sensor has always worked this way (its control entity
+reads as on, so on counts as running at nominal power). This makes metered
+loads agree.
+
+A run ends on whichever of these comes first:
+
+| Ending | When | Meaning |
+|---|---|---|
+| **Finished early** | The power sensor reads idle for a whole idle window, having drawn power at least once | The normal ending. The appliance is done before its booked time ran out |
+| **Completed** | The run had its full hours and isn't drawing | It used what it was given |
+| **Cut short** | One timestep past its hours, still drawing | **Hours needed** is set shorter than the program actually needs |
+| **Never started** | The run had its full hours and never drew a watt | The run did not happen — raises a repair issue |
+| **Cancelled** | You turned the switch off | — |
+
+The reason and its timestamp are attributes of `switch.<load>_requested`
+(`last_completion_reason`, `last_completion_at`) and survive the request being
+cleared — "why did it stop" is asked when the switch is already off.
+
+Because of this, **set Hours needed to the appliance's real cycle length, or a
+little over.** It is a booking, not a target to be hit exactly: the idle rule
+gives back whatever isn't used. Setting it short buys you a `cut_short` ending
+and power pulled from an appliance mid-program.
+
+### Idle detection
+
+Only for loads with a power sensor — without one there is no reading that
+could ever say "finished", and the two settings below aren't created.
+
+| Entity | Default | |
+|---|---|---|
+| `number.<load>_counts_as_finished_below` | 10 W | Deliberately *not* the running threshold (10% of nominal). That one answers "is this doing meaningful work" and ignores marginal draw; this answers "has it finished" and must err the other way. A dishwasher passes through 70–80 W between phases and can dry for twenty minutes at 30 W — none of it finished |
+| `number.<load>_finished_after_idle_for` | One timestep | Longer than the gaps a program leaves between its own phases. Raise it for an eco program with a long soak |
+
+Three things deliberately do **not** count as idle:
+
+- a reading **above** the idle floor, however small — a drying phase is not a
+  finished program;
+- an **unavailable** sensor — a plug that fell off the network says nothing
+  about the appliance;
+- idle while the load is **not being told to run** — a gap the plan itself
+  left between two blocks of one run is idle for reasons that have nothing to
+  do with the appliance.
+
+An appliance still drawing power when its hours run out is **held on for up to
+one more timestep** rather than cut off mid-program, then ends as `cut_short`.
+
+Only on-demand runs end this way. A daily load is judged on what its meter
+saw — "has this appliance done today's work" counts a cycle you started by
+hand, and doesn't count a commanded hour that never reached the appliance. A
+surplus load keeps its energy cap, because being idle under a cloud is what a
+surplus load does.
+
 ## Greyed-out settings
 
 Some settings are only meaningful in certain states, and report unavailable
@@ -119,6 +180,7 @@ rather than accepting a value that would silently never be read:
 | `number.<load>_run_within` | Recurrence is anything but *On demand* (also unavailable on a surplus load) |
 | `time.<load>_earliest_start` / `_latest_finish` | The time-window switch is off |
 | `number.<load>_lowest_power_while_running` | The load runs at full power only |
+| `number.<load>_counts_as_finished_below` / `_finished_after_idle_for` | Recurrence is anything but *On demand* (and not created at all without a power sensor) |
 
 ## Deferrable numbering stays stable
 

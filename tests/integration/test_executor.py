@@ -30,6 +30,7 @@ from custom_components.emhass_companion.const import (
     MODE_FORCE_DISCHARGE,
     MODE_IDLE,
     MODE_SELF_CONSUME,
+    RECURRENCE_ON_DEMAND,
     SUBENTRY_TYPE_DEFERRABLE,
 )
 from custom_components.emhass_companion.coordinator import EmhassCoordinator, EmhassData
@@ -1124,3 +1125,89 @@ async def test_restore_does_not_interleave_with_an_apply(
     )
     last_write = max(index for index, call in enumerate(calls))
     assert handover == last_write
+
+
+# --- how a run ends, from the executor's side ---------------------------------
+
+
+def _armed_load(coordinator: EmhassCoordinator, **fields):
+    """The one deferrable load, armed as an on-demand run."""
+    load = coordinator.loads.get(next(iter(coordinator.config_entry.subentries)))
+    load.recurrence = RECURRENCE_ON_DEMAND
+    load.operating_hours = 1.0
+    load.power_sensor = "sensor.dishwasher_power"
+    for name, value in fields.items():
+        setattr(load, name, value)
+    return load
+
+
+async def test_the_commanded_clock_ticks_only_when_something_was_commanded(
+    hass: HomeAssistant, calls: list[ServiceCall]
+) -> None:
+    """The gate being off means nothing was asked of the appliance, so no run
+    may be credited with the time it was off for."""
+    executor, coordinator = await _build(hass, with_load=True)
+    load = _armed_load(coordinator)
+    load.request(dt_util.utcnow())
+    coordinator.data = EmhassData(
+        plan=_plan(0, deferrable=2000),
+        last_success=dt_util.utcnow(),
+        load_order=[load.subentry_id],
+    )
+
+    coordinator.control_enabled = False
+    await executor.async_apply()
+    await hass.async_block_till_done()
+    assert load.is_commanded is False
+
+    coordinator.control_enabled = True
+    await executor.async_apply()
+    await hass.async_block_till_done()
+    assert load.is_commanded is True
+
+
+async def test_a_stale_plan_does_not_re_run_a_request_that_ended(
+    hass: HomeAssistant, calls: list[ServiceCall]
+) -> None:
+    """The plan outlives the request that produced it. Left to the plan alone,
+    a finished run keeps being switched back on until the next optimisation."""
+    executor, coordinator = await _build(hass, with_load=True)
+    coordinator.control_enabled = True
+    load = _armed_load(coordinator, requested=False)
+    hass.states.async_set(LOAD_SWITCH, "on")
+    coordinator.data = EmhassData(
+        plan=_plan(0, deferrable=2000),
+        last_success=dt_util.utcnow(),
+        load_order=[load.subentry_id],
+    )
+
+    await executor.async_apply()
+    await hass.async_block_till_done()
+
+    assert any(call.service == "turn_off" for call in calls)
+
+
+async def test_an_appliance_still_drawing_at_its_target_is_not_cut_off(
+    hass: HomeAssistant, calls: list[ServiceCall]
+) -> None:
+    """Its target is met, so the plan has stopped asking for it -- obeying that
+    would take power from an appliance mid-program."""
+    executor, coordinator = await _build(hass, with_load=True)
+    coordinator.control_enabled = True
+    now = dt_util.utcnow()
+    load = _armed_load(coordinator)
+    load.request(now - timedelta(hours=2))
+    load.command_runtime = timedelta(hours=2)
+    load.observe_power(2000, now - timedelta(hours=2))
+    hass.states.async_set(LOAD_SWITCH, "on")
+    coordinator.data = EmhassData(
+        plan=_plan(0, deferrable=0),  # the plan wants nothing more from it
+        last_success=now,
+        load_order=[load.subentry_id],
+    )
+
+    assert load.in_completion_hold(dt_util.utcnow()) is True
+    await executor.async_apply()
+    await hass.async_block_till_done()
+
+    assert not any(call.service == "turn_off" for call in calls)

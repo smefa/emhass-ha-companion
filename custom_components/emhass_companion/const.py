@@ -493,6 +493,54 @@ ATTR_REQUESTED_AT: Final = "requested_at"
 ATTR_DEADLINE_AT: Final = "deadline_at"
 ATTR_REQUEST_RUNTIME_SECONDS: Final = "request_runtime_seconds"
 
+# The rest of one on-demand run's state, carried on the same switch and for the
+# same reason: the run has to survive a restart as one unit. command_runtime is
+# the clock the run is judged against (see DeferrableRuntime.elapsed_commanded),
+# seen_running latches the first watt actually drawn, and idle_since is how long
+# the load has read idle while being told to run. Losing any of the three to a
+# restart restarts the judgement: an appliance that finished just before one
+# would wait a fresh idle window to be noticed, and one that never started would
+# look like it had merely not started *yet*.
+ATTR_COMMAND_RUNTIME_SECONDS: Final = "command_runtime_seconds"
+ATTR_SEEN_RUNNING: Final = "seen_running"
+ATTR_IDLE_SINCE: Final = "idle_since"
+# Why the last run ended, and when. Deliberately outlives the request itself --
+# cancel() clears the flag, the anchor and the progress, and "why did it stop"
+# is a question asked precisely when the switch is already off.
+ATTR_COMPLETION_REASON: Final = "last_completion_reason"
+ATTR_COMPLETION_AT: Final = "last_completion_at"
+
+# How an on-demand run ended.
+#
+# The distinction that matters is COMPLETED vs CUT_SHORT: both mean the run had
+# its full operating_hours, but the first ended with the appliance idle and the
+# second had power taken away from an appliance still drawing it -- the signal
+# that operating_hours is set shorter than the program actually needs.
+#
+# FINISHED_EARLY is the normal ending for a metered load, and the only one that
+# needs no configuration to be right. An unmetered load can only ever reach
+# COMPLETED: with no meter, "still drawing" and "finished" are the same reading.
+COMPLETION_FINISHED_EARLY: Final = "finished_early"
+COMPLETION_COMPLETED: Final = "completed"
+COMPLETION_CUT_SHORT: Final = "cut_short"
+COMPLETION_NEVER_STARTED: Final = "never_started"
+COMPLETION_CANCELLED: Final = "cancelled"
+
+# What counts as "the appliance is off" for completion, and for how long.
+#
+# Deliberately *not* running_threshold_w. That one answers "is this load doing
+# meaningful work" and errs towards ignoring a marginal draw; this one answers
+# "has it finished" and must err the other way, because a false yes takes power
+# from a live appliance. A dishwasher passes through 70-80 W between phases and
+# can spend twenty minutes drying at 30 W -- all of it under a 110 W running
+# threshold, none of it finished. So the default is "essentially off" instead,
+# the same floor a standby draw already fails to clear.
+#
+# 0 minutes means one optimisation timestep, the same "0 is the sensible
+# default" convention run_within_hours and max_startups already use.
+DEFAULT_IDLE_POWER_W: Final = 10.0
+DEFAULT_IDLE_MINUTES: Final = 0.0
+
 # --- Profiles ----------------------------------------------------------------
 
 PROFILE_KIND_PRICE: Final = "price"
@@ -726,6 +774,13 @@ ISSUE_SCRIPT_CONTROL_ENTITY: Final = "script_control_entity"
 # taking setup down with a traceback, so the user has to be told which field
 # was ignored and what it now reads as.
 ISSUE_BAD_STORED_TIME: Final = "bad_stored_time"
+# Suffixed with the load's subentry_id, like ISSUE_THERMAL_UNREACHABLE: an
+# on-demand load was given its whole run and never drew a watt. Per-load because
+# only that appliance is affected and only its owner can fix it -- a dishwasher
+# that needs its own start button pressed, a plug that does not resume the
+# program on power-up, a breaker left off. An error rather than a warning: the
+# user asked for a run, the run did not happen, and nothing else will say so.
+ISSUE_LOAD_NEVER_STARTED: Final = "load_never_started"
 
 # Solcast's day sensors are named today / tomorrow / day_3..day_7 -- "tomorrow"
 # *is* day 2, there is no forecast_day_2. Day 3 is the first sensor past the

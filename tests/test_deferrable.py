@@ -13,6 +13,11 @@ from homeassistant.core import State
 import pytest
 
 from custom_components.emhass_companion.const import (
+    COMPLETION_CANCELLED,
+    COMPLETION_COMPLETED,
+    COMPLETION_CUT_SHORT,
+    COMPLETION_FINISHED_EARLY,
+    COMPLETION_NEVER_STARTED,
     LOAD_MODE_AUTO,
     LOAD_MODE_FORCE_ON,
     LOAD_TYPE_THERMAL,
@@ -447,11 +452,14 @@ def test_auto_disarm_waits_for_the_target_to_be_reached():
 
 
 def test_auto_disarm_clears_the_request_once_the_target_is_reached():
-    load = _load(recurrence=RECURRENCE_ON_DEMAND, requested=True, operating_hours=1)
+    load = _load(recurrence=RECURRENCE_ON_DEMAND, operating_hours=1)
+    load.request(T0)
+    load.observe_command(True, T0)
     load.observe_power(1900, T0)
-    load.observe_power(0, T0 + timedelta(hours=1))
+    load.observe_command(False, T0 + timedelta(hours=1))
     assert load.check_auto_disarm(T0 + timedelta(hours=1)) is True
     assert load.requested is False
+    assert load.last_completion_reason == COMPLETION_COMPLETED
 
 
 # --- deadlines ----------------------------------------------------------------
@@ -530,6 +538,7 @@ def test_a_request_that_outlives_midnight_is_not_re_run():
     """
     load = _load(recurrence=RECURRENCE_ON_DEMAND, operating_hours=2)
     load.request(T0)
+    load.observe_command(True, T0)
     load.observe_power(1900, T0)
     midnight = T0 + timedelta(hours=1)
     load.reset_day(midnight)
@@ -782,3 +791,242 @@ def test_the_run_floor_follows_the_power_model():
     than its nominal power; one that may modulate can go down to its floor."""
     assert _surplus(semi_continuous=True).surplus_run_floor_w == 800.0
     assert _surplus(semi_continuous=False, minimum_power_w=250.0).surplus_run_floor_w == 250.0
+
+
+# --- how a run ends -----------------------------------------------------------
+#
+# The clock an on-demand run is judged on is commanded time, not measured time.
+# ``_metered`` gives the load a power sensor, which is what separates "the
+# appliance finished" from "the appliance was never switched on" -- and is the
+# only reason any of the endings below other than COMPLETED can be reached.
+
+STEP = 15
+
+
+def _metered(**overrides) -> DeferrableRuntime:
+    defaults = {
+        "recurrence": RECURRENCE_ON_DEMAND,
+        "power_sensor": "sensor.dishwasher_power",
+        "operating_hours": 1.0,
+    }
+    return _load(**{**defaults, **overrides})
+
+
+def _run(load: DeferrableRuntime, start: datetime) -> None:
+    """Arm a request and start commanding the load, as the executor would."""
+    load.request(start)
+    load.observe_command(True, start)
+
+
+def test_a_duty_cycling_load_is_judged_on_commanded_time_not_its_meter():
+    """The bug this whole rule exists for.
+
+    A dishwasher spends a third of its program under the running threshold --
+    filling, soaking, draining. Measured against its meter it can finish a
+    complete cycle having "run" only 40 minutes of the hour it was given, and
+    the request never clears.
+    """
+    load = _metered()
+    _run(load, T0)
+    # 40 minutes of drawing power spread over a full commanded hour.
+    load.observe_power(1900, T0)
+    load.observe_power(5, T0 + timedelta(minutes=40))
+
+    assert load.elapsed_today(T0 + timedelta(hours=1)) == timedelta(minutes=40)
+    assert load.elapsed_commanded(T0 + timedelta(hours=1)) == timedelta(hours=1)
+    assert load.check_auto_disarm(T0 + timedelta(hours=1), STEP) is True
+    assert load.requested is False
+
+
+def test_an_idle_load_finishes_early_once_the_idle_window_passes():
+    load = _metered()
+    _run(load, T0)
+    load.observe_power(1900, T0)
+    load.observe_power(0, T0 + timedelta(minutes=20))
+
+    assert load.check_auto_disarm(T0 + timedelta(minutes=30), STEP) is False
+    assert load.check_auto_disarm(T0 + timedelta(minutes=35), STEP) is True
+    assert load.last_completion_reason == COMPLETION_FINISHED_EARLY
+    assert load.last_completion_at == T0 + timedelta(minutes=35)
+
+
+def test_a_gap_between_phases_is_not_the_end_of_the_program():
+    """The dishwasher's own pauses are minutes long; the window is a timestep."""
+    load = _metered()
+    _run(load, T0)
+    load.observe_power(1900, T0)
+    load.observe_power(5, T0 + timedelta(minutes=20))
+    load.observe_power(1900, T0 + timedelta(minutes=23))
+
+    assert load.idle_since is None
+    assert load.check_auto_disarm(T0 + timedelta(minutes=40), STEP) is False
+    assert load.requested is True
+
+
+def test_a_low_power_phase_is_not_idle():
+    """A drying phase draws far too little to count as running, and is not
+    remotely finished. Only the idle floor separates the two."""
+    load = _metered()
+    _run(load, T0)
+    load.observe_power(1900, T0)
+    load.observe_power(30, T0 + timedelta(minutes=20))
+
+    assert load.is_running is False
+    assert load.idle_since is None
+    assert load.check_auto_disarm(T0 + timedelta(minutes=50), STEP) is False
+
+
+def test_an_unavailable_meter_is_not_an_idle_reading():
+    """A plug that fell off the network says nothing about the appliance."""
+    load = _metered()
+    _run(load, T0)
+    load.observe_power(1900, T0)
+    load.observe_power(None, T0 + timedelta(minutes=20))
+
+    assert load.idle_since is None
+    assert load.check_auto_disarm(T0 + timedelta(minutes=50), STEP) is False
+
+
+def test_idle_only_counts_while_the_load_is_being_told_to_run():
+    """A gap the plan itself left between two blocks of one run is idle for a
+    reason that has nothing to do with the appliance."""
+    load = _metered(operating_hours=2.0)
+    _run(load, T0)
+    load.observe_power(1900, T0)
+    load.observe_command(False, T0 + timedelta(minutes=30))
+    load.observe_power(0, T0 + timedelta(minutes=31))
+
+    assert load.idle_since is None
+    assert load.check_auto_disarm(T0 + timedelta(hours=1), STEP) is False
+    assert load.requested is True
+
+
+def test_a_load_that_never_drew_a_watt_is_never_started_not_finished():
+    load = _metered()
+    _run(load, T0)
+    load.observe_power(0, T0 + timedelta(minutes=1))
+
+    # Idle from the start, but nothing has been seen to start.
+    assert load.check_auto_disarm(T0 + timedelta(minutes=30), STEP) is False
+    assert load.check_auto_disarm(T0 + timedelta(hours=1), STEP) is True
+    assert load.last_completion_reason == COMPLETION_NEVER_STARTED
+
+
+def test_a_load_still_drawing_at_its_target_is_held_not_cut():
+    load = _metered()
+    _run(load, T0)
+    load.observe_power(1900, T0)
+
+    at_target = T0 + timedelta(hours=1)
+    assert load.in_completion_hold(at_target) is True
+    assert load.check_auto_disarm(at_target, STEP) is False
+    assert load.requested is True
+
+
+def test_the_hold_lasts_one_timestep_and_then_cuts_short():
+    """The signal that operating_hours is set shorter than the program needs."""
+    load = _metered()
+    _run(load, T0)
+    load.observe_power(1900, T0)
+
+    overrun = T0 + timedelta(hours=1, minutes=STEP)
+    assert load.check_auto_disarm(overrun, STEP) is True
+    assert load.last_completion_reason == COMPLETION_CUT_SHORT
+
+
+def test_an_unmetered_load_ends_exactly_at_its_target():
+    """Without a meter "still drawing" is our own command read back, so a load
+    with no power sensor must never be held past its target."""
+    load = _load(recurrence=RECURRENCE_ON_DEMAND, operating_hours=1.0)
+    _run(load, T0)
+    load.observe_power(1900, T0)
+
+    at_target = T0 + timedelta(hours=1)
+    assert load.in_completion_hold(at_target) is False
+    assert load.check_auto_disarm(at_target, STEP) is True
+    assert load.last_completion_reason == COMPLETION_COMPLETED
+
+
+def test_reaching_the_target_and_going_idle_is_punctual_not_early():
+    load = _metered()
+    _run(load, T0)
+    load.observe_power(1900, T0)
+    load.observe_power(0, T0 + timedelta(minutes=50))
+
+    assert load.check_auto_disarm(T0 + timedelta(hours=1, minutes=5), STEP) is True
+    assert load.last_completion_reason == COMPLETION_COMPLETED
+
+
+def test_the_user_turning_the_switch_off_is_recorded_as_cancelled():
+    load = _metered()
+    _run(load, T0)
+    load.cancel(now=T0 + timedelta(minutes=10))
+    assert load.last_completion_reason == COMPLETION_CANCELLED
+    assert load.requested is False
+
+
+def test_a_fresh_request_is_judged_on_its_own_evidence():
+    """Neither the previous run's commanded time nor its latch may carry over."""
+    load = _metered()
+    _run(load, T0)
+    load.observe_power(1900, T0)
+    load.observe_command(False, T0 + timedelta(minutes=40))
+
+    _run(load, T0 + timedelta(hours=3))
+    assert load.seen_running is False
+    assert load.elapsed_commanded(T0 + timedelta(hours=3)) == timedelta()
+
+
+def test_commanded_time_is_credited_from_the_request_not_before():
+    """A load already being commanded when the request arrives starts the new
+    run's clock at the request, not at whenever it was switched on."""
+    load = _metered()
+    load.observe_command(True, T0)
+    load.request(T0 + timedelta(minutes=30))
+
+    assert load.elapsed_commanded(T0 + timedelta(hours=1)) == timedelta(minutes=30)
+
+
+def test_a_daily_load_is_still_judged_on_what_its_meter_saw():
+    """Commanded time answers "was the deal honoured"; a daily load is asking
+    whether the appliance did today's work, however that happened."""
+    load = _load(recurrence=RECURRENCE_DAILY, operating_hours=1.0)
+    load.observe_command(True, T0)
+    load.observe_power(1900, T0)
+    load.observe_power(0, T0 + timedelta(minutes=40))
+
+    assert load.elapsed_towards_target(T0 + timedelta(hours=1)) == timedelta(minutes=40)
+
+
+def test_a_forced_run_ends_when_the_appliance_does():
+    """Its measured target is unreachable for a duty-cycling load, which is how
+    a forced run used to hold a load on until the next restart."""
+    load = _metered()
+    load.force_run(T0)
+    load.observe_command(True, T0)
+    load.observe_power(1900, T0)
+    load.observe_power(0, T0 + timedelta(minutes=40))
+
+    assert load.check_auto_disarm(T0 + timedelta(minutes=56), STEP) is True
+    assert load.mode == LOAD_MODE_AUTO
+
+
+def test_a_forced_run_that_never_starts_still_ends():
+    load = _metered()
+    load.force_run(T0)
+    load.observe_command(True, T0)
+    load.observe_power(0, T0)
+
+    assert load.check_auto_disarm(T0 + timedelta(minutes=30), STEP) is False
+    assert load.check_auto_disarm(T0 + timedelta(hours=1, minutes=STEP), STEP) is True
+    assert load.mode == LOAD_MODE_AUTO
+
+
+def test_completed_timesteps_follow_the_commanded_clock():
+    """The disarm and the payload have to be reading the same run."""
+    load = _metered(operating_hours=2.0)
+    _run(load, T0)
+    load.observe_power(1900, T0)
+    load.observe_power(5, T0 + timedelta(minutes=20))
+
+    assert load.completed_timesteps(T0 + timedelta(hours=1), STEP) == 4

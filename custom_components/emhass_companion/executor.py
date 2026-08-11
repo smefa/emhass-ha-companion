@@ -265,6 +265,12 @@ class Executor:
                 # Already holding _lock, so the unlocked body directly.
                 await self._async_restore("control switch turned off")
             decision.reason = f"{decision.reason} (control disabled, not applied)"
+            # Nothing is being asked of any appliance while the gate is off, so
+            # no run may go on being credited with commanded time. Left open,
+            # a span would quietly run a request to completion during exactly
+            # the period the integration was told to keep its hands off.
+            for load in self.coordinator.loads.all():
+                load.observe_command(False, decision.at or dt_util.utcnow())
             self._record(decision)
             _LOGGER.debug("Would apply %s: %s", decision.action, decision.reason)
             return decision
@@ -430,11 +436,26 @@ class Executor:
 
     def _decide_loads(self, *, use_plan: bool) -> dict[str, bool]:
         """Whether each deferrable load should be running."""
+        now = dt_util.utcnow()
         decisions: dict[str, bool] = {}
         for load in self.coordinator.loads.all():
             if not load.enabled:
                 continue
             scheduled = self._scheduled(load) if use_plan else False
+            if load.armable and not load.requested:
+                # The plan outlives the request that produced it: a run that
+                # ended -- finished, cancelled, or disarmed by
+                # check_auto_disarm -- would otherwise keep being switched on
+                # from the same stale rows until the next optimisation replaces
+                # them. Not applied to a forced run, which is by definition
+                # "run regardless".
+                scheduled = False
+            elif load.in_completion_hold(now):
+                # Its target is met, so the plan has stopped asking for it, but
+                # the appliance is still drawing: leaving it to the plan here
+                # would cut power mid-program. check_auto_disarm ends this
+                # within one timestep either way.
+                scheduled = True
             decisions[load.subentry_id] = resolve_should_run(load.mode, scheduled)
         return decisions
 
@@ -595,9 +616,20 @@ class Executor:
         return False
 
     async def _async_apply_loads(self, decision: Decision) -> None:
+        now = decision.at or dt_util.utcnow()
         for subentry_id, should_run in decision.loads.items():
             load = self.coordinator.loads.get(subentry_id)
-            if load is None or not load.control_entity:
+            if load is None:
+                continue
+            # The commanded clock ticks here and nowhere else: this is the one
+            # point at which the decision is known to have been acted on. A
+            # decision computed while the control gate is off never reaches
+            # this method, and must not be credited as run time -- nothing was
+            # asked of the appliance. A load with no control entity still
+            # counts: its own automation follows the same decision through the
+            # Should run binary sensor.
+            load.observe_command(should_run, now)
+            if not load.control_entity:
                 continue
             await self._async_set_load(load, should_run, decision)
 

@@ -15,7 +15,16 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.util import dt as dt_util
 
-from .const import ATTR_DEADLINE_AT, ATTR_REQUEST_RUNTIME_SECONDS, ATTR_REQUESTED_AT
+from .const import (
+    ATTR_COMMAND_RUNTIME_SECONDS,
+    ATTR_COMPLETION_AT,
+    ATTR_COMPLETION_REASON,
+    ATTR_DEADLINE_AT,
+    ATTR_IDLE_SINCE,
+    ATTR_REQUEST_RUNTIME_SECONDS,
+    ATTR_REQUESTED_AT,
+    ATTR_SEEN_RUNNING,
+)
 from .coordinator import EmhassCoordinator
 from .deferrable import DeferrableRuntime
 from .entity import EmhassEntity, EmhassLoadEntity
@@ -88,14 +97,33 @@ def _requested_attrs(load: DeferrableRuntime) -> dict[str, Any]:
     already-progressed request look freshly armed and already overdue.
     """
     deadline = load.deadline_at
+    now = dt_util.utcnow()
     return {
         ATTR_REQUESTED_AT: load.requested_at.isoformat() if load.requested_at else None,
         ATTR_DEADLINE_AT: deadline.isoformat() if deadline else None,
         ATTR_REQUEST_RUNTIME_SECONDS: load.request_runtime.total_seconds(),
+        # Inclusive of any span still open, unlike request_runtime above: this
+        # is the clock the run is actually judged against, so a restart that
+        # lands mid-span must not roll it back to the last closed one.
+        ATTR_COMMAND_RUNTIME_SECONDS: load.elapsed_commanded(now).total_seconds(),
+        ATTR_SEEN_RUNNING: load.seen_running,
+        ATTR_IDLE_SINCE: load.idle_since.isoformat() if load.idle_since else None,
+        ATTR_COMPLETION_REASON: load.last_completion_reason,
+        ATTR_COMPLETION_AT: (
+            load.last_completion_at.isoformat() if load.last_completion_at else None
+        ),
     }
 
 
 def _restore_requested(load: DeferrableRuntime, attributes: dict[str, Any]) -> None:
+    # Before the early return: how the *last* run ended outlives the run, and is
+    # read precisely when the switch is off -- which is exactly the state this
+    # would otherwise skip.
+    if isinstance(reason := attributes.get(ATTR_COMPLETION_REASON), str):
+        load.last_completion_reason = reason
+    if (raw := attributes.get(ATTR_COMPLETION_AT)) and (parsed := dt_util.parse_datetime(raw)):
+        load.last_completion_at = parsed
+
     if not load.requested:
         return
     if (raw := attributes.get(ATTR_REQUESTED_AT)) and (parsed := dt_util.parse_datetime(raw)):
@@ -109,6 +137,17 @@ def _restore_requested(load: DeferrableRuntime, attributes: dict[str, Any]) -> N
     seconds = attributes.get(ATTR_REQUEST_RUNTIME_SECONDS)
     if isinstance(seconds, (int, float)) and seconds > 0:
         load.request_runtime = timedelta(seconds=seconds)
+
+    commanded = attributes.get(ATTR_COMMAND_RUNTIME_SECONDS)
+    if isinstance(commanded, (int, float)) and commanded > 0:
+        load.command_runtime = timedelta(seconds=commanded)
+    load.seen_running = bool(attributes.get(ATTR_SEEN_RUNNING))
+    if (raw := attributes.get(ATTR_IDLE_SINCE)) and (parsed := dt_util.parse_datetime(raw)):
+        # Restored rather than restarted: an appliance that finished a minute
+        # before the restart has already served most of its idle window, and
+        # making it serve a fresh one is how a run that is plainly over stays
+        # armed for another quarter of an hour after every restart.
+        load.idle_since = parsed
 
 
 LOAD_SWITCHES: tuple[LoadSwitchDescription, ...] = (

@@ -587,6 +587,12 @@
       },
       "minimum_off_time": {
         "name": "18. Minimum time off"
+      },
+      "idle_power": {
+        "name": "19. Counts as finished below"
+      },
+      "idle_time": {
+        "name": "20. Finished after idle for"
       }
     },
     "time": {
@@ -644,6 +650,10 @@
     "bad_stored_time": {
       "title": "{count} stored time(s) could not be read",
       "description": "Home Assistant could not make sense of these stored times of day, so the default was used instead:\n\n{details}\n\nThis normally means the configuration was hand-edited or restored from a backup written by a different version. Open Settings > Devices & services > EMHASS Companion (or the load in question) and set the time again to clear this."
+    },
+    "load_never_started": {
+      "title": "{name} never started",
+      "description": "{name} was requested and given its full {hours} h, but its power sensor never saw it draw anything. The request has been cleared, so nothing is waiting on it -- but the run did not happen.\n\nUsual causes: the appliance needs its own start button pressed after being switched on, it does not resume its program when power returns, or the plug never actually powered it.\n\nThis clears itself the next time the load completes a run."
     }
   },
   "services": {

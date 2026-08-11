@@ -24,6 +24,7 @@ from .const import (
     ACTION_DAYAHEAD,
     ACTION_FORECAST_FIT,
     ACTION_MPC,
+    COMPLETION_NEVER_STARTED,
     CONF_GROUP_LOAD_IDS,
     CONF_GROUP_MAX_POWER,
     CONF_GROUP_MUTUAL_EXCLUSION,
@@ -37,6 +38,7 @@ from .const import (
     EMHASS_CONF_TIME_STEP,
     EMHASS_CONF_VAR_MODEL,
     END_SOC_OPTIMIZED,
+    ISSUE_LOAD_NEVER_STARTED,
     ISSUE_ML_FORECASTER_NOT_READY,
     ISSUE_OPTIMIZATION_INFEASIBLE,
     ISSUE_PLAN_SCHEMA,
@@ -673,6 +675,38 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             translation_placeholders={"action": action},
         )
 
+    def _track_never_started_issues(self) -> None:
+        """Raise or clear the per-load "it never started" repair.
+
+        One issue per load, like :meth:`LoadNumber._check_thermal_reachability`:
+        only that appliance is affected, and the fix is its own -- a dishwasher
+        whose own start button was never pressed, a plug that does not resume
+        the program on power-up, a breaker left off.
+
+        Read off ``last_completion_reason`` rather than raised from inside
+        ``check_auto_disarm``, so that the runtime stays free of Home Assistant
+        plumbing and the issue survives being recomputed every cycle: it is
+        cleared by the next run that ends any other way, which is the only
+        evidence that whatever was wrong has been dealt with.
+        """
+        for load in self.loads.all():
+            issue_id = f"{ISSUE_LOAD_NEVER_STARTED}_{load.subentry_id}"
+            if load.last_completion_reason != COMPLETION_NEVER_STARTED:
+                ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+                continue
+            ir.async_create_issue(
+                self.hass,
+                DOMAIN,
+                issue_id,
+                is_fixable=False,
+                severity=ir.IssueSeverity.ERROR,
+                translation_key=ISSUE_LOAD_NEVER_STARTED,
+                translation_placeholders={
+                    "name": load.name,
+                    "hours": f"{load.operating_hours:g}",
+                },
+            )
+
     def _track_run_failed_issue(self, failed: bool, action: str, message: str) -> None:
         """Raise or clear the whole-integration run-failed repair.
 
@@ -819,7 +853,8 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         # ones that plan could speak for. Ordered between the two calls because
         # it reads the accumulator assume_from_plan just advanced, and writes
         # the armed flag apply_surplus below reads back.
-        self.loads.check_auto_disarm(now)
+        self.loads.check_auto_disarm(now, config.time_step_minutes)
+        self._track_never_started_issues()
         if self.data is not None:
             # Re-derive each surplus load's hours and window from the spare PV
             # the previous plan predicted. Must run *after*

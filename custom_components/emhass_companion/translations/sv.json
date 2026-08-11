@@ -587,6 +587,12 @@
       },
       "minimum_off_time": {
         "name": "18. Minsta tid av"
+      },
+      "idle_power": {
+        "name": "19. Räknas som klar under"
+      },
+      "idle_time": {
+        "name": "20. Klar efter overksam i"
       }
     },
     "time": {
@@ -644,6 +650,10 @@
     "bad_stored_time": {
       "title": "{count} sparad(e) tid(er) kunde inte läsas",
       "description": "Home Assistant kunde inte tolka dessa sparade klockslag, så standardvärdet användes i stället:\n\n{details}\n\nDet beror oftast på att konfigurationen redigerats för hand eller återställts från en säkerhetskopia skriven av en annan version. Öppna Inställningar > Enheter och tjänster > EMHASS Companion (eller den aktuella lasten) och ställ in tiden igen för att rensa detta."
+    },
+    "load_never_started": {
+      "title": "{name} startade aldrig",
+      "description": "{name} begärdes och fick sina hela {hours} h, men effektsensorn såg den aldrig dra något. Begäran har rensats, så inget väntar på den -- men körningen blev inte av.\n\nVanliga orsaker: apparaten behöver att man trycker på dess egen startknapp efter att den slagits på, den återupptar inte programmet när strömmen kommer tillbaka, eller så fick den aldrig ström via uttaget.\n\nDetta försvinner nästa gång lasten slutför en körning."
     }
   },
   "services": {
