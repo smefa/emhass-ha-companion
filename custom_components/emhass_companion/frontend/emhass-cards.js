@@ -3269,15 +3269,24 @@ function valueBox(parent, key) {
 }
 
 /**
+ * The level at and below which the rail stops being informative and starts
+ * warning -- for the fill, and for the trough the plan is heading into.
+ */
+const SOC_LOW_PCT = 20;
+
+/**
  * The planned battery level, with where the battery actually is on it.
  *
  * A lone fill answers "how full is it", which is the one thing a battery
  * owner can already read off their inverter. What a *plan* bar is for is the
- * comparison, so this draws three things on one rail: the level the plan has
+ * comparison, so this draws four things on one rail: the level the plan has
  * for right now (the fill), the peak the plan is steering towards (a lighter
- * band carrying on from it), and the measured level as a marker. A visible
- * gap between the marker and the fill is a plan running on a stale SOC --
- * which is invisible on any single-value display.
+ * band carrying on from it), the lowest level it dips to on the way (a quiet
+ * tick), and the measured level as a marker. A visible gap between the marker
+ * and the fill is a plan running on a stale SOC -- which is invisible on any
+ * single-value display. The low is the other half of the same question: a plan
+ * that ends the day full can still empty the battery at 3pm, and neither the
+ * fill nor the peak band ever says so.
  */
 function socBar(parent, label) {
   const root = tag("div", "soc", parent);
@@ -3287,21 +3296,26 @@ function socBar(parent, label) {
   const rail = tag("div", "rail", root);
   const reach = tag("div", "reach", rail);
   const fill = tag("div", "fill", rail);
+  const dip = tag("div", "dip", rail);
   const mark = tag("div", "mark", rail);
   const key = tag("div", "soc-key", root);
 
   const legend = (swatch) => {
     const item = tag("span", "leg", key);
-    tag("i", `sw ${swatch}`, item);
+    const sw = tag("i", `sw ${swatch}`, item);
     const text = tag("span", null, item, "");
-    item.set = (content) => {
+    item.set = (content, colour) => {
       text.textContent = content || "";
       item.style.display = content ? "" : "none";
+      // Only the low swatch ever tints, and only to warn; the empty string
+      // hands it back to the stylesheet rather than freezing today's colour.
+      sw.style.background = colour || "";
     };
     return item;
   };
   const legNow = legend("now");
   const legPlan = legend("plan");
+  const legLow = legend("low");
   const legPeak = legend("peak");
 
   const clamp = (value) => Math.max(0, Math.min(100, value));
@@ -3309,14 +3323,30 @@ function socBar(parent, label) {
   root.set = (info) => {
     const planned = info.planned;
     const peak = info.peak;
+    const low = info.low;
     const measured = info.measured;
     const hasPlan = Number.isFinite(planned);
+    // The same line the fill goes red on, so the rail never warns about the
+    // level now while staying calm about an identical level an hour out.
+    const isDeep = Number.isFinite(low) && low < SOC_LOW_PCT;
 
     fill.style.width = hasPlan ? `${clamp(planned)}%` : "0%";
     // The band only means anything as *headroom beyond the fill*; without a
     // plan there is nothing for it to extend from.
     reach.style.width = hasPlan && Number.isFinite(peak) ? `${clamp(peak)}%` : "0%";
-    fill.style.background = hasPlan && planned < 20 ? "var(--emh-bad)" : "var(--emh-battery)";
+    fill.style.background =
+      hasPlan && planned < SOC_LOW_PCT ? "var(--emh-bad)" : "var(--emh-battery)";
+
+    if (Number.isFinite(low)) {
+      dip.style.left = `${clamp(low)}%`;
+      dip.style.display = "";
+      // A trough that goes deep is worth reading as a warning rather than as
+      // one more tick, and its colour is the only thing carrying that on the
+      // rail itself, since the fill is drawn from the level *now*.
+      dip.style.background = isDeep ? "var(--emh-bad)" : "";
+    } else {
+      dip.style.display = "none";
+    }
 
     if (Number.isFinite(measured)) {
       mark.style.left = `${clamp(measured)}%`;
@@ -3328,6 +3358,10 @@ function socBar(parent, label) {
     value.textContent = hasPlan ? `${planned.toFixed(0)} %` : "no plan";
     legNow.set(Number.isFinite(measured) ? `now ${measured.toFixed(0)} %` : "");
     legPlan.set(hasPlan ? `plan ${planned.toFixed(0)} %` : "");
+    legLow.set(
+      Number.isFinite(low) ? `low ${low.toFixed(0)} %${info.lowAt ? ` · ${info.lowAt}` : ""}` : "",
+      isDeep ? "var(--emh-bad)" : "",
+    );
     legPeak.set(
       Number.isFinite(peak)
         ? `peak ${peak.toFixed(0)} %${info.peakAt ? ` · ${info.peakAt}` : ""}`
@@ -3348,7 +3382,7 @@ function socBar(parent, label) {
 const STATUS_SECTIONS = [
   ["show_banner", "Control banner", "Whether the Companion is actually in charge"],
   ["show_decision", "Battery decision", "What it decided, why, and at what power"],
-  ["show_soc", "Planned battery level", "The plan's level, its peak, and the measured one"],
+  ["show_soc", "Planned battery level", "The plan's level, its low and peak, and the measured one"],
   ["show_battery", "Battery tiles", "The numbers under the rail"],
   ["show_system", "System tiles", "Mode, cost function, curtailment, loads, timing"],
   ["show_rules", "Why it decided that", "The executor's own rule trace"],
@@ -3718,6 +3752,8 @@ class EmhassStatusCard extends LiveCard {
         planned: isUsable(soc) ? num(soc) : NaN,
         peak: high ? high.v : NaN,
         peakAt: high ? formatTime(high.t, hass) : "",
+        low: low ? low.v : NaN,
+        lowAt: low ? formatTime(low.t, hass) : "",
         measured,
       });
     }
@@ -3896,6 +3932,12 @@ EmhassStatusCard.css = `
   .soc .reach { background: rgba(77, 182, 172, .32);
                 background: color-mix(in srgb, var(--emh-battery) 32%, transparent); }
   .soc .fill { background: var(--emh-battery); }
+  /* The trough is a tick like the measured level, one step quieter, because it
+     has to stay readable wherever it lands -- inside the fill, inside the
+     lighter band, or on the bare rail when the plan only climbs from here. */
+  .soc .dip { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px;
+              border-radius: 1px; background: var(--emh-dim);
+              transition: left 500ms var(--emh-ease), background 300ms; }
   /* The measured level rides on top of both bands: the whole point of it is
      to be readable against the planned one it disagrees with. */
   .soc .mark { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px;
@@ -3907,6 +3949,7 @@ EmhassStatusCard.css = `
   .soc-key .sw { width: 8px; height: 8px; border-radius: 2px; }
   .soc-key .sw.now { background: var(--primary-text-color); }
   .soc-key .sw.plan { background: var(--emh-battery); }
+  .soc-key .sw.low { background: var(--emh-dim); }
   .soc-key .sw.peak { background: rgba(77, 182, 172, .32);
                       background: color-mix(in srgb, var(--emh-battery) 32%, transparent); }
 

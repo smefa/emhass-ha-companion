@@ -158,9 +158,12 @@ entity, so the settings are one tap away rather than absent.
   is not re-sent every run, so "already in effect" and "not sent" are
   different states and the card says which.
 - **Planned battery level** on one rail: the plan's level now as the fill, the
-  peak still to come as a lighter band beyond it, and the *measured* level as
-  a marker. A visible gap between marker and fill is a plan running on a stale
-  SOC, which no single-value display can show.
+  peak still to come as a lighter band beyond it, the lowest level still to
+  come as a tick, and the *measured* level as a marker. A visible gap between
+  marker and fill is a plan running on a stale SOC, which no single-value
+  display can show; the low tick is the other half of the same question, since
+  a plan that ends the day full can still empty the battery on the way, and it
+  turns red when the trough goes under 20 %.
 - Value boxes under **Battery** — the measured level with its gap to the
   plan, battery power with its charge/discharge sense, the end SOC target
   against where the plan actually ends, and the planned low and high with the
