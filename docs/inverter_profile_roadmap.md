@@ -446,8 +446,10 @@ These seven need only **three** archetypes: `signed_power`,
 | Growatt MOD / MID TL3-XH | `solax_modbus` | `tou_rewrite` | **shipped, untested.** Genuinely TOU-based — there is no setpoint register on this family — so it dedicates one slot to the plan and moves that slot's priority mode. Percentages of rated power, so it needs the nameplate rating. No curtailment: two candidate export-limit registers exist, in different units, and which one the family honours is unresolved |
 | Ferroamp EnergyHub | `henricm/ha-ferroamp` | service charge/discharge | Swedish and worth having, but the sign convention is undocumented and needs a live install |
 
-**Not planned: Fronius GEN24.** This one was investigated twice, because the
-first answer looked like it was about the wrong thing.
+### Not planned: Fronius GEN24
+
+This one was investigated three times, because each answer looked like it was
+about the wrong thing.
 
 The core `fronius` integration is read-only — Solar API, no write platforms at
 all. The obvious alternative, hand-written core `modbus:` YAML against SunSpec
@@ -486,11 +488,45 @@ and that is the one failure mode the `untested:` marking does *not* cover. That
 marking says "nobody has confirmed this yet", not "commands may silently
 vanish".
 
-So Fronius GEN24 owners get the script escape hatch, where a script can read
-back what it wrote and fail visibly. If the busy-flag issue upstream is fixed
-and the watchdog gets managed, this is worth revisiting — the register
+A correction to an earlier draft of this section: the silent-drop behaviour was
+described here as an open issue upstream. It is not — no such issue exists in
+that tracker. The finding is first-hand from the source, which is stronger
+evidence but has no corroboration from other users.
+
+**The third pass** asked the obvious follow-up: is there a *better* component
+to drive? Four routes were checked, at source rather than at README:
+
+| Route | Verdict |
+|---|---|
+| `callifo/fronius_modbus` | Re-verified at HEAD (2026-08-01). `toggle_busy` still returns bare on collision, decorating ~15 control methods; `RvrtTms` still appears nowhere. New: open issue #121 — the integration **fails to load on HA 2026.7+** (`unpack_bitstring` removed from pymodbus) without a hand patch. Closed issue #97 is the tell: grid charge power was displayed in W while holding raw SunSpec percent, ≈205× off on a BYD HVM |
+| `redpomodoro/fronius_modbus` | The sibling repo. Same `toggle_busy` pattern, last commit 2025-09-09. Strictly worse. The `smartenergycontrol-be` and `Bigert` forks are copies of callifo |
+| `tz8/home-assistant-gen24-energy-control` | A genuinely different transport — local HTTP `/config/timeofuse`, no Modbus. Not usable as an executor: it is a **rival planner** (its own EPEX + Solcast logic; its only service is `apply_policy`, meaning *apply my plan*), it writes 00:00–23:59 `CHARGE_MAX`/`DISCHARGE_MAX` limits rather than a setpoint, it POSTs the whole TOU table — an unwritable decision posts `{"timeofuse": []}`, wiping the owner's entries — and its HTTP client carries **no authentication at all** |
+| `evcc` | The most-deployed Fronius battery controller anywhere, and it confirms the ceiling rather than clearing it: four *modes* only, no watt setpoint, `maxchargerate` a static config percentage. It does not manage the revert timer either. Its value here is corroboration — the negative-`OutWRte` grid-charge trick and `ChaGriSet` semantics are now cross-confirmed |
+
+Honourable mentions, neither an executor: `wiggal/GEN24_Ladesteuerung` (a
+standalone forecast/price planner that writes charge power over HTTP — it would
+fight EMHASS for the same battery) and `jtbnz/fronius-modbus-controller` (a
+Python library, so it lands where a script lands, plus a dependency).
+
+So the verdict stands, and the survey strengthens it: every serious project on
+this hardware either drops to modes or owns the whole plan. Neither shape fits
+a setpoint executor.
+
+Fronius GEN24 owners get the script escape hatch, where a script can read back
+what it wrote and fail visibly — written up concretely in
+[Fronius GEN24 — the scripts recipe](fronius_gen24_scripts.md). The register
 semantics themselves are well understood and cross-confirmed by three
-independent implementations.
+independent implementations; it is only the delivery that has no home.
+
+**If this is ever revisited**, the interesting finding is the web-API route.
+`/config/timeofuse` is persistent configuration — no watchdog to desync
+against — and it is readable back with a `GET`. What makes it a script recipe
+rather than a profile is the authentication: the GEN24 uses a non-standard
+digest handshake, challenged over `X-WWW-Authenticate` with a SHA-256 (or MD5,
+per `authenticationOptions`) secret, which neither `rest_command` nor
+`curl --digest` can speak. That needs a helper of ~60 lines, which is a
+dependency the Companion should not grow. The Modbus-plus-read-back recipe
+needs no authentication at all, which is why it is the one documented.
 
 Also not planned: Tesla Powerwall, sonnen, Victron (AC-coupled, and Powerwall
 has no watt setpoint at all).
@@ -524,7 +560,7 @@ per profile:
 | Growatt | Whether Battery First at a zero charge rate is a true idle; which of the two export-limit registers this family honours |
 | Sigenergy | Nothing load-bearing: the profile avoids the one undocumented fact (the signed setpoint's sign) rather than guessing it. Whether the per-inverter setpoint needs the plant-level enable is unconfirmed, but this profile uses the plant-level entities throughout |
 | Ferroamp | Charge/discharge sign (not yet shipped) |
-| Fronius GEN24 | Not shipped at all — see "Not planned" above. The register semantics are well confirmed; the delivery path is not |
+| Fronius GEN24 | Not shipped at all — see "Not planned" above. The register semantics are well confirmed; the delivery path is not. The [scripts recipe](fronius_gen24_scripts.md) documents the registers but has not been run against hardware, and `InOutWRte_RvrtTms` in particular is derived from the model 124 layout rather than read out of a working implementation |
 
 The earlier conclusion here — that shipping an unvalidated profile is worse
 than shipping none — has been replaced by the `untested:` marking described at

@@ -41,11 +41,14 @@ control switch says.
 | **Scripts (works with any inverter)** | any | The universal fallback — see below |
 
 **Fronius GEN24 owners:** there is deliberately no profile. The core Fronius
-integration cannot write at all, and every Modbus route to a GEN24 has a
+integration cannot write at all, and every packaged route to a GEN24 has a
 silent-failure mode — writes that report success and change nothing. **Scripts**
-is the honest answer here, because a script can read back what it wrote. The
-reasoning is set out in full in the
-[roadmap](inverter_profile_roadmap.md#catalogue).
+is the honest answer here, because a script can read back what it wrote.
+[Fronius GEN24 — the scripts recipe](fronius_gen24_scripts.md) is that written
+out: registers, read-back sensors, four scripts that fail loudly when a write
+does not stick. The reasoning behind not shipping a profile — including the
+survey of every alternative integration — is in the
+[roadmap](inverter_profile_roadmap.md#not-planned-fronius-gen24).
 
 Anything marked *untested* was written from the integration's source and the
 inverter's register map, but nobody has confirmed it against that hardware
