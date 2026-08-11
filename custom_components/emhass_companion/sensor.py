@@ -826,6 +826,15 @@ class EmhassDecisionSensor(EmhassEntity, SensorEntity):
     def __init__(self, coordinator: EmhassCoordinator) -> None:
         super().__init__(coordinator, "battery_action")
 
+    async def async_added_to_hass(self) -> None:
+        # The coordinator's own notification is not enough here: it is what
+        # *starts* the apply, so it always fires while `last_decision` is still
+        # the previous one. Without this the published action trails the
+        # commands actually sent to the inverter by a whole clock tick.
+        await super().async_added_to_hass()
+        executor = self.coordinator.config_entry.runtime_data.executor
+        self.async_on_remove(executor.add_listener(self.async_write_ha_state))
+
     @property
     def native_value(self) -> str | None:
         decision = self.coordinator.config_entry.runtime_data.executor.last_decision

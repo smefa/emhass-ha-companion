@@ -3617,27 +3617,31 @@ class EmhassStatusCard extends LiveCard {
                 : "Nothing to send"
       }${reason ? ` · ${reason}` : ""}`;
 
-      // `power_w` is the *target* a command carries, and a self-consumption
-      // decision has none: the whole point of it is handing the battery back
-      // to the inverter to follow the house, so the executor sends a zero that
-      // means "not my number". Printing it as the battery's power reads as a
-      // battery doing nothing, at the moment it is usually working hardest.
-      // So when the decision names no power, show what the battery is actually
-      // doing instead -- the live sensor when the card has been pointed at
-      // one, and the plan's own figure when it has not.
+      // What the battery is measurably doing wins, whenever the card has been
+      // pointed at a sensor for it. The two runners-up are both accounts of an
+      // intention rather than an outcome: `power_w` is the *target* the last
+      // command carried, and a target outlives the command -- a decision taken
+      // at the top of the quarter hour is still the last decision after the
+      // executor has stopped the battery, so a stale "2.7 kW" sits next to a
+      // battery at rest. `power_w` is also absent by design for a
+      // self-consumption decision, whose whole point is handing the battery
+      // back to the inverter to follow the house: the executor sends a zero
+      // meaning "not my number", which printed as power reads as a battery
+      // doing nothing at the moment it is usually working hardest.
+      //
+      // Magnitude only, for the live sensor: whether positive means charging
+      // is that sensor's own convention, and guessing it wrong labels a
+      // charging battery as discharging, which is worse than not saying.
       const targetW = Number(attrs.power_w);
       const liveW = num(stateOf(hass, this._config.power_entity));
       let powerText = "";
       let powerNote = "";
-      if (Number.isFinite(targetW) && Math.abs(targetW) >= 1) {
-        powerText = formatPower(Math.abs(targetW));
-        powerNote = "target";
-      } else if (Number.isFinite(liveW)) {
-        // Magnitude only: whether positive means charging is that sensor's own
-        // convention, and guessing it wrong labels a charging battery as
-        // discharging, which is worse than not saying.
+      if (Number.isFinite(liveW)) {
         powerText = formatPower(Math.abs(liveW));
         powerNote = "now";
+      } else if (Number.isFinite(targetW) && Math.abs(targetW) >= 1) {
+        powerText = formatPower(Math.abs(targetW));
+        powerNote = "target";
       } else if (Number.isFinite(watts)) {
         powerText = formatPower(Math.abs(watts));
         powerNote = watts > 1 ? "planned out" : watts < -1 ? "planned in" : "planned";

@@ -14,6 +14,7 @@ setup, compare the decisions, then hand over.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 import logging
@@ -124,7 +125,7 @@ class Executor:
         self.coordinator = coordinator
         self.last_decision: Decision | None = None
         self._last_applied: dict[str, _Command] = {}
-        self._listeners: list = []
+        self._listeners: list[Callable[[], None]] = []
         # Whether `prepare` has run since control was last handed back. Some
         # inverters gate remote control behind a mode that has to be opened
         # once per session rather than before every write.
@@ -154,6 +155,36 @@ class Executor:
     @property
     def system_mode(self) -> str:
         return self.coordinator.system_mode
+
+    # -- change notification --------------------------------------------------
+
+    def add_listener(self, listener: Callable[[], None]) -> Callable[[], None]:
+        """Register a callback for "a new decision has been taken".
+
+        Entities showing the decision cannot ride the coordinator for this.
+        The apply is scheduled *from* a coordinator listener, so by the time a
+        new decision exists every ``CoordinatorEntity`` has already published
+        the previous one -- which is how the action sensor came to say
+        "force charge" for a full clock tick after the executor had already
+        sent the inverter a stop.
+
+        Routing the notification back through ``async_update_listeners`` is
+        not an option either: ``_async_plan_updated`` is itself a coordinator
+        listener, so every apply would schedule another one, forever.
+        """
+        self._listeners.append(listener)
+
+        def _remove() -> None:
+            if listener in self._listeners:
+                self._listeners.remove(listener)
+
+        return _remove
+
+    def _record(self, decision: Decision) -> None:
+        """Publish a decision as the current one, and say so."""
+        self.last_decision = decision
+        for listener in list(self._listeners):
+            listener()
 
     # -- main entry point -----------------------------------------------------
 
@@ -234,7 +265,7 @@ class Executor:
                 # Already holding _lock, so the unlocked body directly.
                 await self._async_restore("control switch turned off")
             decision.reason = f"{decision.reason} (control disabled, not applied)"
-            self.last_decision = decision
+            self._record(decision)
             _LOGGER.debug("Would apply %s: %s", decision.action, decision.reason)
             return decision
 
@@ -242,7 +273,7 @@ class Executor:
         await self._async_execute(
             decision, resolved_action, battery_steps, curtail_action, curtail_steps
         )
-        self.last_decision = decision
+        self._record(decision)
         return decision
 
     async def async_restore(self, reason: str) -> None:
