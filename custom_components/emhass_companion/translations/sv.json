@@ -183,7 +183,7 @@
           "emhass_standard_names": "Använd EMHASS entitetsnamn"
         },
         "data_description": {
-          "emhass_standard_names": "Byter namn på nio plansensorer till p_pv_forecast, p_load_forecast, p_grid_forecast, p_batt_forecast, soc_batt_forecast, optim_status, total_cost_fun_value, unit_load_cost och unit_prod_price, och publicerar även deras prognosserier i EMHASS format. Sensorer per last byter inte namn. Går att ångra."
+          "emhass_standard_names": "Byter namn på plansensorerna till p_pv_forecast, p_load_forecast, p_grid_forecast, p_batt_forecast, soc_batt_forecast, optim_status, total_cost_fun_value, unit_load_cost och unit_prod_price, samt p_pv_curtailment och p_hybrid_inverter där du har dem, och publicerar även deras prognosserier i EMHASS format. Sensorer per last byter inte namn. Går att ångra."
         }
       }
     },
@@ -360,7 +360,7 @@
           "emhass_standard_names": "Använd EMHASS entitetsnamn"
         },
         "data_description": {
-          "emhass_standard_names": "Byter namn på nio plansensorer till p_pv_forecast, p_load_forecast, p_grid_forecast, p_batt_forecast, soc_batt_forecast, optim_status, total_cost_fun_value, unit_load_cost och unit_prod_price, och publicerar även deras prognosserier i EMHASS format. Sensorer per last behåller sina egna namn -- EMHASS numrerar dem P_deferrable0, P_deferrable1 och så vidare efter lastordning, och ett entitets-id flyttar sig aldrig när det väl satts, så att lägga till eller byta namn på en last skulle lämna numret pekande på fel apparat."
+          "emhass_standard_names": "Byter namn på plansensorerna till p_pv_forecast, p_load_forecast, p_grid_forecast, p_batt_forecast, soc_batt_forecast, optim_status, total_cost_fun_value, unit_load_cost och unit_prod_price, samt p_pv_curtailment och p_hybrid_inverter där du har dem, och publicerar även deras prognosserier i EMHASS format. Sensorer per last behåller sina egna namn -- EMHASS numrerar dem P_deferrable0, P_deferrable1 och så vidare efter lastordning, och ett entitets-id flyttar sig aldrig när det väl satts, så att lägga till eller byta namn på en last skulle lämna numret pekande på fel apparat."
         }
       }
     }
@@ -470,6 +470,12 @@
       },
       "end_soc_target": {
         "name": "Mål för slutladdningsnivå"
+      },
+      "pv_curtailment": {
+        "name": "Planerad solbegränsning"
+      },
+      "hybrid_inverter": {
+        "name": "Planerad växelriktareffekt"
       }
     },
     "binary_sensor": {

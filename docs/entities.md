@@ -7,6 +7,8 @@
 | `sensor.*_planned_solar_production` | Planned PV, with the full series in its `forecast` attribute |
 | `sensor.*_planned_house_consumption` | Planned load |
 | `sensor.*_planned_grid_power` | Positive = import, negative = export |
+| `sensor.*_planned_solar_curtailment` | PV the plan gives up. Only if *Let EMHASS curtail* is on |
+| `sensor.*_planned_inverter_power` | AC side of a hybrid inverter: positive = DC to AC, negative = AC to DC. Only if you configured a hybrid inverter |
 | `sensor.*_planned_battery_power` | Positive = discharge, negative = charge |
 | `sensor.*_planned_battery_level` | Percent |
 | `sensor.*_end_soc_target` | The battery level the plan aims for at the horizon's end, with the why in its attributes (`reason`, `cover_energy_wh`, `cover_until`, `sale_blocked`, …) — see [End SOC](end_soc_plan.md) |
@@ -40,7 +42,7 @@ and automations are written against the entity ids EMHASS publishes under, and
 nothing in Home Assistant will tell you those ids stopped being written.
 
 **Settings → Devices & services → EMHASS Companion → Configure → EMHASS entity
-names** switches nine hub sensors over to those ids:
+names** switches the hub sensors over to those ids:
 
 | Companion | EMHASS |
 |---|---|
@@ -49,10 +51,21 @@ names** switches nine hub sensors over to those ids:
 | `sensor.*_planned_grid_power` | `sensor.p_grid_forecast` |
 | `sensor.*_planned_battery_power` | `sensor.p_batt_forecast` |
 | `sensor.*_planned_battery_level` | `sensor.soc_batt_forecast` |
+| `sensor.*_planned_solar_curtailment` | `sensor.p_pv_curtailment` |
+| `sensor.*_planned_inverter_power` | `sensor.p_hybrid_inverter` |
 | `sensor.*_optimisation_status` | `sensor.optim_status` |
 | `sensor.*_planned_cost` | `sensor.total_cost_fun_value` |
 | `sensor.*_import_price` | `sensor.unit_load_cost` |
 | `sensor.*_export_price` | `sensor.unit_prod_price` |
+
+The last two rows of the first group only apply if you have those sensors —
+they exist on the same condition EMHASS emits the column, so a house with no
+hybrid inverter has neither the sensor nor the id.
+
+`sensor.total_cost_profit_value` is **not** in this list. Modern EMHASS
+publishes one cost entity, `total_cost_fun_value`, aggregating every
+`cost_fun_*` column; the `_profit_` form is a legacy name from when that entity
+was named after the chosen `costfun`.
 
 The setup wizard offers this too, but only if EMHASS entities already exist —
 otherwise it never asks, and the Companion's own names are used.

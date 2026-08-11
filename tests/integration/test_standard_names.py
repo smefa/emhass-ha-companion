@@ -58,15 +58,20 @@ def _mock_client():
 
 
 async def _setup(hass: HomeAssistant, *, standard_names: bool | None = None) -> MockConfigEntry:
-    # With a battery, so that the two battery sensors exist at all -- they are
-    # only added when there is one (sensor.py), and half the mapping is theirs.
+    # Every conditional sensor in the mapping switched on: the two battery
+    # ones, curtailment and the hybrid inverter. Without this the mapping is
+    # only half covered, and a house that has all of them is exactly the one
+    # where a wrong id matters most.
     options: dict[str, Any] = {
         "battery": {
             "use_battery": True,
             "capacity_wh": 10000,
             "charge_power_max_w": 5000,
             "discharge_power_max_w": 5000,
-        }
+            "hybrid_inverter": True,
+            "inverter_ac_output_max_w": 10000,
+        },
+        "grid": {"compute_curtailment": True},
     }
     if standard_names is not None:
         options[CONF_EMHASS_STANDARD_NAMES] = standard_names
@@ -364,3 +369,107 @@ async def test_the_options_step_says_nothing_when_every_id_is_free(hass: HomeAss
     result = await flow.async_step_compatibility()
 
     assert result["description_placeholders"]["conflicts"] == ""
+
+
+# --- the conditional sensors ----------------------------------------------------
+
+
+async def _setup_plain(hass: HomeAssistant) -> MockConfigEntry:
+    """No battery, no curtailment, no hybrid inverter."""
+    entry = MockConfigEntry(domain=DOMAIN, data={"url": "http://localhost:5000"}, options={})
+    entry.add_to_hass(hass)
+    patcher = _mock_client()
+    try:
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+    finally:
+        patcher.stop()
+    return entry
+
+
+async def test_curtailment_and_hybrid_sensors_exist_when_configured(
+    hass: HomeAssistant,
+) -> None:
+    entry = await _setup(hass)
+
+    assert _entity_id(hass, entry, "pv_curtailment") is not None
+    assert _entity_id(hass, entry, "hybrid_inverter") is not None
+
+
+async def test_they_are_absent_when_the_settings_are_off(hass: HomeAssistant) -> None:
+    """EMHASS omits the column entirely, so the sensor would read nothing at
+    all rather than a meaningful zero."""
+    entry = await _setup_plain(hass)
+
+    assert _entity_id(hass, entry, "pv_curtailment") is None
+    assert _entity_id(hass, entry, "hybrid_inverter") is None
+
+
+async def test_a_missing_sensor_is_simply_not_renamed(hass: HomeAssistant) -> None:
+    """The mapping has keys this house has no sensor for; that must not raise
+    or leave an orphan registry entry behind."""
+    entry = await _setup_plain(hass)
+    hass.config_entries.async_update_entry(
+        entry, options={**entry.options, CONF_EMHASS_STANDARD_NAMES: True}
+    )
+    await _reload(hass, entry)
+
+    assert _entity_id(hass, entry, "pv_forecast") == "sensor.p_pv_forecast"
+    assert er.async_get(hass).async_get("sensor.p_hybrid_inverter") is None
+    assert er.async_get(hass).async_get("sensor.p_pv_curtailment") is None
+
+
+async def test_the_conditional_sensors_take_their_emhass_ids(hass: HomeAssistant) -> None:
+    entry = await _setup(hass, standard_names=True)
+
+    assert _entity_id(hass, entry, "pv_curtailment") == "sensor.p_pv_curtailment"
+    assert _entity_id(hass, entry, "hybrid_inverter") == "sensor.p_hybrid_inverter"
+
+
+async def _publish_conditional(hass: HomeAssistant, entry: MockConfigEntry) -> None:
+    """A plan carrying the two columns EMHASS only emits when they are on."""
+    now = dt_util.utcnow()
+    coordinator = entry.runtime_data.coordinator
+    coordinator.data = EmhassData(
+        plan=Plan.from_response(
+            {
+                "status": "ok",
+                "generated_at": now.isoformat(),
+                "emhass_schema_version": "1.0",
+                "plan": [
+                    {
+                        "timestamp": (now + timedelta(minutes=n)).isoformat(),
+                        "P_hybrid_inverter": -2500.0,
+                        "P_PV_curtailment": 750.0,
+                    }
+                    for n in (0, 30)
+                ],
+            }
+        ),
+        last_success=now,
+    )
+    coordinator.async_update_listeners()
+    await hass.async_block_till_done()
+
+
+async def test_the_conditional_sensors_read_their_plan_columns(hass: HomeAssistant) -> None:
+    """P_hybrid_inverter is signed: positive DC to AC, negative AC to DC."""
+    entry = await _setup(hass, standard_names=True)
+    await _publish_conditional(hass, entry)
+
+    assert hass.states.get("sensor.p_hybrid_inverter").state == "-2500.0"
+    assert hass.states.get("sensor.p_pv_curtailment").state == "750.0"
+
+
+async def test_the_conditional_sensors_carry_emhass_forecasts(hass: HomeAssistant) -> None:
+    """Both are type_var="power" upstream, so the attribute is `forecasts`."""
+    entry = await _setup(hass, standard_names=True)
+    await _publish_conditional(hass, entry)
+
+    for entity_id, value_key in (
+        ("sensor.p_pv_curtailment", "p_pv_curtailment"),
+        ("sensor.p_hybrid_inverter", "p_hybrid_inverter"),
+    ):
+        attributes = hass.states.get(entity_id).attributes
+        assert "forecasts" in attributes, entity_id
+        assert set(attributes["forecasts"][0]) == {"date", value_key}, entity_id

@@ -666,6 +666,10 @@ EMHASS_STANDARD_OBJECT_IDS: Final[dict[str, str]] = {
     "grid_forecast": "p_grid_forecast",
     "battery_power": "p_batt_forecast",
     "battery_soc": "soc_batt_forecast",
+    # Conditional on the EMHASS side too, so these two often have no sensor to
+    # rename -- a key with no registered entity is simply skipped.
+    "pv_curtailment": "p_pv_curtailment",
+    "hybrid_inverter": "p_hybrid_inverter",
     "optimization_status": "optim_status",
     "plan_cost": "total_cost_fun_value",
     "buy_price": "unit_load_cost",
@@ -684,6 +688,8 @@ EMHASS_STANDARD_SERIES_ATTRIBUTES: Final[dict[str, str]] = {
     "pv_forecast": "forecasts",
     "load_forecast": "forecasts",
     "grid_forecast": "forecasts",
+    "pv_curtailment": "forecasts",
+    "hybrid_inverter": "forecasts",
     "battery_power": "battery_scheduled_power",
     "battery_soc": "battery_scheduled_soc",
     "buy_price": "unit_load_cost_forecasts",

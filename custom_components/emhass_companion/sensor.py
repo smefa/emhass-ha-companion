@@ -109,6 +109,31 @@ POWER_SENSORS: tuple[EmhassSensorDescription, ...] = (
     ),
 )
 
+# Both are conditional upstream -- EMHASS only puts the column in the plan when
+# the matching setting is on -- so they are created on the same condition here
+# rather than sitting at a permanent zero on every other house.
+CURTAILMENT_SENSOR: EmhassSensorDescription = EmhassSensorDescription(
+    key="pv_curtailment",
+    translation_key="pv_curtailment",
+    device_class=SensorDeviceClass.POWER,
+    native_unit_of_measurement=UnitOfPower.WATT,
+    state_class=SensorStateClass.MEASUREMENT,
+    # Positive is PV given up, never negative.
+    value_fn=_plan_value("p_pv_curtailment"),
+    series_fn=_plan_series("p_pv_curtailment"),
+)
+
+HYBRID_INVERTER_SENSOR: EmhassSensorDescription = EmhassSensorDescription(
+    key="hybrid_inverter",
+    translation_key="hybrid_inverter",
+    device_class=SensorDeviceClass.POWER,
+    native_unit_of_measurement=UnitOfPower.WATT,
+    state_class=SensorStateClass.MEASUREMENT,
+    # Positive is DC to AC, negative is AC to DC; see PlanRow.
+    value_fn=_plan_value("p_hybrid_inverter"),
+    series_fn=_plan_series("p_hybrid_inverter"),
+)
+
 BATTERY_SENSORS: tuple[EmhassSensorDescription, ...] = (
     EmhassSensorDescription(
         key="battery_power",
@@ -268,6 +293,13 @@ async def async_setup_entry(
     # simply not created rather than cluttering the device.
     if coordinator.config.battery.enabled:
         descriptions.extend(BATTERY_SENSORS)
+    # Same reasoning as the battery sensors: EMHASS only emits these columns
+    # when the matching setting is on, so anywhere else they would read a
+    # permanent zero (curtailment) or nothing at all (hybrid inverter).
+    if coordinator.config.grid.compute_curtailment:
+        descriptions.append(CURTAILMENT_SENSOR)
+    if coordinator.config.hybrid_inverter.enabled:
+        descriptions.append(HYBRID_INVERTER_SENSOR)
 
     async_add_entities(EmhassSensor(coordinator, description) for description in descriptions)
     async_add_entities(
