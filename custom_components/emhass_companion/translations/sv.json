@@ -494,8 +494,6 @@
         "state": {
           "auto": "Automatiskt",
           "self_consume": "Egenförbrukning",
-          "force_charge": "Tvinga laddning",
-          "force_discharge": "Tvinga urladdning",
           "idle": "Vila"
         }
       },

@@ -404,13 +404,28 @@ MODE_FORCE_CHARGE: Final = "force_charge"
 MODE_FORCE_DISCHARGE: Final = "force_discharge"
 MODE_IDLE: Final = "idle"
 
+# What the optimiser can decide, and therefore what a profile has to implement
+# and what the battery_action sensor can report.
 BATTERY_ACTIONS: Final = (
     MODE_SELF_CONSUME,
     MODE_FORCE_CHARGE,
     MODE_FORCE_DISCHARGE,
     MODE_IDLE,
 )
-SYSTEM_MODES: Final = (MODE_AUTO, *BATTERY_ACTIONS)
+
+# What a *person* can ask for, which is deliberately not the same list. These
+# used to be `(MODE_AUTO, *BATTERY_ACTIONS)`, which conflated the optimiser's
+# output vocabulary with the manual override's input vocabulary. The three here
+# are steady states -- each one is safe to sit in indefinitely. Force
+# charge/discharge are not: a manual mode suspends the optimiser and holds
+# until it is changed back (executor._decide), so selecting one pinned the
+# battery at charge_power_max_w forever, with no SOC guard and no deadline.
+# Worse, that field is optional and defaults to 0 (models.BatteryConfig), so on
+# an install that never set it the mode silently commanded 0 W while the
+# decision sensor still read "force_charge". A bounded force belongs in a
+# service taking both a power and a duration, not in a select that can express
+# neither.
+SYSTEM_MODES: Final = (MODE_AUTO, MODE_SELF_CONSUME, MODE_IDLE)
 
 # --- Cost function -------------------------------------------------------------
 # EMHASS's own optimisation.py objective-function branches; sent verbatim as

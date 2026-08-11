@@ -494,8 +494,6 @@
         "state": {
           "auto": "Automatic",
           "self_consume": "Self-consumption",
-          "force_charge": "Force charge",
-          "force_discharge": "Force discharge",
           "idle": "Idle"
         }
       },

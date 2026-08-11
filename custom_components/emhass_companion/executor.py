@@ -23,7 +23,6 @@ from typing import Any, Final
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
-from .configuration import EmhassConfig
 from .const import (
     ACTION_CURTAIL,
     ACTION_PREPARE,
@@ -33,8 +32,6 @@ from .const import (
     DEFAULT_POWER_DEADBAND_W,
     LIFETIME_PERSISTENT,
     MODE_AUTO,
-    MODE_FORCE_CHARGE,
-    MODE_FORCE_DISCHARGE,
     MODE_IDLE,
     MODE_SELF_CONSUME,
 )
@@ -382,9 +379,13 @@ class Executor:
             # competing with it. No plan is being followed, so there is no
             # basis for curtailing either -- uncurtail rather than leave
             # whatever the last automatic decision happened to set.
+            #
+            # Every selectable mode (SYSTEM_MODES) is a zero-power steady
+            # state, so there is no manual power to work out: self-consumption
+            # hands the battery to the inverter's own logic and idle stops it.
             return Decision(
                 action=mode,
-                power_w=self._manual_power(mode, config),
+                power_w=0.0,
                 reason="manual override",
                 loads=self._decide_loads(use_plan=False),
                 curtail=False,
@@ -426,13 +427,6 @@ class Executor:
             curtail_w=curtail_w,
             rules=[*battery_rules, *curtail_rules],
         )
-
-    def _manual_power(self, mode: str, config: EmhassConfig) -> float:
-        if mode == MODE_FORCE_CHARGE:
-            return config.battery.charge_power_max_w
-        if mode == MODE_FORCE_DISCHARGE:
-            return config.battery.discharge_power_max_w
-        return 0.0
 
     def _decide_loads(self, *, use_plan: bool) -> dict[str, bool]:
         """Whether each deferrable load should be running."""

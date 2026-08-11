@@ -10,10 +10,10 @@ device**.
 
 ## Controls
 
-- **Mode** (select) — *Automatic* / *Self-consumption* / *Force charge* /
-  *Force discharge* / *Idle*. Anything other than *Automatic* takes the
-  optimiser out of the loop and holds that mode until you change it back.
-  Only does anything with an inverter profile configured — see
+- **Mode** (select) — *Automatic* / *Self-consumption* / *Idle*. Anything
+  other than *Automatic* takes the optimiser out of the loop and holds that
+  mode until you change it back, so all three are steady states you can safely
+  leave it in. Only does anything with an inverter profile configured — see
   **[Inverter control](inverter_control.md)**.
 - **Control enabled** (switch) — the master gate on writing to your hardware
   at all. **Ships off**, and stays off until you turn it on.
