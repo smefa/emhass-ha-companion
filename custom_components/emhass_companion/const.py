@@ -185,6 +185,17 @@ CONF_CAPACITY_COST_PER_KW: Final = "capacity_cost_per_kw"
 CONF_COMPUTE_CURTAILMENT: Final = "compute_curtailment"
 
 CONF_SOC_ENTITY: Final = "soc_entity"
+# The battery's own power sensor. Nothing in the optimisation needs it --
+# EMHASS *plans* battery power rather than measuring it -- so this is asked
+# for on behalf of the dashboard cards, which were each collecting it
+# separately, under two different option names and with the sign convention
+# declared once per card. Declared here it is answered once, and every card
+# that draws measured battery power draws it the same way round.
+CONF_BATTERY_POWER_ENTITY: Final = "battery_power_entity"
+# Whether that sensor is positive while charging. EMHASS's convention is the
+# opposite (positive is discharge), and there is no way to tell from the
+# sensor itself: guessing wrong labels a charging battery as discharging.
+CONF_BATTERY_POWER_INVERT: Final = "battery_power_invert"
 CONF_LOAD_ENTITY: Final = "load_entity"
 # The live PV power reading blended into the first naive-mpc-optim forecast
 # step (payload.build_payload), weighted by number.MixBetaNumber. No PV

@@ -86,6 +86,8 @@ the optimiser plans around PV, load and price alone.
 | Setting | Meaning |
 |---|---|
 | Battery SOC sensor | Read at the start of every run so the plan starts from reality |
+| Battery power sensor | Optional, and read by nothing in the optimisation. The dashboard cards draw it against the plan, and asking here means they each stop asking separately |
+| That sensor is positive when charging | Which way round it counts. EMHASS's own convention is the opposite — positive is discharge — and getting it wrong labels a charging battery as discharging |
 | Usable capacity | In Wh |
 | Maximum charge / discharge power | The battery's own limits |
 | Minimum / maximum charge level | The optimiser will not plan the battery outside this range |

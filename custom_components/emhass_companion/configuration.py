@@ -17,6 +17,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
 from .const import (
+    CONF_BATTERY_POWER_ENTITY,
+    CONF_BATTERY_POWER_INVERT,
     CONF_DAYAHEAD_FALLBACK_TIME,
     CONF_HORIZON_HOURS,
     CONF_HOUSE_LOAD_TOTAL_ENTITY,
@@ -107,6 +109,10 @@ class EmhassConfig:
     grid: GridConfig = field(default_factory=GridConfig)
     hybrid_inverter: HybridInverterConfig = field(default_factory=HybridInverterConfig)
     soc_entity: str | None = None
+    # Read by nothing here: it is published for the cards, which draw measured
+    # battery power against the planned figure. See CONF_BATTERY_POWER_ENTITY.
+    battery_power_entity: str | None = None
+    battery_power_invert: bool = False
     pv_live_entity: str | None = None
     house_load_total_entity: str | None = None
 
@@ -145,6 +151,8 @@ class EmhassConfig:
             # to share it with.
             hybrid_inverter=HybridInverterConfig.from_dict(options.get("battery")),
             soc_entity=options.get(CONF_SOC_ENTITY),
+            battery_power_entity=options.get(CONF_BATTERY_POWER_ENTITY),
+            battery_power_invert=bool(options.get(CONF_BATTERY_POWER_INVERT)),
             house_load_total_entity=house_load_total_entity,
             pv_live_entity=options.get(CONF_PV_ENTITY),
         )

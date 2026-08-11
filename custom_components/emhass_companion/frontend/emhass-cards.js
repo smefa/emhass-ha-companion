@@ -506,6 +506,28 @@ function stateOf(hass, entityId) {
   return entityId ? hass.states[entityId] : undefined;
 }
 
+/**
+ * The sensor the Companion was told measures what one of its own sensors plans.
+ *
+ * A card cannot read the integration's configuration -- `findHub` discovers its
+ * entities and nothing else -- so each planned sensor carries a pointer to its
+ * measured counterpart in its own attributes. That is what lets one answer, in
+ * the integration's settings, serve every card at once. Before this, the same
+ * battery power sensor had to be named on the plan card, the overview card and
+ * the status card, under two different option names, with its sign convention
+ * declared separately on each of the two that asked at all.
+ *
+ * Returns null when nothing is configured, and `invert` is a boolean only when
+ * the convention is actually known -- see the callers, which say direction only
+ * then.
+ */
+function measuredBy(hass, hub, plannedKey) {
+  const planned = stateOf(hass, hub ? hub[plannedKey] : null);
+  const attrs = planned && planned.attributes ? planned.attributes : null;
+  if (!attrs || !attrs.measured_entity) return null;
+  return { entity: attrs.measured_entity, invert: attrs.measured_invert === true };
+}
+
 function callService(hass, domain, service, data) {
   return hass.callService(domain, service, data);
 }
@@ -1383,12 +1405,21 @@ class EmhassPlanCard extends HTMLElement {
   _history(hass, hub, now) {
     const wanted = {};
     const invert = [];
+    // This card's own option wins where it is set -- pointing one card at a
+    // different meter is a deliberate choice -- and the Companion's configured
+    // sensor is the default under it.
+    const measured = measuredBy(hass, hub, "sensor.battery_power");
     for (const [name, key, option] of PLAN_HISTORY) {
       const chosen = option ? this._config[option] : null;
-      wanted[name] = chosen || hub[key];
-      if (name === "battery" && chosen && this._config.invert_battery === true) {
-        invert.push(name);
+      if (name === "battery") {
+        const source = chosen
+          ? { entity: chosen, invert: this._config.invert_battery === true }
+          : measured;
+        wanted[name] = source ? source.entity : hub[key];
+        if (source && source.invert) invert.push(name);
+        continue;
       }
+      wanted[name] = chosen || hub[key];
     }
     return readHistory(this, hass, wanted, invert, this._historyMs(), now);
   }
@@ -3629,16 +3660,27 @@ class EmhassStatusCard extends LiveCard {
       // meaning "not my number", which printed as power reads as a battery
       // doing nothing at the moment it is usually working hardest.
       //
-      // Magnitude only, for the live sensor: whether positive means charging
-      // is that sensor's own convention, and guessing it wrong labels a
-      // charging battery as discharging, which is worse than not saying.
+      // Direction is stated only when the sign convention is actually known,
+      // which is exactly when the Companion is the source: it is told which
+      // way its battery power sensor counts, and a sensor named on the card is
+      // not. Guessing it labels a charging battery as discharging, which is
+      // worse than saying only how hard.
       const targetW = Number(attrs.power_w);
-      const liveW = num(stateOf(hass, this._config.power_entity));
+      // The card's own option wins, but a sensor named here says nothing about
+      // which way round it counts -- only the Companion's own setting carries
+      // that, which is why direction below is stated only when it is the source.
+      const live = this._config.power_entity
+        ? { entity: this._config.power_entity }
+        : measuredBy(hass, hub, "sensor.battery_power");
+      const liveW = num(stateOf(hass, live ? live.entity : null));
       let powerText = "";
       let powerNote = "";
       if (Number.isFinite(liveW)) {
         powerText = formatPower(Math.abs(liveW));
-        powerNote = "now";
+        const signed = typeof live.invert === "boolean" ? (live.invert ? -liveW : liveW) : NaN;
+        // NaN falls through both comparisons to the bare "now", which is the
+        // honest answer when the convention is unknown.
+        powerNote = signed > 1 ? "discharging now" : signed < -1 ? "charging now" : "now";
       } else if (Number.isFinite(targetW) && Math.abs(targetW) >= 1) {
         powerText = formatPower(Math.abs(targetW));
         powerNote = "target";
@@ -3665,7 +3707,12 @@ class EmhassStatusCard extends LiveCard {
       if (!high || point.v > high.v) high = point;
     }
 
-    const measured = num(stateOf(hass, this._config.soc_entity));
+    // The Companion already has to know this one -- it is what it sends EMHASS
+    // as the plan's starting level -- so the card asks it rather than making
+    // the same sensor be named twice. The card option stays as an override.
+    const socEntity =
+      this._config.soc_entity || (measuredBy(hass, hub, "sensor.battery_soc") || {}).entity;
+    const measured = num(stateOf(hass, socEntity));
     if (ui.soc) {
       ui.soc.set({
         planned: isUsable(soc) ? num(soc) : NaN,
@@ -3684,7 +3731,7 @@ class EmhassStatusCard extends LiveCard {
       ui.box.show_level,
       Number.isFinite(measured) ? `${measured.toFixed(0)} %` : "–",
       !Number.isFinite(measured)
-        ? "set soc_entity"
+        ? "no battery level sensor set"
         : !Number.isFinite(drift)
           ? ""
           : Math.abs(drift) < 1
@@ -4173,14 +4220,18 @@ class EmhassOverviewCard extends LiveCard {
    * happened".
    */
   _history(hass, hub, now) {
+    // Card option first, then whatever the Companion itself was configured
+    // with, then the plan's own figure.
+    const battery = this._config.battery_entity
+      ? { entity: this._config.battery_entity, invert: this._config.invert_battery === true }
+      : measuredBy(hass, hub, "sensor.battery_power");
     const wanted = {
       solar: this._config.solar_entity || hub["sensor.pv_forecast"],
-      battery: this._config.battery_entity || hub["sensor.battery_power"],
+      battery: battery ? battery.entity : hub["sensor.battery_power"],
     };
     // Only an outside sensor can have the other sign convention: the plan's
     // own battery series is positive while discharging by definition.
-    const invert =
-      this._config.battery_entity && this._config.invert_battery === true ? ["battery"] : [];
+    const invert = battery && battery.invert ? ["battery"] : [];
     return readHistory(this, hass, wanted, invert, this._historyMs(), now);
   }
 
@@ -4721,8 +4772,10 @@ const PLAN_HELPERS = {
   solar_entity: "Left empty, the past is drawn from the forecast the plan used.",
   house_entity: "Left empty, the past is drawn from the plan's own consumption forecast.",
   grid_entity: "Left empty, the past is drawn from the plan's own grid figure.",
-  battery_entity: "Left empty, the past is drawn from the plan's own battery power.",
-  invert_battery: "The chart draws positive as discharge, which is the plan's convention.",
+  battery_entity:
+    "Left empty, the Companion's own battery power sensor is used, and the plan's figure if it has none. Set here only to draw this card from a different meter.",
+  invert_battery:
+    "Only read when a sensor is named above; the Companion carries its own convention. The chart draws positive as discharge, which is the plan's convention.",
 };
 for (const section of PLAN_SECTIONS) {
   PLAN_LABELS[section[0]] = section[1];
@@ -4946,8 +4999,10 @@ const OVERVIEW_LABELS = {
 const OVERVIEW_HELPERS = {
   history_hours: "How far back the window reaches. 0 starts the card at now.",
   solar_entity: "Left empty, the past is drawn from the forecast the plan used.",
-  battery_entity: "Left empty, the past is drawn from the plan's own battery power.",
-  invert_battery: "The card draws positive as discharge, which is the plan's convention.",
+  battery_entity:
+    "Left empty, the Companion's own battery power sensor is used, and the plan's figure if it has none. Set here only to draw this card from a different meter.",
+  invert_battery:
+    "Only read when a sensor is named above; the Companion carries its own convention. The card draws positive as discharge, which is the plan's convention.",
 };
 for (const section of OVERVIEW_SECTIONS) {
   OVERVIEW_LABELS[section[0]] = section[1];
@@ -5055,8 +5110,10 @@ const STATUS_LABELS = {
   power_entity: "Battery power sensor",
 };
 const STATUS_HELPERS = {
-  soc_entity: "Your battery's own state-of-charge sensor, read live",
-  power_entity: "Your battery's own power sensor, for what it is doing right now",
+  soc_entity:
+    "Left empty, the Companion's own battery level sensor is used -- it already has one, since it is what the plan starts from.",
+  power_entity:
+    "Left empty, the Companion's own battery power sensor is used, which also lets this card say whether the battery is charging or discharging rather than only how hard.",
 };
 for (const section of STATUS_SECTIONS) {
   STATUS_LABELS[section[0]] = section[1];

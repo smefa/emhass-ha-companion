@@ -242,6 +242,14 @@ this screen is then ignored.
   exceed *twice* this value before the plan can force the battery again, so
   it doesn't flip modes every recalculation.
 - **Battery SOC sensor** — read at the start of every plan.
+- **Battery power sensor** — optional, and nothing in the optimisation
+  reads it: EMHASS *plans* battery power rather than measuring it. The
+  dashboard cards draw it against the plan, and answering it once here is
+  what stops each card asking for the same sensor separately.
+- **That sensor is positive when charging** — leave off for the usual
+  convention, positive while discharging, which is the plan's own. This is
+  the answer the cards cannot work out for themselves, which is why a card
+  pointed straight at a sensor shows only magnitude.
 - **Live PV power sensor** — optional. Its current reading is blended into
   the first step of every model-predictive PV forecast, weighted by the
   **Live value weight** number on the hub device. Load is blended the same

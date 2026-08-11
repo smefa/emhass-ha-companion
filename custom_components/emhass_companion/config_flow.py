@@ -28,6 +28,8 @@ import voluptuous as vol
 from .api import EmhassClient, EmhassError
 from .const import (
     CONF_ADDER,
+    CONF_BATTERY_POWER_ENTITY,
+    CONF_BATTERY_POWER_INVERT,
     CONF_BATTERY_SOC_DEFICIT_COST,
     CONF_BATTERY_SOC_DEFICIT_THRESHOLD,
     CONF_BATTERY_SOC_SURPLUS_COST,
@@ -704,6 +706,11 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
             self._options["battery"] = _battery_storage_from_input(user_input)
             if soc := user_input.get(CONF_SOC_ENTITY):
                 self._options[CONF_SOC_ENTITY] = soc
+            if battery_power := user_input.get(CONF_BATTERY_POWER_ENTITY):
+                self._options[CONF_BATTERY_POWER_ENTITY] = battery_power
+                self._options[CONF_BATTERY_POWER_INVERT] = bool(
+                    user_input.get(CONF_BATTERY_POWER_INVERT)
+                )
             if pv_live := user_input.get(CONF_PV_ENTITY):
                 self._options[CONF_PV_ENTITY] = pv_live
             return await self.async_step_inverter()
@@ -1464,7 +1471,13 @@ def _battery_storage_from_input(user_input: dict[str, Any]) -> dict[str, Any]:
     return {
         key: value / 100 if key in _SOC_PERCENT_FIELDS else value
         for key, value in user_input.items()
-        if key not in (CONF_SOC_ENTITY, CONF_PV_ENTITY)
+        if key
+        not in (
+            CONF_SOC_ENTITY,
+            CONF_BATTERY_POWER_ENTITY,
+            CONF_BATTERY_POWER_INVERT,
+            CONF_PV_ENTITY,
+        )
     }
 
 
@@ -1661,6 +1674,17 @@ def battery_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
         _optional_blank(CONF_SOC_ENTITY, defaults): selector.EntitySelector(
             selector.EntitySelectorConfig(domain="sensor", device_class="battery")
         ),
+        # Nothing in the optimisation reads this pair; the dashboard cards do.
+        # Asked for here rather than on each card so that the sensor and, more
+        # to the point, which way round it counts are answered once. See
+        # CONF_BATTERY_POWER_ENTITY.
+        _optional_blank(CONF_BATTERY_POWER_ENTITY, defaults): selector.EntitySelector(
+            selector.EntitySelectorConfig(domain="sensor", device_class="power")
+        ),
+        vol.Optional(
+            CONF_BATTERY_POWER_INVERT,
+            default=defaults.get(CONF_BATTERY_POWER_INVERT, False),
+        ): selector.BooleanSelector(),
         # Not a battery setting -- there is no PV-specific step in either flow
         # to put it in (the setup flow's PV step is profile selection only,
         # and PV has no options-flow step at all), so it rides along with
@@ -2122,12 +2146,16 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
         if user_input is not None:
             options["battery"] = _battery_storage_from_input(user_input)
             options[CONF_SOC_ENTITY] = user_input.get(CONF_SOC_ENTITY) or None
+            options[CONF_BATTERY_POWER_ENTITY] = user_input.get(CONF_BATTERY_POWER_ENTITY) or None
+            options[CONF_BATTERY_POWER_INVERT] = bool(user_input.get(CONF_BATTERY_POWER_INVERT))
             options[CONF_PV_ENTITY] = user_input.get(CONF_PV_ENTITY) or None
             return self.async_create_entry(data=options)
 
         defaults = {
             **options.get("battery", {}),
             CONF_SOC_ENTITY: options.get(CONF_SOC_ENTITY) or "",
+            CONF_BATTERY_POWER_ENTITY: options.get(CONF_BATTERY_POWER_ENTITY) or "",
+            CONF_BATTERY_POWER_INVERT: bool(options.get(CONF_BATTERY_POWER_INVERT)),
             CONF_PV_ENTITY: options.get(CONF_PV_ENTITY) or "",
         }
         return self.async_show_form(
