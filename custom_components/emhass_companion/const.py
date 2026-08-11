@@ -537,6 +537,13 @@ PRICE_PROFILE_ORDER: Final = (
 )
 PV_PROFILE_ORDER: Final = ("pv/solcast",)
 
+# The inverter picker is a plain alphabetical list of hardware -- the user
+# knows what is bolted to their wall, so there is nothing to rank. The one
+# exception is the universal script fallback, which is pinned to the bottom:
+# it is what you reach for having failed to find your own inverter above it,
+# and alphabetical order would otherwise bury it between two brands.
+INVERTER_FALLBACK_PROFILE: Final = "inverter/generic_script"
+
 # The temperature picker: a Home Assistant weather entity is the option most
 # users with a weather integration already have, followed by the generic
 # attribute escape hatch, with EMHASS's own Open-Meteo fetch last since it

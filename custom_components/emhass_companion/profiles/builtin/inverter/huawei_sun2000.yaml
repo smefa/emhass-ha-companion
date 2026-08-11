@@ -1,0 +1,175 @@
+name: Huawei SUN2000 M1 / MB0 + LUNA2000 (huawei_solar)
+kind: inverter
+version: 2
+
+brand: Huawei
+
+models:
+  - SUN2000-3KTL-M1
+  - SUN2000-4KTL-M1
+  - SUN2000-5KTL-M1
+  - SUN2000-6KTL-M1
+  - SUN2000-8KTL-M1
+  - SUN2000-10KTL-M1
+  - SUN2000-12K-MB0
+  - SUN2000-15K-MB0
+  - SUN2000-17K-MB0
+  - SUN2000-20K-MB0
+  - SUN2000-25K-MB0
+
+requires: >-
+  wlcrs/huawei_solar (HACS) with "Advanced — elevate permissions" enabled;
+  there is no core Huawei integration
+
+docs: https://github.com/wlcrs/huawei_solar
+
+untested: true
+
+description: >-
+  Huawei SUN2000 M1 and MB0 hybrids with a LUNA2000 battery, over local Modbus.
+
+notes: >-
+  One profile covers both M1 and MB0: the integration matches any model whose
+  name starts with "SUN" and probes capabilities at runtime, so there is no
+  model-specific branching to mirror here.
+
+  **Three things must be true before this can write anything.** Modbus TCP has
+  to be enabled on the inverter or dongle; the integration has to be set up
+  with the **installer** account rather than a FusionSolar consumer login; and
+  **"Advanced: elevate permissions" must have been ticked during setup** —
+  without it the integration registers none of its services at all and every
+  action here fails. That option cannot be changed later without reconfiguring
+  the integration.
+
+  **The inverter accepts one Modbus connection at a time.** Using the
+  FusionSolar app's Device Commissioning while this is connected will drop one
+  of them. Expect a handful of round-trips per command; this profile spaces
+  writes out accordingly.
+
+  **Forced charging expires by itself.** Unlike a register-based inverter,
+  `forcible_charge` carries its own duration and the inverter reverts when it
+  elapses — so this profile is set to `lifetime: expires` and re-issues the
+  command before it runs out. Exactly what the inverter does at expiry is
+  firmware behaviour that is not documented in the integration's source, so
+  watch the first few slots and confirm the battery does not quietly stop
+  partway through a plan.
+
+  **Grid charging is a separate permission.** If you leave the optional
+  "Charge from grid" switch below blank, this profile never touches it and a
+  forced charge will only ever use PV surplus — EMHASS will plan a cheap-hours
+  grid charge that silently does not happen. Fill it in to have forced charges
+  assert it. It is left on afterwards, since it is your setting, not this
+  integration's; the inverter's own "Grid charge cutoff SOC" still bounds it.
+
+  **There is no true idle.** The hardware has no hold-the-battery state, so
+  this profile deliberately defines no `idle` action and the executor falls
+  back to handing control back (`stop_forcible_charge`), recording the
+  substitution in the battery action's reason rather than pretending.
+
+  **Check the sensor entity ids.** The integration names entities after the
+  device, and its battery device is called "Batteries" (plural) — so the SOC
+  sensor is most likely `sensor.batteries_state_of_capacity`, not the
+  singular spelling the project's own older wiki pages use. There is also no
+  native house-load sensor on a plain M1/MB0 without an EMMA dongle.
+
+control:
+  archetype: command_with_duration
+  power_unit: w
+  signed: false
+  invert_sign: false
+  charge_boost: 1.0
+  round_to: 10
+  # The command carries its own lifetime and the inverter reverts when it
+  # elapses -- so the deadband must never be allowed to suppress a re-issue.
+  lifetime: expires
+  duration_min: 30
+  deadband_w: 100
+  # Every command is three or four sequential Modbus writes plus a refresh, on
+  # a link that tolerates exactly one master.
+  min_write_interval_s: 5
+  restore_required: true
+  curtail_mode: export_limit
+  curtail_unit: w
+
+options:
+  battery_device:
+    name: Battery device
+    description: The huawei_solar device named "Batteries" — the forcible charge/discharge services are aimed at it, not at the inverter.
+    selector:
+      device:
+        integration: huawei_solar
+
+  inverter_device:
+    name: Inverter device
+    description: Only used for export limiting. Leave blank if you do not want this profile to curtail.
+    required: false
+    selector:
+      device:
+        integration: huawei_solar
+
+  grid_charge_switch:
+    name: Charge from grid switch
+    description: Optional. When set, a forced charge turns it on first so cheap-hours grid charging actually happens. Left blank, this profile never touches it and forced charges use PV surplus only.
+    required: false
+    suggest:
+      - switch.storage_charge_from_grid_function
+      - switch.batteries_charge_from_grid
+    selector:
+      entity:
+        domain: switch
+
+sensors:
+  # The integration builds entity ids from the device name, and its battery
+  # device is "Batteries" -- confirm these against your own install.
+  battery_soc: sensor.batteries_state_of_capacity
+  battery_power: sensor.batteries_charge_discharge_power   # positive = charging, which is the OPPOSITE of EMHASS's convention
+  grid_power: sensor.power_meter_active_power              # positive = exporting, negative = importing
+  pv_power: sensor.inverter_input_power
+  # load_power: no native sensor without an EMMA dongle -- it has to be
+  # derived from inverter active power and meter power.
+
+limits:
+  # charge_power_max_w / discharge_power_max_w are readable from the battery's
+  # own rated registers, but the integration exposes the user-adjustable
+  # numbers rather than the rated ones -- left for the user to type in.
+
+actions:
+  force_charge:
+    # Assert the grid-charge permission first, so the charge that follows can
+    # actually draw from the grid. Skipped entirely when left unset.
+    - service: switch.turn_on
+      target: { entity_id: "{{ options.grid_charge_switch }}" }
+    - service: huawei_solar.forcible_charge
+      target: { device_id: "{{ options.battery_device }}" }
+      data:
+        power: "{{ power }}"
+        duration: "{{ duration_min }}"
+
+  force_discharge:
+    - service: huawei_solar.forcible_discharge
+      target: { device_id: "{{ options.battery_device }}" }
+      data:
+        power: "{{ power }}"
+        duration: "{{ duration_min }}"
+
+  # No `idle`: the hardware has no hold state. The executor falls back to
+  # self_consume and says so, rather than this profile inventing one out of a
+  # zero-watt forced charge whose behaviour nobody has confirmed.
+
+  self_consume:
+    # Cancels the override and hands the battery back to whatever Working Mode
+    # the user has set. Deliberately does not write the Working Mode select
+    # itself -- someone running Time Of Use should not have it silently
+    # rewritten to Maximise Self Consumption.
+    - service: huawei_solar.stop_forcible_charge
+      target: { device_id: "{{ options.battery_device }}" }
+
+  curtail:
+    - service: huawei_solar.set_maximum_feed_grid_power
+      target: { device_id: "{{ options.inverter_device }}" }
+      data:
+        power: "{{ curtail_w }}"
+
+  uncurtail:
+    - service: huawei_solar.reset_maximum_feed_grid_power
+      target: { device_id: "{{ options.inverter_device }}" }

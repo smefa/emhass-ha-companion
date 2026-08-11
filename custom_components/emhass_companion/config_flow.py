@@ -123,6 +123,7 @@ from .const import (
     DEFAULT_WEIGHT_BATTERY_DISCHARGE,
     DOMAIN,
     END_SOC_MODES,
+    INVERTER_FALLBACK_PROFILE,
     LOAD_PROFILE_CREATE_SENTINEL,
     LOAD_PROFILE_ORDER,
     LOAD_SUBENTRY_TYPES,
@@ -308,6 +309,31 @@ def _rank_profiles(profiles: list[Profile], order: tuple[str, ...]) -> list[Prof
     return sorted(profiles, key=lambda profile: rank.get(profile.key, len(rank)))
 
 
+def _profile_label(profile: Profile) -> str:
+    """The picker label, marking a profile nobody has run on real hardware.
+
+    The marker belongs in the label rather than only in the profile's notes
+    because the picker is where the choice is actually made -- by the time the
+    notes are on screen the inverter has already been chosen.
+    """
+    return f"{profile.name} — UNTESTED" if profile.untested else profile.name
+
+
+UNTESTED_NOTICE = (
+    "**This profile is untested.** It was written from the integration's source "
+    "and the inverter's register map, but nobody has confirmed it against this "
+    "hardware yet. Check the entities below, and watch the first few plans "
+    "closely — the Control enabled switch hands it back at any time. Please "
+    "report back either way so it can be marked as working.\n\n"
+)
+
+
+def _profile_notes(profile: Profile) -> str:
+    """What the setup form shows above the entity fields."""
+    notes = profile.notes or ""
+    return f"{UNTESTED_NOTICE}{notes}" if profile.untested else notes
+
+
 def _profile_selector(
     profiles: list[Profile], order: tuple[str, ...] = ()
 ) -> selector.SelectSelector:
@@ -315,8 +341,31 @@ def _profile_selector(
         selector.SelectSelectorConfig(
             mode=selector.SelectSelectorMode.LIST,
             options=[
-                selector.SelectOptionDict(value=profile.key, label=profile.name)
+                selector.SelectOptionDict(value=profile.key, label=_profile_label(profile))
                 for profile in _rank_profiles(profiles, order)
+            ],
+        )
+    )
+
+
+def _inverter_profile_selector(profiles: list[Profile]) -> selector.SelectSelector:
+    """The inverter picker: hardware A-Z, with the script fallback last.
+
+    Alphabetical rather than ranked, because the user knows what they own and
+    there is nothing to guess at. ``_rank_profiles`` cannot express this -- it
+    moves names to the *front*, and what this list needs is one entry held at
+    the back however many brands get added in front of it.
+    """
+    ranked = sorted(
+        profiles,
+        key=lambda profile: (profile.key == INVERTER_FALLBACK_PROFILE, profile.name.lower()),
+    )
+    return selector.SelectSelector(
+        selector.SelectSelectorConfig(
+            mode=selector.SelectSelectorMode.LIST,
+            options=[
+                selector.SelectOptionDict(value=profile.key, label=_profile_label(profile))
+                for profile in ranked
             ],
         )
     )
@@ -637,7 +686,7 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema(schema),
             description_placeholders={
                 "profile": profile.name,
-                "notes": profile.notes or "",
+                "notes": _profile_notes(profile),
             },
         )
 
@@ -684,7 +733,9 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="inverter",
-            data_schema=vol.Schema({vol.Optional(CONF_PROFILE): _profile_selector(choices)}),
+            data_schema=vol.Schema(
+                {vol.Optional(CONF_PROFILE): _inverter_profile_selector(choices)}
+            ),
         )
 
     async def async_step_inverter_options(
@@ -701,7 +752,7 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=self.add_suggested_values_to_schema(
                 vol.Schema(profile.selector_schema()), _suggested_entities(self.hass, profile)
             ),
-            description_placeholders={"profile": profile.name, "notes": profile.notes or ""},
+            description_placeholders={"profile": profile.name, "notes": _profile_notes(profile)},
         )
 
     async def async_step_grid(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -795,7 +846,7 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema(profile.selector_schema()),
             description_placeholders={
                 "profile": profile.name,
-                "notes": profile.notes or "",
+                "notes": _profile_notes(profile),
             },
         )
 
@@ -1842,7 +1893,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
             data_schema=self.add_suggested_values_to_schema(vol.Schema(schema), stored),
             description_placeholders={
                 "profile": profile.name,
-                "notes": profile.notes or "",
+                "notes": _profile_notes(profile),
             },
         )
 
@@ -1867,7 +1918,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
             ),
             description_placeholders={
                 "profile": profile.name,
-                "notes": profile.notes or "",
+                "notes": _profile_notes(profile),
             },
         )
 
@@ -1936,7 +1987,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
             ),
             description_placeholders={
                 "profile": profile.name,
-                "notes": profile.notes or "",
+                "notes": _profile_notes(profile),
             },
         )
 
@@ -1996,7 +2047,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
             ),
             description_placeholders={
                 "profile": profile.name,
-                "notes": profile.notes or "",
+                "notes": _profile_notes(profile),
             },
         )
 
@@ -2030,7 +2081,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
                 {
                     vol.Optional(
                         CONF_PROFILE, description={"suggested_value": current}
-                    ): _profile_selector(choices)
+                    ): _inverter_profile_selector(choices)
                 }
             ),
         )
@@ -2060,7 +2111,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
             ),
             description_placeholders={
                 "profile": profile.name,
-                "notes": profile.notes or "",
+                "notes": _profile_notes(profile),
             },
         )
 

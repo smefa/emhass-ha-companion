@@ -72,6 +72,13 @@ requires: examplecorp_modbus (HACS) — not the core examplecorp integration
 
 docs: https://github.com/someone/examplecorp-modbus
 
+# Set this while the profile has only ever been read off a register map, and
+# clear it once somebody with the hardware confirms it. It adds "— UNTESTED" to
+# the picker label and a warning above the setup form. Leaving it off on a
+# profile nobody has run makes the first person to try it an unwitting tester
+# of writes to their own battery — so err towards setting it.
+untested: true
+
 description: >-
   One line, shown when choosing an inverter.
 
