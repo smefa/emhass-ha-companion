@@ -149,10 +149,11 @@ phone in a pocket, and a card that is glanced at many times for every time it
 is operated is the wrong place to keep them. Tapping any icon opens the
 entity, so the settings are one tap away rather than absent.
 
-- A banner that goes **green only when the Companion is actually in charge** —
-  control enabled *and* the last decision applied. The gate shut reads "Dry
-  run / Watching", a failed command turns it red, and enabled-but-quiet reads
-  "Armed / Standby" with the reason spelled out (see below).
+- A banner that goes **green when the Companion is in charge and the hardware
+  is doing what the plan asks** — control enabled, commands resolved, and
+  nothing left to correct. The gate shut reads "Dry run / Watching", a failed
+  command turns it red, a command that has just gone out takes the accent
+  ("Updated"), and no resolvable command at all turns it amber (see below).
 - The battery decision with its reason and its power, and — separately —
   whether the command actually went out. A decision that is already in force
   is not re-sent every run, so "already in effect" and "not sent" are
@@ -175,21 +176,36 @@ entity, so the settings are one tap away rather than absent.
   there is one. The error is never hidden, whatever the card is configured
   down to.
 
-#### What "Armed" means
+#### What the banner states mean
 
-Armed is the enabled-but-quiet case, and it has two quite different causes, so
-the banner names which one it is instead of saying "nothing to apply":
+| Banner | Pill | Means |
+| --- | --- | --- |
+| Control failed (red) | Error | The last command did not go through. Checked first: a failure outranks everything below. |
+| Dry run (grey) | Watching | The control gate is off. Decisions are computed in full and none of them is sent. |
+| Controlling your house (accent) | Updated | A command went out on the last run — the plan moved, or the power drifted past the deadband. |
+| Controlling your house (green) | In sync | Commands are resolved and none needed sending: the hardware is already doing what the plan asks. |
+| Armed (amber) | No command | Nothing resolved at all — no inverter profile, or the profile defines no action for what was decided. |
 
-- **"Already where the plan wants it — nothing to re-send"** — commands *were*
-  resolved for this decision, and none of them was worth sending: the inverter
-  is already in that mode at that power, and every load is already in the state
-  the plan asks for. This is the normal steady state of a working system, not a
-  fault. The executor only writes when the action changes, when the power moves
-  past the deadband, or when a time-limited command is about to lapse.
-- **"No inverter command for this decision"** — nothing was resolved at all,
-  which means no inverter profile is set up, or the profile defines no action
-  for what was decided. Loads are still switched; the battery is not being
-  touched. See [Inverter control](inverter_control.md).
+Green is the state a working install sits in nearly all the time, and that is
+deliberate. The executor writes only when the action changes, when the power
+moves past the deadband, or when a time-limited command is about to lapse — so
+a battery charging at full power is sending nothing at all for most of the hour
+it charges. Reserving the green for the runs that *wrote* something leaves a
+perfectly healthy system reading "Armed / Standby" for most of the day, which
+is exactly what the earlier wording did.
+
+"Updated" is therefore an event, not a fault: it says the plan has just changed
+its mind about something. It holds until the next run, which is a whole
+timestep away, so it is a colour you will genuinely see rather than a flash.
+
+Amber is kept for the one case that wants attention. Loads are still switched
+when it shows — the sub-line says "Loads only" if any are configured — but the
+battery is not being touched at all. See [Inverter control](inverter_control.md).
+
+One deliberate gap: a profile that sets `min_write_interval_s` can have a
+*wanted* change suppressed by its own rate limit, and the banner reads green
+for that run rather than admitting the command is pending. It clears on the
+next run, and only profiles that set the field can reach it.
 
 #### The decision's power
 

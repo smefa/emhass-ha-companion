@@ -636,6 +636,8 @@ const TOKENS = `
            background: color-mix(in srgb, var(--emh-ok) 18%, transparent); }
   .sq.wait { color: var(--emh-accent); background: rgba(3, 169, 244, .18);
              background: color-mix(in srgb, var(--emh-accent) 18%, transparent); }
+  .sq.warn { color: var(--emh-warn); background: rgba(255, 166, 0, .18);
+             background: color-mix(in srgb, var(--emh-warn) 18%, transparent); }
   .sq.bad { color: var(--emh-bad); background: rgba(219, 68, 55, .18);
             background: color-mix(in srgb, var(--emh-bad) 18%, transparent); }
 
@@ -3603,26 +3605,46 @@ class EmhassStatusCard extends LiveCard {
       sub = "The last command did not go through";
       pillText = "Error";
     } else if (armed && applied) {
+      // A write is an event, not a state. `applied` means a command went out
+      // on *this* run, and the banner then holds that news until the next run
+      // -- a whole timestep, not a flash -- so it takes the accent rather than
+      // the green. Being mid-change is not more correct than being settled,
+      // and an install whose plan moves several times a day would otherwise
+      // spend half of it in a colour that is supposed to mean "all well".
+      cls = "wait";
+      icon = "mdi:shield-sync";
+      title = "Controlling your house";
+      sub = "New command just sent to your hardware";
+      pillText = "Updated";
+    } else if (armed && steps.length) {
+      // Armed, resolved, and nothing worth sending: the executor writes only
+      // on a change, past the deadband, or before a timed command lapses, so
+      // this is hardware already doing what the plan asks. That is the state
+      // the green belongs to -- it is the one you want the system to be in,
+      // and it is where a working install sits nearly all the time.
+      //
+      // It used to read "Armed / Standby", which described the card's own
+      // last few seconds rather than the house: a battery charging at full
+      // power reported standby for the whole hour, because the command that
+      // started it had been sent before the run being reported on.
       cls = "on";
       icon = "mdi:shield-check";
       title = "Controlling your house";
-      sub = "Decisions are being sent to your hardware";
-      pillText = "Active";
+      sub = "In sync with the plan";
+      pillText = "In sync";
     } else if (armed) {
-      // Armed but nothing applied is the ordinary idle case, not a fault:
-      // colouring it green would make the green meaningless. It has two quite
-      // different causes, though, and "nothing to apply right now" covered
-      // both without explaining either. A resolved command that was not sent
-      // means the house is already in the state the plan wants, which is the
-      // normal steady state; no command at all means there is no inverter
-      // profile behind the decision, which is a setup gap worth naming.
-      cls = "wait";
-      icon = "mdi:shield-outline";
+      // Nothing resolved at all -- no inverter profile, or the profile defines
+      // no action for what was decided. Loads are still switched; the battery
+      // is not being touched. A setup gap rather than a steady state, and the
+      // only one of these worth the amber: the other two are the system
+      // working, and an amber that fires on those is an amber nobody reads.
+      const loadKeys =
+        attrs.loads && typeof attrs.loads === "object" ? Object.keys(attrs.loads) : [];
+      cls = "warn";
+      icon = "mdi:shield-alert-outline";
       title = "Armed";
-      sub = steps.length
-        ? "In sync with the plan"
-        : "No inverter command";
-      pillText = "Standby";
+      sub = loadKeys.length ? "Loads only — no inverter command" : "No inverter command";
+      pillText = "No command";
     }
     if (ui.banner) {
       ui.banner.className = `banner ${cls}`;
@@ -3631,7 +3653,9 @@ class EmhassStatusCard extends LiveCard {
       ui.bannerTitle.textContent = title;
       ui.bannerSub.textContent = sub;
       ui.bannerSub.title = sub;
-      ui.bannerPill.className = `pill ${cls === "wait" ? "" : cls}`;
+      // Every state now carries a colour of its own, so the pill wears the
+      // same class as the rest of the banner rather than opting out of it.
+      ui.bannerPill.className = `pill ${cls}`;
       ui.bannerPillText.textContent = pillText;
     }
 
@@ -3900,6 +3924,8 @@ EmhassStatusCard.css = `
             transition: background 300ms; }
   .banner.on { background: rgba(67, 160, 71, .13);
                background: color-mix(in srgb, var(--emh-ok) 13%, transparent); }
+  .banner.warn { background: rgba(255, 166, 0, .13);
+                 background: color-mix(in srgb, var(--emh-warn) 13%, transparent); }
   .banner.bad { background: rgba(219, 68, 55, .13);
                 background: color-mix(in srgb, var(--emh-bad) 13%, transparent); }
   .banner .grow { flex: 1; min-width: 0; }
