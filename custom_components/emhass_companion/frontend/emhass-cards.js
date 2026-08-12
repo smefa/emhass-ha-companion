@@ -3390,6 +3390,12 @@ const STATUS_SECTIONS = [
   ["show_rules", "Why it decided that", "The executor's own rule trace"],
 ];
 
+/** How close the decision's own timestamp has to sit to the action sensor's
+ *  `last_changed` for the two to count as the same run. Generous, because the
+ *  state write follows the decision by however long the executor's remaining
+ *  axes take, and the alternative reading -- a re-send -- is minutes away. */
+const ACTION_CHANGE_TOLERANCE_MS = 15000;
+
 /** Every tile, as `[section, key, label, description]`. */
 const STATUS_TILES = [
   ["show_battery", "show_level", "Level now", "Measured level, and its gap to the plan"],
@@ -3592,6 +3598,25 @@ class EmhassStatusCard extends LiveCard {
       : attrs.control_enabled === true;
     const applied = attrs.applied === true;
     const failed = Boolean(attrs.error);
+    // Whether the *decision* changed on the run being reported, as opposed to
+    // the same decision being re-sent with a new number. `applied` cannot tell
+    // those apart and they are not the same news: a charge window holds one
+    // action for an hour while the plan revises its power every few minutes,
+    // and the executor rewrites on each revision past the 100 W deadband. On a
+    // real plan that is most rows, so treating every write as a change left
+    // the banner announcing news through the whole of a working charge.
+    //
+    // The sensor's own state is the action, so `last_changed` moves only when
+    // the action does, while `at` advances every run. The run that changed the
+    // action is the one where those two coincide; a re-send leaves them
+    // minutes apart. A missing timestamp reads as "not a change", which lands
+    // on the settled branch below -- the safer of the two to be wrong about.
+    const decidedAt = Date.parse(attrs.at || "");
+    const changedAt = Date.parse((action && action.last_changed) || "");
+    const justChanged =
+      Number.isFinite(decidedAt) &&
+      Number.isFinite(changedAt) &&
+      Math.abs(decidedAt - changedAt) < ACTION_CHANGE_TOLERANCE_MS;
 
     let cls = "";
     let icon = "mdi:eye-outline";
@@ -3604,40 +3629,17 @@ class EmhassStatusCard extends LiveCard {
       title = "Control failed";
       sub = "The last command did not go through";
       pillText = "Error";
-    } else if (armed && applied) {
-      // A write is an event, not a state. `applied` means a command went out
-      // on *this* run, and the banner then holds that news until the next run
-      // -- a whole timestep, not a flash -- so it takes the accent rather than
-      // the green. Being mid-change is not more correct than being settled,
-      // and an install whose plan moves several times a day would otherwise
-      // spend half of it in a colour that is supposed to mean "all well".
-      cls = "wait";
-      icon = "mdi:shield-sync";
-      title = "Controlling your house";
-      sub = "New command just sent to your hardware";
-      pillText = "Updated";
-    } else if (armed && steps.length) {
-      // Armed, resolved, and nothing worth sending: the executor writes only
-      // on a change, past the deadband, or before a timed command lapses, so
-      // this is hardware already doing what the plan asks. That is the state
-      // the green belongs to -- it is the one you want the system to be in,
-      // and it is where a working install sits nearly all the time.
-      //
-      // It used to read "Armed / Standby", which described the card's own
-      // last few seconds rather than the house: a battery charging at full
-      // power reported standby for the whole hour, because the command that
-      // started it had been sent before the run being reported on.
-      cls = "on";
-      icon = "mdi:shield-check";
-      title = "Controlling your house";
-      sub = "In sync with the plan";
-      pillText = "In sync";
-    } else if (armed) {
+    } else if (armed && !steps.length) {
       // Nothing resolved at all -- no inverter profile, or the profile defines
       // no action for what was decided. Loads are still switched; the battery
       // is not being touched. A setup gap rather than a steady state, and the
-      // only one of these worth the amber: the other two are the system
-      // working, and an amber that fires on those is an amber nobody reads.
+      // only one of these worth the amber: the rest are the system working,
+      // and an amber that fires on those is an amber nobody reads.
+      //
+      // Ahead of the two below because it is a property of the install rather
+      // than of the run: an install in this state would otherwise alternate
+      // between amber and the change badge every time a load was switched,
+      // which reads as intermittent rather than as unconfigured.
       const loadKeys =
         attrs.loads && typeof attrs.loads === "object" ? Object.keys(attrs.loads) : [];
       cls = "warn";
@@ -3645,6 +3647,34 @@ class EmhassStatusCard extends LiveCard {
       title = "Armed";
       sub = loadKeys.length ? "Loads only — no inverter command" : "No inverter command";
       pillText = "No command";
+    } else if (armed && applied && justChanged) {
+      // The plan has actually changed its mind, and the new decision went out
+      // on this run. That is news; a power refresh within the same action is
+      // not, and lands on the settled branch below.
+      cls = "wait";
+      icon = "mdi:shield-sync";
+      title = "Controlling your house";
+      // The label as the translation gives it: lowercasing it to fit the
+      // sentence would be wrong in every language that capitalises nouns.
+      sub = `New decision sent: ${labelFor(hass, action)}`;
+      pillText = "Updated";
+    } else if (armed) {
+      // Armed, resolved, and the hardware is doing what the plan asks --
+      // whether that took a write this run or not. The executor writes only
+      // on a change, past the deadband, or before a timed command lapses, so
+      // an untouched run means the command already in force is still the
+      // right one. Both are the state you want the system to be in, and both
+      // are where a working install sits nearly all the time.
+      //
+      // This used to read "Armed / Standby", which described the card's own
+      // last few seconds rather than the house: a battery charging at full
+      // power reported standby for most of the hour it charged, because the
+      // command that started it predated the run being reported on.
+      cls = "on";
+      icon = "mdi:shield-check";
+      title = "Controlling your house";
+      sub = applied ? "Tracking the plan — command refreshed" : "In sync with the plan";
+      pillText = "In sync";
     }
     if (ui.banner) {
       ui.banner.className = `banner ${cls}`;

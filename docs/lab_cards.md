@@ -182,21 +182,30 @@ entity, so the settings are one tap away rather than absent.
 | --- | --- | --- |
 | Control failed (red) | Error | The last command did not go through. Checked first: a failure outranks everything below. |
 | Dry run (grey) | Watching | The control gate is off. Decisions are computed in full and none of them is sent. |
-| Controlling your house (accent) | Updated | A command went out on the last run — the plan moved, or the power drifted past the deadband. |
-| Controlling your house (green) | In sync | Commands are resolved and none needed sending: the hardware is already doing what the plan asks. |
 | Armed (amber) | No command | Nothing resolved at all — no inverter profile, or the profile defines no action for what was decided. |
+| Controlling your house (accent) | Updated | The plan changed its mind, and the new decision went out on this run. |
+| Controlling your house (green) | In sync | The hardware is doing what the plan asks — whether that took a write this run or not. |
 
 Green is the state a working install sits in nearly all the time, and that is
-deliberate. The executor writes only when the action changes, when the power
-moves past the deadband, or when a time-limited command is about to lapse — so
-a battery charging at full power is sending nothing at all for most of the hour
-it charges. Reserving the green for the runs that *wrote* something leaves a
-perfectly healthy system reading "Armed / Standby" for most of the day, which
-is exactly what the earlier wording did.
+deliberate. Reserving it for the runs that *wrote* something leaves a perfectly
+healthy system reading "Armed / Standby" for most of the day, which is exactly
+what the earlier wording did: the executor writes only on a change, past the
+deadband, or before a time-limited command lapses, so a battery charging at
+full power sends nothing at all for most of the hour it charges.
 
-"Updated" is therefore an event, not a fault: it says the plan has just changed
-its mind about something. It holds until the next run, which is a whole
-timestep away, so it is a colour you will genuinely see rather than a flash.
+"Updated" is an event rather than a state, and it means the *decision* changed
+— self-consumption to force-charge, say. It deliberately does not fire when the
+same action is re-sent at a new power, which is a much commoner thing: a charge
+window holds one action for an hour while the plan revises its power every few
+minutes, and each revision past the 100 W deadband is a fresh write. Treating
+those as news would put the banner in the accent colour for the whole of a
+working charge, which is the opposite of what the colour is for. The settled
+banner says "command refreshed" instead when the last run did write.
+
+The card tells the two apart from the decision sensor itself: its state *is*
+the action, so `last_changed` moves only when the action does, while the `at`
+attribute advances every run. The run that changed the action is the one where
+those two timestamps coincide; a re-send leaves them minutes apart.
 
 Amber is kept for the one case that wants attention. Loads are still switched
 when it shows — the sub-line says "Loads only" if any are configured — but the
