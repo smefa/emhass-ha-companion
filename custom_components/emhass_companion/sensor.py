@@ -227,6 +227,13 @@ DIAGNOSTIC_SENSORS: tuple[EmhassSensorDescription, ...] = (
     EmhassSensorDescription(
         key="plan_cost",
         translation_key="plan_cost",
+        # EMHASS's own objective value, passed through unchanged so that the
+        # standard-names option can publish it as `total_cost_fun_value` and
+        # agree with the add-on's own sensor. Diagnostic because it is not
+        # money anyone can total up -- its sign and meaning follow `costfun`
+        # and its window follows whatever was last solved. See docs/savings.md
+        # on why the cost tracking sensors are computed separately.
+        entity_category=EntityCategory.DIAGNOSTIC,
         state_class=SensorStateClass.MEASUREMENT,
         suggested_display_precision=2,
         value_fn=lambda data, now: data.plan.total_cost if data.plan else None,
