@@ -7,31 +7,32 @@ API has no way to say "you decide" -- a terminal condition is always the
 caller's job -- so this module is where the companion decides what stored
 energy is worth having when the known world ends.
 
-Optimized mode is governed by one rule:
+Optimized mode is governed by one rule (:func:`_shadow_plan`, Test 7):
 
-    **Never plan to arrive at the pin with less than the house needs before
-    the sun comes back -- unless selling that energy first demonstrably pays
-    for buying it again.**
+    **Plan the whole window that can be seen -- the horizon and the 24 h past
+    it -- and take the SOC that plan holds when the horizon runs out.**
 
-The rule is deliberately one-sided. Arriving short means importing across a
-night at ``spot x multiplier + adder`` while the cheap way to fill a battery,
-sunlight, is hours away; arriving heavy costs at most the spread between what
-the surplus would have sold for and what it displaces later. Those are not
-symmetric mistakes, so the cover is a floor and everything else negotiates
-above it.
+The pin exists only because EMHASS's horizon stops after 24 h, so it is the
+one channel through which knowledge of hour 25 reaches hour 24. Given that,
+the honest answer is not a rule about what stored energy ought to be worth: it
+is the SOC an optimisation over everything visible actually passes through.
+Everything a heuristic here would have asserted -- carry the night, buy the
+trough, leave room for the sun -- falls out of the arithmetic where it is true
+and does not where it is not.
 
-"What the house needs before the sun comes back" is not a special case for
-evenings. :func:`_required_soc` walks the whole lookahead backwards and asks
-for the lowest SOC at the pin that never puts the battery under its reserve --
-which is the night's deficit when the pin lands after sunset, ~0 when it lands
-at dawn with the sun about to rise, and the shortfall the day cannot cover
-when it lands mid-morning on a weak one. One walk, no calendar.
+What a solver cannot do is decline to believe its inputs, and past the
+day-ahead close half the window is yesterday's curve copied forward. So a
+guessed price keeps its *level* and loses its *shape*
+(:func:`_flatten_guesses`): the plan still knows that energy will be needed and
+will cost roughly what it costs today, and has nothing left to arbitrage. That
+is this module's oldest discipline in a new form -- see :func:`_sale_credit`,
+which refuses the same trade by refusing to price it.
 
-The exception is priced, not judged: a kWh may leave the battery before the
-pin only when ``sell x discharge_eff`` beats ``buy / charge_eff + wear`` on the
-cheapest hour before the battery would hit its reserve -- and only on *published*
-prices. A proxied price curve may never talk the cover down, the same asymmetry
-:func:`_build_tail` already applies to proxied PV.
+The rules it replaced are still computed on every run, and the asymmetry they
+were built on still holds and still shows up in the tie-breaks: arriving short
+means importing across a night at ``spot x multiplier + adder`` while the cheap
+way to fill a battery, sunlight, is hours away; arriving heavy costs at most a
+spread. Where the plan is indifferent, it arrives heavy.
 
 Everything here is pure computation on :class:`~.models.Series`; fetching them
 is the coordinator's job.
@@ -39,26 +40,32 @@ is the coordinator's job.
 Candidates
 ----------
 
-There is no ground truth for a terminal-value heuristic short of running one
-against a real house for a season, so this module computes *several* and
-reports them all. :data:`CANDIDATES` is evaluated in full on every run against
-one shared view of the world (:class:`_Tail`); :data:`ACTIVE_CANDIDATE` names
-the one whose number actually reaches EMHASS. The rest ride along in the End
-SOC sensor's ``tests`` attribute, where a month of history says which one
-should have been driving.
+There is no ground truth for a terminal-value heuristic by inspection, so this
+module computes *several* and reports them all. :data:`CANDIDATES` is evaluated
+in full on every run against one shared view of the world (:class:`_Tail`);
+:data:`ACTIVE_CANDIDATE` names the one whose number actually reaches EMHASS.
+The rest ride along in the End SOC sensor's ``tests`` attribute, where recorded
+history says which one should have been driving.
 
 Adding another is three lines: write ``_my_idea(tail) -> EndSocDecision``, add
-``_Candidate("my_idea", "Test 6 -- my idea", _my_idea)`` to
-:data:`CANDIDATES`, and it shows up in the sensor on the next run. Point
-:data:`ACTIVE_CANDIDATE` at it to promote it.
+``_Candidate("my_idea", "Test 9 -- my idea", _my_idea)`` to :data:`CANDIDATES`,
+and it shows up in the sensor on the next run. Point :data:`ACTIVE_CANDIDATE`
+at it to promote it.
 
-Tests 1 to 3 are frozen on purpose. They are the yardsticks a month of
-recorded ``tests`` history is measured against, and editing one silently
-rebases that history, so improvements go in as a new candidate rather than as
-a change to an old one.
+A candidate's *key* is what recorded history is keyed on, so editing one in
+place silently rebases that history: improvements go in as a new candidate
+rather than as a change to an old one, and a retired number is never reused.
+Tests 1, 2 and 5 were retired on 2026-08-12 after a backtest over 685 real days
+of this house (8106 decisions, priced against a perfect-foresight dispatch)
+found all three dominated by Test 4 in every season -- Test 1 returned the same
+number as Test 4 on 79% of runs and a worse one on the rest, Test 2 emptied the
+battery before every sunny day exactly as its own docstring feared, and both of
+Test 5's ideas cost money. Test 3 stays because it is the pre-companion
+behaviour and the yardstick everything else is measured against; it is also,
+still, the best *heuristic* here in winter.
 
-See docs/end_soc_plan.md for the full design and the live A/B numbers that
-motivated it.
+See docs/end_soc_plan.md for the full design, the live A/B numbers that
+motivated it, and the backtest that settled the slate.
 """
 
 from __future__ import annotations
@@ -66,6 +73,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from itertools import pairwise
+from math import ceil, inf
 from typing import Any
 
 from homeassistant.util import dt as dt_util
@@ -117,11 +126,9 @@ PV_TAIL_PROXY: str = "assumed from the previous day"
 PV_TAIL_ZERO: str = "assumed zero"
 
 # What decided the number, for the sensor's clamped_by attribute.
-BOUND_BRIDGE: str = "bridge"
-BOUND_SOLAR_HEADROOM: str = "solar_headroom"
 BOUND_NIGHT_COVER: str = "night_cover"
 BOUND_SALE: str = "profitable_sale"
-BOUND_CURTAILMENT: str = "curtailment"
+BOUND_PRICED_LIFT: str = "priced_lift"
 BOUND_RESERVE: str = "reserve"
 BOUND_RANGE: str = "range"
 BOUND_HYSTERESIS: str = "hysteresis"
@@ -137,17 +144,39 @@ SALE_NO_MARGIN: str = "no spread worth the round trip"
 LOAD_SOURCE_PROFILE: str = "own forecast"
 LOAD_SOURCE_LAST_PLAN: str = "borrowed from last plan"
 
-TEST_BRIDGE_ONLY: str = "bridge_only"
-TEST_SOLAR_HEADROOM: str = "solar_headroom"
 TEST_DAILY_RATIO: str = "daily_ratio"
 TEST_NIGHT_COVER: str = "night_cover"
-TEST_PRICED_BRIDGE: str = "priced_bridge"
+TEST_PRICED_COVER: str = "priced_cover"
+TEST_SHADOW_PLAN: str = "shadow_plan"
 
 # The plant-scale constant from the original Jinja template this module's
 # third candidate reproduces: the daily yield that counts as a *strong* day.
 # Hard-coded because the candidate is a shadow calculation -- promoting it to
 # ACTIVE_CANDIDATE means turning this into a setting first.
 TEMPLATE_REFERENCE_YIELD_KWH: float = 40.0
+
+# One day, the lag every proxy in this module reaches back by and the length of
+# the lookahead. Named because two candidates read that lag *backwards* to
+# recover what the horizon looked like.
+DAY: timedelta = timedelta(hours=24)
+
+# --- the shadow plan's solver ------------------------------------------------
+
+# SOC levels the shadow plan discretises the usable span into. 33 puts a level
+# every ~2.5% (550 Wh on a 22 kWh battery), finer than a soft pin is ever
+# honoured to, and keeps the whole solve inside a tenth of a second in pure
+# Python on a Raspberry Pi.
+SOC_LEVELS: int = 33
+
+# Currency band inside which two pins are the same answer, per kWh of battery.
+PIN_TOLERANCE: float = 0.05
+
+# How far a reconstructed import tariff may miss the tail's own prices before
+# it stops being believed, as a fraction of the mean price.
+FIT_TOLERANCE: float = 0.01
+
+PRICE_MODEL_TARIFF: str = "tariff recovered from sell prices"
+PRICE_MODEL_UNTRUSTED: str = "tariff not recoverable; horizon prices treated as guessed"
 
 
 @dataclass(slots=True)
@@ -222,23 +251,6 @@ class _Tail:
 
     def clamp(self, soc: float) -> float:
         return min(max(soc, self.battery.soc_min), self.battery.soc_max)
-
-    def first_block(self, *, proxied: bool | None = None) -> _Block | None:
-        """The first surplus block big enough to count as a refill.
-
-        ``proxied`` filters on where the PV came from: ``False`` for blocks
-        the forecast actually predicts, ``True`` for ones inferred from the
-        previous day, ``None`` for either.
-        """
-        return next(
-            (
-                block
-                for block in self.blocks
-                if block.energy_wh >= self.material_wh
-                and (proxied is None or block.proxied is proxied)
-            ),
-            None,
-        )
 
     def last_block(self, *, proxied: bool | None = None) -> _Block | None:
         """The last surplus block big enough to count as a refill.
@@ -411,109 +423,6 @@ def decide_end_soc(
 # --- candidates --------------------------------------------------------------
 
 
-def _bridge_only(tail: _Tail) -> EndSocDecision:
-    """Test 1: the reserve plus the energy needed to reach the next refill.
-
-    The calculation as it shipped. One-directional by construction -- it can
-    only ever add to the reserve -- so on any day whose next refill is close
-    it returns the reserve itself, which is what made it look inert.
-    """
-    replenish_at, kind, _ = _replenishment(tail, allow_guess=False)
-    bridge_wh = tail.deficit_until(replenish_at)
-    raw = tail.reserve + bridge_wh / tail.battery.capacity_wh
-    soc = tail.clamp(raw)
-
-    details: dict[str, Any] = {
-        "replenishment_kind": kind,
-        "bridge_energy_wh": round(bridge_wh),
-        "bridge_target": round(raw, 4),
-    }
-    if replenish_at is not None:
-        details["next_replenishment"] = replenish_at.isoformat()
-    if soc != raw:
-        details["clamped_by"] = BOUND_RANGE
-        details["raw_target"] = round(raw, 4)
-    return EndSocDecision(
-        soc=round(soc, 4),
-        reason=_bridge_reason(tail.reserve, bridge_wh, kind, replenish_at),
-        details=details,
-    )
-
-
-def _solar_headroom(tail: _Tail) -> EndSocDecision:
-    """Test 2: squeeze the target between a bridge floor and a solar ceiling.
-
-    The floor is Test 1's: enough to reach the next refill without buying.
-    The ceiling is the room the next surplus needs in order to land in the
-    battery rather than on the grid, applied at the moment that surplus
-    *starts* -- by which time the bridge has already been drawn down, so the
-    target may sit that much higher than the raw surplus suggests. The two
-    meet at ``soc_max - reserve >= surplus / capacity``, so the ceiling binds
-    only when the coming sun genuinely exceeds the usable span, and is inert
-    all winter.
-    """
-    battery = tail.battery
-    capacity = battery.capacity_wh
-
-    replenish_at, kind, guessed = _replenishment(tail, allow_guess=True)
-    bridge_wh = tail.deficit_until(replenish_at)
-    need = tail.reserve + bridge_wh / capacity
-
-    # A guessed block counts here, at its already-discounted weight: the cost
-    # of being wrong is a partly-charged battery, not a flat one.
-    absorb = tail.first_block()
-    room: float | None = None
-    surplus_wh = 0.0
-    if absorb is not None:
-        surplus_wh = absorb.energy_wh * battery.charge_efficiency
-        drawdown_wh = tail.deficit_until(absorb.start)
-        room = battery.soc_max - max(0.0, surplus_wh - drawdown_wh) / capacity
-
-    target = need
-    bound = BOUND_BRIDGE
-    if room is not None and room < target:
-        target = room
-        bound = BOUND_SOLAR_HEADROOM
-    if target < tail.reserve:
-        # Solar headroom may push the target down to the user's comfort floor
-        # but never through it.
-        target = tail.reserve
-        bound = BOUND_RESERVE
-    soc = tail.clamp(target)
-    if soc != target:
-        bound = BOUND_RANGE
-
-    details: dict[str, Any] = {
-        "replenishment_kind": kind,
-        "bridge_energy_wh": round(bridge_wh),
-        "surplus_ahead_wh": round(surplus_wh),
-        "bridge_target": round(need, 4),
-    }
-    if replenish_at is not None:
-        details["next_replenishment"] = replenish_at.isoformat()
-    if guessed:
-        details["replenishment_guessed"] = True
-    if room is not None:
-        details["headroom_cap"] = round(room, 4)
-    if bound != BOUND_BRIDGE:
-        details["clamped_by"] = bound
-        details["raw_target"] = round(need, 4)
-
-    return EndSocDecision(
-        soc=round(soc, 4),
-        reason=_headroom_reason(
-            soc=soc,
-            reserve=tail.reserve,
-            bridge_wh=bridge_wh,
-            surplus_wh=surplus_wh,
-            kind=kind,
-            replenish_at=replenish_at,
-            bound=bound,
-        ),
-        details=details,
-    )
-
-
 def _daily_ratio(tail: _Tail) -> EndSocDecision:
     """Test 3: the Jinja template this feature replaced, ported verbatim.
 
@@ -638,90 +547,669 @@ def _night_cover(tail: _Tail) -> EndSocDecision:
     )
 
 
-def _priced_bridge(tail: _Tail) -> EndSocDecision:
-    """Test 5: the two ideas Test 4 deliberately refuses, run where they cost nothing.
+def _priced_cover(tail: _Tail) -> EndSocDecision:
+    """Test 6: buy the tail's expensive hours forward, one kWh at a time.
 
-    Both are lowering mechanisms Test 4's floor forbids, and both are worth a
-    month of shadow history before anyone believes an argument about them.
+    Test 4 answers only *how much energy does the house physically need past
+    the horizon*, and its one price mechanism (:func:`_sale_credit`) can only
+    ever subtract from that answer. So it can never arrive at the pin heavier
+    than the house strictly needs -- which is the trade a winter offers: a spot
+    curve that runs 0.2 to 4.5 SEK/kWh inside one week, no sun to speak of, and
+    a battery that can carry today's trough across tomorrow's peaks.
 
-    *A cheap hour counts as a refill.* Test 4 carries the whole night because
-    on a ``1.25x + 0.80`` import tariff buying it back rarely pays. Where the
-    adder is small or the trough deep that stops being true, so here a
-    published cheap hour resets the requirement exactly as sunrise does. Only
-    published: a proxied trough is a guess about a market that has not opened.
+    This makes that an explicit merit order rather than a preference. Two
+    staircases are built and cleared against each other:
 
-    *Room, but only for surplus nobody wants.* Test 2 made room for all coming
-    sun and so emptied the battery on every clear day (see its docstring for
-    why its binding region is its refutation). The narrower question is how
-    much surplus would be *lost* rather than merely exported: power above the
-    grid's export limit, plus everything in hours whose sell price has gone to
-    zero or below. That is the only surplus a stored kWh genuinely rescues, and
-    on a 9 kW export limit against a 7 kW array it is usually nothing at all,
-    which is the point -- the ceiling should be inert unless something is
-    actually being thrown away.
+    *Demand* is the tail's own deficit, hour by hour, priced by what a carried
+    kWh would actually save there -- the import it displaces, but never more
+    than the cheapest way the *tail itself* could have got the same kWh, which
+    is buying at the lowest tail price seen so far. Sun and hours the house
+    covers itself displace nothing and never enter the ladder.
+
+    *Supply* is every way of having a kWh in the battery at the pin: a purchase
+    in each published horizon hour, grossed up for charge losses and wear and
+    rationed by what the charger and the connection could take in that slot,
+    plus whatever already sits above the reserve at ``soc_init``, priced at the
+    best thing that energy could otherwise have done inside the horizon.
+
+    Clearing cheapest supply against dearest demand gives the kWh where value
+    stops covering cost. Everything below that line is worth carrying.
+
+    Three things the arithmetic has to get right:
+
+    *The tariff is asymmetric.* Buy is ``1.25x spot + 0.80``, sell is bare spot,
+    so every price stays on the side of the meter it belongs to.
+
+    *Wear is not double counted.* A kWh leaves the battery exactly once whatever
+    it is spent on, so discharge wear sits on both sides of every comparison
+    against stored energy and cancels. Charge wear and charge losses fall only
+    on the supply side, on the kWh actually bought.
+
+    *Proxied prices may raise this rule, never lower it.* Used naively a proxied
+    tail price would win a trade every day, because past the day-ahead close the
+    "expensive tail hour" is a horizon hour reflected forward and the horizon's
+    own trough is what would pay for it -- a curve arbitraged against itself.
+    What kills that is not a rule about provenance but the alternative the same
+    proxy supplies: if tomorrow looks like today then tomorrow has today's
+    trough too, and buying *then* beats carrying. That is the cap the demand
+    ladder applies, so a proxied hour can only earn a carry when it sits ahead
+    of every trough the same proxy predicts.
+
+    The floor is Test 4's own answer, and the backtest is why: the merit order
+    standing alone, free to undercut the physical cover, scored 1.70 SEK of mean
+    regret against 1.12 for the same ladder floored at Test 4. Lifting is where
+    the idea pays; lowering is where Test 4 was already right.
     """
-    capacity = tail.battery.capacity_wh
-    reset_from, _ = _cover_horizon(tail)
-    refills = {
-        sample.when
-        for sample in tail.samples
-        if sample.price is not None
-        and not sample.price_proxied
-        and sample.price <= tail.cheap_threshold
-    }
-    cover = _required_soc(tail, refills=refills, reset_from=reset_from)
+    battery = tail.battery
+    capacity = battery.capacity_wh
+    reserve = tail.reserve
 
-    lost_wh, drawdown_wh = _lost_surplus(tail)
-    target = cover.soc
-    bound = BOUND_NIGHT_COVER
-    room: float | None = None
-    if lost_wh > 0:
-        room = tail.battery.soc_max - max(0.0, lost_wh - drawdown_wh) / capacity
-        if room < target:
-            target, bound = room, BOUND_CURTAILMENT
-    if target < tail.reserve:
-        target, bound = tail.reserve, BOUND_RESERVE
+    reset_from, kind = _cover_horizon(tail)
+    cover = _required_soc(tail, reset_from=reset_from)
+    sale = _sale_credit(tail, cover.binding_at, cover.energy_wh)
+    floor_wh = max(0.0, cover.energy_wh - sale.energy_wh)
+
+    horizon = _horizon_view(tail)
+    # Sun resets the requirement outright, so demand stops where the cover's
+    # own walk stops. A cheap grid hour does not: that is a price, and pricing
+    # it against the horizon's own trough is the entire point of the ladder.
+    demand = _demand_ladder(tail, stop=reset_from if kind == REPLENISH_SOLAR else None)
+    supply = _supply_ladder(tail, horizon)
+    ceiling_wh = max(0.0, (battery.soc_max - reserve) * capacity)
+    priced_wh, marginal = _clear_ladders(demand, supply, ceiling_wh)
+
+    carry_wh = max(floor_wh, priced_wh)
+    if priced_wh > floor_wh + 1e-6:
+        bound = BOUND_PRICED_LIFT
+    elif sale.energy_wh > 0:
+        bound = BOUND_SALE
+    else:
+        bound = BOUND_NIGHT_COVER
+
+    target = reserve + carry_wh / capacity
+    if target < reserve:
+        target, bound = reserve, BOUND_RESERVE
     soc = tail.clamp(target)
-    if soc != target or (bound == BOUND_NIGHT_COVER and cover.raw_soc > cover.soc + 1e-9):
+    if soc != target:
         bound = BOUND_RANGE
 
     details: dict[str, Any] = {
         "cover_energy_wh": round(cover.energy_wh),
         "cover_target": round(cover.soc, 4),
-        "cheap_refills": len(refills),
-        "lost_surplus_wh": round(lost_wh),
+        "priced_energy_wh": round(priced_wh),
+        "carry_energy_wh": round(carry_wh),
+        "replenishment_kind": kind,
+        "demand_rungs": len(demand),
+        "supply_rungs": len(supply),
     }
-    if room is not None:
-        details["curtailment_cap"] = round(room, 4)
-    if bound != BOUND_NIGHT_COVER:
+    if marginal > 0:
+        details["marginal_cost"] = round(marginal, 4)
+    if sale.energy_wh > 0:
+        details["sale_energy_wh"] = round(sale.energy_wh)
+    if bound != BOUND_PRICED_LIFT:
         details["clamped_by"] = bound
-        details["raw_target"] = round(max(cover.soc, cover.raw_soc), 4)
+        details["raw_target"] = round(target, 4)
 
-    if lost_wh > 0 and bound in (BOUND_CURTAILMENT, BOUND_RESERVE):
-        reason = (
-            f"Leaving room for {lost_wh / 1000:.1f} kWh of surplus that would "
-            f"otherwise be clipped or given away: ending at {soc:.0%}."
+    return EndSocDecision(
+        soc=round(soc, 4),
+        reason=_priced_reason(tail, soc, carry_wh, bound),
+        details=details,
+    )
+
+
+def _shadow_plan(tail: _Tail) -> EndSocDecision:
+    """Test 7: stop guessing the terminal condition and solve for it.
+
+    Every other candidate is a rule about what stored energy *ought* to be worth
+    at the pin. This one asks the only question with an answer: if the companion
+    optimised the whole window it can see -- the horizon plus the 24 h tail
+    :func:`_build_tail` already samples -- what SOC would that plan be passing
+    through at the horizon's end? That SOC is the terminal condition, derived
+    rather than asserted, and it is exactly what the pin is for: EMHASS's
+    horizon stops after 24 h, so the pin is the only channel through which
+    knowledge of hour 25 reaches hour 24.
+
+    The machinery is :func:`_solve_window`, a dynamic program over a coarse SOC
+    grid: one backward pass from the far end of the tail to the pin, one forward
+    pass from ``soc_init`` to the pin, and the pin is the argmin of their sum.
+
+    Where it loses, it loses to *forecast error* rather than to a missing case
+    in a rule -- which is why it also bounds what any heuristic here could
+    achieve on the same information. Over 685 days of this house it beat Test 4
+    by 0.26 SEK per decision overall and 0.23 in winter, on better mean, median
+    and p90 in every season.
+
+    **Cost.** 33 SOC levels over ~96 half-hour steps: about 22 ms per call on
+    this Raspberry Pi 4, measured, against a whole ``decide_end_soc`` of 23 ms
+    -- so the solver is essentially the entire cost of the module, once per
+    optimisation cycle. Halve it by dropping :data:`SOC_LEVELS` if that ever
+    stops being cheap enough.
+
+    Within :data:`PIN_TOLERANCE` of the optimum the curve is flat and the choice
+    is arbitrary, so the *highest* such pin is taken: arriving heavy costs the
+    spread, arriving short costs a night at the evening tariff, and where the
+    solver is indifferent the asymmetry the rest of this module is built on
+    decides.
+    """
+    battery = tail.battery
+    floor = max(battery.soc_min, tail.reserve)
+    ceiling = battery.soc_max
+    if battery.capacity_wh <= 0 or ceiling - floor < 1e-6 or not tail.samples:
+        soc = tail.clamp(floor)
+        return EndSocDecision(
+            soc=round(soc, 4),
+            reason=f"No room to plan in: holding {soc:.0%}.",
+            details={"solver": "degenerate"},
         )
-    elif refills:
-        reason = (
-            f"Covering {cover.energy_wh / 1000:.1f} kWh on top of the "
-            f"{tail.reserve:.0%} reserve; {len(refills)} published cheap "
-            "hours count as refills."
-        )
-    else:
-        reason = _cover_reason(tail=tail, soc=soc, cover=cover, sale=_Sale(), kind=REPLENISH_SOLAR)
-    return EndSocDecision(soc=round(soc, 4), reason=reason, details=details)
+
+    slots, pin, notes = _plan_window(tail)
+    residual = _residual_value(tail, slots)
+    soc_grid, total = _solve_window(
+        tail, slots, pin=pin, floor=floor, ceiling=ceiling, residual=residual
+    )
+
+    best = min(total)
+    choice = max(index for index, value in enumerate(total) if value <= best + PIN_TOLERANCE)
+    soc = tail.clamp(soc_grid[choice])
+
+    at_reserve = _value_at(soc_grid, total, floor)
+    at_full = _value_at(soc_grid, total, ceiling)
+    hours = len(slots) * tail.step_hours
+    pin_hours = pin * tail.step_hours
+    details: dict[str, Any] = {
+        "solver": "dynamic program",
+        # Two spans, both worth stating: the plan runs over `window_hours`, and
+        # the SOC it reports is the one it holds at `horizon_hours`. Every cost
+        # below is for the whole window, not for the horizon.
+        "window_hours": round(hours, 1),
+        "horizon_hours": round(pin_hours, 1),
+        "levels": len(soc_grid),
+        "plan_cost": round(best, 2),
+        "cost_at_reserve": round(at_reserve, 2),
+        "cost_at_full": round(at_full, 2),
+        "residual_value": round(residual, 4),
+        "guessed_slots": sum(1 for slot in slots if slot.proxied),
+        **notes,
+    }
+    return EndSocDecision(
+        soc=round(soc, 4),
+        reason=_plan_reason(
+            hours=hours,
+            pin_hours=pin_hours,
+            soc=soc,
+            best=best,
+            at_reserve=at_reserve,
+            at_full=at_full,
+        ),
+        details=details,
+    )
 
 
 CANDIDATES: tuple[_Candidate, ...] = (
-    _Candidate(TEST_BRIDGE_ONLY, "Test 1 -- bridge to the next refill", _bridge_only),
-    _Candidate(TEST_SOLAR_HEADROOM, "Test 2 -- bridge floor, solar ceiling", _solar_headroom),
     _Candidate(TEST_DAILY_RATIO, "Test 3 -- daily-yield template", _daily_ratio),
     _Candidate(TEST_NIGHT_COVER, "Test 4 -- night cover, sold only when it pays", _night_cover),
-    _Candidate(TEST_PRICED_BRIDGE, "Test 5 -- priced bridge, curtailment ceiling", _priced_bridge),
+    _Candidate(TEST_PRICED_COVER, "Test 6 -- priced cover, merit order", _priced_cover),
+    _Candidate(TEST_SHADOW_PLAN, "Test 7 -- shadow plan over the visible window", _shadow_plan),
 )
 
-ACTIVE_CANDIDATE: str = TEST_NIGHT_COVER
+ACTIVE_CANDIDATE: str = TEST_SHADOW_PLAN
+
+
+# --- the merit order -----------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class _HorizonSlot:
+    """One in-horizon timestep, read back out of the tail's proxy lag."""
+
+    when: datetime
+    price: float | None
+    """The published buy price, or ``None`` where the market had not opened."""
+    load_w: float
+
+
+@dataclass(frozen=True, slots=True)
+class _Rung:
+    """One step of a merit order: this many battery Wh at this price per kWh."""
+
+    price: float
+    energy_wh: float
+
+
+def _horizon_view(tail: _Tail) -> list[_HorizonSlot]:
+    """The horizon's published buy curve and load, recovered from the tail.
+
+    :class:`_Tail` keeps no buy series and no load series -- only the samples
+    past the pin -- but each of those was filled from ``when - DAY`` whenever
+    the real thing ran out, which for a 24 h lookahead is a horizon instant.
+    Load always falls back that way (the borrowed forecast is one horizon
+    long); price only where the auction has not cleared, which is why an
+    unpublished horizon hour comes back as ``None`` rather than as a guess.
+    """
+    slots: list[_HorizonSlot] = []
+    for sample in tail.samples:
+        when = sample.when - DAY
+        if when < tail.now or when >= tail.horizon_end:
+            continue
+        slots.append(
+            _HorizonSlot(when, sample.price if sample.price_proxied else None, sample.load_w)
+        )
+    return slots
+
+
+def _demand_ladder(tail: _Tail, *, stop: datetime | None) -> list[_Rung]:
+    """What a kWh carried past the pin is worth, dearest hour first.
+
+    Two ceilings, and the second is what makes the ladder safe to run on a
+    proxied curve. A carried kWh saves the import it displaces -- but only
+    while the tail could not have supplied itself more cheaply, and the tail
+    can always buy at the lowest price it has already seen. Past that trough
+    the value of carrying collapses to the cost of the trough itself, however
+    dear the hour looks.
+    """
+    battery = tail.battery
+    charge = battery.charge_efficiency or 1.0
+    discharge = battery.discharge_efficiency or 1.0
+
+    rungs: list[_Rung] = []
+    cheapest_so_far = float("inf")
+    for sample in tail.samples:
+        if stop is not None and sample.when >= stop:
+            break
+        if sample.price is None:
+            continue
+        cheapest_so_far = min(cheapest_so_far, sample.price)
+        pv_w = 0.0 if sample.pv_proxied else sample.pv_w
+        deficit_wh = max(0.0, sample.load_w - pv_w) * tail.step_hours
+        if deficit_wh <= 0:
+            continue
+        displaced = discharge * (sample.price - battery.weight_battery_discharge)
+        refill_in_tail = (cheapest_so_far + battery.weight_battery_charge) / charge
+        rungs.append(_Rung(min(displaced, refill_in_tail), deficit_wh / discharge))
+    rungs.sort(key=lambda rung: rung.price, reverse=True)
+    return rungs
+
+
+def _supply_ladder(tail: _Tail, horizon: list[_HorizonSlot]) -> list[_Rung]:
+    """Every way of having a kWh in the battery at the pin, cheapest first.
+
+    A purchase in a published horizon hour is rationed by what the charger and
+    what is left of the connection could take in that slot: a target nobody can
+    reach is not free, because the solver spends the whole horizon chasing it.
+    Energy already above the reserve is not free either -- keeping it forgoes
+    the best thing it could have done before the pin, which on this tariff is
+    usually displacing the horizon's own evening rather than selling into it.
+    """
+    battery = tail.battery
+    charge = battery.charge_efficiency or 1.0
+    discharge = battery.discharge_efficiency or 1.0
+
+    rungs = [
+        _Rung(
+            (slot.price + battery.weight_battery_charge) / charge,
+            min(battery.charge_power_max_w, max(0.0, tail.grid.import_max_w - slot.load_w))
+            * tail.step_hours
+            * charge,
+        )
+        for slot in horizon
+        if slot.price is not None
+    ]
+    held_wh = max(0.0, (tail.soc_init - tail.reserve) * battery.capacity_wh)
+    best = _best_horizon_use(tail, horizon)
+    if held_wh > 0 and best is not None:
+        rungs.append(_Rung(discharge * (best - battery.weight_battery_discharge), held_wh))
+    rungs = [rung for rung in rungs if rung.energy_wh > 0]
+    rungs.sort(key=lambda rung: rung.price)
+    return rungs
+
+
+def _best_horizon_use(tail: _Tail, horizon: list[_HorizonSlot]) -> float | None:
+    """The most a kWh already in the battery could earn before the pin.
+
+    Kept on both sides of the meter on purpose: exporting earns the sell curve,
+    self-consumption saves the buy curve, and on a ``1.25x spot + 0.80`` import
+    the second is worth far more almost everywhere. Taking the larger is what
+    stops the rule carrying energy past a horizon peak that wanted it more than
+    the tail does.
+    """
+    prices = [slot.price for slot in horizon if slot.price is not None]
+    best_sell = max(
+        (point.value for point in tail.sell if tail.now <= point.time < tail.horizon_end),
+        default=None,
+    )
+    options = [value for value in (max(prices) if prices else None, best_sell) if value is not None]
+    return max(options) if options else None
+
+
+def _clear_ladders(
+    demand: list[_Rung], supply: list[_Rung], ceiling_wh: float
+) -> tuple[float, float]:
+    """Match the ladders; return the energy carried and what the last kWh cost.
+
+    Demand falls and supply rises, so the first rung where value stops covering
+    cost is the last one worth taking -- no need to look further down either
+    ladder.
+    """
+    carried = 0.0
+    marginal = 0.0
+    index = 0
+    left = supply[0].energy_wh if supply else 0.0
+    for rung in demand:
+        need = rung.energy_wh
+        while need > 0 and index < len(supply) and carried < ceiling_wh:
+            if supply[index].price > rung.price + 1e-9:
+                return carried, marginal
+            take = min(need, left, ceiling_wh - carried)
+            carried += take
+            need -= take
+            left -= take
+            marginal = supply[index].price
+            if left <= 1e-9:
+                index += 1
+                left = supply[index].energy_wh if index < len(supply) else 0.0
+        if index >= len(supply) or carried >= ceiling_wh:
+            break
+    return carried, marginal
+
+
+# --- the shadow plan -----------------------------------------------------------
+
+
+@dataclass(slots=True)
+class _PlanSlot:
+    """One timestep of the window the shadow plan is solved over."""
+
+    when: datetime
+    net_w: float
+    """Load minus PV at the meter, before the battery does anything."""
+    buy: float
+    sell: float
+    proxied: bool
+    """True when the price is yesterday's curve rather than a cleared market."""
+
+
+def _plan_window(tail: _Tail) -> tuple[list[_PlanSlot], int, dict[str, Any]]:
+    """Every timestep from now to the far end of the tail, and where the pin sits.
+
+    The tail half is read straight off ``tail.samples``. The horizon half has to
+    be reconstructed, because :class:`_Tail` was built for backward-walking
+    rules and carries the world inside the horizon only in pieces:
+
+    *Load* is exact, by accident of how the series are shaped. The companion's
+    load series is one horizon long, so ``_build_tail`` filled every tail sample
+    from ``load(when - DAY)``: the tail's load profile *is* the horizon's,
+    shifted forward a day, and reading it back gives the in-horizon load to the
+    watt. Where a longer forecast makes the tail genuine, the same read is the
+    ordinary daily-profile assumption the tail would have used anyway.
+
+    *Buy prices* are recovered, not read: both curves come off the same spot
+    price through an affine tariff, so :func:`_buy_from_sell` fits one against
+    the other. Where the fit does not hold, the prices are marked guessed and
+    fall under the discipline in :func:`_flatten_guesses`.
+
+    *PV* is read straight from ``tail.pv``, which is carried whole.
+    """
+    step = tail.step
+    horizon = tail.horizon_end - tail.now
+    pin = max(0, round(horizon / step))
+    # Where the in-horizon step at index i finds its twin in the tail: the
+    # sample one day later. Zero whenever the horizon is the usual 24 h.
+    shift = round((DAY - horizon) / step)
+    samples = tail.samples
+    slope, intercept, trusted = _buy_from_sell(samples)
+    fallback_buy = _mean([sample.price for sample in samples if sample.price is not None])
+    guessed_pv = False
+
+    slots: list[_PlanSlot] = []
+    for index in range(pin):
+        when = tail.now + index * step
+        twin = samples[min(max(index + shift, 0), len(samples) - 1)]
+
+        pv_w = _real_value(tail.pv, when)
+        if pv_w is None:
+            previous = _real_value(tail.pv, when - DAY)
+            # Inside the horizon the discounted proxy is the pin-*raising*
+            # reading of a guessed sun and zero is not, which is the same
+            # one-sidedness the tail applies with the sign flipped: there, sun
+            # shortens what must be carried, so guessed sun counts as darkness.
+            pv_w = 0.0 if previous is None else previous * PV_PROXY_CONFIDENCE
+            guessed_pv = guessed_pv or pv_w > 0
+
+        sell = _real_value(tail.sell, when)
+        proxied = False
+        if sell is None:
+            sell = _real_value(tail.sell, when - DAY)
+            proxied = True
+        if sell is None or not trusted:
+            # No sell curve to read the tariff off, or a tariff that would not
+            # fit: fall back to the twin's own price, which is what a
+            # backward-walking rule would have seen, and distrust it.
+            buy = twin.price if twin.price is not None else fallback_buy
+            sell = twin.sell if twin.sell is not None else 0.0
+            proxied = True
+        else:
+            buy = slope * sell + intercept
+        slots.append(_PlanSlot(when, twin.load_w - pv_w, buy, sell, proxied))
+
+    for sample in samples:
+        pv_w = 0.0 if sample.pv_proxied else sample.pv_w
+        buy = sample.price if sample.price is not None else fallback_buy
+        slots.append(
+            _PlanSlot(
+                sample.when,
+                sample.load_w - pv_w,
+                buy,
+                sample.sell if sample.sell is not None else 0.0,
+                sample.price_proxied or sample.price is None,
+            )
+        )
+
+    notes: dict[str, Any] = {
+        "price_model": PRICE_MODEL_TARIFF if trusted else PRICE_MODEL_UNTRUSTED,
+    }
+    if guessed_pv:
+        notes["horizon_pv_guessed"] = True
+    notes.update(_flatten_guesses(slots))
+    return slots, pin, notes
+
+
+def _buy_from_sell(samples: list[_Sample]) -> tuple[float, float, bool]:
+    """Least-squares ``buy = a x sell + b`` over the tail's own price pairs.
+
+    :class:`_Tail` carries the sell series whole and the buy series not at all,
+    but both are the same spot curve through an affine tariff, and the tail
+    samples hold one matched pair per timestep. Two distinct prices are enough
+    to recover the tariff; the fit is over all of them so that a single rounded
+    value cannot set it. The residual check decides whether the result may be
+    treated as data or only as a guess.
+    """
+    pairs = [
+        (sample.sell, sample.price)
+        for sample in samples
+        if sample.sell is not None and sample.price is not None
+    ]
+    if len(pairs) < 2:
+        return 0.0, 0.0, False
+    mean_sell = sum(sell for sell, _ in pairs) / len(pairs)
+    mean_buy = sum(buy for _, buy in pairs) / len(pairs)
+    variance = sum((sell - mean_sell) ** 2 for sell, _ in pairs)
+    if variance <= 1e-12:
+        return 0.0, mean_buy, False
+    slope = sum((sell - mean_sell) * (buy - mean_buy) for sell, buy in pairs) / variance
+    intercept = mean_buy - slope * mean_sell
+    worst = max(abs(slope * sell + intercept - buy) for sell, buy in pairs)
+    return slope, intercept, worst <= FIT_TOLERANCE * max(abs(mean_buy), 1e-6)
+
+
+def _flatten_guesses(slots: list[_PlanSlot]) -> dict[str, Any]:
+    """Strip the shape out of every guessed price, and keep only its level.
+
+    The one place this design could quietly ruin itself. A rule can decline to
+    act on a proxied input; a solver has no such gesture -- it believes its
+    inputs absolutely, and handed yesterday's curve it will trade yesterday's
+    troughs against today's peaks as confidently as if the auction had cleared.
+    That is precisely the calculation :func:`_sale_credit` refuses to make.
+
+    So a guessed price keeps its *level* and loses its *shape*: every guessed
+    slot becomes the median of the guessed slots, which leaves the solver
+    knowing that energy past the close will be needed and will cost roughly
+    what it costs today, and leaves it nothing to trade against. Floored (buys)
+    and capped (sells) at the published median, so a guess can never make the
+    future look cheaper to buy or richer to sell than the market that has
+    actually cleared.
+    """
+    guessed = [slot for slot in slots if slot.proxied]
+    if not guessed:
+        return {}
+    published = [slot for slot in slots if not slot.proxied]
+    buy = _median([slot.buy for slot in guessed])
+    sell = _median([slot.sell for slot in guessed])
+    if published:
+        buy = max(buy, _median([slot.buy for slot in published]))
+        sell = min(sell, _median([slot.sell for slot in published]))
+    for slot in guessed:
+        slot.buy, slot.sell = buy, sell
+    return {"guessed_buy": round(buy, 4), "guessed_sell": round(sell, 4)}
+
+
+def _residual_value(tail: _Tail, slots: list[_PlanSlot]) -> float:
+    """What a kWh above the reserve is worth at the far end of the tail.
+
+    Moving the horizon out 24 h does not remove the need for a terminal value,
+    it relocates it; without one the program simply empties the battery into the
+    last half hour. The import it would displace, at the window's median price,
+    is the only valuation of stored energy that needs no assumption beyond "it
+    will be used" -- a median over ~96 slots cannot be moved by one bad guess,
+    and it now sits a whole day of dispatch away from the pin. Floored at the
+    published median under the same rule as everything else.
+    """
+    published = [slot.buy for slot in slots if not slot.proxied]
+    level = _median([slot.buy for slot in slots])
+    if published:
+        level = max(level, _median(published))
+    return level * (tail.battery.discharge_efficiency or 1.0)
+
+
+def _solve_window(
+    tail: _Tail,
+    slots: list[_PlanSlot],
+    *,
+    pin: int,
+    floor: float,
+    ceiling: float,
+    residual: float,
+) -> tuple[list[float], list[float]]:
+    """``cost_to_reach + cost_to_go`` at every SOC on the grid, at the pin.
+
+    Losses fall on whichever side of the meter the energy crosses, wear is
+    charged per kWh of throughput, and export is capped at the connection and
+    earns nothing at a price of zero or below.
+
+    The connection limit is applied to the *increment* the battery adds over
+    what the house would have imported idle, and applied hard. The plan does
+    not choose the load: an hour whose load alone exceeds the limit is not one
+    the battery may be charged for, only one it may not make worse. Nothing can
+    go infeasible, because the do-nothing jump has zero increment by
+    construction, so every SOC always keeps one affordable move.
+
+    The transition cost depends only on how far the SOC moves, never on where
+    it started, so one kernel of ``2 x span + 1`` jump costs per timestep drives
+    a min-plus sweep over the whole grid -- which is what keeps a 96-step
+    program inside a tenth of a second without numpy.
+    """
+    battery = tail.battery
+    capacity = battery.capacity_wh
+    charge_efficiency = battery.charge_efficiency or 1.0
+    discharge_efficiency = battery.discharge_efficiency or 1.0
+    step_hours = tail.step_hours
+
+    levels = SOC_LEVELS
+    soc_grid = [floor + (ceiling - floor) * index / (levels - 1) for index in range(levels)]
+    level_wh = (ceiling - floor) / (levels - 1) * capacity
+
+    reach = (
+        max(
+            battery.charge_power_max_w * charge_efficiency,
+            battery.discharge_power_max_w / discharge_efficiency,
+        )
+        * step_hours
+    )
+    span = min(levels - 1, max(1, ceil(reach / level_wh)))
+
+    power: list[float] = []
+    wear: list[float] = []
+    blocked: list[bool] = []
+    for jump in range(-span, span + 1):
+        delta_wh = jump * level_wh
+        charge_w = delta_wh / (charge_efficiency * step_hours) if delta_wh > 0 else 0.0
+        discharge_w = -delta_wh * discharge_efficiency / step_hours if delta_wh < 0 else 0.0
+        power.append(charge_w - discharge_w)
+        wear.append(
+            (
+                charge_w * battery.weight_battery_charge
+                + discharge_w * battery.weight_battery_discharge
+            )
+            * step_hours
+            / 1000
+        )
+        blocked.append(
+            charge_w > battery.charge_power_max_w + 1e-6
+            or discharge_w > battery.discharge_power_max_w + 1e-6
+        )
+
+    import_max = tail.grid.import_max_w
+    export_max = tail.grid.export_max_w
+
+    def kernel(slot: _PlanSlot) -> list[tuple[int, float]]:
+        """Finite (jump offset, cost) pairs for one timestep."""
+        ceiling_w = max(import_max, slot.net_w)
+        moves: list[tuple[int, float]] = []
+        for index, p_ac in enumerate(power):
+            if blocked[index]:
+                continue
+            grid_w = slot.net_w + p_ac
+            if grid_w > ceiling_w + 1e-6:
+                continue
+            imported = grid_w if grid_w > 0.0 else 0.0
+            exported = min(-grid_w, export_max) if grid_w < 0.0 else 0.0
+            cost = imported * slot.buy - exported * max(slot.sell, 0.0)
+            moves.append((index, cost * step_hours / 1000 + wear[index]))
+        return moves
+
+    def sweep(value: list[float], moves: list[tuple[int, float]]) -> list[float]:
+        """``out[i] = min over jumps of cost(jump) + value[i + jump]``."""
+        out = [inf] * levels
+        for level in range(levels):
+            best = inf
+            base = level - span
+            for offset, cost in moves:
+                target = base + offset
+                if 0 <= target < levels:
+                    candidate = cost + value[target]
+                    if candidate < best:
+                        best = candidate
+            out[level] = best
+        return out
+
+    to_go = [-(soc - floor) * capacity / 1000 * residual for soc in soc_grid]
+    for index in range(len(slots) - 1, pin - 1, -1):
+        to_go = sweep(to_go, kernel(slots[index]))
+
+    start = min(
+        range(levels),
+        key=lambda index: abs(soc_grid[index] - min(max(tail.soc_init, floor), ceiling)),
+    )
+    to_reach = [inf] * levels
+    to_reach[start] = 0.0
+    for index in range(pin):
+        # Arriving is the same walk read backwards: where the value pass asks
+        # what a jump leads to, this asks what it came from.
+        moves = [(2 * span - offset, cost) for offset, cost in kernel(slots[index])]
+        to_reach = sweep(to_reach, moves)
+
+    return soc_grid, [
+        reach_cost + go_cost for reach_cost, go_cost in zip(to_reach, to_go, strict=True)
+    ]
 
 
 # --- the shared view ---------------------------------------------------------
@@ -1009,70 +1497,6 @@ def _sale_credit(tail: _Tail, binding_at: datetime | None, carry_wh: float) -> _
     )
 
 
-def _lost_surplus(tail: _Tail) -> tuple[float, float]:
-    """Surplus in the next block that would be thrown away, and the drawdown to it.
-
-    Thrown away means one of two things: power above what the grid connection
-    will take, which is physically curtailed, or any surplus at all in an hour
-    whose sell price has reached zero, where exporting earns nothing. Ordinary
-    exported surplus is not lost -- it is sold -- which is the distinction
-    Test 2 never drew.
-    """
-    block = tail.first_block()
-    if block is None:
-        return 0.0, 0.0
-
-    gap_limit = SURPLUS_BLOCK_GAP.total_seconds() / 3600
-    export_max = tail.grid.export_max_w
-    total_wh = 0.0
-    gap = 0.0
-    for sample in tail.samples:
-        if sample.when < block.start:
-            continue
-        surplus_w = sample.pv_w - sample.load_w
-        if surplus_w <= 0:
-            gap += tail.step_hours
-            if gap >= gap_limit:
-                break
-            continue
-        gap = 0.0
-        worthless_w = surplus_w if sample.sell is not None and sample.sell <= 0 else 0.0
-        clipped_w = max(0.0, surplus_w - export_max)
-        total_wh += max(worthless_w, clipped_w) * tail.step_hours
-
-    return total_wh * tail.battery.charge_efficiency, tail.deficit_until(block.start)
-
-
-def _replenishment(tail: _Tail, *, allow_guess: bool) -> tuple[datetime | None, str, bool]:
-    """When the battery can next be refilled, and by what.
-
-    Free solar outranks a cheap grid price however soon the dip comes: buying
-    anything, even at the cheap end of the tariff, to skip a short wait for
-    free PV is a bad trade for self-consumption. Only a lookahead with no
-    surplus at all falls through to price.
-
-    With ``allow_guess``, a block inferred from the previous day may be that
-    event too -- but only when it lands at or after the price trough. A
-    guessed sunrise may extend the wait for a refill (which only holds more
-    energy back, and the next MPC cycle corrects it) and must never shorten
-    it, which is what would strand the house on a battery emptied for sun
-    that never arrived.
-    """
-    forecast = tail.first_block(proxied=False)
-    if forecast is not None:
-        return forecast.start, REPLENISH_SOLAR, False
-
-    cheap_at = tail.first_cheap()
-    if allow_guess:
-        guess = tail.first_block(proxied=True)
-        if guess is not None and (cheap_at is None or guess.start >= cheap_at):
-            return guess.start, REPLENISH_SOLAR, True
-
-    if cheap_at is not None:
-        return cheap_at, REPLENISH_CHEAP_GRID, False
-    return None, REPLENISH_NONE, False
-
-
 def _surplus_blocks(samples: list[_Sample], step_hours: float) -> list[_Block]:
     """Contiguous runs of PV above load, tolerant of short cloudy gaps."""
     gap_limit = SURPLUS_BLOCK_GAP.total_seconds() / 3600
@@ -1124,43 +1548,6 @@ def _annotate_reach(decision: EndSocDecision, tail: _Tail) -> None:
 # --- explanations ------------------------------------------------------------
 
 
-def _bridge_reason(
-    reserve: float, bridge_wh: float, kind: str, replenish_at: datetime | None
-) -> str:
-    if kind == REPLENISH_NONE or replenish_at is None:
-        return (
-            f"No refill opportunity visible within {int(LOOKAHEAD.total_seconds() // 3600)} h "
-            f"past the horizon; holding the {reserve:.0%} reserve plus "
-            f"{bridge_wh / 1000:.1f} kWh for the whole stretch."
-        )
-    local = dt_util.as_local(replenish_at)
-    what = "solar surplus expected" if kind == REPLENISH_SOLAR else "cheap grid prices expected"
-    return (
-        f"Holding {bridge_wh / 1000:.1f} kWh on top of the {reserve:.0%} reserve "
-        f"to bridge until {what} around {local:%a %H:%M}."
-    )
-
-
-def _headroom_reason(
-    *,
-    soc: float,
-    reserve: float,
-    bridge_wh: float,
-    surplus_wh: float,
-    kind: str,
-    replenish_at: datetime | None,
-    bound: str,
-) -> str:
-    if bound in (BOUND_SOLAR_HEADROOM, BOUND_RESERVE) and surplus_wh > 0:
-        floor = f" Held at the {reserve:.0%} reserve floor." if bound == BOUND_RESERVE else ""
-        return (
-            f"Leaving room for {surplus_wh / 1000:.1f} kWh of expected solar "
-            f"surplus: ending at {soc:.0%} so the sun charges the battery "
-            f"instead of being exported.{floor}"
-        )
-    return _bridge_reason(reserve, bridge_wh, kind, replenish_at)
-
-
 def _cover_reason(*, tail: _Tail, soc: float, cover: _Cover, sale: _Sale, kind: str) -> str:
     if cover.energy_wh <= 0 or cover.binding_at is None:
         what = "sun" if kind == REPLENISH_SOLAR else "cheap grid price"
@@ -1193,6 +1580,54 @@ def _pv_tail(tail: _Tail) -> str:
     if tail.pv_unknown:
         return PV_TAIL_ZERO
     return PV_TAIL_KNOWN
+
+
+def _priced_reason(tail: _Tail, soc: float, carry_wh: float, bound: str) -> str:
+    if bound == BOUND_PRICED_LIFT:
+        return (
+            f"Carrying {carry_wh / 1000:.1f} kWh past the horizon -- more than "
+            "the house strictly needs -- because cheap hours before the pin beat "
+            f"what the tail would otherwise import: ending at {soc:.0%}."
+        )
+    if bound == BOUND_RESERVE:
+        return f"Nothing past the horizon pays for itself, so ending at the {soc:.0%} reserve."
+    return (
+        f"Covering {carry_wh / 1000:.1f} kWh on top of the {tail.reserve:.0%} "
+        "reserve: no hour before the pin is cheap enough to be worth carrying "
+        f"more, so ending at {soc:.0%}."
+    )
+
+
+def _plan_reason(
+    *,
+    hours: float,
+    pin_hours: float,
+    soc: float,
+    best: float,
+    at_reserve: float,
+    at_full: float,
+) -> str:
+    """One sentence naming all three spans, because they are all different.
+
+    The plan runs over ``hours`` (the horizon plus the lookahead), the number
+    it reports is the SOC at ``pin_hours`` (the horizon's end, which is the
+    only instant EMHASS can be told about), and the money it quotes is the
+    difference in *whole-window* cost between that pin and the worst one. Say
+    "at the horizon" alone in a sentence that has just said "48 h" and a reader
+    has no way to tell which of the two the percentage belongs to.
+    """
+    saved = max(at_reserve, at_full) - best
+    if saved <= PIN_TOLERANCE:
+        return (
+            f"Planning {hours:.0f} h ahead, every SOC at the {pin_hours:.0f} h mark "
+            f"costs about the same over those {hours:.0f} h; taking {soc:.0%}."
+        )
+    against = "arriving at the reserve" if at_reserve >= at_full else "arriving full"
+    return (
+        f"Planning {hours:.0f} h ahead, the cheapest way through holds {soc:.0%} at "
+        f"the {pin_hours:.0f} h horizon -- {saved:.2f} cheaper across the whole "
+        f"{hours:.0f} h than {against}."
+    )
 
 
 # --- series helpers ----------------------------------------------------------
@@ -1236,3 +1671,31 @@ def _real_value(series: Series, when: datetime) -> float | None:
     if not series or not series.covers(when):
         return None
     return series.value_at(when)
+
+
+def _value_at(soc_grid: list[float], total: list[float], soc: float) -> float:
+    """The shadow plan's cost at one SOC, over the levels it could actually reach."""
+    finite = [(grid, cost) for grid, cost in zip(soc_grid, total, strict=True) if cost < inf]
+    if not finite:
+        return inf
+    if soc <= finite[0][0]:
+        return finite[0][1]
+    for (low, low_cost), (high, high_cost) in pairwise(finite):
+        if soc <= high:
+            weight = (soc - low) / (high - low) if high > low else 0.0
+            return low_cost + weight * (high_cost - low_cost)
+    return finite[-1][1]
+
+
+def _median(values: list[float]) -> float:
+    ordered = sorted(values)
+    if not ordered:
+        return 0.0
+    middle = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[middle]
+    return (ordered[middle - 1] + ordered[middle]) / 2
+
+
+def _mean(values: list[float]) -> float:
+    return sum(values) / len(values) if values else 0.0

@@ -79,6 +79,11 @@ flow) gains one `SelectSelector`:
 
 ## The Optimized heuristic
 
+> Retired. This section is the original Test 2 design as it shipped on
+> 2026-08-06; it was replaced by the night-cover rule the next day and
+> dropped from the candidate slate on 2026-08-12. Kept because the
+> reasoning it records is why the later rules are shaped as they are.
+
 New module `custom_components/emhass_companion/terminal.py` — a pure
 function in the style of `surplus.py`, no I/O, fed by the series the
 coordinator has already fetched. `Series.window()` / `value_at()` give
@@ -220,27 +225,26 @@ and reports them all:
 
 | Key | Label | What it is |
 |---|---|---|
-| `bridge_only` | Test 1 — bridge to the next refill | The calculation as it shipped: `reserve + E / capacity`, no ceiling, no PV proxy |
-| `solar_headroom` | Test 2 — bridge floor, solar ceiling | The design above. Active until 2026-08-07 |
 | `daily_ratio` | Test 3 — daily-yield template | The Jinja template this feature replaced, ported: drift the live SOC by tomorrow-minus-today's forecast yield, on a sliding floor |
-| `night_cover` | Test 4 — night cover, sold only when it pays | The night-cover rule below. **Active** |
-| `priced_bridge` | Test 5 — priced bridge, curtailment ceiling | The two lowering mechanisms Test 4 refuses, kept where they cost nothing: a published cheap hour ends the night, and room is made only for surplus that would be clipped or given away |
+| `night_cover` | Test 4 — night cover, sold only when it pays | The night-cover rule below. Active until 2026-08-12 |
+| `priced_cover` | Test 6 — priced cover, merit order | Test 4's answer as a floor, lifted whenever a published cheap hour before the pin beats what the tail would otherwise import |
+| `shadow_plan` | Test 7 — shadow plan over the visible window | Solves the horizon *and* the tail as one dynamic program and reads the SOC off the optimum at the pin. **Active** |
 
-Tests 1 to 3 are frozen. They are the yardsticks the recorded `tests`
-history is measured against, and editing one silently rebases that
-history, so improvements go in as a new candidate.
+Tests 1, 2 and 5 were retired on 2026-08-12; see the backtest below. A
+candidate's key is what recorded history is keyed on, so editing one in place
+silently rebases that history: improvements go in as a new candidate, and a
+retired number is never reused.
 
 `ACTIVE_CANDIDATE` names the one whose number actually reaches EMHASS;
 the rest ride along in the End SOC sensor's `tests` attribute:
 
 ```yaml
-active_test: night_cover
+active_test: shadow_plan
 tests:
-  bridge_only:     {label: "Test 1 — …", soc: 0.70, reason: "Holding 4.0 kWh …"}
-  solar_headroom:  {label: "Test 2 — …", soc: 0.30, reason: "Leaving room for 22.5 kWh …"}
-  daily_ratio:     {label: "Test 3 — …", soc: 0.58, reason: "Template drift: 12 kWh …"}
-  night_cover:     {label: "Test 4 — …", soc: 0.70, reason: "Covering 4.0 kWh on top …"}
-  priced_bridge:   {label: "Test 5 — …", soc: 0.70, reason: "Covering 4.0 kWh on top …"}
+  daily_ratio:   {label: "Test 3 — …", soc: 0.58, reason: "Template drift: 12 kWh …"}
+  night_cover:   {label: "Test 4 — …", soc: 0.70, reason: "Covering 4.0 kWh on top …"}
+  priced_cover:  {label: "Test 6 — …", soc: 0.70, reason: "Covering 4.0 kWh on top …"}
+  shadow_plan:   {label: "Test 7 — …", soc: 0.64, reason: "Planning the next 48 h …"}
 ```
 
 Recorded over a month, that attribute says which one *should* have been
@@ -255,10 +259,10 @@ turning that into a setting first.
 
 **Adding another is three lines**: write
 `_my_idea(tail: _Tail) -> EndSocDecision`, add
-`_Candidate("my_idea", "Test 6 — my idea", _my_idea)` to `CANDIDATES`,
+`_Candidate("my_idea", "Test 9 — my idea", _my_idea)` to `CANDIDATES`,
 and it appears in the sensor on the next run. `_Tail` already exposes
-`reserve`, `clamp()`, `first_block()`, `last_block()`, `first_cheap()`
-and `deficit_until()`, and `_required_soc()` / `_sale_credit()` are
+`reserve`, `clamp()`, `last_block()`, `first_cheap()` and
+`deficit_until()`, and `_required_soc()` / `_sale_credit()` are
 reusable, so a new idea is usually a few lines of arithmetic over data
 that has already been gathered.
 
@@ -342,6 +346,71 @@ hour instead. The rule refuses to buy at night in order to make room for
 sun, and a week of December overcast is exactly the case where there is
 no sun to make room for; without this the cover would run the full 24 h
 and pin every winter run at `soc_max`.
+
+## The backtest (2026-08-12)
+
+Shadow history answers "which candidate should have been driving" only
+if you already know what the right answer was. So the candidates were
+replayed against this house's own recorded past instead: hourly SE2 spot,
+PV production and household load pulled out of Home Assistant's long-term
+statistics back to 2024-01-26, and a dynamic program that finds the
+cheapest possible dispatch over a 72 h window, split at the pin:
+
+    total(pin) = cheapest way to reach it + cheapest way to live with it
+
+which prices *every* possible pin in one forward and one backward pass.
+The best of them is what a controller with perfect foresight would have
+paid; each candidate's answer is a lookup; and
+
+    regret = total(candidate's pin) − min(total)
+
+is what that candidate's mistake cost, in kronor, at that moment. The
+replay is deliberately handicapped the way a real run is: Nordpool
+publishes tomorrow around 13:00, so a 06:00 decision sees a price curve
+that stops tonight; the load series is one horizon long and is a
+forecast, not the truth.
+
+**8106 decisions over 685 days** (4 decision hours × 3 starting SOCs),
+mean regret in SEK:
+
+| Candidate | winter | shoulder | summer | ALL |
+|---|---|---|---|---|
+| Test 7 `shadow_plan` | **1.04** | **0.95** | **0.86** | **0.93** |
+| Test 6 `priced_cover` | 1.25 | 1.23 | 1.07 | 1.16 |
+| Test 4 `night_cover` | 1.26 | 1.27 | 1.12 | 1.19 |
+| Test 1 `bridge_only` | 1.37 | 1.45 | 1.28 | 1.35 |
+| Test 5 `priced_bridge` | 1.32 | 1.48 | 1.37 | 1.39 |
+| Test 3 `daily_ratio` | 1.09 | 1.56 | 1.58 | 1.45 |
+| Test 2 `solar_headroom` | 1.37 | 1.58 | 1.78 | 1.63 |
+| *mode: same as start* | 1.13 | 1.53 | 1.49 | 1.41 |
+| *mode: fixed reserve* | 1.36 | 2.16 | 2.20 | 1.99 |
+| *pin at 100 %* | 2.05 | 3.21 | 3.47 | 3.06 |
+
+What it settled:
+
+- **Tests 1, 2 and 5 are dominated by Test 4 in every season.** Test 1
+  returns Test 4's own number on 79 % of runs and a worse one on the
+  rest; Test 2 is worst overall, exactly as its own docstring feared;
+  both of Test 5's ideas cost money. Retired.
+- **Test 4 is a summer rule.** It is the best of the five in summer and
+  loses in winter to the template it replaced (Test 3, −0.18 SEK,
+  t = 3.4) and to doing nothing at all. It reasons about energy and lets
+  price only ever *lower* the answer, so in a sunless January it has no
+  mechanism to buy the trough or dodge the 07:00 peak.
+- **Test 3 stays** despite the worst-but-one overall mean. It is the
+  pre-companion behaviour, it is the yardstick, and it is still the best
+  *heuristic* here in winter.
+- **Test 7 wins everywhere**, on mean, median and p90, in all three
+  seasons: −0.26 SEK per decision against Test 4 overall (t = 12.8) and
+  −0.23 in winter (t = 5.4). Promoted.
+- Two ideas were tried and refused. A price-percentile "peak guard" was
+  good in winter (1.14) and badly wrong the rest of the year (1.82
+  overall). Test 6's merit order **without** Test 4's floor under it —
+  free to undercut the physical cover — scored 1.70 against 1.12 for the
+  same ladder floored; the lifting half is where the idea pays.
+
+The harness lives outside the repo, in `tools/end_soc_bench/`, along with
+the extractor that rebuilds the dataset from a running Home Assistant.
 
 ## PV coverage past the horizon
 
