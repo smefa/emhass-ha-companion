@@ -531,6 +531,9 @@
       "plan_stale": {
         "name": "Plan out of date"
       },
+      "sources_blind": {
+        "name": "Source readings unavailable"
+      },
       "should_run": {
         "name": "Should run"
       },
@@ -708,6 +711,10 @@
     "run_failed": {
       "title": "The last {action} run failed",
       "description": "EMHASS did not produce a plan: {error}\n\nThe previous plan is being kept. This resolves automatically once a run succeeds again -- check the EMHASS add-on logs for the full error if it doesn't clear on its own."
+    },
+    "sources_blind": {
+      "title": "{count} source reading(s) have stopped reporting",
+      "description": "These entities have been unavailable for more than {minutes} minutes:\n\n{entities}\n\n{consequence}\n\nCheck the integration that provides them -- a Modbus or cloud inverter that has lost its connection is the usual cause. This repair clears itself as soon as they report again."
     },
     "pv_tail_short": {
       "title": "Solar forecast ends too close to the horizon",

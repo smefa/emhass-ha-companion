@@ -20,7 +20,7 @@ control.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterator, Mapping
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 import re
@@ -37,6 +37,7 @@ from yarl import URL
 
 from .const import CONF_URL, DOMAIN, ML_MIN_HISTORY_DAYS, USER_PROFILE_DIR
 from .coordinator import EmhassCoordinator
+from .health import collect_entity_references
 
 # A down add-on must produce a finding, not a 30s hang -- api.py's own
 # READ_TIMEOUT is sized for a slow solve, not for a diagnostics download
@@ -60,13 +61,6 @@ _SECRET_LINE_RE: Final = re.compile(
 # `key: |`, `key: >-`, ... -- the value is not on this line but in the more
 # indented block beneath it, which has to be redacted too.
 _BLOCK_SCALAR_RE: Final = re.compile(r"^[|>][0-9+-]*\s*$")
-
-# Deliberately the same simple shape the plan calls out rather than
-# homeassistant.helpers.config_validation's entity-id validator: this walks
-# arbitrary profile_options blobs whose schema this module does not know, and
-# a local pattern is robust to that in a way importing a stricter validator
-# would not be.
-_ENTITY_ID_RE = re.compile(r"[a-z_]+\.[a-z0-9_]+")
 
 # Large enough for any hand-written profile, small enough that one runaway
 # file cannot balloon the bundle.
@@ -361,37 +355,6 @@ def _subentries_section(entry: ConfigEntry) -> list[dict[str, Any]]:
 # -- entity health ------------------------------------------------------------
 
 
-def _walk_entity_candidates(value: Any, path: str) -> Iterator[tuple[str, str]]:
-    if isinstance(value, str):
-        if _ENTITY_ID_RE.fullmatch(value):
-            yield path, value
-    elif isinstance(value, Mapping):
-        for key, item in value.items():
-            yield from _walk_entity_candidates(item, f"{path}.{key}")
-    elif isinstance(value, (list, tuple)):
-        for index, item in enumerate(value):
-            yield from _walk_entity_candidates(item, f"{path}[{index}]")
-
-
-def _collect_entity_references(entry: ConfigEntry) -> dict[str, list[str]]:
-    """Every entity id referenced anywhere in the config, and where from.
-
-    Walks ``entry.data``, ``entry.options`` and every subentry's ``data`` --
-    not just the fields this module knows the shape of -- because a profile's
-    own options (a Solcast entity list, a template's referenced sensors) are
-    exactly where the two most common remote failures ("wrong entity id" and
-    "kW where the code expects W") actually show up.
-    """
-    references: dict[str, list[str]] = {}
-    roots: list[tuple[str, Any]] = [("data", entry.data), ("options", entry.options)]
-    for subentry in entry.subentries.values():
-        roots.append((f"subentries[{subentry.subentry_type}:{subentry.title}]", subentry.data))
-    for root_name, root_value in roots:
-        for path, entity_id in _walk_entity_candidates(root_value, root_name):
-            references.setdefault(entity_id, []).append(path)
-    return references
-
-
 def _entity_health(
     hass: HomeAssistant, registry: er.EntityRegistry, entity_id: str, referenced_by: list[str]
 ) -> dict[str, Any]:
@@ -414,7 +377,7 @@ def _entity_health(
 
 def _entities_section(hass: HomeAssistant, entry: ConfigEntry) -> list[dict[str, Any]]:
     try:
-        references = _collect_entity_references(entry)
+        references = collect_entity_references(entry)
         registry = er.async_get(hass)
     except Exception as err:  # noqa: BLE001
         return [{"error": str(err)}]

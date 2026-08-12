@@ -22,6 +22,7 @@
 | `sensor.*_battery_action` | What the executor did or would do, and why — see [Handing over control](handing_over_control.md) |
 | `sensor.*_last_request_to_emhass` | The exact payload of the last optimisation request. Diagnostic, disabled by default — see [Troubleshooting](troubleshooting.md) |
 | `binary_sensor.*_plan_out_of_date` | The plan is too old to act on |
+| `binary_sensor.*_source_readings_unavailable` | One of the entities this integration reads has stopped reporting — see [Troubleshooting](troubleshooting.md#when-a-source-stops-reporting) |
 | `switch.*_control_enabled` | Master gate on acting. Ships **off** |
 | `select.*_mode` | Anything but *Automatic* suspends control |
 | `button.*_recalculate_now` / `*_rebuild_day_ahead_plan` | Run on demand |

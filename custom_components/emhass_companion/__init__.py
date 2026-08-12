@@ -188,6 +188,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
     entry.async_on_unload(loads.async_stop)
     entry.async_on_unload(coordinator.async_stop_clock)
     entry.async_on_unload(coordinator.async_stop_pv_live_tracking)
+    entry.async_on_unload(coordinator.async_stop_source_health)
     # A coroutine, so the final settle and the store write both complete before
     # the entry is torn down; the ledger is otherwise up to two minutes behind
     # (see metering._SAVE_DELAY) and a reload would lose that much of the day.
@@ -280,6 +281,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
     loads.async_start()
     coordinator.async_start_clock()
     coordinator.async_start_pv_live_tracking()
+    # After the platforms, like the savings tracker above: the sources_blind
+    # sensor has to exist before the watch can have anything to report to.
+    coordinator.async_start_source_health()
     scheduler.async_start()
     entry.async_create_background_task(hass, scheduler.async_run_initial(), "emhass_initial_run")
 

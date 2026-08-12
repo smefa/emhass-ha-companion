@@ -531,6 +531,9 @@
       "plan_stale": {
         "name": "Planen är inaktuell"
       },
+      "sources_blind": {
+        "name": "Källvärden är otillgängliga"
+      },
       "should_run": {
         "name": "Bör vara igång"
       },
@@ -708,6 +711,10 @@
     "run_failed": {
       "title": "Den senaste körningen av {action} misslyckades",
       "description": "EMHASS producerade ingen plan: {error}\n\nDen tidigare planen behålls. Detta löser sig automatiskt så snart en körning lyckas igen -- kontrollera EMHASS-tilläggets loggar för hela felet om det inte löser sig av sig själv."
+    },
+    "sources_blind": {
+      "title": "{count} källvärde(n) rapporterar inte längre",
+      "description": "Följande entiteter har varit otillgängliga i mer än {minutes} minuter:\n\n{entities}\n\n{consequence}\n\nKontrollera integrationen som tillhandahåller dem -- en Modbus- eller molnansluten växelriktare som tappat sin anslutning är den vanligaste orsaken. Denna reparation försvinner av sig själv så snart de rapporterar igen."
     },
     "pv_tail_short": {
       "title": "Solprognosen tar slut för nära horisonten",

@@ -29,7 +29,11 @@ async def async_setup_entry(
 ) -> None:
     coordinator: EmhassCoordinator = entry.runtime_data.coordinator
     async_add_entities(
-        [EmhassPlanStaleBinarySensor(coordinator), SolarSurplusBinarySensor(coordinator)]
+        [
+            EmhassPlanStaleBinarySensor(coordinator),
+            SourcesBlindBinarySensor(coordinator),
+            SolarSurplusBinarySensor(coordinator),
+        ]
     )
 
     for load in entry.runtime_data.loads.all():
@@ -70,6 +74,36 @@ class EmhassPlanStaleBinarySensor(EmhassEntity, BinarySensorEntity):
             ),
             "stale_after": str(self.coordinator.config.stale_after),
         }
+
+
+class SourcesBlindBinarySensor(EmhassEntity, BinarySensorEntity):
+    """Whether any entity this integration reads from has stopped reporting.
+
+    The companion-side answer to "why has it been doing nothing all afternoon".
+    Every individual read already falls back on its own so that one dead sensor
+    cannot take the optimisation down (see health.py), which is right, and
+    which is exactly why the failure is otherwise invisible.
+
+    On for *any* blind source, not just the ones that stand control down: a
+    dead price sensor does not make the inverter unsafe, but it is still the
+    reason tomorrow's plan is wrong, and an automation or a template wanting
+    only the severe case can read ``blind_critical_entities``.
+    """
+
+    _attr_translation_key = "sources_blind"
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: EmhassCoordinator) -> None:
+        super().__init__(coordinator, "sources_blind")
+
+    @property
+    def is_on(self) -> bool:
+        return bool(self.coordinator.health.blind)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return self.coordinator.health.report
 
 
 class SolarSurplusBinarySensor(EmhassEntity, BinarySensorEntity):

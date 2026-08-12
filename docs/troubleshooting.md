@@ -93,6 +93,48 @@ response_variable: result
 Call it from an administrator account — the response carries the profile's
 resolved EMHASS settings, so it is gated the same way diagnostics are.
 
+## When a source stops reporting
+
+Every entity this integration reads belongs to somebody else's integration,
+and each read falls back on its own when one goes away — the SOC reverts to
+the configured initial value, live PV simply is not blended, a dynamic grid
+limit reverts to the static number. That is deliberate: one dead sensor must
+not take the whole optimisation down. It also means the failure is invisible,
+which is what `binary_sensor.*_source_readings_unavailable` exists to fix.
+
+It turns on when any entity the config points at has been `unavailable` or
+`unknown` for more than **15 minutes**, and a repair notice appears naming
+them. Its attributes carry the detail:
+
+| Attribute | |
+|---|---|
+| `blind_entities` | Everything currently unreadable |
+| `blind_critical_entities` | The subset that has stood control down |
+| `blind_since` | When the first of them went |
+| `grace_period` | How long a reading may be gone before it counts |
+
+Two things stop it crying wolf. Nothing is counted until Home Assistant has
+finished starting, since most of the house reads `unavailable` while
+integrations are still loading; and a reading must then stay gone for the
+full grace period, so a Modbus inverter that drops its TCP connection and
+reconnects a minute later is ignored.
+
+**What happens to control.** If a *critical* reading is among them — the
+battery SOC entity, or one of the entities your inverter profile writes to —
+the battery is handed back to the inverter's own self-consumption logic and
+the repair is raised as an error. Commanding it from a fallback SOC constant
+that has no relationship to how full the battery actually is can push a full
+battery or flatten an empty one. Deferrable loads keep following the plan:
+those rows are not made unsafe by a missing battery reading, only less well
+timed. Everything resumes on its own as soon as the readings come back —
+there is nothing to acknowledge or reset.
+
+**Where to look.** The entity ids in the repair tell you which integration to
+go and check; a whole block of them going together is almost always one
+connection rather than one sensor. Diagnostics reports the same entities with
+much more context (whether each is registered, disabled, or merely
+unavailable) under its `entities` section.
+
 **A stored time could not be read.** A repair naming the setting (the day-ahead
 fallback time, or a load's window or comfort band) means the value in the
 configuration store was not a time this could parse — almost always a

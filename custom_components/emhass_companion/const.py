@@ -384,6 +384,22 @@ DEFAULT_CAPACITY_COST_PER_KW: Final = 0.0
 DEFAULT_POWER_DEADBAND_W: Final = 100
 STALE_PLAN_FACTOR: Final = 2
 
+# --- Source health -----------------------------------------------------------
+
+# The states that mean "this entity is not telling us anything". The empty
+# string is in here because a state object can exist with no value at all
+# during a restore, which is as unreadable as the two named ones.
+UNREADABLE_STATES: Final = ("unknown", "unavailable", "")
+# How long a source entity must stay unreadable before health.SourceHealth
+# calls it a fault. Long enough to ride out the things that fix themselves --
+# a Modbus inverter dropping and re-establishing its TCP connection, a cloud
+# integration re-authenticating, an add-on restart -- and short enough that a
+# genuinely dead source is reported within one optimisation cycle or two
+# rather than at the end of the day. Counted from the later of "the reading
+# went" and "Home Assistant finished starting", so it is also what covers a
+# source whose integration is slow to load.
+SOURCE_BLIND_GRACE: Final = timedelta(minutes=15)
+
 # Self-consumption classification (strategy.decide_battery): "does the plan
 # want any grid exchange at all", read straight from the plan's own P_grid
 # column. Not the same question as soc_min/soc_max -- those are planning
@@ -900,6 +916,13 @@ ISSUE_BAD_STORED_TIME: Final = "bad_stored_time"
 # program on power-up, a breaker left off. An error rather than a warning: the
 # user asked for a run, the run did not happen, and nothing else will say so.
 ISSUE_LOAD_NEVER_STARTED: Final = "load_never_started"
+# Entities this integration reads from have stopped reporting for longer than
+# SOURCE_BLIND_GRACE. Whole-integration rather than per-entity: they normally
+# go together (one Modbus connection, one cloud API, one dead inverter), and a
+# repair per sensor would bury the one fact that matters under thirty copies
+# of it. An error rather than a warning when a critical reading is among them,
+# because control stands down at that point -- see health.critical_entities.
+ISSUE_SOURCES_BLIND: Final = "sources_blind"
 # The EMHASS-standard entity ids the user asked for are already taken, almost
 # always by EMHASS's own publish-data writing them. Renaming into an occupied
 # id is refused by the entity registry, so the affected sensors keep their

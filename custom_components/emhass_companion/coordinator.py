@@ -44,6 +44,7 @@ from .const import (
     ISSUE_PLAN_SCHEMA,
     ISSUE_PV_TAIL_SHORT,
     ISSUE_RUN_FAILED,
+    ISSUE_SOURCES_BLIND,
     LOAD_BOOTSTRAP_LOOKBACK,
     LOAD_FORECAST_METHOD_LIST,
     LOAD_FORECAST_METHOD_MLFORECASTER,
@@ -61,6 +62,7 @@ from .const import (
     SUPPORTED_PLAN_SCHEMA_MAJOR,
 )
 from .deferrable import DeferrableRegistry, state_to_watts
+from .health import SourceHealth
 from .models import (
     DeferrableLoad,
     DeferrableLoadGroup,
@@ -211,6 +213,14 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         self._pv_live_average = TimeWeightedAverage()
         self._unsub_pv_live: Callable[[], None] | None = None
 
+        # Watches every entity the config points at for one that has stopped
+        # reporting. Constructed here rather than passed in so that nothing
+        # holding a coordinator has to know it exists, but only started by
+        # async_start_source_health -- a coordinator built and never started
+        # (every unit test) watches nothing.
+        self.health = SourceHealth(hass, entry)
+        self._unsub_health: Callable[[], None] | None = None
+
         # Sensor mlforecaster has actually been confirmed trained against,
         # persisted so a restart does not throw away a working model and
         # retrain for nothing. None until a fit succeeds or async_load_ml_state
@@ -326,6 +336,78 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         if self._unsub_pv_live is not None:
             self._unsub_pv_live()
             self._unsub_pv_live = None
+
+    @callback
+    def async_start_source_health(self) -> None:
+        """Start watching for source entities that have stopped reporting.
+
+        The listener republishes every plan-derived entity and raises or
+        clears the repair. Republishing looks heavier than it is -- it is the
+        same ``async_update_listeners`` the clock tick already calls every
+        timestep -- and it is what carries the news to both places that need
+        it: the ``sources_blind`` binary sensor, and ``_async_plan_updated``
+        in __init__, which schedules the apply that actually hands the
+        inverter back. Routing the stand-down through the existing apply path
+        rather than calling the executor from here keeps every write to the
+        inverter behind that one lock.
+        """
+        self._unsub_health = self.health.add_listener(self._async_health_changed)
+        self.health.async_start()
+
+    @callback
+    def async_stop_source_health(self) -> None:
+        self.health.async_stop()
+        if self._unsub_health is not None:
+            self._unsub_health()
+            self._unsub_health = None
+        ir.async_delete_issue(self.hass, DOMAIN, ISSUE_SOURCES_BLIND)
+
+    @callback
+    def _async_health_changed(self) -> None:
+        self._track_blind_sources_issue()
+        self.async_update_listeners()
+
+    @property
+    def blind_sources(self) -> tuple[str, ...]:
+        """Critical readings gone long enough that control must stand down."""
+        return self.health.blind_critical
+
+    def _track_blind_sources_issue(self) -> None:
+        """Raise or clear the "a source stopped reporting" repair.
+
+        Severity follows the consequence rather than the count: any blind
+        source is worth telling the user about, but one of the readings the
+        inverter is commanded from being gone means control has just been
+        handed back, and that is an error whether it is one entity or twenty.
+        """
+        blind = self.health.blind
+        if not blind:
+            ir.async_delete_issue(self.hass, DOMAIN, ISSUE_SOURCES_BLIND)
+            return
+        critical = self.health.blind_critical
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            ISSUE_SOURCES_BLIND,
+            is_fixable=False,
+            severity=ir.IssueSeverity.ERROR if critical else ir.IssueSeverity.WARNING,
+            translation_key=ISSUE_SOURCES_BLIND,
+            translation_placeholders={
+                "count": str(len(blind)),
+                "minutes": f"{self.health.grace.total_seconds() / 60:g}",
+                "entities": "\n".join(f"- `{entity_id}`" for entity_id in blind),
+                "consequence": (
+                    "The battery has been handed back to the inverter's own "
+                    "self-consumption logic, because the readings it would be "
+                    "commanded from are among these. Control resumes on its own "
+                    "once they report again."
+                    if critical
+                    else "The plan is still being followed. Each of these falls "
+                    "back to a configured default meanwhile, so the optimisation "
+                    "is running on assumptions rather than measurements."
+                ),
+            },
+        )
 
     @callback
     def _async_pv_live_changed(self, event: Event[EventStateChangedData]) -> None:
