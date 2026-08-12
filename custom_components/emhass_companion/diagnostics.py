@@ -128,6 +128,13 @@ async def async_get_config_entry_diagnostics(
                 ("load_forecast", data.load_forecast),
             )
         },
+        # The whole day's ledger, not just the published headline. Almost every
+        # "this savings number looks wrong" report is answered by one of the
+        # inputs -- an unpriced hour after a restart, a meter that resolved to
+        # a power sensor rather than a counter, a balance residual saying two
+        # of the user's own sensors disagree -- and none of those are visible
+        # from the sensor's state alone.
+        "savings": _savings_section(entry),
         "end_soc": (
             {
                 "soc": data.end_soc.soc,
@@ -158,6 +165,48 @@ async def async_get_config_entry_diagnostics(
 
 
 # -- redaction ------------------------------------------------------------
+
+
+def _savings_section(entry: ConfigEntry) -> dict[str, Any]:
+    """The day's ledger, its sources, and the forecast built from the plan.
+
+    Entity ids only, never redacted: they are the user's own sensor names and
+    are already all over the rest of this bundle, and which meter answered for
+    which quantity is the single most useful thing here.
+    """
+    tracker = getattr(entry.runtime_data, "tracker", None)
+    if tracker is None:
+        return {"configured": False}
+
+    forecast = tracker.forecast()
+    return {
+        "configured": tracker.meters.usable,
+        "sources": tracker.meters.describe(),
+        "has_solar": tracker.meters.has_solar,
+        "has_battery": tracker.meters.has_battery,
+        "ledger": tracker.ledger.as_dict(),
+        "derived": {
+            "solar_savings": tracker.ledger.solar_savings,
+            "battery_savings": tracker.ledger.battery_savings,
+            "total_savings": tracker.ledger.total_savings,
+            "storage_carry": tracker.ledger.storage_carry,
+            "average_import_price": tracker.ledger.average_import_price,
+            "average_export_price": tracker.ledger.average_export_price,
+            "average_charge_price": tracker.ledger.average_charge_price,
+            "average_discharge_price": tracker.ledger.average_discharge_price,
+        },
+        "forecast_24h": None
+        if forecast is None
+        else {
+            "hours": forecast.hours,
+            "complete": forecast.complete,
+            "actual_cost": forecast.actual_cost,
+            "solar_only_cost": forecast.solar_only_cost,
+            "grid_only_cost": forecast.grid_only_cost,
+            "storage_carry": forecast.storage_carry,
+            "total_savings": forecast.total_savings,
+        },
+    }
 
 
 def _keys_matching_pattern(value: Any) -> set[str]:

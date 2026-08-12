@@ -10,7 +10,7 @@ substance of that answer.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Final
 
 from homeassistant.config_entries import (
     ConfigEntry,
@@ -21,13 +21,17 @@ from homeassistant.config_entries import (
     SubentryFlowResult,
 )
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.data_entry_flow import section
 from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 import voluptuous as vol
 
 from .api import EmhassClient, EmhassError
+from .configuration import EmhassConfig
 from .const import (
     CONF_ADDER,
+    CONF_BATTERY_CHARGE_ENERGY_ENTITY,
+    CONF_BATTERY_DISCHARGE_ENERGY_ENTITY,
     CONF_BATTERY_POWER_ENTITY,
     CONF_BATTERY_POWER_INVERT,
     CONF_BATTERY_SOC_DEFICIT_COST,
@@ -48,7 +52,9 @@ from .const import (
     CONF_EMHASS_STANDARD_NAMES,
     CONF_END_SOC_MODE,
     CONF_ENERGY_NEEDED,
+    CONF_GRID_EXPORT_ENERGY_ENTITY,
     CONF_GRID_EXPORT_LIMIT_ENTITY,
+    CONF_GRID_IMPORT_ENERGY_ENTITY,
     CONF_GRID_IMPORT_LIMIT_ENTITY,
     CONF_GROUP_LOAD_IDS,
     CONF_GROUP_MAX_POWER,
@@ -66,6 +72,8 @@ from .const import (
     CONF_LOAD,
     CONF_MAX_STARTUPS,
     CONF_MAX_TEMPERATURE,
+    CONF_METERING,
+    CONF_METERING_ENABLED,
     CONF_MINIMUM_OFF_TIME,
     CONF_MINIMUM_ON_TIME,
     CONF_MINIMUM_POWER,
@@ -80,6 +88,7 @@ from .const import (
     CONF_PROFILE,
     CONF_PROFILE_OPTIONS,
     CONF_PV,
+    CONF_PV_ENERGY_ENTITY,
     CONF_PV_ENTITY,
     CONF_RECURRENCE,
     CONF_SEMI_CONTINUOUS,
@@ -147,6 +156,7 @@ from .const import (
     SUBENTRY_TYPE_THERMAL,
     TEMPERATURE_PROFILE_ORDER,
 )
+from .metering import async_energy_dashboard_defaults
 from .naming import async_taken_standard_ids
 from .profiles import (
     Profile,
@@ -1739,6 +1749,102 @@ def battery_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
     }
 
 
+METERING_SECTION: Final = "meters"
+"""Section key the override pickers are nested under in the form payload."""
+
+METERING_KEYS: Final = (
+    CONF_GRID_IMPORT_ENERGY_ENTITY,
+    CONF_GRID_EXPORT_ENERGY_ENTITY,
+    CONF_PV_ENERGY_ENTITY,
+    CONF_BATTERY_CHARGE_ENERGY_ENTITY,
+    CONF_BATTERY_DISCHARGE_ENERGY_ENTITY,
+)
+"""The five meters, in the order they are shown.
+
+Deliberately the Energy dashboard's own grid, solar and battery sources and
+nothing else, which is what lets the whole screen collapse to one switch: the
+answers are already on file, so they can be resolved rather than asked for.
+
+Two fields that the first version of this screen had are gone on purpose:
+
+* a **grid power** sensor, as a fallback for houses with no import/export
+  counters. Those houses cannot use Home Assistant's own Energy dashboard
+  either, so they have already built a Riemann-sum helper -- and offering a
+  second, worse integration of the same signal is a field, a code path and a
+  way to be quietly less accurate, for nobody.
+* a **house consumption** counter. The entry already asks for a whole-house
+  power sensor for the load forecast, and the energy balance covers the rest,
+  so the question could only ever be asked of people already answered.
+
+One tuple, read by the schema, the summary and the step that collects it, so a
+field can never be offered and then dropped on save -- which is what happened
+to ``capacity_cost_per_kw`` (see the note on the setup flow's grid step).
+"""
+
+
+def _metering_summary(resolved: dict[str, Any], config: EmhassConfig) -> str:
+    """What the switch will actually use, written out for the description.
+
+    The screen has one control, so this text is the only thing standing between
+    the user and a number they cannot trace. It names every meter, says which
+    were resolved from the Energy dashboard against which came from sensors
+    already configured here, and -- most importantly -- says plainly when the
+    grid pair is missing, since that is the one case where turning the switch
+    on produces nothing at all.
+    """
+    labels = {
+        CONF_GRID_IMPORT_ENERGY_ENTITY: "Grid import",
+        CONF_GRID_EXPORT_ENERGY_ENTITY: "Grid export",
+        CONF_PV_ENERGY_ENTITY: "Solar",
+        CONF_BATTERY_CHARGE_ENERGY_ENTITY: "Battery charged",
+        CONF_BATTERY_DISCHARGE_ENERGY_ENTITY: "Battery discharged",
+    }
+    lines = [
+        f"- **{label}**: `{resolved[key]}`" for key, label in labels.items() if resolved.get(key)
+    ]
+
+    # The fallbacks are not on this form at all -- they are sensors the entry
+    # already has for other reasons -- so they would be invisible without this.
+    # Read straight off the config rather than through build_meters, which
+    # answers for a *configured* entry and returns nothing while the switch is
+    # still off, i.e. exactly when this screen is being looked at.
+    if not resolved.get(CONF_PV_ENERGY_ENTITY) and config.pv_live_entity:
+        lines.append(f"- **Solar**: `{config.pv_live_entity}` (your live PV sensor)")
+    if config.house_load_total_entity:
+        lines.append(
+            f"- **House consumption**: `{config.house_load_total_entity}` (your house load sensor)"
+        )
+    else:
+        lines.append("- **House consumption**: derived from the other meters")
+
+    missing = not (
+        resolved.get(CONF_GRID_IMPORT_ENERGY_ENTITY)
+        and resolved.get(CONF_GRID_EXPORT_ENERGY_ENTITY)
+    )
+    if missing:
+        return (
+            "\n\n**No grid import/export counters were found**, and they are the one "
+            "requirement -- without them there is no actual cost to compare anything "
+            "against. Set them under *Meters* below, or add them to your Energy "
+            "dashboard first and come back."
+        )
+    return "\n\nUsing:\n" + "\n".join(lines)
+
+
+def metering_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
+    """The override pickers, shown collapsed.
+
+    Every field optional, and pre-filled with whatever was resolved, so this
+    section is empty-handed only for a house the Energy dashboard could not
+    answer for. Filtered to the energy device class: these are counters, and
+    offering the whole sensor domain would bury them.
+    """
+    energy = selector.EntitySelectorConfig(domain="sensor", device_class="energy")
+    return {
+        _optional_blank(key, defaults): selector.EntitySelector(energy) for key in METERING_KEYS
+    }
+
+
 STANDARD_TIME_STEPS = ("5", "10", "15", "20", "30", "60")
 
 
@@ -1873,8 +1979,66 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
                 "tariff",
                 "inverter",
                 "temperature",
+                "metering",
                 "compatibility",
             ],
+        )
+
+    async def async_step_metering(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Turn cost and savings tracking on, and say which meters it used.
+
+        Its own step, and options-only rather than part of the setup wizard,
+        because nothing in the optimisation depends on any of it: these are
+        what the house *did*, and everything else the wizard asks for is what
+        EMHASS should plan against. A user who never opens this screen loses
+        the savings sensors and nothing else.
+
+        **One visible field.** The five meters this needs are the Energy
+        dashboard's own grid, solar and battery sources, so they are resolved
+        from it and simply *shown* in the description; the pickers live in a
+        collapsed section for the houses that resolution cannot answer. Asking
+        five entity-picker questions whose answers were already on file was the
+        first version of this screen and it was tedious for no gain.
+
+        Resolving on submit and storing the result -- rather than looking the
+        dashboard up at runtime -- is what the switch really buys. Otherwise a
+        user reorganising their Energy dashboard next spring silently repoints
+        a savings figure at a different meter, or breaks it outright, with
+        nothing anywhere saying so.
+        """
+        options = dict(self.config_entry.options)
+        stored = options.get(CONF_METERING) or {}
+        suggested = await async_energy_dashboard_defaults(self.hass)
+        resolved = {key: stored.get(key) or suggested.get(key) or "" for key in METERING_KEYS}
+
+        if user_input is not None:
+            overrides = user_input.get(METERING_SECTION) or {}
+            options[CONF_METERING] = {
+                CONF_METERING_ENABLED: user_input[CONF_METERING_ENABLED],
+                # An override wins; anything left blank keeps whatever was
+                # resolved, so clearing a field falls back rather than blanking
+                # the quantity.
+                **{key: (overrides.get(key) or resolved.get(key) or None) for key in METERING_KEYS},
+            }
+            return self.async_create_entry(data=options)
+
+        config = EmhassConfig.from_entry(self.hass, self.config_entry)
+        return self.async_show_form(
+            step_id="metering",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_METERING_ENABLED,
+                        default=bool(stored.get(CONF_METERING_ENABLED, bool(stored))),
+                    ): selector.BooleanSelector(),
+                    vol.Required(METERING_SECTION): section(
+                        vol.Schema(metering_schema(resolved)), {"collapsed": True}
+                    ),
+                }
+            ),
+            description_placeholders={"found": _metering_summary(resolved, config)},
         )
 
     async def async_step_compatibility(

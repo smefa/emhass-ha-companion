@@ -14,7 +14,11 @@
 | `sensor.*_end_soc_target` | The battery level the plan aims for at the horizon's end, with the why in its attributes (`reason`, `cover_energy_wh`, `cover_until`, `sale_blocked`, …) — see [End SOC](end_soc_plan.md) |
 | `sensor.*_import_price` / `*_export_price` | Composed prices |
 | `sensor.*_optimisation_status` | Result of the last solve |
-| `sensor.*_planned_cost` | Cost of the current plan |
+| `sensor.*_planned_cost` | EMHASS's own objective value for the current plan. Not money you can total up — see [Cost and savings](savings.md) |
+| `sensor.*_energy_cost_today` | What the grid actually cost today, net of export income |
+| `sensor.*_savings_today` | Today's saving against a house with no solar and no battery, with every input in its attributes |
+| `sensor.*_solar_savings_today` / `*_battery_savings_today` | That saving split in two. Only if you configured a solar meter |
+| `sensor.*_forecast_cost_24h` / `*_forecast_savings_24h` | The same, priced off the current plan for the next 24 hours |
 | `sensor.*_battery_action` | What the executor did or would do, and why — see [Handing over control](handing_over_control.md) |
 | `sensor.*_last_request_to_emhass` | The exact payload of the last optimisation request. Diagnostic, disabled by default — see [Troubleshooting](troubleshooting.md) |
 | `binary_sensor.*_plan_out_of_date` | The plan is too old to act on |
@@ -22,6 +26,10 @@
 | `select.*_mode` | Anything but *Automatic* suspends control |
 | `button.*_recalculate_now` / `*_rebuild_day_ahead_plan` | Run on demand |
 | `button.*_train_load_forecaster` | Only present if your load forecast profile trains EMHASS's own model (see [Data sources](data_sources.md)) |
+
+Cost and savings entities only exist once you have pointed the integration at
+your meters, under **Configure → Cost and savings** — see
+[Cost and savings](savings.md).
 
 Battery entities only exist if you configured a battery. Solar-surplus hub
 entities (`sensor.*_solar_surplus*`) only exist once a surplus load does — see

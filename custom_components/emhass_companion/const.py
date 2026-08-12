@@ -208,6 +208,26 @@ CONF_PV_ENTITY: Final = "pv_entity"
 # profile's `entity` option rather than trusting whatever is stored there.
 CONF_HOUSE_LOAD_TOTAL_ENTITY: Final = "house_load_total_entity"
 
+# Cost tracking (metering.py, savings.py). The meters the *realised* cost and
+# savings are settled from -- entirely separate from the forecast sources
+# above, which describe what EMHASS should plan against rather than what the
+# house actually did. Held in their own options blob because the whole feature
+# is optional: an entry with none of these set simply has no savings sensors.
+CONF_METERING: Final = "metering"
+CONF_METERING_ENABLED: Final = "metering_enabled"
+# The five meters, which are deliberately exactly the Energy dashboard's own
+# grid, solar and battery sources -- so they can be resolved from it, and so
+# the override form has a shape the user has already seen once.
+#
+# Stored *resolved*, never left to be looked up again at runtime: the whole
+# point of asking is that the answer stops moving when the user later
+# reorganises their Energy dashboard.
+CONF_GRID_IMPORT_ENERGY_ENTITY: Final = "grid_import_energy_entity"
+CONF_GRID_EXPORT_ENERGY_ENTITY: Final = "grid_export_energy_entity"
+CONF_PV_ENERGY_ENTITY: Final = "pv_energy_entity"
+CONF_BATTERY_CHARGE_ENERGY_ENTITY: Final = "battery_charge_energy_entity"
+CONF_BATTERY_DISCHARGE_ENERGY_ENTITY: Final = "battery_discharge_energy_entity"
+
 # Deferrable load subentry keys
 CONF_NAME: Final = "name"
 CONF_NOMINAL_POWER: Final = "nominal_power_w"
@@ -634,6 +654,23 @@ TEMPERATURE_PROFILE_ORDER: Final = (
 # between sensor.py (creates the entity) and configuration.py (resolves its
 # entity id back out of the registry) so the two can never drift apart.
 NET_HOUSE_LOAD_KEY: Final = "net_house_load"
+
+# --- Cost and savings ---------------------------------------------------------
+#
+# Sensor keys for the savings feature. Grouped here rather than left inline in
+# sensor.py because the config flow needs to name them too, when it explains
+# which sensors an incomplete meter setup will and will not produce.
+SAVINGS_KEY_COST_TODAY: Final = "energy_cost_today"
+SAVINGS_KEY_SAVINGS_TODAY: Final = "savings_today"
+SAVINGS_KEY_SOLAR_TODAY: Final = "solar_savings_today"
+SAVINGS_KEY_BATTERY_TODAY: Final = "battery_savings_today"
+SAVINGS_KEY_FORECAST_COST: Final = "forecast_cost_24h"
+SAVINGS_KEY_FORECAST_SAVINGS: Final = "forecast_savings_24h"
+
+# The forecast sensors' window. A day, because that is the question people
+# actually ask ("what will tonight cost me"), and because a horizon shorter
+# than this is reported as the hours it did cover rather than extrapolated.
+SAVINGS_FORECAST_HOURS: Final = 24
 
 # --- EMHASS-standard entity names --------------------------------------------
 #

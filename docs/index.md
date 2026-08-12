@@ -61,6 +61,7 @@ The add-on's address is filled in automatically if it is running.
 - **[Deferrable loads](deferrable_loads.md)** and **[Thermal loads](thermal_loads.md)** — the entities each load type creates, on-demand loads, and calibration advice. **[Surplus loads](surplus_loads.md)** covers loads that only ever run on spare solar.
 - **[Dashboard cards](dashboard_cards.md)** — the plan overview and per-load cards that register automatically.
 - **[Entities](entities.md)** — the full list of sensors, switches and controls.
+- **[Cost and savings](savings.md)** — what today actually cost, what it saved against a house with no solar and no battery, and what the next 24 hours look like.
 - **[Handing over control](handing_over_control.md)** — the migration path and safety behaviours.
 - **[Inverter control](inverter_control.md)** — configuring battery control: profiles available today, and the scripts fallback for any inverter. Fronius GEN24 owners want the [scripts recipe](fronius_gen24_scripts.md).
 - **[Data sources](data_sources.md)** and **[Writing a profile](profiles.md)** — what ships built in, and how to add your own.

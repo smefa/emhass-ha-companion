@@ -45,6 +45,12 @@ from .deferrable import DeferrableRegistry
 from .executor import Executor
 from .frontend import async_setup_frontend
 from .log_ring import LogRingHandler
+from .metering import (
+    SavingsTracker,
+    build_forecast_callable,
+    build_meters,
+    build_prices_callable,
+)
 from .naming import async_apply_standard_names
 from .schedule import Scheduler
 from .services import async_register_services, async_unregister_services
@@ -75,12 +81,14 @@ class EmhassRuntimeData:
         loads: DeferrableRegistry,
         executor: Executor,
         log_handler: LogRingHandler,
+        tracker: SavingsTracker,
     ) -> None:
         self.coordinator = coordinator
         self.scheduler = scheduler
         self.loads = loads
         self.executor = executor
         self.log_handler = log_handler
+        self.tracker = tracker
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bool:
@@ -142,7 +150,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
 
     scheduler = Scheduler(hass, coordinator)
     executor = Executor(hass, coordinator)
-    entry.runtime_data = EmhassRuntimeData(coordinator, scheduler, loads, executor, log_handler)
+    # Built before the platforms are forwarded, because the sensor platform
+    # decides which savings sensors this house can support from the meters it
+    # resolved. Loaded (restoring yesterday's ledger and the meter baselines)
+    # before it starts, so the first settle differences against the stored
+    # readings rather than re-baselining and losing the restart's energy.
+    tracker = SavingsTracker(
+        hass,
+        entry,
+        build_meters(coordinator.config, entry.options),
+        soc_entity=coordinator.config.soc_entity,
+        capacity_kwh=(coordinator.config.battery.capacity_wh or 0.0) / 1000.0
+        if coordinator.config.battery.enabled
+        else None,
+        prices=build_prices_callable(coordinator),
+        plan_forecast=build_forecast_callable(coordinator),
+    )
+    await tracker.async_load()
+    entry.runtime_data = EmhassRuntimeData(
+        coordinator, scheduler, loads, executor, log_handler, tracker
+    )
 
     # Entities are created before the first optimisation so that a failed or
     # slow first run leaves a diagnosable integration rather than none at all.
@@ -152,10 +179,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
     await async_apply_standard_names(hass, entry)
     async_register_services(hass)
 
+    # Started after the platforms, so the sensors are already subscribed and
+    # see the first settle rather than waiting a whole publish interval for
+    # the second.
+    tracker.async_start()
+
     entry.async_on_unload(scheduler.async_stop)
     entry.async_on_unload(loads.async_stop)
     entry.async_on_unload(coordinator.async_stop_clock)
     entry.async_on_unload(coordinator.async_stop_pv_live_tracking)
+    # A coroutine, so the final settle and the store write both complete before
+    # the entry is torn down; the ledger is otherwise up to two minutes behind
+    # (see metering._SAVE_DELAY) and a reload would lose that much of the day.
+    entry.async_on_unload(tracker.async_shutdown)
 
     async def _async_restore_on_unload() -> None:
         await executor.async_restore("integration unloaded")

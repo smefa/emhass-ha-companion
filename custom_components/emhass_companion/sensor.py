@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -30,16 +30,28 @@ from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.util import dt as dt_util
 
 from .configuration import EmhassConfig
-from .const import BATTERY_ACTIONS, NET_HOUSE_LOAD_KEY
+from .const import (
+    BATTERY_ACTIONS,
+    NET_HOUSE_LOAD_KEY,
+    SAVINGS_FORECAST_HOURS,
+    SAVINGS_KEY_BATTERY_TODAY,
+    SAVINGS_KEY_COST_TODAY,
+    SAVINGS_KEY_FORECAST_COST,
+    SAVINGS_KEY_FORECAST_SAVINGS,
+    SAVINGS_KEY_SAVINGS_TODAY,
+    SAVINGS_KEY_SOLAR_TODAY,
+)
 from .coordinator import EmhassCoordinator, EmhassData
 from .deferrable import DeferrableRuntime, state_to_watts
 from .entity import EmhassEntity, EmhassLoadEntity
+from .metering import SavingsTracker
 from .models import Series
 from .naming import (
     emhass_series_payload,
     standard_names_enabled,
     standard_series_attribute,
 )
+from .savings import Forecast, Ledger
 from .smoothing import TimeWeightedAverage
 from .surplus import current_block, total_energy_wh, window_of
 
@@ -310,6 +322,30 @@ async def async_setup_entry(
             SolarSurplusStartSensor(coordinator),
             SolarSurplusEndSensor(coordinator),
         ]
+    )
+
+    # Cost tracking is opt-in and degrades in steps rather than all at once:
+    # without a grid meter there is no actual cost and so nothing to compare
+    # against, so no sensors at all; with a grid meter but no PV meter the
+    # solar/battery split cannot be drawn, so only the two totals appear. See
+    # metering.MeterSpec.
+    tracker: SavingsTracker = entry.runtime_data.tracker
+    if tracker.meters.usable:
+        # The split needs a solar meter to draw the middle world with. Without
+        # one the two totals are still exact -- see savings.py on why neither
+        # depends on the PV measurement -- so they are published alone rather
+        # than withheld.
+        split = tracker.meters.has_solar
+        async_add_entities(
+            SavingsSensor(coordinator, tracker, description)
+            for description in SAVINGS_SENSORS
+            if split or description.key not in (SAVINGS_KEY_SOLAR_TODAY, SAVINGS_KEY_BATTERY_TODAY)
+        )
+    # The forecast sensors need no meters at all -- they price the plan, which
+    # every entry has -- so they are created whether or not cost tracking was
+    # ever configured.
+    async_add_entities(
+        SavingsForecastSensor(coordinator, tracker, description) for description in FORECAST_SENSORS
     )
 
     # Only present for an entry set up through "Create a house load sensor" --
@@ -930,3 +966,308 @@ class EmhassDecisionSensor(EmhassEntity, SensorEntity):
         if decision is not None:
             attributes.update(decision.as_attributes())
         return attributes
+
+
+# --- Cost and savings ---------------------------------------------------------
+#
+# These read the tracker rather than the plan, so they are not
+# CoordinatorEntity-driven like everything above: a meter tick is not an
+# optimisation, and waiting for the next solve to publish a cost would leave
+# the day's money a quarter of an hour stale for no reason. See metering.py.
+
+
+def _round(value: float | None, digits: int = 3) -> float | None:
+    """Attribute-friendly rounding.
+
+    Raw accumulator floats carry a dozen meaningless digits; publishing them
+    makes an attribute dump unreadable and every state write a diff.
+    """
+    return None if value is None else round(value, digits)
+
+
+@dataclass(frozen=True, kw_only=True)
+class SavingsSensorDescription(SensorEntityDescription):
+    """Describes a sensor derived from the day's ledger."""
+
+    value_fn: Callable[[Ledger], float]
+    attrs_fn: Callable[[Ledger], dict[str, Any]] | None = None
+
+
+@dataclass(frozen=True, kw_only=True)
+class ForecastSensorDescription(SensorEntityDescription):
+    """Describes a sensor derived from pricing the plan ahead."""
+
+    value_fn: Callable[[Forecast], float]
+    attrs_fn: Callable[[Forecast], dict[str, Any]] | None = None
+
+
+def _cost_attributes(ledger: Ledger) -> dict[str, Any]:
+    return {
+        "import_spend": _round(ledger.import_spend, 2),
+        "export_income": _round(ledger.export_income, 2),
+        "import_kwh": _round(ledger.imported_kwh),
+        "export_kwh": _round(ledger.exported_kwh),
+        "average_import_price": _round(ledger.average_import_price, 4),
+        "average_export_price": _round(ledger.average_export_price, 4),
+        # Non-zero means the day is understated: energy flowed while no price
+        # was known for it. Published rather than hidden so an incomplete day
+        # is visibly incomplete.
+        "unpriced_kwh": _round(ledger.unpriced_kwh),
+    }
+
+
+def _savings_attributes(ledger: Ledger) -> dict[str, Any]:
+    """Everything needed to check the headline by hand.
+
+    A savings figure nobody can reconstruct is a savings figure nobody
+    believes, so all three worlds and every input to them are here.
+    """
+    return {
+        "actual_cost": _round(ledger.actual_cost, 2),
+        "baseline_cost_grid_only": _round(ledger.grid_only_cost, 2),
+        "baseline_cost_solar_only": _round(ledger.solar_only_cost, 2),
+        "solar_savings": _round(ledger.solar_savings, 2),
+        "battery_savings": _round(ledger.battery_savings, 2),
+        "storage_carry": _round(ledger.storage_carry, 2),
+        "savings_excl_carry": _round(ledger.savings_excl_carry, 2),
+        "import_kwh": _round(ledger.imported_kwh),
+        "export_kwh": _round(ledger.exported_kwh),
+        "solar_kwh": _round(ledger.pv_kwh),
+        "house_load_kwh": _round(ledger.house_load_kwh),
+        "battery_charge_kwh": _round(ledger.battery_charge_kwh),
+        "battery_discharge_kwh": _round(ledger.battery_discharge_kwh),
+        "self_sufficiency_percent": _round(ledger.self_sufficiency, 1),
+        "unpriced_kwh": _round(ledger.unpriced_kwh),
+        # Zero unless a measured house-load sensor disagrees with the energy
+        # balance the other meters imply. The first thing to look at when a
+        # number seems wrong -- see docs/savings.md.
+        "balance_residual_kwh": _round(ledger.balance_residual_kwh),
+    }
+
+
+def _solar_attributes(ledger: Ledger) -> dict[str, Any]:
+    return {
+        "solar_kwh": _round(ledger.pv_kwh),
+        "house_load_kwh": _round(ledger.house_load_kwh),
+        "baseline_cost_grid_only": _round(ledger.grid_only_cost, 2),
+        "baseline_cost_solar_only": _round(ledger.solar_only_cost, 2),
+        "self_sufficiency_percent": _round(ledger.self_sufficiency, 1),
+    }
+
+
+def _battery_attributes(ledger: Ledger) -> dict[str, Any]:
+    """The battery's own working, including the spread it actually captured.
+
+    ``average_charge_price`` against ``average_discharge_price`` is the gross
+    spread; the saving is that spread net of the round-trip loss below it,
+    which is why both are here beside the headline rather than instead of it.
+    """
+    return {
+        "battery_charge_kwh": _round(ledger.battery_charge_kwh),
+        "battery_discharge_kwh": _round(ledger.battery_discharge_kwh),
+        "round_trip_loss_kwh": _round(
+            max(ledger.battery_charge_kwh - ledger.battery_discharge_kwh, 0.0)
+        ),
+        "average_charge_price": _round(ledger.average_charge_price, 4),
+        "average_discharge_price": _round(ledger.average_discharge_price, 4),
+        "storage_carry": _round(ledger.storage_carry, 2),
+        "stored_start_kwh": _round(ledger.stored_start_kwh),
+        "stored_now_kwh": _round(ledger.stored_now_kwh),
+    }
+
+
+SAVINGS_SENSORS: tuple[SavingsSensorDescription, ...] = (
+    SavingsSensorDescription(
+        key=SAVINGS_KEY_COST_TODAY,
+        translation_key=SAVINGS_KEY_COST_TODAY,
+        value_fn=lambda ledger: ledger.actual_cost,
+        attrs_fn=_cost_attributes,
+    ),
+    SavingsSensorDescription(
+        key=SAVINGS_KEY_SAVINGS_TODAY,
+        translation_key=SAVINGS_KEY_SAVINGS_TODAY,
+        value_fn=lambda ledger: ledger.total_savings,
+        attrs_fn=_savings_attributes,
+    ),
+    SavingsSensorDescription(
+        key=SAVINGS_KEY_SOLAR_TODAY,
+        translation_key=SAVINGS_KEY_SOLAR_TODAY,
+        value_fn=lambda ledger: ledger.solar_savings,
+        attrs_fn=_solar_attributes,
+    ),
+    SavingsSensorDescription(
+        key=SAVINGS_KEY_BATTERY_TODAY,
+        translation_key=SAVINGS_KEY_BATTERY_TODAY,
+        value_fn=lambda ledger: ledger.battery_savings,
+        attrs_fn=_battery_attributes,
+    ),
+)
+
+
+def _forecast_attributes(forecast: Forecast) -> dict[str, Any]:
+    return {
+        "hours_covered": _round(forecast.hours, 2),
+        # False when the plan's horizon is shorter than the window asked for.
+        # The sensor reports what the plan does cover rather than extrapolating
+        # it, so this is what says the number is not a whole day.
+        "covers_full_window": forecast.complete,
+        "window_start": forecast.start.isoformat(),
+        "window_end": forecast.end.isoformat(),
+        "actual_cost": _round(forecast.actual_cost, 2),
+        "baseline_cost_grid_only": _round(forecast.grid_only_cost, 2),
+        "baseline_cost_solar_only": _round(forecast.solar_only_cost, 2),
+        "solar_savings": _round(forecast.solar_savings, 2),
+        "battery_savings": _round(forecast.battery_savings, 2),
+        "storage_carry": _round(forecast.storage_carry, 2),
+        "import_kwh": _round(forecast.import_kwh),
+        "export_kwh": _round(forecast.export_kwh),
+        "solar_kwh": _round(forecast.pv_kwh),
+        "house_load_kwh": _round(forecast.load_kwh),
+        # Planned cost per clock hour. A single total cannot show *why* a night
+        # is expensive; this is the shape a card draws.
+        "hourly_cost": [
+            {"time": when.isoformat(), "value": round(value, 3)} for when, value in forecast.hourly
+        ],
+    }
+
+
+FORECAST_SENSORS: tuple[ForecastSensorDescription, ...] = (
+    ForecastSensorDescription(
+        key=SAVINGS_KEY_FORECAST_COST,
+        translation_key=SAVINGS_KEY_FORECAST_COST,
+        value_fn=lambda forecast: forecast.actual_cost,
+        attrs_fn=_forecast_attributes,
+    ),
+    ForecastSensorDescription(
+        key=SAVINGS_KEY_FORECAST_SAVINGS,
+        translation_key=SAVINGS_KEY_FORECAST_SAVINGS,
+        value_fn=lambda forecast: forecast.total_savings,
+        attrs_fn=_forecast_attributes,
+    ),
+)
+
+
+class SavingsSensorBase(EmhassEntity, SensorEntity):
+    """Shared plumbing for anything measured in money.
+
+    The unit is Home Assistant's own configured currency rather than anything
+    this integration knows. The tariff is composed from the user's own price
+    entity and their own multipliers and adders; nothing upstream of here ever
+    says what currency those are in, and asking again on the cost tracking
+    screen would be asking a question Home Assistant has already answered.
+    """
+
+    _attr_suggested_display_precision = 2
+
+    def __init__(self, coordinator: EmhassCoordinator, tracker: SavingsTracker, key: str) -> None:
+        super().__init__(coordinator, key)
+        self.tracker = tracker
+        self._attr_native_unit_of_measurement = coordinator.hass.config.currency
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self.async_on_remove(self.tracker.async_add_listener(self.async_write_ha_state))
+
+
+class SavingsSensor(SavingsSensorBase):
+    """One figure from the day's ledger.
+
+    ``TOTAL`` with an explicit ``last_reset`` rather than ``TOTAL_INCREASING``:
+    savings can fall within a day (an hour of buying at the peak while the
+    battery sat idle) and the cost sensor goes down every time the house
+    exports, so a monotonic state class would read each of those as a meter
+    reset and start the day over.
+
+    That pairing is also what makes Home Assistant keep the per-day history
+    itself, in its own long-term statistics -- which is why this feature ships
+    no history of its own. Month and year totals come from the statistics card
+    for free, and a second accumulator that could drift from the first would be
+    a support burden for no new information.
+    """
+
+    entity_description: SavingsSensorDescription
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_state_class = SensorStateClass.TOTAL
+
+    def __init__(
+        self,
+        coordinator: EmhassCoordinator,
+        tracker: SavingsTracker,
+        description: SavingsSensorDescription,
+    ) -> None:
+        super().__init__(coordinator, tracker, description.key)
+        self.entity_description = description
+
+    @property
+    def last_reset(self) -> datetime | None:
+        """Local midnight of the day the ledger is accumulating.
+
+        Derived from the ledger's own recorded day rather than from "today",
+        so it stays right across the rollover and across a restart that
+        restored a ledger written before midnight.
+        """
+        try:
+            day = date.fromisoformat(self.tracker.ledger.day)
+        except ValueError:
+            return None
+        return dt_util.start_of_local_day(day)
+
+    @property
+    def native_value(self) -> float:
+        return round(self.entity_description.value_fn(self.tracker.ledger), 4)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        if self.entity_description.attrs_fn is None:
+            return None
+        attributes = self.entity_description.attrs_fn(self.tracker.ledger)
+        # Which entity, and which shape, answered for each quantity. A metered
+        # source is exact; an integrated power sensor is only as good as its
+        # update rate, and the difference is not visible anywhere else.
+        attributes["sources"] = self.tracker.meters.describe()
+        return attributes
+
+
+class SavingsForecastSensor(SavingsSensorBase):
+    """One figure from pricing the plan ahead.
+
+    No device class: Home Assistant only allows ``MONETARY`` with a ``TOTAL``
+    state class, and this is not a total of anything -- it is an estimate of a
+    window that moves with every run. It carries the currency as its unit and
+    leaves it there.
+    """
+
+    entity_description: ForecastSensorDescription
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(
+        self,
+        coordinator: EmhassCoordinator,
+        tracker: SavingsTracker,
+        description: ForecastSensorDescription,
+    ) -> None:
+        super().__init__(coordinator, tracker, description.key)
+        self.entity_description = description
+
+    @property
+    def _forecast(self) -> Forecast | None:
+        return self.tracker.forecast(timedelta(hours=SAVINGS_FORECAST_HOURS))
+
+    @property
+    def available(self) -> bool:
+        # Unlike the rest of this device, which stays readable on purpose: an
+        # estimate with no plan behind it is not stale, it does not exist, and
+        # publishing a zero would read as "this day is free".
+        return self._forecast is not None
+
+    @property
+    def native_value(self) -> float | None:
+        forecast = self._forecast
+        return None if forecast is None else round(self.entity_description.value_fn(forecast), 4)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        forecast = self._forecast
+        if forecast is None or self.entity_description.attrs_fn is None:
+            return None
+        return self.entity_description.attrs_fn(forecast)

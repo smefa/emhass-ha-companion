@@ -209,6 +209,7 @@
           "tariff": "Buy and sell prices",
           "inverter": "Inverter control",
           "temperature": "Outdoor temperature",
+          "metering": "Cost and savings",
           "compatibility": "EMHASS entity names"
         }
       },
@@ -362,6 +363,36 @@
         "data_description": {
           "emhass_standard_names": "Renames the plan sensors to p_pv_forecast, p_load_forecast, p_grid_forecast, p_batt_forecast, soc_batt_forecast, optim_status, total_cost_fun_value, unit_load_cost and unit_prod_price, plus p_pv_curtailment and p_hybrid_inverter where you have those, and also publishes their forecast series in EMHASS's format. Per-load sensors keep their own names -- EMHASS numbers those P_deferrable0, P_deferrable1 and so on by load order, and an entity id never moves once assigned, so adding or renaming a load would leave the number pointing at the wrong appliance."
         }
+      },
+      "metering": {
+        "title": "Cost and savings",
+        "description": "Track what the grid actually cost you, and what solar and the battery saved against a house with neither. Measured from your own meters and your own prices — nothing here changes the optimisation.{found}\n\nThe meters were read from your Energy dashboard. They are stored when you submit, so reorganising that dashboard later cannot silently repoint them. Open *Meters* only if something above is wrong or missing.",
+        "data": {
+          "metering_enabled": "Track cost and savings"
+        },
+        "data_description": {
+          "metering_enabled": "Creates the cost and savings sensors. Turning it off removes them and stops the tracking; the next 24 h forecast sensors are unaffected either way."
+        },
+        "sections": {
+          "meters": {
+            "name": "Meters",
+            "description": "Override anything the Energy dashboard could not answer. Grid import and export are the only requirement — with them you get today's cost and today's saving, and adding solar splits that saving into a solar part and a battery part.",
+            "data": {
+              "grid_import_energy_entity": "Grid import (kWh)",
+              "grid_export_energy_entity": "Grid export (kWh)",
+              "pv_energy_entity": "Solar production (kWh)",
+              "battery_charge_energy_entity": "Battery charged (kWh)",
+              "battery_discharge_energy_entity": "Battery discharged (kWh)"
+            },
+            "data_description": {
+              "grid_import_energy_entity": "Total energy bought from the grid. A daily counter that resets at midnight is fine.",
+              "grid_export_energy_entity": "Total energy sold to the grid.",
+              "pv_energy_entity": "Separates the solar saving from the battery saving. Your total saving does not depend on it — only the split between the two does.",
+              "battery_charge_energy_entity": "Energy into the battery.",
+              "battery_discharge_energy_entity": "Energy out of the battery."
+            }
+          }
+        }
       }
     }
   },
@@ -476,6 +507,24 @@
       },
       "hybrid_inverter": {
         "name": "Planned inverter power"
+      },
+      "energy_cost_today": {
+        "name": "Energy cost today"
+      },
+      "savings_today": {
+        "name": "Savings today"
+      },
+      "solar_savings_today": {
+        "name": "Solar savings today"
+      },
+      "battery_savings_today": {
+        "name": "Battery savings today"
+      },
+      "forecast_cost_24h": {
+        "name": "Forecast cost next 24 h"
+      },
+      "forecast_savings_24h": {
+        "name": "Forecast savings next 24 h"
       }
     },
     "binary_sensor": {
