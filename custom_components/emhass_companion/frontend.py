@@ -9,10 +9,13 @@ match. Serving them from here keeps the two in lockstep.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from functools import partial
+import gzip
 import logging
 from pathlib import Path
 
-from homeassistant.components.http import StaticPathConfig
+from aiohttp import web
 from homeassistant.components.lovelace import LovelaceData
 from homeassistant.components.lovelace.const import (
     DOMAIN as LOVELACE_DOMAIN,
@@ -28,6 +31,12 @@ _LOGGER = logging.getLogger(__name__)
 
 CARDS_FILENAME = "emhass-cards.js"
 CARDS_URL = f"/{DOMAIN}/{CARDS_FILENAME}"
+CONTENT_TYPE = "text/javascript"
+# Mirrors homeassistant.components.http.static.CACHE_HEADER (31 days) without
+# importing a private module path: each resource URL already carries a
+# version query string, so a stale cached copy only matters until the next
+# version bump, not until this expires.
+CACHE_CONTROL = "public, max-age=2678400"
 
 # Every card ships in one bundle. There was briefly a second, experimental one
 # alongside it; its cards graduated into this one, and the machinery for
@@ -71,31 +80,69 @@ async def _async_drop_retired_resources(hass: HomeAssistant) -> None:
         _LOGGER.info("Removed the retired dashboard card resource %s", path)
 
 
+@dataclass(slots=True)
+class _Bundle:
+    """A card bundle's bytes, kept in both forms so gzip runs once, not per request."""
+
+    raw: bytes
+    gzipped: bytes
+
+
+def _read_and_compress(source: Path) -> _Bundle:
+    """Off the event loop: file I/O and a compression pass over ~200 KB."""
+    raw = source.read_bytes()
+    return _Bundle(raw=raw, gzipped=gzip.compress(raw, compresslevel=9))
+
+
+async def _serve_bundle(bundle: _Bundle, request: web.Request) -> web.Response:
+    """Hand back whichever form the client asked for.
+
+    aiohttp's own static-file serving (what HA's StaticPathConfig uses under
+    the hood) is a plain FileResponse with no content negotiation, so every
+    client downloaded the full, uncommented bundle -- gzip shrinks it by
+    roughly three quarters. That matters here specifically: the dashboard
+    cards race the frontend's own fixed element-registration timeout
+    (home-assistant/frontend#52960), and a slower transfer on a weak
+    connection is a slower registration, which is a card more likely to lose
+    that race.
+    """
+    accepts_gzip = "gzip" in request.headers.get("Accept-Encoding", "")
+    headers = {"Cache-Control": CACHE_CONTROL, "Vary": "Accept-Encoding"}
+    if accepts_gzip:
+        headers["Content-Encoding"] = "gzip"
+    return web.Response(
+        body=bundle.gzipped if accepts_gzip else bundle.raw,
+        content_type=CONTENT_TYPE,
+        headers=headers,
+    )
+
+
 async def _async_register_static_paths(hass: HomeAssistant) -> None:
-    """Serve the JavaScript files.
+    """Serve the JavaScript files, gzip-compressed when the client allows it.
 
     Registering the same path twice raises, and a config entry reload runs this
-    again, so it is guarded. The files themselves are served with cache headers
-    -- each resource URL carries a version query string, which is what actually
-    invalidates a stale copy.
+    again, so it is guarded. Each resource URL carries a version query string,
+    which is what actually invalidates a stale cached copy.
     """
     if hass.data.get(_STATIC_PATH_KEY):
         return
 
-    configs: list[StaticPathConfig] = []
+    bundles: dict[str, _Bundle] = {}
     for filename, url in BUNDLES:
         source = Path(__file__).parent / "frontend" / filename
         if not source.is_file():  # pragma: no cover - packaging error
             _LOGGER.error("Card bundle missing at %s; those cards will not load", source)
             continue
-        configs.append(StaticPathConfig(url, str(source), cache_headers=True))
+        bundles[url] = await hass.async_add_executor_job(_read_and_compress, source)
 
-    if not configs:  # pragma: no cover - packaging error
+    if not bundles:  # pragma: no cover - packaging error
         return
 
-    await hass.http.async_register_static_paths(configs)
+    for url, bundle in bundles.items():
+        hass.http.app.router.add_route("GET", url, partial(_serve_bundle, bundle))
+
     hass.data[_STATIC_PATH_KEY] = True
-    _LOGGER.debug("Serving dashboard cards at %s", ", ".join(url for _, url in BUNDLES))
+    _LOGGER.debug("Serving dashboard cards at %s", ", ".join(bundles))
 
 
 async def _async_register_resource(hass: HomeAssistant, version: str, cards_url: str) -> None:

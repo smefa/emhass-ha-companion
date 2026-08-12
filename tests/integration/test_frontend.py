@@ -16,6 +16,7 @@ import pytest
 
 from custom_components.emhass_companion.frontend import (
     CARDS_URL,
+    _async_register_static_paths,
     async_setup_frontend,
 )
 
@@ -155,3 +156,55 @@ async def test_missing_lovelace_is_not_fatal(hass: HomeAssistant) -> None:
 
 async def test_storage_mode_is_the_default(hass: HomeAssistant, lovelace) -> None:
     assert lovelace.resource_mode == MODE_STORAGE
+
+
+async def test_bundle_is_gzipped_when_the_client_allows_it(
+    hass: HomeAssistant, hass_client_no_auth
+) -> None:
+    """A slow transfer is a slower element registration, on the frontend's own
+
+    fixed timeout (home-assistant/frontend#52960) -- smaller loses that race
+    less often.
+    """
+    # The autouse fixture above patches the module attribute; this test's own
+    # import of the function was bound before that ran, so it still calls the
+    # real thing.
+    assert await async_setup_component(hass, "http", {})
+    await _async_register_static_paths(hass)
+    client = await hass_client_no_auth()
+
+    response = await client.get(CARDS_URL, headers={"Accept-Encoding": "gzip"})
+    assert response.status == 200
+    # The wire format, not the client's own view: aiohttp's client transparently
+    # decompresses a gzip body on read, so content_length is the only place the
+    # actual transfer size -- the thing this is for -- is still visible.
+    assert response.headers["Content-Encoding"] == "gzip"
+    assert response.headers["Vary"] == "Accept-Encoding"
+
+    from pathlib import Path
+
+    import custom_components.emhass_companion.frontend as frontend
+
+    raw = (Path(frontend.__file__).parent / "frontend" / frontend.CARDS_FILENAME).read_bytes()
+    assert await response.read() == raw
+    assert response.content_length < len(raw)
+
+
+async def test_bundle_falls_back_to_plain_text_without_gzip_support(
+    hass: HomeAssistant, hass_client_no_auth
+) -> None:
+    """A client that never advertised gzip must not be handed compressed bytes."""
+    assert await async_setup_component(hass, "http", {})
+    await _async_register_static_paths(hass)
+    client = await hass_client_no_auth()
+
+    response = await client.get(CARDS_URL, headers={"Accept-Encoding": "identity"})
+    assert response.status == 200
+    assert "Content-Encoding" not in response.headers
+
+    from pathlib import Path
+
+    import custom_components.emhass_companion.frontend as frontend
+
+    raw = (Path(frontend.__file__).parent / "frontend" / frontend.CARDS_FILENAME).read_bytes()
+    assert await response.read() == raw
