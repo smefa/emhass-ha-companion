@@ -357,9 +357,21 @@ def test_every_inverter_profile_defines_the_fallback_action(strings):
 # --- dashboard cards ---------------------------------------------------------
 
 
-BUNDLE = COMPONENT / "frontend" / "emhass-cards.js"
+# The cards used to ship as a single emhass-cards.js; split into a shared
+# core module plus one bundle per card family so that a lost race against the
+# frontend's own fixed element-registration timeout (home-assistant/frontend
+# #52960) only takes down one family's elements instead of all fourteen.
+CORE_FILE = "emhass-core.js"
+CARD_FILES = (
+    "emhass-plan-card.js",
+    "emhass-deferrable-cards.js",
+    "emhass-health-card.js",
+    "emhass-status-card.js",
+    "emhass-overview-card.js",
+)
+FRONTEND_FILES = (CORE_FILE, *CARD_FILES)
 
-# Every card in the bundle, which is also the list the picker must offer.
+# Every card across all bundles, which is also the list the picker must offer.
 CARDS = (
     "emhass-plan-card",
     "emhass-deferrable-card",
@@ -373,20 +385,35 @@ CARDS = (
 
 @pytest.fixture(scope="module")
 def bundle() -> str:
-    assert BUNDLE.is_file(), f"card bundle missing at {BUNDLE}"
-    return BUNDLE.read_text(encoding="utf-8")
+    """Every shipped frontend file concatenated into one string.
+
+    Only good for substring/regex checks below -- each file is its own ES
+    module with its own `import`/`export` statements, so the concatenation
+    itself is not valid as a single module. `test_card_bundle_parses_as_a_javascript_module`
+    parses each file separately for that reason.
+    """
+    parts = []
+    for filename in FRONTEND_FILES:
+        path = COMPONENT / "frontend" / filename
+        assert path.is_file(), f"card bundle missing at {path}"
+        parts.append(path.read_text(encoding="utf-8"))
+    return "\n".join(parts)
 
 
-def test_card_bundle_parses_as_a_javascript_module(bundle):
-    """Syntax-check the card bundle without needing Node.
+@pytest.mark.parametrize("filename", FRONTEND_FILES)
+def test_card_bundle_parses_as_a_javascript_module(filename):
+    """Syntax-check each card bundle without needing Node.
 
-    The bundle is plain ES2017-compatible JavaScript on purpose: it can then be
-    parsed by a pure-Python parser, which is the only way this file gets any
-    automated checking at all. Optional chaining and nullish coalescing are
-    deliberately avoided for the same reason.
+    Every file is plain ES2017-compatible JavaScript on purpose: it can then
+    be parsed by a pure-Python parser, which is the only way these files get
+    any automated checking at all. Optional chaining and nullish coalescing
+    are deliberately avoided for the same reason. `__VERSION__` is the
+    placeholder frontend.py substitutes with the real integration version at
+    serve time; any string parses fine here.
     """
     esprima = pytest.importorskip("esprima")
-    esprima.parseModule(bundle)
+    source = (COMPONENT / "frontend" / filename).read_text(encoding="utf-8")
+    esprima.parseModule(source.replace("__VERSION__", "0.0.0"))
 
 
 def test_card_bundle_avoids_syntax_the_parser_cannot_check(bundle):
@@ -585,7 +612,7 @@ def test_brand_icon_has_a_transparent_background():
         assert img.getpixel((0, 0))[3] == 0, "top-left corner is not transparent"
 
 
-def test_cards_match_entities_by_translation_key():
+def test_cards_match_entities_by_translation_key(bundle):
     """Entity ids are translated and renameable; unique_id never reaches the card.
 
     Both cards used to locate a load's entities by English substrings of the
@@ -604,7 +631,7 @@ def test_cards_match_entities_by_translation_key():
     load". translation_key is the only identifier that is stable across
     renames and languages *and* actually delivered to the frontend.
     """
-    source = (COMPONENT / "frontend" / "emhass-cards.js").read_text(encoding="utf-8")
+    source = bundle
     assert "id.includes(" not in source, "entity ids are not a stable key"
     # Reading it, not the prose above explaining why nothing may.
     assert ".unique_id" not in source, "unique_id is not in the display registry"
@@ -613,7 +640,7 @@ def test_cards_match_entities_by_translation_key():
     assert '"should_run" in load.entities' in source
 
 
-def test_cards_look_up_load_entities_by_their_real_translation_keys():
+def test_cards_look_up_load_entities_by_their_real_translation_keys(bundle):
     """A load's key is what strings.json calls it, not what Python calls it.
 
     Two of a load's entities are namespaced away from the hub's in
@@ -624,7 +651,7 @@ def test_cards_look_up_load_entities_by_their_real_translation_keys():
     """
     import re
 
-    source = (COMPONENT / "frontend" / "emhass-cards.js").read_text(encoding="utf-8")
+    source = bundle
 
     # Every translation key the cards ask a load for must be one a load
     # actually publishes, per strings.json.
@@ -643,7 +670,7 @@ def test_cards_look_up_load_entities_by_their_real_translation_keys():
             assert key in published, f'the card asks a load for "{key}", which no entity publishes'
 
 
-def test_cards_attach_their_shadow_root_at_most_once():
+def test_cards_attach_their_shadow_root_at_most_once(bundle):
     """`setConfig` runs repeatedly on one element, `attachShadow` may not.
 
     The card editor calls `setConfig` on the same element for every option
@@ -651,7 +678,7 @@ def test_cards_attach_their_shadow_root_at_most_once():
     An unguarded `attachShadow` in that rebuild throws `NotSupportedError`,
     which red-cards the element the moment anyone edits the card.
     """
-    source = (COMPONENT / "frontend" / "emhass-cards.js").read_text(encoding="utf-8")
+    source = bundle
     assert source.count("this.attachShadow(") == source.count(
         "if (!this.shadowRoot) this.attachShadow("
     )

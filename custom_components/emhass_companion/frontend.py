@@ -29,8 +29,6 @@ from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-CARDS_FILENAME = "emhass-cards.js"
-CARDS_URL = f"/{DOMAIN}/{CARDS_FILENAME}"
 CONTENT_TYPE = "text/javascript"
 # Mirrors homeassistant.components.http.static.CACHE_HEADER (31 days) without
 # importing a private module path: each resource URL already carries a
@@ -38,19 +36,31 @@ CONTENT_TYPE = "text/javascript"
 # version bump, not until this expires.
 CACHE_CONTROL = "public, max-age=2678400"
 
-# Every card ships in one bundle. There was briefly a second, experimental one
-# alongside it; its cards graduated into this one, and the machinery for
-# serving several is kept because it costs nothing and the alternative -- a
-# prefix match against a single URL -- is the bug that made a sibling bundle
-# look like a stale copy of this one.
-BUNDLES: tuple[tuple[str, str], ...] = ((CARDS_FILENAME, CARDS_URL),)
+CORE_FILENAME = "emhass-core.js"
+CORE_URL = f"/{DOMAIN}/{CORE_FILENAME}"
+
+# One entry per card family, each its own Lovelace resource. All 14 elements
+# used to ship from one module: when the frontend's own element-registration
+# race (home-assistant/frontend#52960) is lost, the whole module fails and
+# every card on it goes down together. Splitting by family means a lost race
+# takes out 1-3 elements instead of 14, and each file is small enough to be
+# less likely to lose that race at all. The shared code they all `import`
+# from lives in CORE_FILENAME -- served (below) but never registered as a
+# resource of its own, since nothing loads it except as a dependency.
+BUNDLES: tuple[tuple[str, str], ...] = (
+    ("emhass-plan-card.js", f"/{DOMAIN}/emhass-plan-card.js"),
+    ("emhass-deferrable-cards.js", f"/{DOMAIN}/emhass-deferrable-cards.js"),
+    ("emhass-health-card.js", f"/{DOMAIN}/emhass-health-card.js"),
+    ("emhass-status-card.js", f"/{DOMAIN}/emhass-status-card.js"),
+    ("emhass-overview-card.js", f"/{DOMAIN}/emhass-overview-card.js"),
+)
 
 _STATIC_PATH_KEY = f"{DOMAIN}_static_path_registered"
 
 
 async def async_setup_frontend(hass: HomeAssistant, version: str) -> None:
     """Serve the card bundles and register them as Lovelace resources."""
-    await _async_register_static_paths(hass)
+    await _async_register_static_paths(hass, version)
     for _, url in BUNDLES:
         await _async_register_resource(hass, version, url)
     await _async_drop_retired_resources(hass)
@@ -88,9 +98,18 @@ class _Bundle:
     gzipped: bytes
 
 
-def _read_and_compress(source: Path) -> _Bundle:
-    """Off the event loop: file I/O and a compression pass over ~200 KB."""
-    raw = source.read_bytes()
+def _read_and_compress(source: Path, version: str) -> _Bundle:
+    """Off the event loop: file I/O, version substitution, and compression.
+
+    Each family bundle imports the shared core module by a literal
+    `./emhass-core.js?v=__VERSION__` specifier -- a relative import, so the
+    browser resolves and caches it by that exact URL regardless of which
+    versioned bundle asked for it. Without the substituted version in that
+    URL, core.js would keep its own separate, unversioned cache entry, and a
+    change to it would never invalidate for a browser that had already
+    fetched an older copy, even after every family bundle moved on.
+    """
+    raw = source.read_text(encoding="utf-8").replace("__VERSION__", version).encode("utf-8")
     return _Bundle(raw=raw, gzipped=gzip.compress(raw, compresslevel=9))
 
 
@@ -117,32 +136,35 @@ async def _serve_bundle(bundle: _Bundle, request: web.Request) -> web.Response:
     )
 
 
-async def _async_register_static_paths(hass: HomeAssistant) -> None:
+async def _async_register_static_paths(hass: HomeAssistant, version: str) -> None:
     """Serve the JavaScript files, gzip-compressed when the client allows it.
 
     Registering the same path twice raises, and a config entry reload runs this
     again, so it is guarded. Each resource URL carries a version query string,
-    which is what actually invalidates a stale cached copy.
+    which is what actually invalidates a stale cached copy. The core module is
+    served here too -- every family bundle imports it -- but it is never one of
+    `BUNDLES`, since nothing loads it as a Lovelace resource of its own.
     """
     if hass.data.get(_STATIC_PATH_KEY):
         return
 
-    bundles: dict[str, _Bundle] = {}
-    for filename, url in BUNDLES:
+    files = ((CORE_FILENAME, CORE_URL), *BUNDLES)
+    routes: dict[str, _Bundle] = {}
+    for filename, url in files:
         source = Path(__file__).parent / "frontend" / filename
         if not source.is_file():  # pragma: no cover - packaging error
             _LOGGER.error("Card bundle missing at %s; those cards will not load", source)
             continue
-        bundles[url] = await hass.async_add_executor_job(_read_and_compress, source)
+        routes[url] = await hass.async_add_executor_job(_read_and_compress, source, version)
 
-    if not bundles:  # pragma: no cover - packaging error
+    if not routes:  # pragma: no cover - packaging error
         return
 
-    for url, bundle in bundles.items():
+    for url, bundle in routes.items():
         hass.http.app.router.add_route("GET", url, partial(_serve_bundle, bundle))
 
     hass.data[_STATIC_PATH_KEY] = True
-    _LOGGER.debug("Serving dashboard cards at %s", ", ".join(bundles))
+    _LOGGER.debug("Serving dashboard cards at %s", ", ".join(routes))
 
 
 async def _async_register_resource(hass: HomeAssistant, version: str, cards_url: str) -> None:
