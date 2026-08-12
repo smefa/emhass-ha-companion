@@ -4305,18 +4305,20 @@ class EmhassOverviewCard extends LiveCard {
   }
 
   /**
-   * What solar and the battery actually did, from the recorder.
+   * What solar, the battery and the price actually did, from the recorder.
    *
    * The plan is no use behind the present: an MPC run starts at the timestep
-   * it was made in, so the moment the window reaches into the past the two
-   * lanes would start with two hours of blank rail. The recorder has the
-   * answer, and it is one call.
+   * it was made in, so the moment the window reaches into the past these
+   * lanes would start with blank rail. The backend trims `buy_price` the same
+   * way it trims every plan series -- to `window_start` onward -- so the
+   * ribbon needs its own recorder lookup exactly as the power lanes do. The
+   * recorder has the answer, and it is one call for all three.
    *
-   * Read from the Companion's own sensors by default, whose sign convention is
-   * known -- positive is discharge -- and which need no configuration to work.
-   * `solar_entity` and `battery_entity` point it at the house's own meters
-   * instead, which is the difference between "what was forecast" and "what
-   * happened".
+   * Solar and battery are read from the Companion's own sensors by default,
+   * whose sign convention is known -- positive is discharge -- and which need
+   * no configuration to work. `solar_entity` and `battery_entity` point it at
+   * the house's own meters instead, which is the difference between "what was
+   * forecast" and "what happened".
    */
   _history(hass, hub, now) {
     // Card option first, then whatever the Companion itself was configured
@@ -4327,6 +4329,7 @@ class EmhassOverviewCard extends LiveCard {
     const wanted = {
       solar: this._config.solar_entity || hub["sensor.pv_forecast"],
       battery: battery ? battery.entity : hub["sensor.battery_power"],
+      price: hub["sensor.buy_price"],
     };
     // Only an outside sensor can have the other sign convention: the plan's
     // own battery series is positive while discharging by definition.
@@ -4362,13 +4365,17 @@ class EmhassOverviewCard extends LiveCard {
     const planSolar = series(pv);
     const planBattery = series(battery);
     const history = this._history(hass, hub, now);
-    const prices = series(buy);
+    // The backend trims the price forecast to start at "now" like every
+    // other plan series, so the ribbon needs the same recorder backfill the
+    // power lanes get below -- without it, everything before "now" reads as
+    // "no prices published yet".
+    const prices = mergeHistory(history.price, series(buy));
     const solarPoints = mergeHistory(history.solar, planSolar);
     const batteryPoints = mergeHistory(history.battery, planBattery);
     const socPoints = series(soc);
     const loads = findLoads(hass).map((load) => loadView(hass, load));
-    // A rolling window rather than the extent of the data: the price series
-    // alone reaches back to last midnight, and eleven hours of spent morning
+    // A rolling window rather than the extent of the data: the plan's own
+    // series only reach back to "now", and eleven hours of spent morning
     // squeeze the part of the plan that can still be changed into a third of
     // the card. The end is still the data's, since that is the horizon.
     const lists = [prices, solarPoints, batteryPoints]
