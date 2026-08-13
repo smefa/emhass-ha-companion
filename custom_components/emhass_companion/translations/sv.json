@@ -116,7 +116,12 @@
           "soc_entity": "Sensor för batteriets laddningsnivå",
           "battery_power_entity": "Sensor för batteriets effekt",
           "battery_power_invert": "Sensorn är positiv vid laddning",
-          "pv_entity": "Sensor för aktuell soleffekt"
+          "pv_entity": "Sensor för aktuell soleffekt",
+          "no_charge_from_grid": "Blockera laddning från elnätet",
+          "battery_first_priority": "Töm batteriet före nätimport",
+          "battery_dynamic": "Begränsa (ur)laddningens ramptakt",
+          "battery_dynamic_max": "Max urladdningsramp",
+          "battery_dynamic_min": "Max laddningsramp"
         },
         "data_description": {
           "hybrid_inverter": "På om solpanelerna och batteriet delar en och samma växelriktares AC-effektgräns, vilket gäller de flesta hembatterisystem. Av om det är två separata växelriktare med varsin gräns.",
@@ -136,7 +141,12 @@
           "battery_soc_surplus_threshold": "Nivån över vilken batteriet debiteras en hållkostnad, om en sådan är satt nedan. Att stå fulladdat åldrar ett litiumbatteri snabbare, så detta motverkar att det parkeras där i timmar.",
           "battery_soc_surplus_cost": "Debiteras per kWh över den bekväma nivån, per timme där. Använd det för att få planen att fylla batteriet sent i stället för tidigt när båda kostar lika mycket. 0 stänger av detta, vilket är standard.",
           "battery_stress_segments": "Hur fint den kvadratiska kostnadskurvan nedan approximeras. Högre följer den verkliga kostnaden närmare men gör varje optimering något långsammare; 10 är en bra avvägning och spelar bara roll när en effektkostnad är satt nedan.",
-          "battery_stress_cost": "Motverkar snabb laddning och urladdning. Kostnaden växer med effekten i kvadrat, så halv effekt kostar en fjärdedel, och planen sprider en laddning över flera timmar i stället för att pressa in den i den billigaste. Prissatt per kW vid full effekt, per timme. 0 stänger av detta, vilket är standard."
+          "battery_stress_cost": "Motverkar snabb laddning och urladdning. Kostnaden växer med effekten i kvadrat, så halv effekt kostar en fjärdedel, och planen sprider en laddning över flera timmar i stället för att pressa in den i den billigaste. Prissatt per kW vid full effekt, per timme. 0 stänger av detta, vilket är standard.",
+          "no_charge_from_grid": "På begränsar batteriet till att endast laddas av solöverskott -- det köper aldrig nätström för att ladda. Husets el och export påverkas inte.",
+          "battery_first_priority": "På föredrar att tömma batteriet före nätimport, så att det används upp innan någon import sker medan det fortfarande är över sin minsta laddningsnivå. Mest användbart vid ett fast (icke tidsdifferentierat) elpris. Detta är en mjuk preferens, inte en hård gräns -- import medan batteriet är laddat straffas hårt så att uttömning vinner vid fast pris, men optimeraren kan ändå importera när det är den enda genomförbara lösningen, så det gör aldrig en plan olöslig.",
+          "battery_dynamic": "På begränsar hur mycket (ur)laddningseffekten får ändras mellan tidssteg, med hjälp av de två rampgränserna nedan. Av lämnar batteriet fritt att svänga mellan full laddnings- och urladdningseffekt inom ett enda steg.",
+          "battery_dynamic_max": "Hur mycket urladdningseffekten som mest får öka under ett tidssteg, som andel av batteriets maxeffekt. Gäller bara när rampgränsen ovan är på.",
+          "battery_dynamic_min": "Hur mycket laddningseffekten som mest får öka under ett tidssteg, som andel av batteriets maxeffekt. Gäller bara när rampgränsen ovan är på."
         }
       },
       "inverter": {
@@ -277,7 +287,12 @@
           "soc_entity": "Sensor för batteriets laddningsnivå",
           "battery_power_entity": "Sensor för batteriets effekt",
           "battery_power_invert": "Sensorn är positiv vid laddning",
-          "pv_entity": "Sensor för aktuell soleffekt"
+          "pv_entity": "Sensor för aktuell soleffekt",
+          "no_charge_from_grid": "Blockera laddning från elnätet",
+          "battery_first_priority": "Töm batteriet före nätimport",
+          "battery_dynamic": "Begränsa (ur)laddningens ramptakt",
+          "battery_dynamic_max": "Max urladdningsramp",
+          "battery_dynamic_min": "Max laddningsramp"
         },
         "data_description": {
           "hybrid_inverter": "På om solpanelerna och batteriet delar en och samma växelriktares AC-effektgräns, vilket gäller de flesta hembatterisystem. Av om det är två separata växelriktare med varsin gräns.",
@@ -295,7 +310,12 @@
           "battery_stress_segments": "Hur fint den kvadratiska kostnadskurvan nedan approximeras. Högre följer den verkliga kostnaden närmare men gör varje optimering något långsammare; 10 är en bra avvägning och spelar bara roll när en effektkostnad är satt nedan.",
           "battery_stress_cost": "Motverkar snabb laddning och urladdning. Kostnaden växer med effekten i kvadrat, så halv effekt kostar en fjärdedel, och planen sprider en laddning över flera timmar i stället för att pressa in den i den billigaste. Prissatt per kW vid full effekt, per timme. 0 stänger av detta, vilket är standard.",
           "battery_power_entity": "Vad batteriet gör just nu, så att korten kan rita det mot planen. Ingenting i optimeringen läser den.",
-          "battery_power_invert": "Lämna av om sensorn är positiv vid urladdning, vilket är planens egen konvention. Fel håll gör att ett batteri som laddas visas som att det laddas ur."
+          "battery_power_invert": "Lämna av om sensorn är positiv vid urladdning, vilket är planens egen konvention. Fel håll gör att ett batteri som laddas visas som att det laddas ur.",
+          "no_charge_from_grid": "På begränsar batteriet till att endast laddas av solöverskott -- det köper aldrig nätström för att ladda. Husets el och export påverkas inte.",
+          "battery_first_priority": "På föredrar att tömma batteriet före nätimport, så att det används upp innan någon import sker medan det fortfarande är över sin minsta laddningsnivå. Mest användbart vid ett fast (icke tidsdifferentierat) elpris. Detta är en mjuk preferens, inte en hård gräns -- import medan batteriet är laddat straffas hårt så att uttömning vinner vid fast pris, men optimeraren kan ändå importera när det är den enda genomförbara lösningen, så det gör aldrig en plan olöslig.",
+          "battery_dynamic": "På begränsar hur mycket (ur)laddningseffekten får ändras mellan tidssteg, med hjälp av de två rampgränserna nedan. Av lämnar batteriet fritt att svänga mellan full laddnings- och urladdningseffekt inom ett enda steg.",
+          "battery_dynamic_max": "Hur mycket urladdningseffekten som mest får öka under ett tidssteg, som andel av batteriets maxeffekt. Gäller bara när rampgränsen ovan är på.",
+          "battery_dynamic_min": "Hur mycket laddningseffekten som mest får öka under ett tidssteg, som andel av batteriets maxeffekt. Gäller bara när rampgränsen ovan är på."
         }
       },
       "grid": {

@@ -647,6 +647,11 @@ def _battery_settings(battery: BatteryConfig) -> dict[str, Any]:
         "battery_charge_efficiency": battery.charge_efficiency,
         "battery_discharge_efficiency": battery.discharge_efficiency,
         "set_nodischarge_to_grid": battery.no_discharge_to_grid,
+        "set_nocharge_from_grid": battery.no_charge_from_grid,
+        "set_battery_first_priority": battery.battery_first_priority,
+        "set_battery_dynamic": battery.dynamic_enabled,
+        "battery_dynamic_max": battery.dynamic_max,
+        "battery_dynamic_min": battery.dynamic_min,
         # Cycle cost per kWh of throughput, charged against the objective
         # EMHASS maximises. Both default to 0.0 -- EMHASS's own default -- so
         # an untouched config sends the same numbers it always did.

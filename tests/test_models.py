@@ -142,6 +142,50 @@ def test_battery_export_block_is_read_from_stored_options():
     assert config.no_discharge_to_grid is True
 
 
+def test_battery_new_grid_flags_default_off():
+    config = BatteryConfig.from_dict({"use_battery": True})
+    assert config.no_charge_from_grid is False
+    assert config.battery_first_priority is False
+    assert config.dynamic_enabled is False
+    assert config.dynamic_max == 0.9
+    assert config.dynamic_min == -0.9
+
+
+def test_battery_new_grid_flags_are_read_from_stored_options():
+    config = BatteryConfig.from_dict(
+        {
+            "use_battery": True,
+            "no_charge_from_grid": True,
+            "battery_first_priority": True,
+            "battery_dynamic": True,
+            "battery_dynamic_max": 0.5,
+            "battery_dynamic_min": -0.3,
+        }
+    )
+    assert config.no_charge_from_grid is True
+    assert config.battery_first_priority is True
+    assert config.dynamic_enabled is True
+    assert config.dynamic_max == 0.5
+    assert config.dynamic_min == -0.3
+
+
+def test_battery_dynamic_min_survives_the_form_round_trip():
+    """The form asks for a positive ramp magnitude; EMHASS wants it negative."""
+    stored = _battery_storage_from_input(
+        {
+            "use_battery": True,
+            "battery_dynamic": True,
+            "battery_dynamic_max": 50,
+            "battery_dynamic_min": 30,
+        }
+    )
+    assert stored["battery_dynamic_max"] == 0.5
+    assert stored["battery_dynamic_min"] == -0.3
+    config = BatteryConfig.from_dict(stored)
+    assert config.dynamic_max == 0.5
+    assert config.dynamic_min == -0.3
+
+
 def test_battery_soc_and_stress_defaults():
     """The deficit pair ships live -- it keeps the plan off the soc_min floor
     without ever making a problem infeasible. The surplus pair and the stress

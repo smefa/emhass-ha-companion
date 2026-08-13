@@ -370,6 +370,11 @@ DEFAULT_BATTERY_STRESS_COST: Final = 0.0
 # 10 piecewise-linear pieces per quadratic curve. More tracks the curve closer
 # at the cost of two extra solver constraints each; EMHASS's own default.
 DEFAULT_BATTERY_STRESS_SEGMENTS: Final = 10
+# Ramp cap on (dis)charge power between timesteps, as a fraction of the
+# battery's own power max -- EMHASS's own defaults, inert until
+# set_battery_dynamic turns the constraint on.
+DEFAULT_BATTERY_DYNAMIC_MAX: Final = 0.9
+DEFAULT_BATTERY_DYNAMIC_MIN: Final = -0.9
 # EMHASS's own default is 1.0 -- a lossless converter, which no real inverter
 # is. 0.97 is typical of a modern hybrid in both directions; assuming no loss
 # makes the plan expect more out of every charge than the hardware delivers.

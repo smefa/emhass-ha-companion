@@ -116,7 +116,12 @@
           "soc_entity": "Battery SOC sensor",
           "battery_power_entity": "Battery power sensor",
           "battery_power_invert": "That sensor is positive when charging",
-          "pv_entity": "Live PV power sensor"
+          "pv_entity": "Live PV power sensor",
+          "no_charge_from_grid": "Block charging from grid",
+          "battery_first_priority": "Drain battery before grid import",
+          "battery_dynamic": "Limit (dis)charge ramp rate",
+          "battery_dynamic_max": "Max discharge ramp",
+          "battery_dynamic_min": "Max charge ramp"
         },
         "data_description": {
           "hybrid_inverter": "On if PV and the battery share one inverter's AC-side power limit, which is most home battery systems. Off if they are two independent inverters, each with its own limit.",
@@ -136,7 +141,12 @@
           "battery_soc_surplus_threshold": "The level above which the battery is charged a holding cost, if one is set below. Sitting at full charge ages a lithium battery faster, so this discourages parking there for hours.",
           "battery_soc_surplus_cost": "Charged per kWh above the comfort level, per hour spent there. Use it to make the plan fill the battery late rather than early when both cost the same. 0 turns this off, which is the default.",
           "battery_stress_segments": "How finely the squared cost curve below is approximated. Higher tracks the true cost more closely but makes every optimisation a little slower; 10 is a good balance and only matters when a stress cost is set below.",
-          "battery_stress_cost": "Discourages fast charging and discharging. The cost grows with the square of the power, so running at half power costs a quarter as much, and the plan spreads a charge over several hours instead of forcing it into the single cheapest one. Priced per kW at full power, per hour. 0 turns this off, which is the default."
+          "battery_stress_cost": "Discourages fast charging and discharging. The cost grows with the square of the power, so running at half power costs a quarter as much, and the plan spreads a charge over several hours instead of forcing it into the single cheapest one. Priced per kW at full power, per hour. 0 turns this off, which is the default.",
+          "no_charge_from_grid": "On restricts the battery to charging from excess PV only -- it will never buy grid power to charge. House power and export are unaffected.",
+          "battery_first_priority": "On prefers draining the battery before importing from the grid, so it is used up before any import while still above its minimum charge level. Mainly useful on a flat (non time-of-use) tariff. A soft preference, not a hard limit -- importing while the battery is charged is heavily penalised so drain-first wins on a flat tariff, but the optimiser can still import when that is the only feasible option, so it never makes a plan infeasible.",
+          "battery_dynamic": "On caps how much the (dis)charge power may change between timesteps, using the two ramp limits below. Off leaves the battery free to swing between full charge and discharge power in a single step.",
+          "battery_dynamic_max": "The most the discharge power may increase in one timestep, as a percentage of the battery's maximum power. Only takes effect once the ramp limit above is on.",
+          "battery_dynamic_min": "The most the charge power may increase in one timestep, as a percentage of the battery's maximum power. Only takes effect once the ramp limit above is on."
         }
       },
       "inverter": {
@@ -277,7 +287,12 @@
           "soc_entity": "Battery SOC sensor",
           "battery_power_entity": "Battery power sensor",
           "battery_power_invert": "That sensor is positive when charging",
-          "pv_entity": "Live PV power sensor"
+          "pv_entity": "Live PV power sensor",
+          "no_charge_from_grid": "Block charging from grid",
+          "battery_first_priority": "Drain battery before grid import",
+          "battery_dynamic": "Limit (dis)charge ramp rate",
+          "battery_dynamic_max": "Max discharge ramp",
+          "battery_dynamic_min": "Max charge ramp"
         },
         "data_description": {
           "hybrid_inverter": "On if PV and the battery share one inverter's AC-side power limit, which is most home battery systems. Off if they are two independent inverters, each with its own limit.",
@@ -295,7 +310,12 @@
           "battery_stress_segments": "How finely the squared cost curve below is approximated. Higher tracks the true cost more closely but makes every optimisation a little slower; 10 is a good balance and only matters when a stress cost is set below.",
           "battery_stress_cost": "Discourages fast charging and discharging. The cost grows with the square of the power, so running at half power costs a quarter as much, and the plan spreads a charge over several hours instead of forcing it into the single cheapest one. Priced per kW at full power, per hour. 0 turns this off, which is the default.",
           "battery_power_entity": "What the battery is doing right now, for the dashboard cards to draw against the plan. Nothing in the optimisation reads it.",
-          "battery_power_invert": "Leave off if the sensor is positive while discharging, which is the plan's own convention. Getting it the wrong way round labels a charging battery as discharging."
+          "battery_power_invert": "Leave off if the sensor is positive while discharging, which is the plan's own convention. Getting it the wrong way round labels a charging battery as discharging.",
+          "no_charge_from_grid": "On restricts the battery to charging from excess PV only -- it will never buy grid power to charge. House power and export are unaffected.",
+          "battery_first_priority": "On prefers draining the battery before importing from the grid, so it is used up before any import while still above its minimum charge level. Mainly useful on a flat (non time-of-use) tariff. A soft preference, not a hard limit -- importing while the battery is charged is heavily penalised so drain-first wins on a flat tariff, but the optimiser can still import when that is the only feasible option, so it never makes a plan infeasible.",
+          "battery_dynamic": "On caps how much the (dis)charge power may change between timesteps, using the two ramp limits below. Off leaves the battery free to swing between full charge and discharge power in a single step.",
+          "battery_dynamic_max": "The most the discharge power may increase in one timestep, as a percentage of the battery's maximum power. Only takes effect once the ramp limit above is on.",
+          "battery_dynamic_min": "The most the charge power may increase in one timestep, as a percentage of the battery's maximum power. Only takes effect once the ramp limit above is on."
         }
       },
       "grid": {

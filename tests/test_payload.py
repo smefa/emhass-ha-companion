@@ -532,6 +532,34 @@ def test_battery_export_block_rides_through_to_emhass():
     assert payload["set_nodischarge_to_grid"] is True
 
 
+def test_battery_new_grid_flags_default_off():
+    battery = BatteryConfig(enabled=True, capacity_wh=25600)
+    payload = build_payload(_inputs(battery=battery, soc_init=0.098)).payload
+    assert payload["set_nocharge_from_grid"] is False
+    assert payload["set_battery_first_priority"] is False
+    assert payload["set_battery_dynamic"] is False
+    assert payload["battery_dynamic_max"] == 0.9
+    assert payload["battery_dynamic_min"] == -0.9
+
+
+def test_battery_new_grid_flags_ride_through_to_emhass():
+    battery = BatteryConfig(
+        enabled=True,
+        capacity_wh=25600,
+        no_charge_from_grid=True,
+        battery_first_priority=True,
+        dynamic_enabled=True,
+        dynamic_max=0.5,
+        dynamic_min=-0.3,
+    )
+    payload = build_payload(_inputs(battery=battery, soc_init=0.098)).payload
+    assert payload["set_nocharge_from_grid"] is True
+    assert payload["set_battery_first_priority"] is True
+    assert payload["set_battery_dynamic"] is True
+    assert payload["battery_dynamic_max"] == 0.5
+    assert payload["battery_dynamic_min"] == -0.3
+
+
 def test_battery_cycle_costs_default_to_priced_discharge():
     """The shipped discharge weight has to reach EMHASS, or a round trip is
     planned as if the wear it causes were free."""

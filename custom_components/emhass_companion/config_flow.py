@@ -108,6 +108,8 @@ from .const import (
     CONF_WEIGHT_BATTERY_CHARGE,
     CONF_WEIGHT_BATTERY_DISCHARGE,
     CONTROL_ENTITY_DOMAINS,
+    DEFAULT_BATTERY_DYNAMIC_MAX,
+    DEFAULT_BATTERY_DYNAMIC_MIN,
     DEFAULT_BATTERY_SOC_DEFICIT_COST,
     DEFAULT_BATTERY_SOC_DEFICIT_THRESHOLD,
     DEFAULT_BATTERY_SOC_SURPLUS_COST,
@@ -1509,6 +1511,8 @@ _SOC_PERCENT_FIELDS = (
     # as the sliders above rather than being stored in the form's own percent.
     CONF_BATTERY_SOC_DEFICIT_THRESHOLD,
     CONF_BATTERY_SOC_SURPLUS_THRESHOLD,
+    # A percentage of the battery's own power max, same conversion.
+    "battery_dynamic_max",
 )
 
 
@@ -1518,8 +1522,12 @@ def _battery_storage_from_input(user_input: dict[str, Any]) -> dict[str, Any]:
     ``soc_min``/``soc_max``/``soc_target`` are entered as percent in the form
     but stored as a 0-1 fraction, matching what EMHASS's own API expects
     (see payload.py) and what the rest of the integration assumes.
+    ``battery_dynamic_min`` is entered as a positive ramp-magnitude percent --
+    asking for a negative slider value would be unfriendly -- but EMHASS wants
+    it negative, so it gets its own sign flip rather than joining
+    ``_SOC_PERCENT_FIELDS``.
     """
-    return {
+    result = {
         key: value / 100 if key in _SOC_PERCENT_FIELDS else value
         for key, value in user_input.items()
         if key
@@ -1530,6 +1538,9 @@ def _battery_storage_from_input(user_input: dict[str, Any]) -> dict[str, Any]:
             CONF_PV_ENTITY,
         )
     }
+    if "battery_dynamic_min" in result:
+        result["battery_dynamic_min"] = -result["battery_dynamic_min"] / 100
+    return result
 
 
 def battery_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
@@ -1752,6 +1763,40 @@ def battery_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
         # the blend weight.
         _optional_blank(CONF_PV_ENTITY, defaults): selector.EntitySelector(
             selector.EntitySelectorConfig(domain="sensor", device_class="power")
+        ),
+        # EMHASS runtime flags with no counterpart above -- appended at the end
+        # rather than grouped with the fields they relate to, so the order of
+        # everything above stays stable for anyone who already has this form
+        # memorised.
+        vol.Required(
+            "no_charge_from_grid", default=defaults.get("no_charge_from_grid", False)
+        ): selector.BooleanSelector(),
+        vol.Required(
+            "battery_first_priority",
+            default=defaults.get("battery_first_priority", False),
+        ): selector.BooleanSelector(),
+        vol.Required(
+            "battery_dynamic", default=defaults.get("battery_dynamic", False)
+        ): selector.BooleanSelector(),
+        vol.Optional(
+            "battery_dynamic_max",
+            default=round(
+                defaults.get("battery_dynamic_max", DEFAULT_BATTERY_DYNAMIC_MAX) * 100
+            ),
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=1, max=100, step=1, unit_of_measurement="%", mode="slider"
+            )
+        ),
+        vol.Optional(
+            "battery_dynamic_min",
+            default=round(
+                abs(defaults.get("battery_dynamic_min", DEFAULT_BATTERY_DYNAMIC_MIN)) * 100
+            ),
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=1, max=100, step=1, unit_of_measurement="%", mode="slider"
+            )
         ),
     }
 

@@ -36,6 +36,8 @@ from .const import (
     CONF_WEIGHT_BATTERY_DISCHARGE,
     DEFAULT_BATTERY_SOC_DEFICIT_COST,
     DEFAULT_BATTERY_SOC_DEFICIT_THRESHOLD,
+    DEFAULT_BATTERY_DYNAMIC_MAX,
+    DEFAULT_BATTERY_DYNAMIC_MIN,
     DEFAULT_BATTERY_SOC_SURPLUS_COST,
     DEFAULT_BATTERY_SOC_SURPLUS_THRESHOLD,
     DEFAULT_BATTERY_STRESS_COST,
@@ -414,6 +416,26 @@ class BatteryConfig:
     """Below this |P_grid|, the plan wants no grid exchange at all -- hand the
     battery to the inverter's own self-consumption mode instead of forcing it.
     See strategy.decide_battery."""
+    no_charge_from_grid: bool = False
+    """Forbids charging the battery from the grid -- it may still charge from
+    excess PV, just not buy power to do it. Sent as set_nocharge_from_grid.
+    EMHASS's own default is already False, so an untouched config changes
+    nothing."""
+    battery_first_priority: bool = False
+    """Prefers draining the battery before importing from the grid, mainly
+    useful on a flat tariff. Sent as set_battery_first_priority. A soft
+    penalty rather than a hard constraint on EMHASS's side, so it cannot make
+    a plan infeasible -- import while the battery is charged is heavily
+    penalised, not forbidden."""
+    dynamic_enabled: bool = False
+    """Caps how fast (dis)charge power may ramp between timesteps. Sent as
+    set_battery_dynamic; off by default, matching EMHASS."""
+    dynamic_max: float = DEFAULT_BATTERY_DYNAMIC_MAX
+    dynamic_min: float = DEFAULT_BATTERY_DYNAMIC_MIN
+    """Ramp limits as a fraction of the battery's own power max, sent as
+    battery_dynamic_max/battery_dynamic_min. Only meaningful once
+    dynamic_enabled is on; EMHASS's own defaults (0.9 / -0.9) ride along inert
+    otherwise."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> BatteryConfig:
@@ -460,6 +482,11 @@ class BatteryConfig:
             self_consume_threshold_w=float(
                 data.get("self_consume_threshold_w", DEFAULT_SELF_CONSUME_THRESHOLD_W)
             ),
+            no_charge_from_grid=bool(data.get("no_charge_from_grid", False)),
+            battery_first_priority=bool(data.get("battery_first_priority", False)),
+            dynamic_enabled=bool(data.get("battery_dynamic", False)),
+            dynamic_max=float(data.get("battery_dynamic_max", DEFAULT_BATTERY_DYNAMIC_MAX)),
+            dynamic_min=float(data.get("battery_dynamic_min", DEFAULT_BATTERY_DYNAMIC_MIN)),
         )
 
 
