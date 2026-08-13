@@ -1558,6 +1558,13 @@ def battery_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
                 min=0, max=100000, step=100, unit_of_measurement="W", mode="box"
             )
         ),
+        # EMHASS's own default is True, which silently blocks the battery from
+        # ever selling -- even a plan that would otherwise discharge into a
+        # price spike sits idle. Default False here so export works unless
+        # deliberately turned off.
+        vol.Required(
+            "no_discharge_to_grid", default=defaults.get("no_discharge_to_grid", False)
+        ): selector.BooleanSelector(),
         # A hybrid inverter shares one AC-side throughput limit between PV and
         # battery. Left off, the fields below are collected but never sent to
         # EMHASS (see payload.py's _hybrid_inverter_settings) -- harmless to

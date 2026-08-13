@@ -517,6 +517,21 @@ def test_battery_enabled_sends_every_limit():
     assert payload["soc_final"] == 0.098
 
 
+def test_battery_export_defaults_to_allowed():
+    """EMHASS's own default for set_nodischarge_to_grid is True, which quietly
+    blocks the battery from ever selling. An untouched battery must override
+    that so export works unless someone turns it off deliberately."""
+    battery = BatteryConfig(enabled=True, capacity_wh=25600)
+    payload = build_payload(_inputs(battery=battery, soc_init=0.098)).payload
+    assert payload["set_nodischarge_to_grid"] is False
+
+
+def test_battery_export_block_rides_through_to_emhass():
+    battery = BatteryConfig(enabled=True, capacity_wh=25600, no_discharge_to_grid=True)
+    payload = build_payload(_inputs(battery=battery, soc_init=0.098)).payload
+    assert payload["set_nodischarge_to_grid"] is True
+
+
 def test_battery_cycle_costs_default_to_priced_discharge():
     """The shipped discharge weight has to reach EMHASS, or a round trip is
     planned as if the wear it causes were free."""
@@ -707,6 +722,7 @@ def test_battery_cycle_costs_are_omitted_with_no_battery():
     payload = build_payload(_inputs(battery=battery)).payload
     assert "weight_battery_discharge" not in payload
     assert "weight_battery_charge" not in payload
+    assert "set_nodischarge_to_grid" not in payload
 
 
 def test_a_chosen_end_soc_replaces_the_pin_to_start():

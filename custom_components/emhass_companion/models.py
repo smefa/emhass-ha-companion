@@ -389,6 +389,11 @@ class BatteryConfig:
     target never plans below."""
     charge_efficiency: float = DEFAULT_CHARGE_EFFICIENCY
     discharge_efficiency: float = DEFAULT_DISCHARGE_EFFICIENCY
+    no_discharge_to_grid: bool = False
+    """Forbids the battery from exporting -- it may still power the house, just
+    not sell. EMHASS's own default is True, which silently blocks arbitrage
+    even when a plan would otherwise discharge into a price spike; False here
+    so a plant that can export does, unless this is turned on deliberately."""
     weight_battery_discharge: float = DEFAULT_WEIGHT_BATTERY_DISCHARGE
     weight_battery_charge: float = DEFAULT_WEIGHT_BATTERY_CHARGE
     """Cycle cost per kWh of throughput, in the tariff's own currency. Charged
@@ -426,6 +431,7 @@ class BatteryConfig:
             discharge_efficiency=float(
                 data.get("discharge_efficiency", DEFAULT_DISCHARGE_EFFICIENCY)
             ),
+            no_discharge_to_grid=bool(data.get("no_discharge_to_grid", False)),
             weight_battery_discharge=float(
                 data.get(CONF_WEIGHT_BATTERY_DISCHARGE, DEFAULT_WEIGHT_BATTERY_DISCHARGE)
             ),

@@ -130,6 +130,18 @@ def test_battery_cycle_costs_survive_the_form_round_trip():
     assert config.soc_min == 0.10
 
 
+def test_battery_export_defaults_to_allowed():
+    """EMHASS's own default (set_nodischarge_to_grid=True) silently blocks the
+    battery from ever selling, so an untouched config must override it."""
+    config = BatteryConfig.from_dict({"use_battery": True, "capacity_wh": 25600})
+    assert config.no_discharge_to_grid is False
+
+
+def test_battery_export_block_is_read_from_stored_options():
+    config = BatteryConfig.from_dict({"use_battery": True, "no_discharge_to_grid": True})
+    assert config.no_discharge_to_grid is True
+
+
 def test_battery_soc_and_stress_defaults():
     """The deficit pair ships live -- it keeps the plan off the soc_min floor
     without ever making a problem infeasible. The surplus pair and the stress

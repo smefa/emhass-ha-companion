@@ -1,6 +1,6 @@
 [project]
 name = "emhass-companion"
-version = "0.9.5.6"
+version = "0.9.5.7"
 description = "Home Assistant integration that makes EMHASS usable without YAML"
 license = "AGPL-3.0-or-later"
 license-files = ["LICENSE"]

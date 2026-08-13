@@ -94,6 +94,7 @@
           "capacity_wh": "Användbar kapacitet",
           "charge_power_max_w": "Maximal laddeffekt",
           "discharge_power_max_w": "Maximal urladdningseffekt",
+          "no_discharge_to_grid": "Blockera export till elnätet",
           "hybrid_inverter": "Delad växelriktare (hybrid)",
           "inverter_ac_output_max_w": "Maximal AC-uteffekt (urladdning/export)",
           "inverter_ac_input_max_w": "Maximal AC-ineffekt (laddning/import)",
@@ -119,6 +120,7 @@
         },
         "data_description": {
           "hybrid_inverter": "På om solpanelerna och batteriet delar en och samma växelriktares AC-effektgräns, vilket gäller de flesta hembatterisystem. Av om det är två separata växelriktare med varsin gräns.",
+          "no_discharge_to_grid": "På hindrar batteriet från att ladda ur mot export -- det förser fortfarande huset med el, men säljer aldrig. EMHASS eget standardvärde är på, vilket tyst utesluter arbitrage även när en plan annars skulle tjäna på en prisspik, så detta levereras avstängt. Solöverskott exporteras ändå normalt oavsett detta -- det gäller bara batteriet.",
           "soc_min": "Optimeringen planerar aldrig batteriet under denna nivå.",
           "soc_target": "Där optimeringen siktar på att lämna batteriet vid horisontens slut. Med slutladdningsnivå \"Optimerad\" är detta i stället reservgolvet som det beräknade målet aldrig planerar under; med \"Fast %-reglage\" är detta exakt den nivå den siktar på.",
           "self_consume_threshold_w": "När planens näteffekt ligger inom detta antal watt från noll lämnas batteriet till växelriktarens egen egenanvändningsläge istället för planens tvingade laddning/urladdning -- även en stor planerad laddning eller urladdning åsidosätts, eftersom egenanvändning följer verklig sol- och lastdata bättre än en prognos vid små obalanser. När läget väl har lämnats över måste näteffekten överstiga dubbla detta värde innan planen kan tvinga batteriet igen, så att läget inte växlar fram och tillbaka vid varje omräkning. Inte samma sak som laddningsnivåerna ovan, som bara begränsar vad optimeringen får planera mellan.",
@@ -253,6 +255,7 @@
           "capacity_wh": "Användbar kapacitet",
           "charge_power_max_w": "Maximal laddeffekt",
           "discharge_power_max_w": "Maximal urladdningseffekt",
+          "no_discharge_to_grid": "Blockera export till elnätet",
           "hybrid_inverter": "Delad växelriktare (hybrid)",
           "inverter_ac_output_max_w": "Maximal AC-uteffekt (urladdning/export)",
           "inverter_ac_input_max_w": "Maximal AC-ineffekt (laddning/import)",
@@ -278,6 +281,7 @@
         },
         "data_description": {
           "hybrid_inverter": "På om solpanelerna och batteriet delar en och samma växelriktares AC-effektgräns, vilket gäller de flesta hembatterisystem. Av om det är två separata växelriktare med varsin gräns.",
+          "no_discharge_to_grid": "På hindrar batteriet från att ladda ur mot export -- det förser fortfarande huset med el, men säljer aldrig. EMHASS eget standardvärde är på, vilket tyst utesluter arbitrage även när en plan annars skulle tjäna på en prisspik, så detta levereras avstängt. Solöverskott exporteras ändå normalt oavsett detta -- det gäller bara batteriet.",
           "self_consume_threshold_w": "När planens näteffekt ligger inom detta antal watt från noll lämnas batteriet till växelriktarens egen egenanvändningsläge istället för planens tvingade laddning/urladdning -- även en stor planerad laddning eller urladdning åsidosätts, eftersom egenanvändning följer verklig sol- och lastdata bättre än en prognos vid små obalanser. När läget väl har lämnats över måste näteffekten överstiga dubbla detta värde innan planen kan tvinga batteriet igen, så att läget inte växlar fram och tillbaka vid varje omräkning. Inte samma sak som laddningsnivåerna ovan, som bara begränsar vad optimeringen får planera mellan.",
           "pv_entity": "Valfritt. Blandas in i det första steget av varje MPC-prognos, viktat av reglaget \"Live-värdets vikt\". Last blandas in på samma sätt automatiskt, med sensorn vald under Husets förbrukning > Sensor för husets last -- ingen separat sensor behövs där.",
           "soc_target": "Där optimeringen siktar på att lämna batteriet vid horisontens slut. Med slutladdningsnivå \"Optimerad\" är detta i stället reservgolvet som det beräknade målet aldrig planerar under; med \"Fast %-reglage\" är detta exakt den nivå den siktar på.",
