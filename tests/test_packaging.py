@@ -388,7 +388,7 @@ _GLOBALS = frozenset(
     cancelAnimationFrame clearInterval clearTimeout console customElements
     document fetch getComputedStyle location navigator requestAnimationFrame
     setInterval setTimeout window
-    """.split()
+    """.split()  # noqa: SIM905 -- list literal would be a wall of quoted strings
 )
 
 # Every card across all bundles, which is also the list the picker must offer.
@@ -536,8 +536,7 @@ def test_no_binding_is_declared_twice_in_one_function_body(filename):
     bodies += [
         node.body.body
         for node in _nodes(ast)
-        if node.type
-        in ("FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression")
+        if node.type in ("FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression")
         and node.body.type == "BlockStatement"
     ]
 
@@ -614,14 +613,19 @@ def test_every_name_a_bundle_uses_is_declared_somewhere_in_it(filename):
         elif node.type in ("LabeledStatement", "BreakStatement", "ContinueStatement"):
             if getattr(node, "label", None):
                 non_references.add(id(node.label))
-        elif node.type in ("FunctionDeclaration", "FunctionExpression", "ClassDeclaration"):
-            if getattr(node, "id", None):
-                non_references.add(id(node.id))
+        elif node.type in (
+            "FunctionDeclaration",
+            "FunctionExpression",
+            "ClassDeclaration",
+        ) and getattr(node, "id", None):
+            non_references.add(id(node.id))
 
     unresolved = {
         node.name: node.loc.start.line
         for node in nodes
-        if node.type == "Identifier" and id(node) not in non_references and node.name not in declared
+        if node.type == "Identifier"
+        and id(node) not in non_references
+        and node.name not in declared
     }
     assert not unresolved, f"{filename} uses undeclared names: {unresolved}"
 
