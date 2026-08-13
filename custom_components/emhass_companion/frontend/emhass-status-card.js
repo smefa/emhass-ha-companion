@@ -1,11 +1,9 @@
 /**
- * NOTE FOR REVIEWERS: this file was mechanically extracted from the single
- * the original single-bundle emhass-cards.js, splitting it into a shared
- * core module and one bundle per card family so that a lost race against the frontend's
- * fixed element-registration timeout (home-assistant/frontend#52960) only
- * takes down 1-3 elements instead of all 14. Every line below is verbatim
- * from the original file; only import/export wiring and file boundaries
- * (and this note) are new.
+ * Extracted from the single-bundle emhass-cards.js, which shipped all fourteen
+ * elements in one module: when the frontend's own fixed element-registration
+ * timeout (home-assistant/frontend#52960) is lost, the whole module fails, so
+ * one lost race took down every card at once. Split into a shared core module
+ * plus one bundle per card family, a lost race costs one family's elements.
  */
 
 import {
@@ -688,7 +686,8 @@ class EmhassStatusCard extends LiveCard {
       steps.length ? (applied ? "sent" : "resolved, not sent") : "no inverter action",
     );
 
-    const decidedAt = attrs.at ? Date.parse(attrs.at) : NaN;
+    // `decidedAt` is the same instant the change badge above is keyed to, and
+    // is already parsed at the top of this method.
     setBox(
       ui.box.show_decided,
       formatAgoShort(decidedAt),

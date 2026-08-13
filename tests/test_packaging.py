@@ -371,6 +371,26 @@ CARD_FILES = (
 )
 FRONTEND_FILES = (CORE_FILE, *CARD_FILES)
 
+# The ambient names the cards are allowed to reach for without declaring them:
+# the standard library, plus the slice of the browser they actually use. Kept
+# as an explicit list rather than a blanket exemption so that
+# test_every_name_a_bundle_uses_is_declared_somewhere_in_it stays meaningful --
+# a typo'd global is a card that throws at render time, same as any other
+# undeclared name.
+_GLOBALS = frozenset(
+    """
+    Array Boolean Date Error Infinity Intl JSON Map Math NaN Number Object
+    Promise RegExp Set String Symbol TypeError WeakMap
+    decodeURIComponent encodeURIComponent isFinite isNaN parseFloat parseInt
+    undefined
+    AbortController CustomEvent Element Event HTMLElement Node
+    ResizeObserver URL URLSearchParams
+    cancelAnimationFrame clearInterval clearTimeout console customElements
+    document fetch getComputedStyle location navigator requestAnimationFrame
+    setInterval setTimeout window
+    """.split()
+)
+
 # Every card across all bundles, which is also the list the picker must offer.
 CARDS = (
     "emhass-plan-card",
@@ -420,6 +440,190 @@ def test_card_bundle_avoids_syntax_the_parser_cannot_check(bundle):
     """Guard the constraint above, since a lapse silently disables the check."""
     assert "?." not in bundle, "optional chaining defeats the syntax check"
     assert "??" not in bundle, "nullish coalescing defeats the syntax check"
+
+
+# The checks below exist because parsing is not enough. A `const` declared
+# twice in one scope, a name imported that the core module does not export,
+# and a name used that nothing declares are all *early errors*: a real engine
+# rejects the whole module before running a line of it, but a parser accepts
+# them happily. Splitting one file into six introduced all three at once --
+# every card on the dashboard became a red "Configuration error" box while
+# test_card_bundle_parses_as_a_javascript_module stayed green.
+
+
+def _ast(filename):
+    esprima = pytest.importorskip("esprima")
+    source = (COMPONENT / "frontend" / filename).read_text(encoding="utf-8")
+    return esprima.parseModule(source.replace("__VERSION__", "0.0.0"), {"loc": True})
+
+
+def _nodes(node):
+    """Every node beneath (and including) `node`, in no particular order."""
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        if isinstance(current, list):
+            stack.extend(item for item in current if item is not None)
+            continue
+        if not hasattr(current, "type"):
+            continue
+        yield current
+        for key, child in vars(current).items():
+            if key not in ("loc", "range", "type") and (
+                isinstance(child, list) or hasattr(child, "type")
+            ):
+                stack.append(child)
+
+
+def _bound_names(pattern):
+    """Every name a binding pattern introduces, destructuring included."""
+    if pattern is None:
+        return
+    if pattern.type == "Identifier":
+        yield pattern.name
+    elif pattern.type == "ObjectPattern":
+        for prop in pattern.properties:
+            yield from _bound_names(prop.value if prop.type == "Property" else prop.argument)
+    elif pattern.type == "ArrayPattern":
+        for element in pattern.elements:
+            yield from _bound_names(element)
+    elif pattern.type == "AssignmentPattern":
+        yield from _bound_names(pattern.left)
+    elif pattern.type == "RestElement":
+        yield from _bound_names(pattern.argument)
+
+
+def test_the_core_module_exports_every_name_the_cards_import():
+    """An import of a name core does not export kills the importing bundle.
+
+    Not the statement -- the module: the browser refuses to instantiate it at
+    all, so one missing `export` takes down every card in that family. The
+    core module keeps its whole surface in one `export {...}` list precisely
+    so this stays checkable, and a helper moved between files is exactly the
+    edit that breaks it.
+    """
+    exported = {
+        specifier.exported.name
+        for node in _ast(CORE_FILE).body
+        if node.type == "ExportNamedDeclaration"
+        for specifier in node.specifiers
+    }
+    assert exported, "the core module exports nothing at all"
+
+    for filename in CARD_FILES:
+        imported = {
+            specifier.imported.name
+            for node in _ast(filename).body
+            if node.type == "ImportDeclaration"
+            for specifier in node.specifiers
+            if specifier.type == "ImportSpecifier"
+        }
+        missing = imported - exported
+        assert not missing, f"{filename} imports {sorted(missing)}, which {CORE_FILE} lacks"
+
+
+@pytest.mark.parametrize("filename", FRONTEND_FILES)
+def test_no_binding_is_declared_twice_in_one_function_body(filename):
+    """A `let`/`const` redeclaration is a SyntaxError for the whole file.
+
+    Checked per function body rather than per scope, which is the case a file
+    split actually produces: two halves of what were separate methods land in
+    one, and the second `const` of a name is fatal even though both halves
+    were fine where they came from.
+    """
+    ast = _ast(filename)
+    bodies = [ast.body]
+    bodies += [
+        node.body.body
+        for node in _nodes(ast)
+        if node.type
+        in ("FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression")
+        and node.body.type == "BlockStatement"
+    ]
+
+    for statements in bodies:
+        seen = {}
+        for statement in statements:
+            if statement.type == "VariableDeclaration" and statement.kind in ("let", "const"):
+                declared = [
+                    (name, declarator.id)
+                    for declarator in statement.declarations
+                    for name in _bound_names(declarator.id)
+                ]
+            elif statement.type == "ClassDeclaration" and statement.id:
+                declared = [(statement.id.name, statement.id)]
+            else:
+                continue
+            for name, node in declared:
+                first = seen.get(name)
+                assert first is None, (
+                    f"{filename}: '{name}' is declared twice in one scope, "
+                    f"at lines {first} and {node.loc.start.line}"
+                )
+                seen[name] = node.loc.start.line
+
+
+@pytest.mark.parametrize("filename", FRONTEND_FILES)
+def test_every_name_a_bundle_uses_is_declared_somewhere_in_it(filename):
+    """A name left behind by a file split throws the moment the card renders.
+
+    Deliberately loose: every binding anywhere in the file counts, whatever
+    its scope, so this never objects to shadowing or to a name used before its
+    block. What it does catch is the name that is declared in *no* scope of
+    this file and imported from nowhere -- which no amount of parsing will.
+    """
+    ast = _ast(filename)
+    nodes = list(_nodes(ast))
+
+    declared = set(_GLOBALS)
+    for node in nodes:
+        if node.type == "VariableDeclarator":
+            declared.update(_bound_names(node.id))
+        elif node.type == "ClassDeclaration" and node.id:
+            declared.add(node.id.name)
+        elif node.type in (
+            "FunctionDeclaration",
+            "FunctionExpression",
+            "ArrowFunctionExpression",
+        ):
+            if getattr(node, "id", None):
+                declared.add(node.id.name)
+            for param in node.params:
+                declared.update(_bound_names(param))
+        elif node.type == "CatchClause":
+            declared.update(_bound_names(node.param))
+        elif node.type in ("ImportSpecifier", "ImportDefaultSpecifier", "ImportNamespaceSpecifier"):
+            declared.add(node.local.name)
+
+    # Everything an Identifier node can be that is not a reference to a
+    # binding: a property name, a key, a label. Collected by walking the
+    # parents that introduce them rather than by guessing at the name.
+    non_references = set()
+    for node in nodes:
+        if node.type == "MemberExpression" and not node.computed:
+            non_references.add(id(node.property))
+        elif node.type in ("Property", "MethodDefinition") and not node.computed:
+            non_references.add(id(node.key))
+        elif node.type == "ImportSpecifier":
+            non_references.add(id(node.imported))
+            non_references.add(id(node.local))
+        elif node.type == "ExportSpecifier":
+            # `local` is left in: `export { x }` naming an undeclared x is the
+            # mirror image of the bug this whole block is here for.
+            non_references.add(id(node.exported))
+        elif node.type in ("LabeledStatement", "BreakStatement", "ContinueStatement"):
+            if getattr(node, "label", None):
+                non_references.add(id(node.label))
+        elif node.type in ("FunctionDeclaration", "FunctionExpression", "ClassDeclaration"):
+            if getattr(node, "id", None):
+                non_references.add(id(node.id))
+
+    unresolved = {
+        node.name: node.loc.start.line
+        for node in nodes
+        if node.type == "Identifier" and id(node) not in non_references and node.name not in declared
+    }
+    assert not unresolved, f"{filename} uses undeclared names: {unresolved}"
 
 
 def test_cards_are_registered_with_the_picker(bundle):

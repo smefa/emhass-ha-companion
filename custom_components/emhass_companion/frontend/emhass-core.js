@@ -1,5 +1,18 @@
 /**
- * EMHASS Companion dashboard cards.
+ * EMHASS Companion dashboard cards: everything the card bundles share.
+ *
+ * The cards used to ship as one emhass-cards.js holding all fourteen custom
+ * elements. When the frontend's own fixed element-registration timeout
+ * (home-assistant/frontend#52960) is lost, the whole module fails, so one lost
+ * race took down every card at once. They are now one bundle per card family,
+ * importing their common code from here; a lost race costs one family.
+ *
+ * That makes this file the one place a mistake is still expensive, and the
+ * failure mode is specific: a name used by a bundle but missing from the
+ * `export` list at the bottom does not break that name, it stops the whole
+ * importing module from being instantiated -- an entire family of cards
+ * replaced by "Configuration error" boxes. tests/test_packaging.py checks the
+ * two lists against each other for that reason.
  *
  * Deliberately plain custom elements with inline SVG: no Lit, no charting
  * library, no build step. A bundler would mean an npm toolchain in CI, a
@@ -9,31 +22,22 @@
  * network and cannot be broken by a CDN.
  *
  * ES2017 syntax only -- no optional chaining and no nullish coalescing, both
- * of which defeat the pure-Python syntax check in tests/test_packaging.py,
- * which is the only automated checking this file gets at all.
+ * of which defeat the pure-Python parser in tests/test_packaging.py, which is
+ * the only automated checking these files get at all.
  *
  * Colours come from Home Assistant's own theme variables wherever one exists,
  * so every card follows the active theme rather than inventing a second
  * palette that only matches the default one.
  *
- * Two generations of card live here. The plan and deferrable cards rebuild
- * their markup on every `hass` update, which is fine for a chart; the five
- * that came later extend `LiveCard`, build their DOM once and update it in
- * place, because a rebuild during a drag throws away the element under the
+ * Two generations of card are built on this. The plan and deferrable cards
+ * rebuild their markup on every `hass` update, which is fine for a chart; the
+ * five that came later extend `LiveCard`, build their DOM once and update it
+ * in place, because a rebuild during a drag throws away the element under the
  * finger several times a second.
  */
-/**
- * NOTE FOR REVIEWERS: this file was mechanically extracted from the single
- * the original single-bundle emhass-cards.js, splitting it into a shared
- * core module and one bundle per card family so that a lost race against the frontend's
- * fixed element-registration timeout (home-assistant/frontend#52960) only
- * takes down 1-3 elements instead of all 14. Every line below is verbatim
- * from the original file; only import/export wiring and file boundaries
- * (and this note) are new.
- */
 
-export const PLATFORM = "emhass_companion";
-export const SVGNS = "http://www.w3.org/2000/svg";
+const PLATFORM = "emhass_companion";
+const SVGNS = "http://www.w3.org/2000/svg";
 
 /** The plan card's palette, from Home Assistant's energy dashboard. */
 const COLORS = {
@@ -951,7 +955,7 @@ function statTile(parent, key) {
 // overview card: it is the one place someone goes to read the chart in
 // detail, where the overview card's job is a glance.
 const DEFAULT_PLAN_HISTORY_HOURS = 4;
-export const DEFAULT_HISTORY_HOURS = 2;
+const DEFAULT_HISTORY_HOURS = 2;
 
 /* ------------------------------------------- info card 2: house status */
 
@@ -980,6 +984,20 @@ function showsSection(config, key) {
   const value = config ? config[key] : undefined;
   return value === undefined ? true : value !== false;
 }
+
+/**
+ * Home Assistant's own form widgets, on demand.
+ *
+ * `ha-form` is not exported anywhere a custom card can import it from; it is
+ * pulled in by whichever built-in card editor the frontend loads first. On a
+ * dashboard where none has been opened yet it is simply not defined, and an
+ * editor built on it renders as an empty box. Creating a built-in card and
+ * asking it for its own editor is the sanctioned way to force the load.
+ *
+ * Custom elements upgrade in place, so the properties this file sets before
+ * the definition lands are picked up when it does.
+ */
+let haFormPromise = null;
 
 function loadHaForm() {
   if (haFormPromise) return haFormPromise;
@@ -1089,3 +1107,54 @@ function sectionGrid(sections) {
     schema: sections.map((section) => ({ name: section[0], selector: { boolean: {} } })),
   };
 }
+
+
+/* ------------------------------------------------------------------ exports */
+/**
+ * What the card bundles are allowed to reach for.
+ *
+ * Listed in one place rather than as `export` on each declaration, so that the
+ * shared surface can be read off in one screen -- and so that adding an export
+ * is a deliberate line here rather than a keyword that quietly widens it.
+ */
+export {
+  callService,
+  CardEditor,
+  cleanSections,
+  clipSeries,
+  COLORS,
+  DEFAULT_HISTORY_HOURS,
+  DEFAULT_PLAN_HISTORY_HOURS,
+  findHub,
+  findLoads,
+  formatAgo,
+  formatCountdown,
+  formatEnergy,
+  formatHours,
+  formatPower,
+  formatSpan,
+  formatTime,
+  haptic,
+  integrate,
+  isUsable,
+  labelFor,
+  LiveCard,
+  loadHaForm,
+  loadView,
+  measuredBy,
+  mergeHistory,
+  moreInfo,
+  num,
+  pastBand,
+  pressButton,
+  readHistory,
+  sectionGrid,
+  series,
+  showsSection,
+  stateOf,
+  statTile,
+  svg,
+  tag,
+  trackSvg,
+  valueBox,
+};
