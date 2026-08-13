@@ -357,9 +357,41 @@ def test_every_inverter_profile_defines_the_fallback_action(strings):
 # --- dashboard cards ---------------------------------------------------------
 
 
-BUNDLE = COMPONENT / "frontend" / "emhass-cards.js"
+# The cards used to ship as a single emhass-cards.js; split into a shared
+# core module plus one bundle per card family so that a lost race against the
+# frontend's own fixed element-registration timeout (home-assistant/frontend
+# #52960) only takes down one family's elements instead of all fourteen.
+CORE_FILE = "emhass-core.js"
+CARD_FILES = (
+    "emhass-plan-card.js",
+    "emhass-deferrable-cards.js",
+    "emhass-health-card.js",
+    "emhass-status-card.js",
+    "emhass-overview-card.js",
+)
+FRONTEND_FILES = (CORE_FILE, *CARD_FILES)
 
-# Every card in the bundle, which is also the list the picker must offer.
+# The ambient names the cards are allowed to reach for without declaring them:
+# the standard library, plus the slice of the browser they actually use. Kept
+# as an explicit list rather than a blanket exemption so that
+# test_every_name_a_bundle_uses_is_declared_somewhere_in_it stays meaningful --
+# a typo'd global is a card that throws at render time, same as any other
+# undeclared name.
+_GLOBALS = frozenset(
+    """
+    Array Boolean Date Error Infinity Intl JSON Map Math NaN Number Object
+    Promise RegExp Set String Symbol TypeError WeakMap
+    decodeURIComponent encodeURIComponent isFinite isNaN parseFloat parseInt
+    undefined
+    AbortController CustomEvent Element Event HTMLElement Node
+    ResizeObserver URL URLSearchParams
+    cancelAnimationFrame clearInterval clearTimeout console customElements
+    document fetch getComputedStyle location navigator requestAnimationFrame
+    setInterval setTimeout window
+    """.split()
+)
+
+# Every card across all bundles, which is also the list the picker must offer.
 CARDS = (
     "emhass-plan-card",
     "emhass-deferrable-card",
@@ -373,26 +405,225 @@ CARDS = (
 
 @pytest.fixture(scope="module")
 def bundle() -> str:
-    assert BUNDLE.is_file(), f"card bundle missing at {BUNDLE}"
-    return BUNDLE.read_text(encoding="utf-8")
+    """Every shipped frontend file concatenated into one string.
+
+    Only good for substring/regex checks below -- each file is its own ES
+    module with its own `import`/`export` statements, so the concatenation
+    itself is not valid as a single module. `test_card_bundle_parses_as_a_javascript_module`
+    parses each file separately for that reason.
+    """
+    parts = []
+    for filename in FRONTEND_FILES:
+        path = COMPONENT / "frontend" / filename
+        assert path.is_file(), f"card bundle missing at {path}"
+        parts.append(path.read_text(encoding="utf-8"))
+    return "\n".join(parts)
 
 
-def test_card_bundle_parses_as_a_javascript_module(bundle):
-    """Syntax-check the card bundle without needing Node.
+@pytest.mark.parametrize("filename", FRONTEND_FILES)
+def test_card_bundle_parses_as_a_javascript_module(filename):
+    """Syntax-check each card bundle without needing Node.
 
-    The bundle is plain ES2017-compatible JavaScript on purpose: it can then be
-    parsed by a pure-Python parser, which is the only way this file gets any
-    automated checking at all. Optional chaining and nullish coalescing are
-    deliberately avoided for the same reason.
+    Every file is plain ES2017-compatible JavaScript on purpose: it can then
+    be parsed by a pure-Python parser, which is the only way these files get
+    any automated checking at all. Optional chaining and nullish coalescing
+    are deliberately avoided for the same reason. `__VERSION__` is the
+    placeholder frontend.py substitutes with the real integration version at
+    serve time; any string parses fine here.
     """
     esprima = pytest.importorskip("esprima")
-    esprima.parseModule(bundle)
+    source = (COMPONENT / "frontend" / filename).read_text(encoding="utf-8")
+    esprima.parseModule(source.replace("__VERSION__", "0.0.0"))
 
 
 def test_card_bundle_avoids_syntax_the_parser_cannot_check(bundle):
     """Guard the constraint above, since a lapse silently disables the check."""
     assert "?." not in bundle, "optional chaining defeats the syntax check"
     assert "??" not in bundle, "nullish coalescing defeats the syntax check"
+
+
+# The checks below exist because parsing is not enough. A `const` declared
+# twice in one scope, a name imported that the core module does not export,
+# and a name used that nothing declares are all *early errors*: a real engine
+# rejects the whole module before running a line of it, but a parser accepts
+# them happily. Splitting one file into six introduced all three at once --
+# every card on the dashboard became a red "Configuration error" box while
+# test_card_bundle_parses_as_a_javascript_module stayed green.
+
+
+def _ast(filename):
+    esprima = pytest.importorskip("esprima")
+    source = (COMPONENT / "frontend" / filename).read_text(encoding="utf-8")
+    return esprima.parseModule(source.replace("__VERSION__", "0.0.0"), {"loc": True})
+
+
+def _nodes(node):
+    """Every node beneath (and including) `node`, in no particular order."""
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        if isinstance(current, list):
+            stack.extend(item for item in current if item is not None)
+            continue
+        if not hasattr(current, "type"):
+            continue
+        yield current
+        for key, child in vars(current).items():
+            if key not in ("loc", "range", "type") and (
+                isinstance(child, list) or hasattr(child, "type")
+            ):
+                stack.append(child)
+
+
+def _bound_names(pattern):
+    """Every name a binding pattern introduces, destructuring included."""
+    if pattern is None:
+        return
+    if pattern.type == "Identifier":
+        yield pattern.name
+    elif pattern.type == "ObjectPattern":
+        for prop in pattern.properties:
+            yield from _bound_names(prop.value if prop.type == "Property" else prop.argument)
+    elif pattern.type == "ArrayPattern":
+        for element in pattern.elements:
+            yield from _bound_names(element)
+    elif pattern.type == "AssignmentPattern":
+        yield from _bound_names(pattern.left)
+    elif pattern.type == "RestElement":
+        yield from _bound_names(pattern.argument)
+
+
+def test_the_core_module_exports_every_name_the_cards_import():
+    """An import of a name core does not export kills the importing bundle.
+
+    Not the statement -- the module: the browser refuses to instantiate it at
+    all, so one missing `export` takes down every card in that family. The
+    core module keeps its whole surface in one `export {...}` list precisely
+    so this stays checkable, and a helper moved between files is exactly the
+    edit that breaks it.
+    """
+    exported = {
+        specifier.exported.name
+        for node in _ast(CORE_FILE).body
+        if node.type == "ExportNamedDeclaration"
+        for specifier in node.specifiers
+    }
+    assert exported, "the core module exports nothing at all"
+
+    for filename in CARD_FILES:
+        imported = {
+            specifier.imported.name
+            for node in _ast(filename).body
+            if node.type == "ImportDeclaration"
+            for specifier in node.specifiers
+            if specifier.type == "ImportSpecifier"
+        }
+        missing = imported - exported
+        assert not missing, f"{filename} imports {sorted(missing)}, which {CORE_FILE} lacks"
+
+
+@pytest.mark.parametrize("filename", FRONTEND_FILES)
+def test_no_binding_is_declared_twice_in_one_function_body(filename):
+    """A `let`/`const` redeclaration is a SyntaxError for the whole file.
+
+    Checked per function body rather than per scope, which is the case a file
+    split actually produces: two halves of what were separate methods land in
+    one, and the second `const` of a name is fatal even though both halves
+    were fine where they came from.
+    """
+    ast = _ast(filename)
+    bodies = [ast.body]
+    bodies += [
+        node.body.body
+        for node in _nodes(ast)
+        if node.type
+        in ("FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression")
+        and node.body.type == "BlockStatement"
+    ]
+
+    for statements in bodies:
+        seen = {}
+        for statement in statements:
+            if statement.type == "VariableDeclaration" and statement.kind in ("let", "const"):
+                declared = [
+                    (name, declarator.id)
+                    for declarator in statement.declarations
+                    for name in _bound_names(declarator.id)
+                ]
+            elif statement.type == "ClassDeclaration" and statement.id:
+                declared = [(statement.id.name, statement.id)]
+            else:
+                continue
+            for name, node in declared:
+                first = seen.get(name)
+                assert first is None, (
+                    f"{filename}: '{name}' is declared twice in one scope, "
+                    f"at lines {first} and {node.loc.start.line}"
+                )
+                seen[name] = node.loc.start.line
+
+
+@pytest.mark.parametrize("filename", FRONTEND_FILES)
+def test_every_name_a_bundle_uses_is_declared_somewhere_in_it(filename):
+    """A name left behind by a file split throws the moment the card renders.
+
+    Deliberately loose: every binding anywhere in the file counts, whatever
+    its scope, so this never objects to shadowing or to a name used before its
+    block. What it does catch is the name that is declared in *no* scope of
+    this file and imported from nowhere -- which no amount of parsing will.
+    """
+    ast = _ast(filename)
+    nodes = list(_nodes(ast))
+
+    declared = set(_GLOBALS)
+    for node in nodes:
+        if node.type == "VariableDeclarator":
+            declared.update(_bound_names(node.id))
+        elif node.type == "ClassDeclaration" and node.id:
+            declared.add(node.id.name)
+        elif node.type in (
+            "FunctionDeclaration",
+            "FunctionExpression",
+            "ArrowFunctionExpression",
+        ):
+            if getattr(node, "id", None):
+                declared.add(node.id.name)
+            for param in node.params:
+                declared.update(_bound_names(param))
+        elif node.type == "CatchClause":
+            declared.update(_bound_names(node.param))
+        elif node.type in ("ImportSpecifier", "ImportDefaultSpecifier", "ImportNamespaceSpecifier"):
+            declared.add(node.local.name)
+
+    # Everything an Identifier node can be that is not a reference to a
+    # binding: a property name, a key, a label. Collected by walking the
+    # parents that introduce them rather than by guessing at the name.
+    non_references = set()
+    for node in nodes:
+        if node.type == "MemberExpression" and not node.computed:
+            non_references.add(id(node.property))
+        elif node.type in ("Property", "MethodDefinition") and not node.computed:
+            non_references.add(id(node.key))
+        elif node.type == "ImportSpecifier":
+            non_references.add(id(node.imported))
+            non_references.add(id(node.local))
+        elif node.type == "ExportSpecifier":
+            # `local` is left in: `export { x }` naming an undeclared x is the
+            # mirror image of the bug this whole block is here for.
+            non_references.add(id(node.exported))
+        elif node.type in ("LabeledStatement", "BreakStatement", "ContinueStatement"):
+            if getattr(node, "label", None):
+                non_references.add(id(node.label))
+        elif node.type in ("FunctionDeclaration", "FunctionExpression", "ClassDeclaration"):
+            if getattr(node, "id", None):
+                non_references.add(id(node.id))
+
+    unresolved = {
+        node.name: node.loc.start.line
+        for node in nodes
+        if node.type == "Identifier" and id(node) not in non_references and node.name not in declared
+    }
+    assert not unresolved, f"{filename} uses undeclared names: {unresolved}"
 
 
 def test_cards_are_registered_with_the_picker(bundle):
@@ -585,7 +816,7 @@ def test_brand_icon_has_a_transparent_background():
         assert img.getpixel((0, 0))[3] == 0, "top-left corner is not transparent"
 
 
-def test_cards_match_entities_by_translation_key():
+def test_cards_match_entities_by_translation_key(bundle):
     """Entity ids are translated and renameable; unique_id never reaches the card.
 
     Both cards used to locate a load's entities by English substrings of the
@@ -604,7 +835,7 @@ def test_cards_match_entities_by_translation_key():
     load". translation_key is the only identifier that is stable across
     renames and languages *and* actually delivered to the frontend.
     """
-    source = (COMPONENT / "frontend" / "emhass-cards.js").read_text(encoding="utf-8")
+    source = bundle
     assert "id.includes(" not in source, "entity ids are not a stable key"
     # Reading it, not the prose above explaining why nothing may.
     assert ".unique_id" not in source, "unique_id is not in the display registry"
@@ -613,7 +844,7 @@ def test_cards_match_entities_by_translation_key():
     assert '"should_run" in load.entities' in source
 
 
-def test_cards_look_up_load_entities_by_their_real_translation_keys():
+def test_cards_look_up_load_entities_by_their_real_translation_keys(bundle):
     """A load's key is what strings.json calls it, not what Python calls it.
 
     Two of a load's entities are namespaced away from the hub's in
@@ -624,7 +855,7 @@ def test_cards_look_up_load_entities_by_their_real_translation_keys():
     """
     import re
 
-    source = (COMPONENT / "frontend" / "emhass-cards.js").read_text(encoding="utf-8")
+    source = bundle
 
     # Every translation key the cards ask a load for must be one a load
     # actually publishes, per strings.json.
@@ -643,7 +874,7 @@ def test_cards_look_up_load_entities_by_their_real_translation_keys():
             assert key in published, f'the card asks a load for "{key}", which no entity publishes'
 
 
-def test_cards_attach_their_shadow_root_at_most_once():
+def test_cards_attach_their_shadow_root_at_most_once(bundle):
     """`setConfig` runs repeatedly on one element, `attachShadow` may not.
 
     The card editor calls `setConfig` on the same element for every option
@@ -651,7 +882,7 @@ def test_cards_attach_their_shadow_root_at_most_once():
     An unguarded `attachShadow` in that rebuild throws `NotSupportedError`,
     which red-cards the element the moment anyone edits the card.
     """
-    source = (COMPONENT / "frontend" / "emhass-cards.js").read_text(encoding="utf-8")
+    source = bundle
     assert source.count("this.attachShadow(") == source.count(
         "if (!this.shadowRoot) this.attachShadow("
     )

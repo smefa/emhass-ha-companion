@@ -23,7 +23,6 @@ from typing import Any, Final
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
-from .configuration import EmhassConfig
 from .const import (
     ACTION_CURTAIL,
     ACTION_PREPARE,
@@ -33,8 +32,6 @@ from .const import (
     DEFAULT_POWER_DEADBAND_W,
     LIFETIME_PERSISTENT,
     MODE_AUTO,
-    MODE_FORCE_CHARGE,
-    MODE_FORCE_DISCHARGE,
     MODE_IDLE,
     MODE_SELF_CONSUME,
 )
@@ -382,16 +379,43 @@ class Executor:
             # competing with it. No plan is being followed, so there is no
             # basis for curtailing either -- uncurtail rather than leave
             # whatever the last automatic decision happened to set.
+            #
+            # Every selectable mode (SYSTEM_MODES) is a zero-power steady
+            # state, so there is no manual power to work out: self-consumption
+            # hands the battery to the inverter's own logic and idle stops it.
             return Decision(
                 action=mode,
-                power_w=self._manual_power(mode, config),
+                power_w=0.0,
                 reason="manual override",
                 loads=self._decide_loads(use_plan=False),
                 curtail=False,
                 rules=["manual override active; uncurtailing"],
             )
 
-        if self.coordinator.plan_is_stale or not self.coordinator.data.plan:
+        if blind := self.coordinator.blind_sources:
+            # The readings this would command the inverter from have been gone
+            # long enough to be a fault rather than a blip (health.py). The
+            # plan itself is still fresh, so it is not stale -- it is worse
+            # than stale: it was solved from a configured SOC constant that
+            # has no relationship to how full the battery actually is, and
+            # acting on it can push a full battery or flatten an empty one.
+            #
+            # The load schedule is left alone. Those rows are not made unsafe
+            # by a missing battery reading, only less well timed, and stopping
+            # every appliance in the house is a far bigger intervention than
+            # this fault warrants.
+            return Decision(
+                action=MODE_SELF_CONSUME,
+                reason=(
+                    f"source readings unavailable ({', '.join(blind)}); "
+                    "handing the battery back to the inverter"
+                ),
+                loads=self._decide_loads(use_plan=self._plan_usable()),
+                curtail=False,
+                rules=[f"{entity_id} is unavailable; not commanding blind" for entity_id in blind],
+            )
+
+        if not self._plan_usable():
             # A plan that stopped being refreshed describes a world that no
             # longer exists. Falling back beats continuing to follow it.
             return Decision(
@@ -427,12 +451,17 @@ class Executor:
             rules=[*battery_rules, *curtail_rules],
         )
 
-    def _manual_power(self, mode: str, config: EmhassConfig) -> float:
-        if mode == MODE_FORCE_CHARGE:
-            return config.battery.charge_power_max_w
-        if mode == MODE_FORCE_DISCHARGE:
-            return config.battery.discharge_power_max_w
-        return 0.0
+    def _plan_usable(self) -> bool:
+        """Whether there is a plan worth reading rows out of.
+
+        Two callers, which is the whole reason it exists: the stale branch
+        below asks so it can fall back, and the blind-sources branch above
+        asks so it can keep following the load schedule while still refusing
+        to command the battery.
+        """
+        return bool(self.coordinator.data and self.coordinator.data.plan) and (
+            not self.coordinator.plan_is_stale
+        )
 
     def _decide_loads(self, *, use_plan: bool) -> dict[str, bool]:
         """Whether each deferrable load should be running."""

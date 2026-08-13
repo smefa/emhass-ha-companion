@@ -175,6 +175,16 @@
           "dayahead_fallback_time": "En fullständig dygnsplan byggs normalt om automatiskt så snart nya priser kommer. Den här tiden används bara som reserv om det aldrig sker.",
           "capacity_cost_per_kw": "Om ditt nätavtal debiterar den högsta effekt du tar ut, inte bara energin, ange det priset per kW här. Planen jämnar då ut sin värsta importtopp -- sprider ut laster och laddar ur batteriet över den -- i stället för att bara jaga billiga timmar. Debiteras en gång på toppen, inte per timme. 0 stänger av detta, vilket är standard."
         }
+      },
+      "compatibility": {
+        "title": "EMHASS entitetsnamn",
+        "description": "Home Assistant har redan EMHASS-sensorer:\n\n{existing}\n\nOm dina paneler, mallar eller automationer är skrivna mot de namnen kan EMHASS Companion publicera sina egna plansensorer under samma entitets-id, så att de fortsätter fungera.\n\nLåt det vara av om du inte behöver det -- Companions egna namn är tydligare, och du kan slå på det senare under Konfigurera.",
+        "data": {
+          "emhass_standard_names": "Använd EMHASS entitetsnamn"
+        },
+        "data_description": {
+          "emhass_standard_names": "Byter namn på plansensorerna till p_pv_forecast, p_load_forecast, p_grid_forecast, p_batt_forecast, soc_batt_forecast, optim_status, total_cost_fun_value, unit_load_cost och unit_prod_price, samt p_pv_curtailment och p_hybrid_inverter där du har dem, och publicerar även deras prognosserier i EMHASS format. Sensorer per last byter inte namn. Går att ångra."
+        }
       }
     },
     "error": {
@@ -198,7 +208,9 @@
           "grid": "Nät och schema",
           "tariff": "Köp- och säljpriser",
           "inverter": "Växelriktarstyrning",
-          "temperature": "Utetemperatur"
+          "temperature": "Utetemperatur",
+          "metering": "Kostnad och besparing",
+          "compatibility": "EMHASS entitetsnamn"
         }
       },
       "load": {
@@ -341,6 +353,46 @@
       "temperature_options": {
         "title": "Konfigurera {profile}",
         "description": "{notes}"
+      },
+      "compatibility": {
+        "title": "EMHASS entitetsnamn",
+        "description": "Publicera plansensorerna under de entitets-id som EMHASS själv använder, så att paneler, mallar och andra integrationer skrivna för EMHASS fortsätter fungera. Av som standard; slår du av det igen återställs de namn sensorerna hade innan.{conflicts}",
+        "data": {
+          "emhass_standard_names": "Använd EMHASS entitetsnamn"
+        },
+        "data_description": {
+          "emhass_standard_names": "Byter namn på plansensorerna till p_pv_forecast, p_load_forecast, p_grid_forecast, p_batt_forecast, soc_batt_forecast, optim_status, total_cost_fun_value, unit_load_cost och unit_prod_price, samt p_pv_curtailment och p_hybrid_inverter där du har dem, och publicerar även deras prognosserier i EMHASS format. Sensorer per last behåller sina egna namn -- EMHASS numrerar dem P_deferrable0, P_deferrable1 och så vidare efter lastordning, och ett entitets-id flyttar sig aldrig när det väl satts, så att lägga till eller byta namn på en last skulle lämna numret pekande på fel apparat."
+        }
+      },
+      "metering": {
+        "title": "Kostnad och besparing",
+        "description": "Följ vad elnätet faktiskt kostade dig, och vad solen och batteriet sparade jämfört med ett hus utan någotdera. Mätt från dina egna mätare och dina egna priser — inget här påverkar optimeringen.{found}\n\nMätarna lästes från din energipanel. De sparas när du skickar in, så att en omorganisation av panelen senare inte kan peka om dem i tysthet. Öppna *Mätare* bara om något ovan är fel eller saknas.",
+        "data": {
+          "metering_enabled": "Följ kostnad och besparing"
+        },
+        "data_description": {
+          "metering_enabled": "Skapar sensorerna för kostnad och besparing. Stänger du av den tas de bort och mätningen upphör; prognossensorerna för 24 h påverkas inte."
+        },
+        "sections": {
+          "meters": {
+            "name": "Mätare",
+            "description": "Ändra det energipanelen inte kunde svara på. Köp och försäljning mot elnätet är det enda som krävs — med dem får du dagens kostnad och dagens besparing, och lägger du till solen delas besparingen upp i en soldel och en batteridel.",
+            "data": {
+              "grid_import_energy_entity": "Köpt från elnätet (kWh)",
+              "grid_export_energy_entity": "Såld till elnätet (kWh)",
+              "pv_energy_entity": "Solproduktion (kWh)",
+              "battery_charge_energy_entity": "Laddat till batteriet (kWh)",
+              "battery_discharge_energy_entity": "Urladdat från batteriet (kWh)"
+            },
+            "data_description": {
+              "grid_import_energy_entity": "Total energi köpt från elnätet. En daglig räknare som nollställs vid midnatt fungerar bra.",
+              "grid_export_energy_entity": "Total energi såld till elnätet.",
+              "pv_energy_entity": "Skiljer solbesparingen från batteribesparingen. Din totala besparing beror inte på den — bara uppdelningen mellan de två gör det.",
+              "battery_charge_energy_entity": "Energi in i batteriet.",
+              "battery_discharge_energy_entity": "Energi ut ur batteriet."
+            }
+          }
+        }
       }
     }
   },
@@ -449,11 +501,38 @@
       },
       "end_soc_target": {
         "name": "Mål för slutladdningsnivå"
+      },
+      "pv_curtailment": {
+        "name": "Planerad solbegränsning"
+      },
+      "hybrid_inverter": {
+        "name": "Planerad växelriktareffekt"
+      },
+      "energy_cost_today": {
+        "name": "Elkostnad idag"
+      },
+      "savings_today": {
+        "name": "Besparing idag"
+      },
+      "solar_savings_today": {
+        "name": "Solbesparing idag"
+      },
+      "battery_savings_today": {
+        "name": "Batteribesparing idag"
+      },
+      "forecast_cost_24h": {
+        "name": "Prognos kostnad 24 h"
+      },
+      "forecast_savings_24h": {
+        "name": "Prognos besparing 24 h"
       }
     },
     "binary_sensor": {
       "plan_stale": {
         "name": "Planen är inaktuell"
+      },
+      "sources_blind": {
+        "name": "Källvärden är otillgängliga"
       },
       "should_run": {
         "name": "Bör vara igång"
@@ -494,8 +573,6 @@
         "state": {
           "auto": "Automatiskt",
           "self_consume": "Egenförbrukning",
-          "force_charge": "Tvinga laddning",
-          "force_discharge": "Tvinga urladdning",
           "idle": "Vila"
         }
       },
@@ -635,6 +712,10 @@
       "title": "Den senaste körningen av {action} misslyckades",
       "description": "EMHASS producerade ingen plan: {error}\n\nDen tidigare planen behålls. Detta löser sig automatiskt så snart en körning lyckas igen -- kontrollera EMHASS-tilläggets loggar för hela felet om det inte löser sig av sig själv."
     },
+    "sources_blind": {
+      "title": "{count} källvärde(n) rapporterar inte längre",
+      "description": "Följande entiteter har varit otillgängliga i mer än {minutes} minuter:\n\n{entities}\n\n{consequence}\n\nKontrollera integrationen som tillhandahåller dem -- en Modbus- eller molnansluten växelriktare som tappat sin anslutning är den vanligaste orsaken. Denna reparation försvinner av sig själv så snart de rapporterar igen."
+    },
     "pv_tail_short": {
       "title": "Solprognosen tar slut för nära horisonten",
       "description": "Optimerad slutladdningsnivå har liten eller ingen solprognos bortom optimeringshorisonten, så den antar mörker där och håller ett försiktigt högt batterimål.\n\nDin Solcast-profil kan se en dag längre: öppna integrationens alternativ, gå till solprognossteget och lägg till `{entity}` bland de valda prognossensorerna."
@@ -654,6 +735,10 @@
     "load_never_started": {
       "title": "{name} startade aldrig",
       "description": "{name} begärdes och fick sina hela {hours} h, men effektsensorn såg den aldrig dra något. Begäran har rensats, så inget väntar på den -- men körningen blev inte av.\n\nVanliga orsaker: apparaten behöver att man trycker på dess egen startknapp efter att den slagits på, den återupptar inte programmet när strömmen kommer tillbaka, eller så fick den aldrig ström via uttaget.\n\nDetta försvinner nästa gång lasten slutför en körning."
+    },
+    "standard_names_taken": {
+      "title": "{count} EMHASS-entitetsnamn är redan upptagna",
+      "description": "EMHASS Companion ombads publicera under EMHASS egna entitets-id, men dessa används redan:\n\n{details}\n\nNästan alltid är det EMHASS-tillägget som publicerar dem själv. De sensorerna behåller sina Companion-namn tills vidare. För att slutföra bytet: stäng av publiceringen i EMHASS (töm `publish_prefix`, eller sluta anropa dess publish-data), ta bort de kvarvarande entiteterna och ladda om EMHASS Companion. För att sluta försöka: slå av alternativet under Inställningar > Enheter och tjänster > EMHASS Companion > Konfigurera > EMHASS entitetsnamn."
     }
   },
   "services": {

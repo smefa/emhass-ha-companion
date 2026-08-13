@@ -55,9 +55,11 @@ two that ship in-box:
 
 ## Entities
 
-- **Mode** (select) — *Automatic* / *Self-consumption* / *Force charge* /
-  *Force discharge* / *Idle*. Anything other than *Automatic* takes the
-  optimiser out of the loop and holds that mode until you change it back.
+- **Mode** (select) — *Automatic* / *Self-consumption* / *Idle*. Anything
+  other than *Automatic* takes the optimiser out of the loop and holds that
+  mode until you change it back. All three are steady states, safe to sit in
+  indefinitely; there is deliberately no *Force charge* / *Force discharge*
+  here, since neither has an endpoint a select can express.
 - **Control enabled** (switch) — the master switch on acting at all. **Ships
   off.**
 - **Battery action** (sensor) — what the integration did, or would have

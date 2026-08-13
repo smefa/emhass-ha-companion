@@ -67,6 +67,7 @@ nav:
       - Dashboard cards: dashboard_cards.md
       - Lab cards (experimental): lab_cards.md
       - Entities: entities.md
+      - Cost and savings: savings.md
       - Handing over control: handing_over_control.md
       - Inverter control: inverter_control.md
       - Fronius GEN24 scripts: fronius_gen24_scripts.md

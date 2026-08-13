@@ -83,7 +83,7 @@ called with nothing to call.
 
 | Entity | |
 |---|---|
-| `select.*_mode` | *Automatic* / *Self-consumption* / *Force charge* / *Force discharge* / *Idle*. Anything but *Automatic* suspends the optimiser and holds that mode until changed back |
+| `select.*_mode` | *Automatic* / *Self-consumption* / *Idle*. Anything but *Automatic* suspends the optimiser and holds that mode until changed back. Only steady states are offered — force charge/discharge stay optimiser-only decisions (`BATTERY_ACTIONS`), reportable on `sensor.*_battery_action` but not selectable |
 | `switch.*_control_enabled` | Master gate on acting at all. Ships **off** |
 | `sensor.*_battery_action` | What the executor did or would do this cycle, and why — its `steps` attribute is the literal service calls |
 

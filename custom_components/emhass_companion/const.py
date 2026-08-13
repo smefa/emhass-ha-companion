@@ -208,6 +208,26 @@ CONF_PV_ENTITY: Final = "pv_entity"
 # profile's `entity` option rather than trusting whatever is stored there.
 CONF_HOUSE_LOAD_TOTAL_ENTITY: Final = "house_load_total_entity"
 
+# Cost tracking (metering.py, savings.py). The meters the *realised* cost and
+# savings are settled from -- entirely separate from the forecast sources
+# above, which describe what EMHASS should plan against rather than what the
+# house actually did. Held in their own options blob because the whole feature
+# is optional: an entry with none of these set simply has no savings sensors.
+CONF_METERING: Final = "metering"
+CONF_METERING_ENABLED: Final = "metering_enabled"
+# The five meters, which are deliberately exactly the Energy dashboard's own
+# grid, solar and battery sources -- so they can be resolved from it, and so
+# the override form has a shape the user has already seen once.
+#
+# Stored *resolved*, never left to be looked up again at runtime: the whole
+# point of asking is that the answer stops moving when the user later
+# reorganises their Energy dashboard.
+CONF_GRID_IMPORT_ENERGY_ENTITY: Final = "grid_import_energy_entity"
+CONF_GRID_EXPORT_ENERGY_ENTITY: Final = "grid_export_energy_entity"
+CONF_PV_ENERGY_ENTITY: Final = "pv_energy_entity"
+CONF_BATTERY_CHARGE_ENERGY_ENTITY: Final = "battery_charge_energy_entity"
+CONF_BATTERY_DISCHARGE_ENERGY_ENTITY: Final = "battery_discharge_energy_entity"
+
 # Deferrable load subentry keys
 CONF_NAME: Final = "name"
 CONF_NOMINAL_POWER: Final = "nominal_power_w"
@@ -364,6 +384,22 @@ DEFAULT_CAPACITY_COST_PER_KW: Final = 0.0
 DEFAULT_POWER_DEADBAND_W: Final = 100
 STALE_PLAN_FACTOR: Final = 2
 
+# --- Source health -----------------------------------------------------------
+
+# The states that mean "this entity is not telling us anything". The empty
+# string is in here because a state object can exist with no value at all
+# during a restore, which is as unreadable as the two named ones.
+UNREADABLE_STATES: Final = ("unknown", "unavailable", "")
+# How long a source entity must stay unreadable before health.SourceHealth
+# calls it a fault. Long enough to ride out the things that fix themselves --
+# a Modbus inverter dropping and re-establishing its TCP connection, a cloud
+# integration re-authenticating, an add-on restart -- and short enough that a
+# genuinely dead source is reported within one optimisation cycle or two
+# rather than at the end of the day. Counted from the later of "the reading
+# went" and "Home Assistant finished starting", so it is also what covers a
+# source whose integration is slow to load.
+SOURCE_BLIND_GRACE: Final = timedelta(minutes=15)
+
 # Self-consumption classification (strategy.decide_battery): "does the plan
 # want any grid exchange at all", read straight from the plan's own P_grid
 # column. Not the same question as soc_min/soc_max -- those are planning
@@ -404,13 +440,28 @@ MODE_FORCE_CHARGE: Final = "force_charge"
 MODE_FORCE_DISCHARGE: Final = "force_discharge"
 MODE_IDLE: Final = "idle"
 
+# What the optimiser can decide, and therefore what a profile has to implement
+# and what the battery_action sensor can report.
 BATTERY_ACTIONS: Final = (
     MODE_SELF_CONSUME,
     MODE_FORCE_CHARGE,
     MODE_FORCE_DISCHARGE,
     MODE_IDLE,
 )
-SYSTEM_MODES: Final = (MODE_AUTO, *BATTERY_ACTIONS)
+
+# What a *person* can ask for, which is deliberately not the same list. These
+# used to be `(MODE_AUTO, *BATTERY_ACTIONS)`, which conflated the optimiser's
+# output vocabulary with the manual override's input vocabulary. The three here
+# are steady states -- each one is safe to sit in indefinitely. Force
+# charge/discharge are not: a manual mode suspends the optimiser and holds
+# until it is changed back (executor._decide), so selecting one pinned the
+# battery at charge_power_max_w forever, with no SOC guard and no deadline.
+# Worse, that field is optional and defaults to 0 (models.BatteryConfig), so on
+# an install that never set it the mode silently commanded 0 W while the
+# decision sensor still read "force_charge". A bounded force belongs in a
+# service taking both a power and a duration, not in a select that can express
+# neither.
+SYSTEM_MODES: Final = (MODE_AUTO, MODE_SELF_CONSUME, MODE_IDLE)
 
 # --- Cost function -------------------------------------------------------------
 # EMHASS's own optimisation.py objective-function branches; sent verbatim as
@@ -620,6 +671,90 @@ TEMPERATURE_PROFILE_ORDER: Final = (
 # entity id back out of the registry) so the two can never drift apart.
 NET_HOUSE_LOAD_KEY: Final = "net_house_load"
 
+# --- Cost and savings ---------------------------------------------------------
+#
+# Sensor keys for the savings feature. Grouped here rather than left inline in
+# sensor.py because the config flow needs to name them too, when it explains
+# which sensors an incomplete meter setup will and will not produce.
+SAVINGS_KEY_COST_TODAY: Final = "energy_cost_today"
+SAVINGS_KEY_SAVINGS_TODAY: Final = "savings_today"
+SAVINGS_KEY_SOLAR_TODAY: Final = "solar_savings_today"
+SAVINGS_KEY_BATTERY_TODAY: Final = "battery_savings_today"
+SAVINGS_KEY_FORECAST_COST: Final = "forecast_cost_24h"
+SAVINGS_KEY_FORECAST_SAVINGS: Final = "forecast_savings_24h"
+
+# The forecast sensors' window. A day, because that is the question people
+# actually ask ("what will tonight cost me"), and because a horizon shorter
+# than this is reported as the hours it did cover rather than extrapolated.
+SAVINGS_FORECAST_HOURS: Final = 24
+
+# --- EMHASS-standard entity names --------------------------------------------
+#
+# Off by default. Turned on, the plan sensors below take the entity ids EMHASS
+# publishes the same quantities under, so a dashboard, template sensor or
+# third-party integration written against a bare EMHASS install keeps working
+# when the Companion takes over the optimisation.
+#
+# Deliberately limited to the quantities whose EMHASS name is a fixed string.
+# The per-load ones are P_deferrable{k}, numbered by load order
+# (DeferrableRegistry.index_of, which sorts by name) -- but an entity id is
+# assigned once and never moves on its own, so renaming or adding a load would
+# leave sensor.p_deferrable0 pointing at a different appliance for good, with
+# nothing to warn the user. A wrong number on a silent sensor is worse than no
+# sensor, so those are left out.
+CONF_EMHASS_STANDARD_NAMES: Final = "emhass_standard_names"
+# The entity ids these sensors had before the option was first switched on.
+# Kept so that switching it off restores exactly what the user had, rather than
+# whatever Home Assistant would generate today -- a friendly name or a
+# translation may have changed in between, and silently landing on a third id
+# would break their dashboards a second time.
+CONF_ENTITY_IDS_BEFORE_STANDARD: Final = "entity_ids_before_standard_names"
+
+# Sensor key (EmhassSensorDescription.key, which is also the tail of the
+# unique_id) -> the object id EMHASS uses. Mirrors the default_passed_dict in
+# EMHASS's utils.py:build_params.
+EMHASS_STANDARD_OBJECT_IDS: Final[dict[str, str]] = {
+    "pv_forecast": "p_pv_forecast",
+    "load_forecast": "p_load_forecast",
+    "grid_forecast": "p_grid_forecast",
+    "battery_power": "p_batt_forecast",
+    "battery_soc": "soc_batt_forecast",
+    # Conditional on the EMHASS side too, so these two often have no sensor to
+    # rename -- a key with no registered entity is simply skipped.
+    "pv_curtailment": "p_pv_curtailment",
+    "hybrid_inverter": "p_hybrid_inverter",
+    "optimization_status": "optim_status",
+    "plan_cost": "total_cost_fun_value",
+    "buy_price": "unit_load_cost",
+    "sell_price": "unit_prod_price",
+}
+
+# Matching the entity id alone is not enough for a consumer that reads the
+# forward-looking series: EMHASS carries it under a different attribute name
+# per quantity, and in a different shape from this integration's own
+# ``forecast`` -- a list of {"date": <iso>, "<object_id>": "<value>"}, values
+# as strings, starting at the current timestep rather than at the plan's start
+# (EMHASS retrieve_hass.get_attr_data_dict). With the option on, that shape is
+# published *alongside* ``forecast``; the native attribute stays because the
+# dashboard cards read it.
+EMHASS_STANDARD_SERIES_ATTRIBUTES: Final[dict[str, str]] = {
+    "pv_forecast": "forecasts",
+    "load_forecast": "forecasts",
+    "grid_forecast": "forecasts",
+    "pv_curtailment": "forecasts",
+    "hybrid_inverter": "forecasts",
+    "battery_power": "battery_scheduled_power",
+    "battery_soc": "battery_scheduled_soc",
+    "buy_price": "unit_load_cost_forecasts",
+    "sell_price": "unit_prod_price_forecasts",
+}
+# EMHASS rounds prices to four decimals and everything else to two.
+EMHASS_STANDARD_SERIES_DECIMALS: Final[dict[str, int]] = {
+    "buy_price": 4,
+    "sell_price": 4,
+}
+DEFAULT_STANDARD_SERIES_DECIMALS: Final = 2
+
 # The profile schema is a public API for contributors and for users writing local
 # profiles. Bump only with a documented migration.
 #
@@ -781,6 +916,19 @@ ISSUE_BAD_STORED_TIME: Final = "bad_stored_time"
 # program on power-up, a breaker left off. An error rather than a warning: the
 # user asked for a run, the run did not happen, and nothing else will say so.
 ISSUE_LOAD_NEVER_STARTED: Final = "load_never_started"
+# Entities this integration reads from have stopped reporting for longer than
+# SOURCE_BLIND_GRACE. Whole-integration rather than per-entity: they normally
+# go together (one Modbus connection, one cloud API, one dead inverter), and a
+# repair per sensor would bury the one fact that matters under thirty copies
+# of it. An error rather than a warning when a critical reading is among them,
+# because control stands down at that point -- see health.critical_entities.
+ISSUE_SOURCES_BLIND: Final = "sources_blind"
+# The EMHASS-standard entity ids the user asked for are already taken, almost
+# always by EMHASS's own publish-data writing them. Renaming into an occupied
+# id is refused by the entity registry, so the affected sensors keep their
+# Companion ids and the user is told which ones and why -- silently leaving
+# half the option unapplied would look like it simply did not work.
+ISSUE_STANDARD_NAMES_TAKEN: Final = "standard_names_taken"
 
 # Solcast's day sensors are named today / tomorrow / day_3..day_7 -- "tomorrow"
 # *is* day 2, there is no forecast_day_2. Day 3 is the first sensor past the

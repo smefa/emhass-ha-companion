@@ -175,6 +175,16 @@
           "dayahead_fallback_time": "A full day-ahead plan is normally rebuilt automatically as soon as new prices arrive. This time is only used as a backstop if that never happens.",
           "capacity_cost_per_kw": "If your network tariff bills the highest power you draw, not just the energy, enter that price per kW here. The plan then flattens its single worst import peak -- shifting loads apart and discharging the battery across it -- instead of only chasing cheap hours. Charged once on the peak, not per hour. 0 turns this off, which is the default."
         }
+      },
+      "compatibility": {
+        "title": "EMHASS entity names",
+        "description": "Home Assistant already has EMHASS sensors:\n\n{existing}\n\nIf your dashboards, templates or automations are written against those names, EMHASS Companion can publish its own plan sensors under the same entity ids, so they keep working.\n\nLeave this off unless you need it -- the Companion's own names are clearer, and you can turn it on later under Configure.",
+        "data": {
+          "emhass_standard_names": "Use EMHASS's entity names"
+        },
+        "data_description": {
+          "emhass_standard_names": "Renames the plan sensors to p_pv_forecast, p_load_forecast, p_grid_forecast, p_batt_forecast, soc_batt_forecast, optim_status, total_cost_fun_value, unit_load_cost and unit_prod_price, plus p_pv_curtailment and p_hybrid_inverter where you have those, and also publishes their forecast series in EMHASS's format. Per-load sensors are not renamed. Reversible."
+        }
       }
     },
     "error": {
@@ -198,7 +208,9 @@
           "grid": "Grid and schedule",
           "tariff": "Buy and sell prices",
           "inverter": "Inverter control",
-          "temperature": "Outdoor temperature"
+          "temperature": "Outdoor temperature",
+          "metering": "Cost and savings",
+          "compatibility": "EMHASS entity names"
         }
       },
       "load": {
@@ -341,6 +353,46 @@
       "temperature_options": {
         "title": "Configure {profile}",
         "description": "{notes}"
+      },
+      "compatibility": {
+        "title": "EMHASS entity names",
+        "description": "Publish the plan sensors under the entity ids EMHASS itself uses, so dashboards, templates and other integrations written for EMHASS keep working. Off by default; turning it back off restores the names the sensors had before.{conflicts}",
+        "data": {
+          "emhass_standard_names": "Use EMHASS's entity names"
+        },
+        "data_description": {
+          "emhass_standard_names": "Renames the plan sensors to p_pv_forecast, p_load_forecast, p_grid_forecast, p_batt_forecast, soc_batt_forecast, optim_status, total_cost_fun_value, unit_load_cost and unit_prod_price, plus p_pv_curtailment and p_hybrid_inverter where you have those, and also publishes their forecast series in EMHASS's format. Per-load sensors keep their own names -- EMHASS numbers those P_deferrable0, P_deferrable1 and so on by load order, and an entity id never moves once assigned, so adding or renaming a load would leave the number pointing at the wrong appliance."
+        }
+      },
+      "metering": {
+        "title": "Cost and savings",
+        "description": "Track what the grid actually cost you, and what solar and the battery saved against a house with neither. Measured from your own meters and your own prices — nothing here changes the optimisation.{found}\n\nThe meters were read from your Energy dashboard. They are stored when you submit, so reorganising that dashboard later cannot silently repoint them. Open *Meters* only if something above is wrong or missing.",
+        "data": {
+          "metering_enabled": "Track cost and savings"
+        },
+        "data_description": {
+          "metering_enabled": "Creates the cost and savings sensors. Turning it off removes them and stops the tracking; the next 24 h forecast sensors are unaffected either way."
+        },
+        "sections": {
+          "meters": {
+            "name": "Meters",
+            "description": "Override anything the Energy dashboard could not answer. Grid import and export are the only requirement — with them you get today's cost and today's saving, and adding solar splits that saving into a solar part and a battery part.",
+            "data": {
+              "grid_import_energy_entity": "Grid import (kWh)",
+              "grid_export_energy_entity": "Grid export (kWh)",
+              "pv_energy_entity": "Solar production (kWh)",
+              "battery_charge_energy_entity": "Battery charged (kWh)",
+              "battery_discharge_energy_entity": "Battery discharged (kWh)"
+            },
+            "data_description": {
+              "grid_import_energy_entity": "Total energy bought from the grid. A daily counter that resets at midnight is fine.",
+              "grid_export_energy_entity": "Total energy sold to the grid.",
+              "pv_energy_entity": "Separates the solar saving from the battery saving. Your total saving does not depend on it — only the split between the two does.",
+              "battery_charge_energy_entity": "Energy into the battery.",
+              "battery_discharge_energy_entity": "Energy out of the battery."
+            }
+          }
+        }
       }
     }
   },
@@ -449,11 +501,38 @@
       },
       "end_soc_target": {
         "name": "End SOC target"
+      },
+      "pv_curtailment": {
+        "name": "Planned solar curtailment"
+      },
+      "hybrid_inverter": {
+        "name": "Planned inverter power"
+      },
+      "energy_cost_today": {
+        "name": "Energy cost today"
+      },
+      "savings_today": {
+        "name": "Savings today"
+      },
+      "solar_savings_today": {
+        "name": "Solar savings today"
+      },
+      "battery_savings_today": {
+        "name": "Battery savings today"
+      },
+      "forecast_cost_24h": {
+        "name": "Forecast cost next 24 h"
+      },
+      "forecast_savings_24h": {
+        "name": "Forecast savings next 24 h"
       }
     },
     "binary_sensor": {
       "plan_stale": {
         "name": "Plan out of date"
+      },
+      "sources_blind": {
+        "name": "Source readings unavailable"
       },
       "should_run": {
         "name": "Should run"
@@ -494,8 +573,6 @@
         "state": {
           "auto": "Automatic",
           "self_consume": "Self-consumption",
-          "force_charge": "Force charge",
-          "force_discharge": "Force discharge",
           "idle": "Idle"
         }
       },
@@ -635,6 +712,10 @@
       "title": "The last {action} run failed",
       "description": "EMHASS did not produce a plan: {error}\n\nThe previous plan is being kept. This resolves automatically once a run succeeds again -- check the EMHASS add-on logs for the full error if it doesn't clear on its own."
     },
+    "sources_blind": {
+      "title": "{count} source reading(s) have stopped reporting",
+      "description": "These entities have been unavailable for more than {minutes} minutes:\n\n{entities}\n\n{consequence}\n\nCheck the integration that provides them -- a Modbus or cloud inverter that has lost its connection is the usual cause. This repair clears itself as soon as they report again."
+    },
     "pv_tail_short": {
       "title": "Solar forecast ends too close to the horizon",
       "description": "End SOC's Optimized mode has little or no solar forecast beyond the optimisation horizon, so it assumes darkness there and holds a conservatively high battery target.\n\nYour Solcast profile can see one day further: open the integration's options, go to the solar forecast step, and add `{entity}` to the selected forecast sensors."
@@ -654,6 +735,10 @@
     "load_never_started": {
       "title": "{name} never started",
       "description": "{name} was requested and given its full {hours} h, but its power sensor never saw it draw anything. The request has been cleared, so nothing is waiting on it -- but the run did not happen.\n\nUsual causes: the appliance needs its own start button pressed after being switched on, it does not resume its program when power returns, or the plug never actually powered it.\n\nThis clears itself the next time the load completes a run."
+    },
+    "standard_names_taken": {
+      "title": "{count} EMHASS entity name(s) already taken",
+      "description": "EMHASS Companion was asked to publish under EMHASS's own entity ids, but these are already in use:\n\n{details}\n\nAlmost always this is the EMHASS add-on publishing them itself. Those sensors keep their Companion names for now. To finish the switch, turn off publishing in EMHASS (unset `publish_prefix`, or stop calling its publish-data action), delete the leftover entities, then reload EMHASS Companion. To stop trying, turn the option off under Settings > Devices & services > EMHASS Companion > Configure > EMHASS entity names."
     }
   },
   "services": {

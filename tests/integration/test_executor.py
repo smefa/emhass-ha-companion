@@ -20,18 +20,21 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.emhass_companion.api import EmhassClient
 from custom_components.emhass_companion.const import (
+    BATTERY_ACTIONS,
     CONF_CONTROL_ENTITY,
     CONF_INVERTER,
     CONF_NOMINAL_POWER,
     CONF_PROFILE,
     CONF_PROFILE_OPTIONS,
     DOMAIN,
+    MODE_AUTO,
     MODE_FORCE_CHARGE,
     MODE_FORCE_DISCHARGE,
     MODE_IDLE,
     MODE_SELF_CONSUME,
     RECURRENCE_ON_DEMAND,
     SUBENTRY_TYPE_DEFERRABLE,
+    SYSTEM_MODES,
 )
 from custom_components.emhass_companion.coordinator import EmhassCoordinator, EmhassData
 from custom_components.emhass_companion.deferrable import DeferrableRegistry
@@ -319,14 +322,41 @@ async def test_manual_mode_suspends_the_plan(hass: HomeAssistant, calls: list[Se
     executor, coordinator = await _build(hass)
     coordinator.data = EmhassData(plan=_plan(-3000), last_success=dt_util.utcnow())
     coordinator.control_enabled = True
-    coordinator.system_mode = MODE_FORCE_DISCHARGE
+    coordinator.system_mode = MODE_IDLE
 
     decision = await executor.async_apply()
     await hass.async_block_till_done()
 
-    assert decision.action == MODE_FORCE_DISCHARGE
+    assert decision.action == MODE_IDLE
     assert decision.reason == "manual override"
-    assert calls[-1].data["option"] == "Forced Discharge"
+    assert calls[-1].data["option"] == "Stop"
+
+
+async def test_manual_modes_carry_no_power(hass: HomeAssistant) -> None:
+    """Every selectable mode is a zero-power steady state, so a manual
+    override never sends a magnitude -- the failure this replaced was
+    force_charge holding at charge_power_max_w indefinitely, which defaults
+    to 0 anyway on an install that never set it."""
+    executor, coordinator = await _build(hass)
+    coordinator.data = EmhassData(plan=_plan(-3000), last_success=dt_util.utcnow())
+    coordinator.control_enabled = True
+
+    for mode in SYSTEM_MODES:
+        if mode == MODE_AUTO:
+            continue
+        coordinator.system_mode = mode
+        decision = await executor.async_apply()
+        assert decision.power_w == 0.0, mode
+
+
+def test_force_modes_are_not_selectable() -> None:
+    """Force charge/discharge remain in BATTERY_ACTIONS -- the optimiser still
+    decides them and profiles still implement them -- but a person cannot pin
+    the system into one."""
+    assert MODE_FORCE_CHARGE in BATTERY_ACTIONS
+    assert MODE_FORCE_DISCHARGE in BATTERY_ACTIONS
+    assert MODE_FORCE_CHARGE not in SYSTEM_MODES
+    assert MODE_FORCE_DISCHARGE not in SYSTEM_MODES
 
 
 # --- the deadband ------------------------------------------------------------

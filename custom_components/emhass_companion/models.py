@@ -651,6 +651,15 @@ class PlanRow:
     of the battery decision: a plan can curtail while idle, and charge while not
     curtailing.
     """
+    p_hybrid_inverter: float | None = None
+    """AC-side power across a hybrid inverter, in W.
+
+    Only present when ``inverter_is_hybrid`` is set on the EMHASS side. Positive
+    is DC to AC -- delivered to the house or grid -- and negative is AC to DC,
+    which is the battery charging from the grid across the DC bus. Not the same
+    quantity as ``p_batt``: this is what crosses the inverter after PV and
+    battery have been netted on the DC side.
+    """
     soc: float | None = None
     unit_load_cost: float | None = None
     unit_prod_price: float | None = None
@@ -703,6 +712,7 @@ class PlanRow:
             p_grid=_as_float(record.get("P_grid")),
             p_batt=_as_float(record.get("P_batt")),
             p_pv_curtailment=_as_float(record.get("P_PV_curtailment")),
+            p_hybrid_inverter=_as_float(record.get("P_hybrid_inverter")),
             soc=_as_float(record.get("SOC_opt")),
             unit_load_cost=_as_float(record.get("unit_load_cost")),
             unit_prod_price=_as_float(record.get("unit_prod_price")),
