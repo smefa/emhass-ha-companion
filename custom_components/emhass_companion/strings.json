@@ -221,6 +221,7 @@
           "tariff": "Buy and sell prices",
           "inverter": "Inverter control",
           "temperature": "Outdoor temperature",
+          "network": "Network tariff",
           "metering": "Cost and savings",
           "compatibility": "EMHASS entity names"
         }
@@ -375,6 +376,17 @@
         }
       },
       "temperature_options": {
+        "title": "Configure {profile}",
+        "description": "{notes}"
+      },
+      "network": {
+        "title": "Network tariff",
+        "description": "Your grid operator's own tariff structure, layered on top of whatever Buy and sell prices already composes: time-differentiated energy fees, and (tracked for now, not yet acted on by the plan) a demand charge. Leave blank if your network fee is a flat per-kWh rate with no time-of-day or capacity component -- there is nothing here for it to add.\n\n{profiles}",
+        "data": {
+          "profile": "Network tariff profile"
+        }
+      },
+      "network_options": {
         "title": "Configure {profile}",
         "description": "{notes}"
       },
@@ -549,6 +561,15 @@
       },
       "forecast_savings_24h": {
         "name": "Forecast savings next 24 h"
+      },
+      "network_tariff_band": {
+        "name": "Network tariff band"
+      },
+      "period_peak": {
+        "name": "Billing period peak"
+      },
+      "peak_headroom": {
+        "name": "Peak headroom"
       }
     },
     "binary_sensor": {

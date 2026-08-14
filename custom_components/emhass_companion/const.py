@@ -94,6 +94,7 @@ CONF_PV: Final = "pv"
 CONF_LOAD: Final = "load"
 CONF_INVERTER: Final = "inverter"
 CONF_TEMPERATURE: Final = "temperature"
+CONF_NETWORK: Final = "network"
 
 CONF_TARIFF: Final = "tariff"
 CONF_BUY: Final = "buy"
@@ -605,12 +606,19 @@ PROFILE_KIND_LOAD: Final = "load"
 PROFILE_KIND_INVERTER: Final = "inverter"
 # Outdoor temperature, needed only once a thermal deferrable load exists.
 PROFILE_KIND_TEMPERATURE: Final = "temperature"
+# Network/grid-operator tariff structure: time-differentiated energy bands and
+# demand (capacity) charges, layered on top of the supplier-side price a
+# `price` profile already composes. See docs/network_tariffs_plan.md. Neither
+# a source (it fetches nothing) nor an emhass-settings profile (it delegates
+# nothing) -- see `_validate_network` in profiles/schema.py.
+PROFILE_KIND_NETWORK: Final = "network"
 PROFILE_KINDS: Final = (
     PROFILE_KIND_PRICE,
     PROFILE_KIND_PV,
     PROFILE_KIND_LOAD,
     PROFILE_KIND_TEMPERATURE,
     PROFILE_KIND_INVERTER,
+    PROFILE_KIND_NETWORK,
 )
 # Built-in profile keys are f"{kind}/{filename stem}" (profiles/__init__.py).
 # The "House load sensor" profile is the one load profile with a live
@@ -675,6 +683,12 @@ TEMPERATURE_PROFILE_ORDER: Final = (
 # between sensor.py (creates the entity) and configuration.py (resolves its
 # entity id back out of the registry) so the two can never drift apart.
 NET_HOUSE_LOAD_KEY: Final = "net_house_load"
+
+# --- Network tariffs -----------------------------------------------------------
+
+NETWORK_TARIFF_BAND_KEY: Final = "network_tariff_band"
+PERIOD_PEAK_KEY: Final = "period_peak"
+PEAK_HEADROOM_KEY: Final = "peak_headroom"
 
 # --- Cost and savings ---------------------------------------------------------
 #

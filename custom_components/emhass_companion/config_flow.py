@@ -81,6 +81,7 @@ from .const import (
     CONF_MPC_INTERVAL,
     CONF_MULTIPLIER,
     CONF_NAME,
+    CONF_NETWORK,
     CONF_NOMINAL_POWER,
     CONF_OPERATING_HOURS,
     CONF_POWER_SENSOR,
@@ -146,6 +147,7 @@ from .const import (
     PROFILE_KEY_LOAD_SENSOR,
     PROFILE_KIND_INVERTER,
     PROFILE_KIND_LOAD,
+    PROFILE_KIND_NETWORK,
     PROFILE_KIND_PRICE,
     PROFILE_KIND_PV,
     PROFILE_KIND_TEMPERATURE,
@@ -1780,9 +1782,7 @@ def battery_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
         ): selector.BooleanSelector(),
         vol.Optional(
             "battery_dynamic_max",
-            default=round(
-                defaults.get("battery_dynamic_max", DEFAULT_BATTERY_DYNAMIC_MAX) * 100
-            ),
+            default=round(defaults.get("battery_dynamic_max", DEFAULT_BATTERY_DYNAMIC_MAX) * 100),
         ): selector.NumberSelector(
             selector.NumberSelectorConfig(
                 min=1, max=100, step=1, unit_of_measurement="%", mode="slider"
@@ -2014,6 +2014,8 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
         self._inverter_profiles: dict[str, Profile] = {}
         self._temperature_key: str = ""
         self._temperature_profiles: dict[str, Profile] = {}
+        self._network_key: str = ""
+        self._network_profiles: dict[str, Profile] = {}
         self._load_key: str = ""
         self._load_profiles: dict[str, Profile] = {}
         self._pv_key: str = ""
@@ -2031,6 +2033,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
                 "tariff",
                 "inverter",
                 "temperature",
+                "network",
                 "metering",
                 "compatibility",
             ],
@@ -2370,6 +2373,72 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
         stored = (options.get(CONF_TEMPERATURE) or {}).get(CONF_PROFILE_OPTIONS) or {}
         return self.async_show_form(
             step_id="temperature_options",
+            data_schema=self.add_suggested_values_to_schema(
+                vol.Schema(profile.selector_schema()), stored
+            ),
+            description_placeholders={
+                "profile": profile.name,
+                "notes": _profile_notes(profile),
+            },
+        )
+
+    async def async_step_network(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Choose the grid operator's own tariff structure, if any.
+
+        Optional, like the inverter step: without one selected, buy and sell
+        prices are exactly what ``Tariff.compose`` already produced, which is
+        the behaviour every entry had before this existed.
+        """
+        options = dict(self.config_entry.options)
+        profiles = (await async_load_profiles(self.hass)).profiles
+        choices = available_profiles(self.hass, profiles, PROFILE_KIND_NETWORK)
+
+        if user_input is not None:
+            key = user_input.get(CONF_PROFILE)
+            if not key:
+                options[CONF_NETWORK] = {}
+                return self.async_create_entry(data=options)
+            self._network_key = key
+            self._network_profiles = profiles
+            return await self.async_step_network_options()
+
+        current = (options.get(CONF_NETWORK) or {}).get(CONF_PROFILE)
+        return self.async_show_form(
+            step_id="network",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(
+                        CONF_PROFILE, description={"suggested_value": current}
+                    ): _profile_selector(choices)
+                }
+            ),
+            description_placeholders={
+                "profiles": "\n".join(
+                    f"- **{profile.name}** — {profile.description or ''}" for profile in choices
+                )
+            },
+        )
+
+    async def async_step_network_options(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        options = dict(self.config_entry.options)
+        profile = self._network_profiles[self._network_key]
+
+        if user_input is not None or not profile.options:
+            options[CONF_NETWORK] = {
+                CONF_PROFILE: self._network_key,
+                CONF_PROFILE_OPTIONS: user_input or {},
+            }
+            return self.async_create_entry(data=options)
+
+        stored = (options.get(CONF_NETWORK) or {}).get(CONF_PROFILE_OPTIONS) or {}
+        if (options.get(CONF_NETWORK) or {}).get(CONF_PROFILE) != self._network_key:
+            stored = {}
+        return self.async_show_form(
+            step_id="network_options",
             data_schema=self.add_suggested_values_to_schema(
                 vol.Schema(profile.selector_schema()), stored
             ),

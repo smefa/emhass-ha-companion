@@ -52,6 +52,7 @@ from .metering import (
     build_prices_callable,
 )
 from .naming import async_apply_standard_names
+from .peaks import PeakTracker
 from .schedule import Scheduler
 from .services import async_register_services, async_unregister_services
 from .util import version_at_least
@@ -82,6 +83,7 @@ class EmhassRuntimeData:
         executor: Executor,
         log_handler: LogRingHandler,
         tracker: SavingsTracker,
+        peak_tracker: PeakTracker | None,
     ) -> None:
         self.coordinator = coordinator
         self.scheduler = scheduler
@@ -89,6 +91,10 @@ class EmhassRuntimeData:
         self.executor = executor
         self.log_handler = log_handler
         self.tracker = tracker
+        # None unless a network profile with a demand_charge is selected and a
+        # grid-import meter is configured -- see _build_peak_tracker. Nothing
+        # here yet acts on it; sensor.py is the only reader.
+        self.peak_tracker = peak_tracker
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bool:
@@ -167,8 +173,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
         plan_forecast=build_forecast_callable(coordinator),
     )
     await tracker.async_load()
+
+    # None on most entries -- see _build_peak_tracker. Loaded the same way as
+    # the savings tracker, before the platforms are forwarded, so the period
+    # and peak sensors read a restored record on their very first render.
+    peak_tracker = _build_peak_tracker(hass, entry, coordinator)
+    if peak_tracker is not None:
+        await peak_tracker.async_load()
+
     entry.runtime_data = EmhassRuntimeData(
-        coordinator, scheduler, loads, executor, log_handler, tracker
+        coordinator, scheduler, loads, executor, log_handler, tracker, peak_tracker
     )
 
     # Entities are created before the first optimisation so that a failed or
@@ -183,6 +197,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
     # see the first settle rather than waiting a whole publish interval for
     # the second.
     tracker.async_start()
+    if peak_tracker is not None:
+        peak_tracker.async_start()
 
     entry.async_on_unload(scheduler.async_stop)
     entry.async_on_unload(loads.async_stop)
@@ -193,6 +209,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
     # the entry is torn down; the ledger is otherwise up to two minutes behind
     # (see metering._SAVE_DELAY) and a reload would lose that much of the day.
     entry.async_on_unload(tracker.async_shutdown)
+    if peak_tracker is not None:
+        entry.async_on_unload(peak_tracker.async_shutdown)
 
     async def _async_restore_on_unload() -> None:
         await executor.async_restore("integration unloaded")
@@ -404,4 +422,39 @@ def _report_profile_errors(hass: HomeAssistant, coordinator: EmhassCoordinator) 
             "count": str(len(coordinator.profile_errors)),
             "details": details,
         },
+    )
+
+
+def _build_peak_tracker(
+    hass: HomeAssistant, entry: EmhassConfigEntry, coordinator: EmhassCoordinator
+) -> PeakTracker | None:
+    """Build the demand-charge peak tracker, or None if there is nothing to track.
+
+    Two things have to be true: the selected network profile actually defines
+    a ``demand_charge`` (most don't -- energy bands alone need no tracker at
+    all), and a grid-import meter is configured for it to watch. The second
+    reuses whatever the savings feature already asks for
+    (``metering.build_meters``) rather than a second entity picker, but through
+    its own :class:`~.metering.Meter` instance -- sharing the savings
+    tracker's would advance its baseline twice for every real energy delta.
+    """
+    calendar = coordinator.network_calendar
+    if calendar is None or calendar.demand_charge is None:
+        return None
+    meters = build_meters(coordinator.config, entry.options)
+    if meters.grid_import is None:
+        return None
+    demand = calendar.demand_charge
+    return PeakTracker(
+        hass,
+        entry,
+        meters.grid_import,
+        interval=demand.measure.interval,
+        aggregate=demand.measure.aggregate,
+        top_n=demand.measure.n,
+        distinct_days=demand.measure.distinct_days,
+        in_window=lambda when: (
+            coordinator.network_calendar is not None
+            and coordinator.network_calendar.in_demand_window(when, coordinator.holiday_cache)
+        ),
     )

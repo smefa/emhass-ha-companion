@@ -33,6 +33,7 @@ from ..const import (
     PERCENT_UNITS,
     POWER_UNITS,
     PROFILE_KIND_INVERTER,
+    PROFILE_KIND_NETWORK,
     PROFILE_KINDS,
     PROFILE_SCHEMA_VERSION,
     SOURCE_TYPE_ATTRIBUTES,
@@ -70,6 +71,11 @@ def _empty_block(schema: Any) -> Any:
     being told "expected dict" for it is a poor way to find out.
     """
     return vol.All(lambda value: {} if value is None else value, schema)
+
+
+def _empty_list_block(schema: Any) -> Any:
+    """:func:`_empty_block`'s counterpart for a block that is a list, not a mapping."""
+    return vol.All(lambda value: [] if value is None else value, schema)
 
 
 OPTION_SCHEMA = vol.Schema(
@@ -266,12 +272,41 @@ def _validate_inverter(document: dict[str, Any]) -> dict[str, Any]:
     return document
 
 
+def _validate_network(document: dict[str, Any]) -> dict[str, Any]:
+    """Cross-field rule for a network (grid operator tariff) profile.
+
+    A network profile is a fourth structural shape: unlike every other kind it
+    has neither a ``source`` (it fetches nothing of its own) nor an ``emhass``
+    block (it delegates nothing to EMHASS's own forecasting) -- it exists
+    purely to contribute a calendar, energy-price bands and/or a demand-charge
+    description. The three blocks below are deliberately left as permissive
+    dicts/lists in the flat schema rather than fully typed here: every field in
+    them may be a template (see ``network_tariffs_plan.md``'s profile schema),
+    and voluptuous cannot validate a document that still contains unrendered
+    Jinja. The real structural validation happens in ``network_calendar.py``,
+    at the point each profile is actually resolved -- the same split
+    ``emhass:`` settings already use via ``resolve_settings``.
+    """
+    if not (
+        document.get("energy_bands")
+        or document.get("demand_charge")
+        or document.get("capacity_limit")
+    ):
+        raise vol.Invalid(
+            "'network' profile must define at least one of 'energy_bands', "
+            "'demand_charge' or 'capacity_limit'; it currently contributes nothing"
+        )
+    return document
+
+
 def _validate_profile(document: dict[str, Any]) -> dict[str, Any]:
     """Cross-field rules that the flat schema cannot express."""
     kind = document["kind"]
 
     if kind == PROFILE_KIND_INVERTER:
         return _validate_inverter(document)
+    if kind == PROFILE_KIND_NETWORK:
+        return _validate_network(document)
 
     # Source profiles either fetch a series themselves, or delegate the forecast
     # to EMHASS's own methods via `emhass:` settings (that is how "user has no
@@ -336,6 +371,13 @@ PROFILE_SCHEMA = vol.All(
             vol.Optional("actions", default={}): vol.Schema(
                 {cv.string: vol.All(cv.ensure_list, [ACTION_STEP_SCHEMA])}
             ),
+            # network profiles -- see _validate_network for why these stay loose
+            vol.Optional("calendar", default={}): _empty_block(dict),
+            vol.Optional("energy_bands", default=[]): _empty_list_block(
+                vol.All(cv.ensure_list, [dict])
+            ),
+            vol.Optional("demand_charge", default={}): _empty_block(dict),
+            vol.Optional("capacity_limit", default={}): _empty_block(dict),
         }
     ),
     _validate_profile,
@@ -442,6 +484,24 @@ class Profile:
     @property
     def produces_series(self) -> bool:
         return self.source is not None
+
+    # -- network profiles -------------------------------------------------------
+
+    @property
+    def calendar(self) -> dict[str, Any]:
+        return self.document.get("calendar", {})
+
+    @property
+    def energy_bands(self) -> list[dict[str, Any]]:
+        return self.document.get("energy_bands", [])
+
+    @property
+    def demand_charge(self) -> dict[str, Any]:
+        return self.document.get("demand_charge", {})
+
+    @property
+    def capacity_limit(self) -> dict[str, Any]:
+        return self.document.get("capacity_limit", {})
 
     def selector_schema(self, *, skip: set[str] = frozenset()) -> dict[Any, Any]:
         """Build a voluptuous schema fragment for this profile's options.

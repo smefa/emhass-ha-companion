@@ -33,6 +33,7 @@ from .engine import (
     render,
     render_action,
     resolve_limits,
+    resolve_network,
     resolve_sensors,
     resolve_settings,
 )
@@ -52,6 +53,7 @@ __all__ = [
     "render",
     "render_action",
     "resolve_limits",
+    "resolve_network",
     "resolve_sensors",
     "resolve_settings",
 ]

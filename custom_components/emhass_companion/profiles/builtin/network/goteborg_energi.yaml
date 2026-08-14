@@ -1,0 +1,77 @@
+name: Göteborg Energi (tidsindelad elnätsavgift)
+kind: network
+version: 1
+description: >-
+  Göteborg Energi Nät's time-differentiated grid tariff: a high-load window on
+  winter weekdays, and a demand charge on the mean of the three highest hourly
+  peaks inside it.
+notes: >-
+  Rates change every year and this profile ships last year's as defaults --
+  check them against your own invoice before relying on it. The high-load
+  window excludes red days and, unusually, Christmas Eve and New Year's Eve,
+  which are not public holidays in Sweden; add them under "Add holidays" in
+  the Workday integration's own configuration.
+
+  If your price source (Configure > Buy and sell prices) already includes
+  network fees -- some resellers quote an all-in öre/kWh -- set its tariff
+  mode to "already includes costs" rather than stacking these bands on top of
+  it a second time.
+
+detect:
+  always: true
+
+options:
+  hoglast_ore:
+    name: High-load energy fee
+    description: öre/kWh during the high-load window (07:00-20:00, weekdays, Nov-Mar).
+    default: 34.0
+    selector: { number: { min: 0, max: 500, step: any, mode: box } }
+  laglast_ore:
+    name: Low-load energy fee
+    description: öre/kWh at all other times. Includes the transmission fee.
+    default: 6.5
+    selector: { number: { min: 0, max: 500, step: any, mode: box } }
+  effekt_kr_per_kw:
+    name: Demand charge
+    description: >-
+      kr/kW/month, as it appears on your invoice, on the mean of the three
+      highest hourly peaks inside the high-load window. Not yet acted on by
+      the optimiser -- this profile only tracks it for now.
+    default: 135.0
+    selector: { number: { min: 0, max: 2000, step: any, mode: box } }
+  workday_entity:
+    name: Workday sensor
+    description: >-
+      A binary_sensor from the Workday integration, configured for Sweden with
+      weekends and holidays excluded. Supplies the red-day calendar the
+      high-load window is excluded on.
+    selector: { entity: { integration: workday, domain: binary_sensor } }
+
+calendar:
+  business_day:
+    weekdays: [mon, tue, wed, thu, fri]
+    exclude_holidays: true
+    holiday_entity: "{{ options.workday_entity }}"
+
+energy_bands:
+  - name: höglast
+    months: [11, 12, 1, 2, 3]
+    days: business_day
+    hours: "07:00-20:00"
+    buy: { adder: "{{ options.hoglast_ore / 100 }}" }
+  - name: låglast
+    buy: { adder: "{{ options.laglast_ore / 100 }}" }
+
+demand_charge:
+  rate_per_kw: "{{ options.effekt_kr_per_kw }}"
+  rate_basis: month
+  window:
+    months: [11, 12, 1, 2, 3]
+    days: business_day
+    hours: "07:00-20:00"
+  measure:
+    interval: 60min
+    aggregate: mean_top_n
+    n: 3
+    distinct_days: true
+  period: month

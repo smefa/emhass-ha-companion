@@ -274,6 +274,26 @@ def resolve_settings(
     return render(hass, profile.emhass_settings, _variables(profile, options))
 
 
+def resolve_network(
+    hass: HomeAssistant, profile: Profile, options: dict[str, Any]
+) -> dict[str, Any]:
+    """Render a network profile's calendar/band/demand-charge blocks.
+
+    The whole document is rendered in one pass, the same way ``resolve_settings``
+    renders ``emhass:`` -- so a rate change is a template referencing ``options``,
+    never a reason to touch the YAML. ``network_calendar.NetworkCalendar`` is what
+    turns the rendered, still-loosely-typed result into something that can
+    actually be matched against a timestamp; this function only ever renders.
+    """
+    variables = _variables(profile, options)
+    return {
+        "calendar": render(hass, profile.calendar, variables),
+        "energy_bands": render(hass, profile.energy_bands, variables),
+        "demand_charge": render(hass, profile.demand_charge, variables),
+        "capacity_limit": render(hass, profile.capacity_limit, variables),
+    }
+
+
 # --- inverter actions --------------------------------------------------------
 
 

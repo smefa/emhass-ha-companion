@@ -73,12 +73,14 @@ from .models import (
     ceil_to_step,
     floor_to_step,
 )
+from .network_calendar import HolidayCache, NetworkCalendar, NetworkCalendarError
 from .payload import PayloadInputs, PayloadResult, build_payload
 from .profiles import (
     Profile,
     ProfileError,
     async_load_profiles,
     async_resolve_series,
+    resolve_network,
     resolve_settings,
 )
 from .smoothing import TimeWeightedAverage
@@ -174,6 +176,20 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         self.profiles: dict[str, Profile] = {}
         self.profile_errors: dict[str, str] = {}
         self.data = EmhassData()
+
+        # The selected network (grid operator tariff) profile, resolved once
+        # per profile/config reload rather than on every run: resolving it is
+        # template rendering, not I/O, but the result is read far more often
+        # (every band-sensor tick) than it changes. None when no network
+        # profile is configured, or when the one configured no longer resolves
+        # -- see _refresh_network_calendar.
+        self.network_calendar: NetworkCalendar | None = None
+        # Per-date red-day answers behind any `exclude_holidays` calendar,
+        # shared between the band sensor and the demand-window predicate a
+        # peak tracker is built against -- both need the same "is today a red
+        # day" fact, and re-resolving it twice would double the
+        # workday.check_date traffic for no benefit.
+        self.holiday_cache = HolidayCache()
 
         # Owned by the control switch and the mode select. Held here rather than
         # read back out of the state machine so the executor never has to parse
@@ -437,6 +453,28 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         result = await async_load_profiles(self.hass)
         self.profiles = result.profiles
         self.profile_errors = result.errors
+        self._refresh_network_calendar()
+
+    def _refresh_network_calendar(self) -> None:
+        """Recompute the resolved network profile after profiles or config change.
+
+        Synchronous: rendering a profile's calendar/band blocks is template
+        evaluation against ``options``, not I/O. Only the holiday lookups it
+        depends on are async, and those live in ``self.holiday_cache``,
+        refreshed separately on every run against whatever dates the horizon
+        actually needs -- see ``_build``.
+        """
+        selection = self.config.network
+        profile = self.profiles.get(selection.key) if selection.key else None
+        if profile is None:
+            self.network_calendar = None
+            return
+        try:
+            resolved = resolve_network(self.hass, profile, selection.options)
+            self.network_calendar = NetworkCalendar.from_resolved(resolved)
+        except (ProfileError, NetworkCalendarError) as err:
+            _LOGGER.warning("Network profile '%s' could not be resolved: %s", selection.key, err)
+            self.network_calendar = None
 
     async def async_load_ml_state(self) -> None:
         """Restore which sensor mlforecaster was last confirmed trained against."""
@@ -449,6 +487,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
 
     def reload_config(self) -> None:
         self.config = EmhassConfig.from_entry(self.hass, self.config_entry)
+        self._refresh_network_calendar()
 
     def load_forecast_settings(self) -> dict[str, Any]:
         """The ``emhass:`` settings the configured load profile contributes.
@@ -892,8 +931,22 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             outdoor = await self._series(config.temperature, PROFILE_KIND_TEMPERATURE)
 
         buy = sell = None
+        network_warnings: list[str] = []
         if spot:
             buy, sell = config.tariff.compose(self.hass, spot)
+            if self.network_calendar is not None and buy:
+                # Bands add the network operator's own energy-fee structure on
+                # top of the supplier tariff `Tariff.compose` just produced --
+                # same Series in, same Series out, so nothing downstream has to
+                # know a network profile exists. Holiday dates are resolved
+                # for exactly the dates this horizon touches (two or three,
+                # normally), not the whole calendar year.
+                dates = self.network_calendar.dates_in(buy)
+                entity_id = next(iter(self.network_calendar.holiday_entities()), None)
+                network_warnings = await self.holiday_cache.async_ensure(
+                    self.hass, entity_id, dates
+                )
+                buy, sell = self.network_calendar.apply_bands(buy, sell, self.holiday_cache)
 
         settings: dict[str, Any] = {}
         for selection, kind in (
@@ -995,7 +1048,10 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             cost_fun=self.cost_fun,
             extra_settings=settings,
         )
-        return inputs, build_payload(inputs)
+        built = build_payload(inputs)
+        if network_warnings:
+            built.warnings = [*network_warnings, *built.warnings]
+        return inputs, built
 
     # -- input gathering ------------------------------------------------------
 

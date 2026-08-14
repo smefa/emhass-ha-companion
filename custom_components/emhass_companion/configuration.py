@@ -25,6 +25,7 @@ from .const import (
     CONF_INVERTER,
     CONF_LOAD,
     CONF_MPC_INTERVAL,
+    CONF_NETWORK,
     CONF_PRICE,
     CONF_PROFILE,
     CONF_PROFILE_OPTIONS,
@@ -104,6 +105,11 @@ class EmhassConfig:
     inverter: ProfileSelection = field(default_factory=ProfileSelection)
     # Outdoor temperature forecast, consulted only once a thermal load exists.
     temperature: ProfileSelection = field(default_factory=ProfileSelection)
+    # The grid operator's own tariff structure -- energy bands and/or a demand
+    # charge -- layered on top of whatever `tariff` composes from the supplier's
+    # spot price. Optional: an entry with none selected behaves exactly as it
+    # did before this existed. See docs/network_tariffs_plan.md.
+    network: ProfileSelection = field(default_factory=ProfileSelection)
     tariff: Tariff = field(default_factory=lambda: Tariff.from_dict({}))
     battery: BatteryConfig = field(default_factory=BatteryConfig)
     grid: GridConfig = field(default_factory=GridConfig)
@@ -143,6 +149,7 @@ class EmhassConfig:
             load=load,
             inverter=ProfileSelection.from_dict(options.get(CONF_INVERTER)),
             temperature=ProfileSelection.from_dict(options.get(CONF_TEMPERATURE)),
+            network=ProfileSelection.from_dict(options.get(CONF_NETWORK)),
             tariff=Tariff.from_dict(options.get("tariff")),
             battery=BatteryConfig.from_dict(options.get("battery")),
             grid=GridConfig.from_dict(options.get("grid")),

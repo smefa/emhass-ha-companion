@@ -85,6 +85,32 @@ def test_profile_contributing_nothing_is_rejected():
         validate_document({"name": "X", "kind": "price", "version": 1})
 
 
+def test_network_profile_with_no_blocks_is_rejected():
+    """The fourth structural shape's own "contributes nothing" check.
+
+    A network profile has neither ``source`` nor ``emhass``, so it cannot hit
+    the check above at all -- it needs its own, in different language, or a
+    profile that forgot every one of ``energy_bands``/``demand_charge``/
+    ``capacity_limit`` would pass validation and silently do nothing.
+    """
+    with pytest.raises(ProfileError, match="contributes nothing"):
+        validate_document({"name": "X", "kind": "network", "version": 1})
+
+
+def test_network_profile_with_only_energy_bands_is_accepted():
+    document = validate_document(
+        {
+            "name": "X",
+            "kind": "network",
+            "version": 1,
+            "energy_bands": [{"name": "flat", "buy": {"adder": 0.1}}],
+        }
+    )
+    assert document["kind"] == "network"
+    assert "source" not in document
+    assert document["emhass"] == {}
+
+
 def test_source_missing_required_keys_is_rejected():
     with pytest.raises(ProfileError, match="requires"):
         validate_document(

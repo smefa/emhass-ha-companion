@@ -221,6 +221,7 @@
           "tariff": "Köp- och säljpriser",
           "inverter": "Växelriktarstyrning",
           "temperature": "Utetemperatur",
+          "network": "Nättariff",
           "metering": "Kostnad och besparing",
           "compatibility": "EMHASS entitetsnamn"
         }
@@ -375,6 +376,17 @@
         }
       },
       "temperature_options": {
+        "title": "Konfigurera {profile}",
+        "description": "{notes}"
+      },
+      "network": {
+        "title": "Nättariff",
+        "description": "Nätägarens egen tariffstruktur, ovanpå det som Köp- och säljpriser redan sätter samman: tidsdifferentierade energiavgifter och (bevakas ännu, men styr inget i planen) en effektavgift. Lämna tomt om nätavgiften är en fast avgift per kWh utan tidsstyrning eller effektkomponent -- då finns inget här att lägga till.\n\n{profiles}",
+        "data": {
+          "profile": "Nättariffprofil"
+        }
+      },
+      "network_options": {
         "title": "Konfigurera {profile}",
         "description": "{notes}"
       },
@@ -549,6 +561,15 @@
       },
       "forecast_savings_24h": {
         "name": "Prognos besparing 24 h"
+      },
+      "network_tariff_band": {
+        "name": "Nättariffskikt"
+      },
+      "period_peak": {
+        "name": "Effekttopp denna period"
+      },
+      "peak_headroom": {
+        "name": "Effektmarginal"
       }
     },
     "binary_sensor": {

@@ -33,6 +33,9 @@ from .configuration import EmhassConfig
 from .const import (
     BATTERY_ACTIONS,
     NET_HOUSE_LOAD_KEY,
+    NETWORK_TARIFF_BAND_KEY,
+    PEAK_HEADROOM_KEY,
+    PERIOD_PEAK_KEY,
     SAVINGS_FORECAST_HOURS,
     SAVINGS_KEY_BATTERY_TODAY,
     SAVINGS_KEY_COST_TODAY,
@@ -51,6 +54,8 @@ from .naming import (
     standard_names_enabled,
     standard_series_attribute,
 )
+from .network_calendar import HolidayCache, NetworkCalendar
+from .peaks import PeakTracker
 from .savings import Forecast, Ledger
 from .smoothing import TimeWeightedAverage
 from .surplus import current_block, total_energy_wh, window_of
@@ -330,6 +335,22 @@ async def async_setup_entry(
             SolarSurplusEndSensor(coordinator),
         ]
     )
+
+    # Only meaningful once a network profile with at least one band is
+    # actually selected -- available() already reports unavailable without
+    # one, but not creating the entity at all is better than a permanently
+    # unavailable one on every install that has never heard of this feature.
+    if coordinator.config.network and coordinator.network_calendar is not None:
+        async_add_entities([NetworkTariffBandSensor(coordinator)])
+
+    peak_tracker = entry.runtime_data.peak_tracker
+    if peak_tracker is not None:
+        async_add_entities(
+            [
+                PeriodPeakSensor(coordinator, peak_tracker),
+                PeakHeadroomSensor(coordinator, peak_tracker),
+            ]
+        )
 
     # Cost tracking is opt-in and degrades in steps rather than all at once:
     # without a grid meter there is no actual cost and so nothing to compare
@@ -973,6 +994,164 @@ class EmhassDecisionSensor(EmhassEntity, SensorEntity):
         if decision is not None:
             attributes.update(decision.as_attributes())
         return attributes
+
+
+class NetworkTariffBandSensor(EmhassEntity, SensorEntity):
+    """Which energy band of the configured network profile is in force now.
+
+    Unlike the plan-derived sensors above, this reads no plan at all -- a band
+    is a pure function of wall-clock time and the profile's own calendar, so it
+    changes on its own between optimisation runs (a weekday's high-load window
+    opening at 07:00, say). It still refreshes on the coordinator's clock tick
+    like every other ``EmhassEntity`` (see ``coordinator.async_start_clock``),
+    which is exactly the update cadence a value that can change with no new
+    data needs.
+    """
+
+    _attr_translation_key = NETWORK_TARIFF_BAND_KEY
+    _attr_device_class = SensorDeviceClass.ENUM
+
+    def __init__(self, coordinator: EmhassCoordinator) -> None:
+        super().__init__(coordinator, NETWORK_TARIFF_BAND_KEY)
+
+    @property
+    def _calendar(self) -> NetworkCalendar | None:
+        return self.coordinator.network_calendar
+
+    @property
+    def _holidays(self) -> HolidayCache:
+        return self.coordinator.holiday_cache
+
+    @property
+    def available(self) -> bool:
+        return self._calendar is not None and bool(self._calendar.bands)
+
+    @property
+    def options(self) -> list[str] | None:
+        calendar = self._calendar
+        return [band.name for band in calendar.bands] if calendar else None
+
+    @property
+    def native_value(self) -> str | None:
+        calendar = self._calendar
+        if calendar is None:
+            return None
+        band = calendar.current_band(dt_util.utcnow(), self._holidays)
+        return band.name if band else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        calendar = self._calendar
+        if calendar is None:
+            return None
+        now = dt_util.utcnow()
+        band = calendar.current_band(now, self._holidays)
+        attributes: dict[str, Any] = {
+            "adder": band.buy.adder if band else None,
+            "multiplier": band.buy.multiplier if band else None,
+        }
+        change = calendar.next_change(now, self._holidays)
+        if change is not None:
+            when, next_band = change
+            attributes["next_change"] = dt_util.as_local(when).isoformat()
+            attributes["next_band"] = next_band.name if next_band else None
+        if self._holidays.degraded:
+            attributes["holiday_lookup_degraded"] = True
+        return attributes
+
+
+class PeakSensorBase(EmhassEntity, SensorEntity):
+    """Shared plumbing for the demand-charge peak tracker's two sensors.
+
+    Subscribes to the tracker rather than to the coordinator, for the same
+    reason ``SavingsSensorBase`` does: a meter tick is not an optimisation,
+    and a peak that only updated once per solve would lag the real one by up
+    to an MPC interval.
+    """
+
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_native_unit_of_measurement = UnitOfPower.KILO_WATT
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 2
+
+    def __init__(self, coordinator: EmhassCoordinator, peak_tracker: PeakTracker, key: str) -> None:
+        super().__init__(coordinator, key)
+        self.peak_tracker = peak_tracker
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self.async_on_remove(self.peak_tracker.async_add_listener(self.async_write_ha_state))
+
+
+class PeriodPeakSensor(PeakSensorBase):
+    """The billed demand-charge aggregate so far this billing period."""
+
+    _attr_translation_key = PERIOD_PEAK_KEY
+
+    def __init__(self, coordinator: EmhassCoordinator, peak_tracker: PeakTracker) -> None:
+        super().__init__(coordinator, peak_tracker, PERIOD_PEAK_KEY)
+
+    @property
+    def native_value(self) -> float:
+        return round(self.peak_tracker.current_aggregate_kw, 3)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        tracker = self.peak_tracker
+        return {
+            "period": tracker.period_key,
+            "days_remaining": tracker.days_remaining,
+            "floor_kw": round(tracker.floor_kw, 3),
+            "contributing_intervals": [
+                {
+                    "start": dt_util.as_local(interval.start).isoformat(),
+                    "local_day": interval.local_day,
+                    "kw": round(interval.kw, 3),
+                }
+                for interval in tracker.contributing_intervals
+            ],
+        }
+
+
+class PeakHeadroomSensor(PeakSensorBase):
+    """How much more can be drawn right now before a new peak raises the bill.
+
+    The one sensor of this pair meant for automations more than for reading:
+    "hold the EV charger back" needs a live number, not the plan's own
+    quarter-hourly cadence. There is no metered live grid-import reading
+    anywhere in this integration, though (the tracker's own meter accumulates
+    energy, and calling its ``take()`` from here would double-count against
+    the tracker) -- so "current draw" is read off the plan's own ``p_grid`` at
+    ``now``, the same figure ``grid_forecast`` already publishes. That lags a
+    real load spike by up to an MPC interval, which is an approximation worth
+    stating rather than a claim of real-time accuracy.
+    """
+
+    _attr_translation_key = PEAK_HEADROOM_KEY
+
+    def __init__(self, coordinator: EmhassCoordinator, peak_tracker: PeakTracker) -> None:
+        super().__init__(coordinator, peak_tracker, PEAK_HEADROOM_KEY)
+
+    @property
+    def _current_draw_kw(self) -> float | None:
+        data = self.coordinator.data
+        row = data.plan.row_at(dt_util.utcnow()) if data.plan else None
+        if row is None or row.p_grid is None:
+            return None
+        # Export (negative p_grid) never eats into demand-charge headroom --
+        # the charge is on import power only.
+        return max(row.p_grid, 0.0) / 1000.0
+
+    @property
+    def available(self) -> bool:
+        return self._current_draw_kw is not None
+
+    @property
+    def native_value(self) -> float | None:
+        draw_kw = self._current_draw_kw
+        if draw_kw is None:
+            return None
+        return round(self.peak_tracker.headroom_kw(draw_kw), 3)
 
 
 # --- Cost and savings ---------------------------------------------------------

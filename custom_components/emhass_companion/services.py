@@ -17,8 +17,9 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.util import dt as dt_util
 import voluptuous as vol
 
-from .const import ACTION_DAYAHEAD, ACTION_MPC, DOMAIN
-from .profiles import ProfileError, async_resolve_series, resolve_settings
+from .const import ACTION_DAYAHEAD, ACTION_MPC, DOMAIN, PROFILE_KIND_NETWORK
+from .network_calendar import HolidayCache, NetworkCalendar, NetworkCalendarError
+from .profiles import ProfileError, async_resolve_series, resolve_network, resolve_settings
 from .profiles.schema import humanize_error
 from .typical_load import typical_day_records
 
@@ -137,6 +138,38 @@ def async_register_services(hass: HomeAssistant) -> None:
             "is_builtin": profile.is_builtin,
             "options_used": options,
         }
+
+        if profile.kind == PROFILE_KIND_NETWORK:
+            # A network profile fetches nothing and delegates nothing to
+            # EMHASS -- it has no ``emhass:`` settings worth reporting and no
+            # series to resolve, so the generic branches below (written for
+            # every other kind) would report "contributes nothing" for a
+            # profile that in fact defines bands and a demand charge. The
+            # useful diagnostic here is what actually matches *now*.
+            try:
+                resolved = resolve_network(hass, profile, options)
+                calendar = NetworkCalendar.from_resolved(resolved)
+            except (ProfileError, NetworkCalendarError) as err:
+                result["error"] = str(err)
+                return result
+            now = dt_util.utcnow()
+            holidays = HolidayCache()
+            if entity_id := next(iter(calendar.holiday_entities()), None):
+                await holidays.async_ensure(hass, entity_id, {dt_util.as_local(now).date()})
+            band = calendar.current_band(now, holidays)
+            result.update(
+                {
+                    "bands": [b.name for b in calendar.bands],
+                    "current_band": band.name if band else None,
+                    "current_adjustment": (
+                        {"multiplier": band.buy.multiplier, "adder": band.buy.adder}
+                        if band
+                        else None
+                    ),
+                    "has_demand_charge": calendar.demand_charge is not None,
+                }
+            )
+            return result
 
         try:
             settings = resolve_settings(hass, profile, options)
