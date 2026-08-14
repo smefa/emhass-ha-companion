@@ -460,7 +460,10 @@ class NetworkCalendar:
             else None
         )
         return cls(
-            calendars=calendars, bands=bands, demand_charge=demand_charge, capacity_limit=capacity_limit
+            calendars=calendars,
+            bands=bands,
+            demand_charge=demand_charge,
+            capacity_limit=capacity_limit,
         )
 
     # -- holiday plumbing -------------------------------------------------------

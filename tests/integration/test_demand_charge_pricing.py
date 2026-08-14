@@ -257,7 +257,9 @@ async def test_build_sends_an_explicit_capacity_limit_array(hass: HomeAssistant)
     assert isinstance(built.payload["maximum_power_from_grid"], list)
 
 
-async def test_capacity_limit_does_not_apply_below_the_min_emhass_version(hass: HomeAssistant) -> None:
+async def test_capacity_limit_does_not_apply_below_the_min_emhass_version(
+    hass: HomeAssistant,
+) -> None:
     coordinator = _coordinator(hass)
     window = Window.from_dict({"hours": "15:00-20:00"}, {})
     coordinator.network_calendar = NetworkCalendar(

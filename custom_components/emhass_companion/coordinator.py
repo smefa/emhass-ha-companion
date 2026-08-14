@@ -1147,7 +1147,10 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             self.backend_version, MIN_EMHASS_VERSION_DEMAND_CHARGE
         )
         if array_capable and calendar is not None:
-            if calendar.capacity_limit is not None and calendar.capacity_limit.ceiling_kw is not None:
+            if (
+                calendar.capacity_limit is not None
+                and calendar.capacity_limit.ceiling_kw is not None
+            ):
                 # An explicit subscribed-tier ceiling, independent of whether
                 # the demand charge itself can be priced.
                 capacity_limit_w = calendar.capacity_limit.ceiling_kw * 1000

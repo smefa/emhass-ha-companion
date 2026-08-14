@@ -14,9 +14,9 @@ from datetime import datetime
 
 from homeassistant.core import HomeAssistant
 
+from custom_components.emhass_companion.network_calendar import NetworkCalendar
 from custom_components.emhass_companion.profiles import _load_profiles
 from custom_components.emhass_companion.profiles.engine import resolve_network
-from custom_components.emhass_companion.network_calendar import NetworkCalendar
 
 
 def _amber_profile(tmp_path):

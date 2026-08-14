@@ -830,7 +830,9 @@ def test_capacity_limit_only_lowers_timesteps_inside_its_window():
 
 
 def test_capacity_limit_array_length_matches_horizon_steps_on_mpc():
-    result = build_payload(_inputs(capacity_limit_w=4000.0, capacity_limit_window=lambda when: True))
+    result = build_payload(
+        _inputs(capacity_limit_w=4000.0, capacity_limit_window=lambda when: True)
+    )
     assert len(result.payload["maximum_power_from_grid"]) == DAY_STEPS
 
 
@@ -846,7 +848,9 @@ def test_capacity_limit_array_length_is_whole_days_on_dayahead():
             capacity_limit_window=lambda when: True,
         )
     )
-    assert len(result.payload["maximum_power_from_grid"]) == DAY_STEPS  # one whole day, 30-min steps
+    assert (
+        len(result.payload["maximum_power_from_grid"]) == DAY_STEPS
+    )  # one whole day, 30-min steps
 
 
 def test_capacity_limit_is_floored_at_its_own_timesteps_forecast_load():
