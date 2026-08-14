@@ -9,6 +9,7 @@ never drift away from what Home Assistant believes.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, time, timedelta
 import logging
@@ -345,6 +346,38 @@ class PayloadInputs:
     mix_beta: float = 0.5
     cost_fun: str = DEFAULT_COST_FUN
     extra_settings: dict[str, Any] = field(default_factory=dict)
+    network_demand_charge_configured: bool = False
+    """Whether the selected network profile defines a ``demand_charge`` at
+    all -- set independently of whether it can currently be priced, so that a
+    windowed tariff on a backend without the window mask still zeroes
+    ``capacity_cost_per_kw`` here rather than falling back to the unrelated
+    manual number (see coordinator.demand_charge_pricing)."""
+    demand_charge_rate_per_kw: float | None = None
+    """The effective ``capacity_cost_per_kw`` -- already converted from the
+    tariff sheet's rate by ``peaks.effective_rate_per_kw`` -- or None when the
+    network profile's demand charge cannot be safely priced right now
+    (backend too old, or a real window on a backend with no window mask)."""
+    current_period_peak_w: float | None = None
+    """``PeakTracker.floor_kw`` in watts, MPC only -- see
+    docs/network_tariffs_plan.md, "The incurred-peak floor"."""
+    capacity_limit_w: float | None = None
+    """An explicit ``capacity_limit:`` block's ceiling
+    (``subscribed_kw - headroom_kw``, in watts). None when the profile
+    defines none. Composes with (can only lower) the scalar import limit
+    inside ``capacity_limit_window`` -- see docs/network_tariffs_plan.md,
+    "Mechanism 3"."""
+    capacity_limit_window: Callable[[datetime], bool] | None = None
+    """Predicate for :attr:`capacity_limit_w`'s own window. Always set
+    together with it."""
+    demand_fallback_ceiling_w: float | None = None
+    """``number.*_peak_target`` in watts -- the ceiling enforced, inside the
+    demand charge's own window, whenever ``network_demand_charge_configured``
+    is true but :attr:`demand_charge_rate_per_kw` is None (the peak cannot be
+    safely priced right now). This is the v0.18.0 fallback: a windowed demand
+    charge enforced as a ceiling rather than a price."""
+    demand_window: Callable[[datetime], bool] | None = None
+    """Predicate for the demand charge's own window, consulted only when
+    :attr:`demand_fallback_ceiling_w` is in effect."""
 
 
 @dataclass(slots=True)
@@ -388,6 +421,59 @@ def resolve_grid_limit(
     if live_w is None:
         return math.floor(ceiling_w)
     return math.floor(min(ceiling_w, max(live_w, min(floor_w, ceiling_w))))
+
+
+def build_capacity_limit_array(
+    *,
+    grid_scalar_w: int,
+    ceilings: Sequence[tuple[Callable[[datetime], bool], float]],
+    grid_start: datetime,
+    step: timedelta,
+    count: int,
+    load: Series | None,
+) -> tuple[list[int], list[str]]:
+    """The per-timestep import ceiling a network profile's ``capacity_limit``
+    and/or demand-window fallback impose.
+
+    Every element starts at ``grid_scalar_w`` -- the ordinary scalar limit,
+    itself already the tighter of the connection rating, a live sensor
+    reading and the horizon's forecast peak (see ``resolve_grid_limit``) --
+    and is lowered further by whichever of ``ceilings`` windows covers that
+    timestep. Composition can therefore only ever lower the scalar, never
+    raise it, keeping grid_limits.md's rule intact across every source.
+
+    Each timestep a ceiling applies to is then floored at *that timestep's
+    own* forecast load, not the horizon's peak: a per-timestep cap that dips
+    below one hour's own forecast draw makes the whole run infeasible, and
+    EMHASS answers infeasible for the entire problem, not for that hour. See
+    docs/network_tariffs_plan.md, "Mechanism 3".
+    """
+    values: list[int] = []
+    raised_at: list[datetime] = []
+    for index in range(count):
+        start = grid_start + step * index
+        limit = float(grid_scalar_w)
+        active = False
+        for in_window, ceiling_w in ceilings:
+            if in_window(start):
+                active = True
+                limit = min(limit, ceiling_w)
+        if active:
+            floor_w = (load.value_at(start) or 0.0) if load else 0.0
+            if floor_w > limit:
+                raised_at.append(start)
+                limit = floor_w
+        values.append(math.floor(limit))
+    warnings: list[str] = []
+    if raised_at:
+        warnings.append(
+            f"The network tariff's capacity limit had to be raised above its target at "
+            f"{len(raised_at)} timestep(s), between "
+            f"{dt_util.as_local(raised_at[0]):%Y-%m-%d %H:%M} and "
+            f"{dt_util.as_local(raised_at[-1]):%Y-%m-%d %H:%M}, to stay above the forecast load -- "
+            "a plan cannot be built below what the house is expected to draw."
+        )
+    return values, warnings
 
 
 def _import_floor_w(inputs: PayloadInputs, horizon_end: datetime) -> float:
@@ -434,9 +520,17 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
         # Counted in timesteps, not hours -- a frequent source of horizons that
         # are wrong by a factor of two.
         payload["prediction_horizon"] = inputs.horizon_steps
+        # A per-timestep array (maximum_power_from_grid as a list, below) must
+        # be exactly this long on MPC -- see _prepare_power_limit_array's
+        # silent collapse-to-first-element failure mode.
+        capacity_array_steps = inputs.horizon_steps
     else:
         hours = inputs.horizon_steps * inputs.time_step_minutes / 60
-        payload["delta_forecast_daily"] = max(1, math.ceil(hours / 24))
+        delta_forecast_daily = max(1, math.ceil(hours / 24))
+        payload["delta_forecast_daily"] = delta_forecast_daily
+        # Day-ahead's own array length is whole days' worth of timesteps, not
+        # horizon_steps -- see docs/network_tariffs_plan.md, "Mechanism 3".
+        capacity_array_steps = delta_forecast_daily * (24 * 60 // inputs.time_step_minutes)
 
     # -- inputs ---------------------------------------------------------------
     # Supplying a forecast key makes EMHASS switch that forecast's method to
@@ -552,9 +646,37 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
     payload.update(_battery_settings(inputs.battery))
     payload.update(_hybrid_inverter_settings(inputs.hybrid_inverter))
     import_floor = _import_floor_w(inputs, horizon_end)
-    payload["maximum_power_from_grid"] = resolve_grid_limit(
+    import_scalar_w = resolve_grid_limit(
         inputs.grid_import_limit_w, inputs.grid.import_max_w, import_floor
     )
+    # A network profile's capacity_limit and/or demand-window fallback turn
+    # the scalar above into a per-timestep list -- only where either actually
+    # applies, so the common case (no network profile, or one with no
+    # capacity concern) keeps sending the plain scalar every other test here
+    # expects.
+    capacity_ceilings: list[tuple[Callable[[datetime], bool], float]] = []
+    if inputs.capacity_limit_w is not None and inputs.capacity_limit_window is not None:
+        capacity_ceilings.append((inputs.capacity_limit_window, inputs.capacity_limit_w))
+    if (
+        inputs.network_demand_charge_configured
+        and inputs.demand_charge_rate_per_kw is None
+        and inputs.demand_fallback_ceiling_w is not None
+        and inputs.demand_window is not None
+    ):
+        capacity_ceilings.append((inputs.demand_window, inputs.demand_fallback_ceiling_w))
+    if capacity_ceilings:
+        capacity_array, capacity_warnings = build_capacity_limit_array(
+            grid_scalar_w=import_scalar_w,
+            ceilings=capacity_ceilings,
+            grid_start=floor_to_step(inputs.now, step),
+            step=step,
+            count=capacity_array_steps,
+            load=inputs.load,
+        )
+        payload["maximum_power_from_grid"] = capacity_array
+        warnings.extend(capacity_warnings)
+    else:
+        payload["maximum_power_from_grid"] = import_scalar_w
     # Export gets the same override with no floor of its own: nothing has to
     # leave the property the way the house load has to be served, so a low
     # limit only costs revenue -- except with EMHASS's own curtailment off,
@@ -578,7 +700,27 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
     # than from _battery_settings: EMHASS prices it off the grid variable, so
     # it must keep working for a plant with no battery at all, and that helper
     # returns early when the battery is off.
-    payload["capacity_cost_per_kw"] = inputs.grid.capacity_cost_per_kw
+    #
+    # A network profile's demand charge, once configured, owns this entirely
+    # -- it never falls back to the plain manual number below, because that
+    # number carries none of the window/memory reasoning the profile does,
+    # and mixing the two would silently reintroduce the "too broad" bug
+    # docs/network_tariffs_plan.md describes. current_period_peak is the
+    # memory half of the same mechanism, and only means anything to EMHASS on
+    # naive-mpc-optim.
+    if inputs.network_demand_charge_configured:
+        if inputs.action == ACTION_MPC and inputs.demand_charge_rate_per_kw is not None:
+            payload["capacity_cost_per_kw"] = round(inputs.demand_charge_rate_per_kw, 4)
+            if inputs.current_period_peak_w is not None:
+                payload["current_period_peak"] = round(inputs.current_period_peak_w)
+        else:
+            # Day-ahead, or the peak cannot be safely priced yet (see
+            # coordinator.demand_charge_pricing): zero rather than the stale
+            # manual number, which EMHASS would otherwise price across the
+            # whole horizon with no window and no memory.
+            payload["capacity_cost_per_kw"] = 0.0
+    else:
+        payload["capacity_cost_per_kw"] = inputs.grid.capacity_cost_per_kw
     # EMHASS's own PV curtailment, a plant_conf parameter reachable through
     # runtimeparams via its associations.csv. With it off there is no
     # `P_PV_curtailment` column at all, so strategy.decide_curtailment's

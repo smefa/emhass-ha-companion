@@ -1,6 +1,13 @@
 # Network tariffs (planned)
 
-*Status: planned. Nothing here is implemented.*
+*Status: phases 1-4 and 6 (energy bands, the peak tracker, the priced peak,
+the windowed hard cap, and docs — [network_tariffs.md](network_tariffs.md),
+[guide/network_tariffs.md](guide/network_tariffs.md), the Amber profile, the
+savings-gap note) are implemented on `dev`. Phase 5 (the window mask) is
+blocked upstream — EMHASS's `master` has it, but it has not reached a release
+yet, so there is no version number to gate on. See
+[Version gating](network_tariffs.md#version-gating) for the fallback this
+runs on in the meantime.*
 
 *Backend requirement: mixed, and the mix is the single most important
 constraint on this design. Of the three EMHASS runtime parameters this

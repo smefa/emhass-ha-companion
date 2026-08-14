@@ -11,7 +11,7 @@ custom_components/emhass_companion/profiles/builtin/<kind>/   shipped
 <config>/emhass_companion/profiles/<kind>/                    yours
 ```
 
-`<kind>` is `price`, `pv`, `load` or `inverter`.
+`<kind>` is `price`, `pv`, `load`, `temperature`, `inverter` or `network`.
 
 Your directory is outside the integration, so **HACS updates never delete your files**. A file whose name matches a built-in *replaces* it — which means you can patch a broken built-in locally instead of waiting for a release.
 
@@ -21,7 +21,7 @@ Reload the integration after adding or editing a profile.
 
 ```yaml
 name: Human readable name        # shown during setup
-kind: price                      # price | pv | load | inverter
+kind: price                      # price | pv | load | temperature | inverter | network
 version: 1                       # profile schema version
 description: One line, shown when choosing a source.
 ```
@@ -211,6 +211,46 @@ Action templates get `{{ power }}` (converted to the unit the profile declares),
 > self-contained file covering the `control:` block, the unit conversions, the
 > command-lifetime rules and a worked example per control model. It is a valid
 > profile as it stands, and a test keeps it that way.
+
+## `network` profiles
+
+A fourth structural shape, alongside a source profile (`source`/`emhass`) and
+an `inverter` profile (`sensors`/`limits`/`actions`): a `network` profile
+fetches nothing and delegates nothing. It describes a grid operator's
+tariff calendar instead — time-of-day energy fees and a demand (capacity)
+charge — as at least one of `energy_bands`, `demand_charge` or
+`capacity_limit`. A profile defining none of the three is rejected the same
+way a source profile with neither `source` nor `emhass` is.
+
+```yaml
+name: Example network operator
+kind: network
+version: 1
+calendar:
+  business_day:
+    weekdays: [mon, tue, wed, thu, fri]
+    exclude_holidays: true
+    holiday_entity: "{{ options.workday_entity }}"
+energy_bands:
+  - name: high load
+    months: [11, 12, 1, 2, 3]
+    days: business_day
+    hours: "07:00-20:00"
+    buy: {adder: "{{ options.high_load_fee }}"}
+  - name: low load
+    buy: {adder: "{{ options.low_load_fee }}"}
+demand_charge:
+  rate_per_kw: "{{ options.demand_rate }}"
+  rate_basis: month          # month | day -- how the sheet rate is quoted
+  window: {months: [11, 12, 1, 2, 3], days: business_day, hours: "07:00-20:00"}
+  measure: {interval: 60min, aggregate: mean_top_n, n: 3, distinct_days: true}
+  period: month
+```
+
+See [Network tariffs](network_tariffs.md) for what each block does once
+resolved — the calendar semantics, how a sheet rate is converted to what
+EMHASS is actually sent, and the built-in Göteborg Energi and Amber Electric
+profiles as worked examples.
 
 ## Testing a profile
 

@@ -54,6 +54,7 @@ nav:
       - Surplus loads: guide/surplus_loads.md
       - Inverter control: guide/inverter_control.md
       - Hub controls: guide/hub_controls.md
+      - Network tariffs: guide/network_tariffs.md
       - Dashboard cards: guide/dashboard_cards.md
   - Technical reference:
       - Setup: setup.md
@@ -73,6 +74,7 @@ nav:
       - Fronius GEN24 scripts: fronius_gen24_scripts.md
       - Data sources: data_sources.md
       - Dynamic grid limits: grid_limits.md
+      - Network tariffs: network_tariffs.md
       - Template additions: template_additions.md
       - Writing a profile: profiles.md
       - Inverter profile roadmap: inverter_profile_roadmap.md

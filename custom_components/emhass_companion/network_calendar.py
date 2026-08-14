@@ -190,6 +190,16 @@ class Window:
             return False
         return not (self.hours is not None and not self.hours.contains(local_when.time()))
 
+    @property
+    def is_unrestricted(self) -> bool:
+        """Whether this window matches every instant -- no month, day or hour
+        restriction at all. What ``mechanism 2``'s v0.18.0 fallback checks
+        before pricing a peak with no window mask to restrict it: a demand
+        charge whose own window is already "all the time" needs no mask to be
+        priced correctly, since EMHASS's unmasked epigraph *is* that window.
+        """
+        return self.months is None and self.days is None and self.hours is None
+
 
 # --- energy bands ---------------------------------------------------------------
 
@@ -220,7 +230,7 @@ def _parse_bands(raw_bands: list[Any], calendars: dict[str, DateSet]) -> list[Ba
     return bands
 
 
-# --- demand charge (consulted by peaks.py, not acted on before phase 3) -------
+# --- demand charge (consulted by peaks.py and payload.py) --------------------
 
 
 @dataclass(slots=True)
@@ -277,6 +287,66 @@ class DemandCharge:
             rate_per_kw=rate,
             rate_basis=str(data.get("rate_basis") or "month"),
         )
+
+
+# --- capacity limit (consulted by payload.py) --------------------------------
+
+
+@dataclass(slots=True)
+class CapacityLimit:
+    """A ``capacity_limit:`` block: an optional hard ceiling on grid import.
+
+    Distinct from ``demand_charge`` even though both describe a window and a
+    kW figure: this one is a subscribed capacity tier a household is
+    contractually inside, priced or not, while the demand charge is what
+    *sets* the number worth protecting. The two are allowed to share a window
+    -- ``window: same_as_demand_charge`` -- because a subscribed tier is
+    usually the same high-load period the demand charge bills against, but
+    nothing requires it.
+    """
+
+    subscribed_kw: float | None
+    window: Window | None
+    headroom_kw: float
+
+    @classmethod
+    def from_dict(
+        cls,
+        data: dict[str, Any],
+        calendars: dict[str, DateSet],
+        demand_window: Window | None,
+    ) -> CapacityLimit:
+        if not isinstance(data, dict):
+            raise NetworkCalendarError(f"capacity_limit must be a mapping, got {data!r}")
+        subscribed_raw = data.get("subscribed_kw")
+        try:
+            subscribed_kw = float(subscribed_raw) if subscribed_raw not in (None, "") else None
+        except (TypeError, ValueError) as err:
+            raise NetworkCalendarError(
+                f"Invalid capacity_limit.subscribed_kw {subscribed_raw!r}: {err}"
+            ) from err
+        window_raw = data.get("window")
+        if window_raw in (None, "same_as_demand_charge"):
+            window = demand_window
+        else:
+            window = Window.from_dict(window_raw, calendars)
+        try:
+            headroom_kw = float(data.get("headroom_kw") or 0.0)
+        except (TypeError, ValueError) as err:
+            raise NetworkCalendarError(
+                f"Invalid capacity_limit.headroom_kw {data.get('headroom_kw')!r}: {err}"
+            ) from err
+        return cls(subscribed_kw=subscribed_kw, window=window, headroom_kw=headroom_kw)
+
+    @property
+    def ceiling_kw(self) -> float | None:
+        """``subscribed_kw - headroom_kw``, or ``None`` with no tier set at
+        all -- a profile may define ``capacity_limit:`` for its window alone
+        (shared by the demand-charge fallback) with no hard ceiling of its
+        own."""
+        if self.subscribed_kw is None:
+            return None
+        return max(0.0, self.subscribed_kw - self.headroom_kw)
 
 
 # --- the resolved calendar --------------------------------------------------
@@ -369,6 +439,7 @@ class NetworkCalendar:
     calendars: dict[str, DateSet] = field(default_factory=dict)
     bands: list[Band] = field(default_factory=list)
     demand_charge: DemandCharge | None = None
+    capacity_limit: CapacityLimit | None = None
 
     @classmethod
     def from_resolved(cls, resolved: dict[str, Any]) -> NetworkCalendar:
@@ -380,7 +451,17 @@ class NetworkCalendar:
         bands = _parse_bands(resolved.get("energy_bands") or [], calendars)
         demand_raw = resolved.get("demand_charge") or {}
         demand_charge = DemandCharge.from_dict(demand_raw, calendars) if demand_raw else None
-        return cls(calendars=calendars, bands=bands, demand_charge=demand_charge)
+        capacity_raw = resolved.get("capacity_limit") or {}
+        capacity_limit = (
+            CapacityLimit.from_dict(
+                capacity_raw, calendars, demand_charge.window if demand_charge else None
+            )
+            if capacity_raw
+            else None
+        )
+        return cls(
+            calendars=calendars, bands=bands, demand_charge=demand_charge, capacity_limit=capacity_limit
+        )
 
     # -- holiday plumbing -------------------------------------------------------
 
@@ -447,10 +528,7 @@ class NetworkCalendar:
         unconditional band) and when the next change is further out than the
         search window; either way, the sensor simply omits the attribute.
         """
-        if len(self.bands) <= 1 and all(
-            band.window.months is None and band.window.days is None and band.window.hours is None
-            for band in self.bands
-        ):
+        if len(self.bands) <= 1 and all(band.window.is_unrestricted for band in self.bands):
             return None
 
         current = self.current_band(now, holidays)
@@ -480,6 +558,19 @@ class NetworkCalendar:
         if self.demand_charge is None or self.demand_charge.window is None:
             return True
         return self.demand_charge.window.matches(
+            dt_util.as_local(when), is_holiday=holidays.get(dt_util.as_local(when).date())
+        )
+
+    def in_capacity_window(self, when: datetime, holidays: HolidayCache) -> bool:
+        """Whether ``when`` falls inside the configured ``capacity_limit`` window.
+
+        ``True`` with no ``capacity_limit:`` block, or one with no window of
+        its own -- same "no restriction configured" reading as
+        :meth:`in_demand_window`.
+        """
+        if self.capacity_limit is None or self.capacity_limit.window is None:
+            return True
+        return self.capacity_limit.window.matches(
             dt_util.as_local(when), is_holiday=holidays.get(dt_util.as_local(when).date())
         )
 

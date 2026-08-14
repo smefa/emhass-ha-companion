@@ -570,6 +570,9 @@
       },
       "peak_headroom": {
         "name": "Effektmarginal"
+      },
+      "demand_charge_rate": {
+        "name": "Effektavgift"
       }
     },
     "binary_sensor": {
@@ -694,6 +697,9 @@
       },
       "mix_beta": {
         "name": "Live-värdets vikt"
+      },
+      "peak_target": {
+        "name": "Effekttak"
       },
       "energy_needed": {
         "name": "14. Energi som behövs"

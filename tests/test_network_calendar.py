@@ -138,6 +138,17 @@ def test_window_with_no_fields_matches_everything():
     assert window.matches(datetime(2026, 6, 15, 3, 0), is_holiday=True)
 
 
+def test_window_with_no_fields_is_unrestricted():
+    assert Window.from_dict({}, {}).is_unrestricted
+
+
+def test_window_with_any_field_is_not_unrestricted():
+    assert not Window.from_dict({"months": [1, 2]}, {}).is_unrestricted
+    assert not Window.from_dict({"hours": "07:00-20:00"}, {}).is_unrestricted
+    calendars = {"business_day": DateSet.from_dict({})}
+    assert not Window.from_dict({"days": "business_day"}, calendars).is_unrestricted
+
+
 # --- NetworkCalendar: band matching --------------------------------------------
 
 
@@ -271,6 +282,76 @@ def test_in_demand_window_respects_the_window():
 def test_unknown_aggregate_raises():
     with pytest.raises(NetworkCalendarError, match="Unknown measure\\.aggregate"):
         NetworkCalendar.from_resolved({"demand_charge": {"measure": {"aggregate": "banana"}}})
+
+
+# --- capacity limit ------------------------------------------------------------
+
+
+def test_capacity_limit_defaults_window_to_demand_charge():
+    resolved = {
+        **GOTEBORG_RESOLVED,
+        "capacity_limit": {"subscribed_kw": 10, "headroom_kw": 0.5},
+    }
+    calendar = NetworkCalendar.from_resolved(resolved)
+    assert calendar.capacity_limit is not None
+    assert calendar.capacity_limit.ceiling_kw == 9.5
+    assert calendar.capacity_limit.window is calendar.demand_charge.window
+
+
+def test_capacity_limit_same_as_demand_charge_is_the_explicit_default_too():
+    resolved = {
+        **GOTEBORG_RESOLVED,
+        "capacity_limit": {"subscribed_kw": 10, "window": "same_as_demand_charge"},
+    }
+    calendar = NetworkCalendar.from_resolved(resolved)
+    assert calendar.capacity_limit.window is calendar.demand_charge.window
+
+
+def test_capacity_limit_headroom_defaults_to_zero():
+    resolved = {**GOTEBORG_RESOLVED, "capacity_limit": {"subscribed_kw": 10}}
+    calendar = NetworkCalendar.from_resolved(resolved)
+    assert calendar.capacity_limit.ceiling_kw == 10
+
+
+def test_capacity_limit_with_no_subscribed_kw_has_no_ceiling():
+    """A profile may set only a window (for the demand-charge fallback to
+    share) with no hard tier of its own."""
+    resolved = {**GOTEBORG_RESOLVED, "capacity_limit": {"window": "same_as_demand_charge"}}
+    calendar = NetworkCalendar.from_resolved(resolved)
+    assert calendar.capacity_limit.ceiling_kw is None
+
+
+def test_capacity_limit_invalid_subscribed_kw_raises():
+    with pytest.raises(NetworkCalendarError, match="subscribed_kw"):
+        NetworkCalendar.from_resolved(
+            {**GOTEBORG_RESOLVED, "capacity_limit": {"subscribed_kw": "banana"}}
+        )
+
+
+def test_in_capacity_window_true_with_no_capacity_limit_configured():
+    calendar = NetworkCalendar.from_resolved(GOTEBORG_RESOLVED)
+    assert calendar.in_capacity_window(_local(2026, 7, 1, 3, 0), HolidayCache())
+
+
+def test_in_capacity_window_inherits_the_demand_charge_window_by_default():
+    resolved = {**GOTEBORG_RESOLVED, "capacity_limit": {"subscribed_kw": 10}}
+    calendar = NetworkCalendar.from_resolved(resolved)
+    holidays = HolidayCache()
+    assert calendar.in_capacity_window(_local(2026, 1, 14, 11, 0), holidays)
+    assert not calendar.in_capacity_window(_local(2026, 1, 14, 21, 0), holidays)
+
+
+def test_capacity_limit_own_window_overrides_same_as_demand_charge():
+    resolved = {
+        **GOTEBORG_RESOLVED,
+        "capacity_limit": {"subscribed_kw": 10, "window": {"hours": "15:00-20:00"}},
+    }
+    calendar = NetworkCalendar.from_resolved(resolved)
+    holidays = HolidayCache()
+    # The demand charge's own window is 07:00-20:00 (winter weekdays); the
+    # capacity limit's own 15:00-20:00 window must not inherit it.
+    assert calendar.in_demand_window(_local(2026, 1, 14, 8, 0), holidays)
+    assert not calendar.in_capacity_window(_local(2026, 1, 14, 8, 0), holidays)
 
 
 # --- HolidayCache ------------------------------------------------------------

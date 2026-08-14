@@ -40,9 +40,20 @@ in place of the fixed number on every run.
   limit below your peak surplus makes the problem infeasible. Turn curtailment
   on if you're going to constrain export.
 
-Both limits are single values per run, not per timestep — that is all EMHASS
-accepts. A day-ahead run therefore applies one instant's reading across the
-whole horizon. See [Smoothing](#smoothing) below.
+Both limits sent from the grid step and the sensors above are single values
+per run, applied to every timestep alike — a day-ahead run therefore applies
+one instant's reading across the whole horizon. See [Smoothing](#smoothing)
+below.
+
+That is not, however, "all EMHASS accepts": `maximum_power_from_grid` also
+takes a per-timestep list, and this integration sends one when a network
+tariff's `capacity_limit` (or its windowed-demand-charge fallback) is
+configured — see
+[Network tariffs, "The windowed hard cap"](network_tariffs.md#the-windowed-hard-cap).
+When it does, the scalar described above still sets the ceiling for every
+timestep *outside* that window; the array only ever lowers timesteps inside
+it, never raises anything past what the grid step and the sensors already
+allow.
 
 ## Three-phase imbalance
 

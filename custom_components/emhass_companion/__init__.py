@@ -149,6 +149,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
         )
 
     coordinator = EmhassCoordinator(hass, entry, client, loads)
+    # Already probed above for _check_version; reused here so the demand
+    # charge's own version gate (demand_charge_pricing) never has to ask
+    # EMHASS again just to find out what it already knows.
+    coordinator.backend_version = version
     await coordinator.async_load_profiles()
     await coordinator.async_load_ml_state()
     _report_profile_errors(hass, coordinator)
@@ -178,6 +182,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
     # the savings tracker, before the platforms are forwarded, so the period
     # and peak sensors read a restored record on their very first render.
     peak_tracker = _build_peak_tracker(hass, entry, coordinator)
+    coordinator.peak_tracker = peak_tracker
     if peak_tracker is not None:
         await peak_tracker.async_load()
 

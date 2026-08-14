@@ -172,5 +172,12 @@ saving invents one), and moving a load also changes what the battery does, so
 the component would not add cleanly to the other two. Left out rather than
 shipped as a number that cannot be defended.
 
-**Capacity and demand charges.** Realising these needs your network operator's
-own peak window and billing period. Out of scope.
+**Capacity and demand charges.** A [network tariff profile](network_tariffs.md)
+tracks and prices these, but this page still doesn't. Everything above prices
+energy per kWh; a demand charge is billed on a peak *power*, once a period,
+which does not decompose into a daily figure the way an energy cost does — so
+the daily cost sensor understates a bill that has one, and neither the "what
+the plan saved" comparison nor the forecast credits demand-charge shaving at
+all. The [period peak and peak headroom sensors](network_tariffs.md#entities)
+report the demand-charge side directly; they are just not folded into the
+number on this page.

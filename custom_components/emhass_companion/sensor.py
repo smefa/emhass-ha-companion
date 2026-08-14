@@ -32,6 +32,7 @@ from homeassistant.util import dt as dt_util
 from .configuration import EmhassConfig
 from .const import (
     BATTERY_ACTIONS,
+    DEMAND_CHARGE_RATE_KEY,
     NET_HOUSE_LOAD_KEY,
     NETWORK_TARIFF_BAND_KEY,
     PEAK_HEADROOM_KEY,
@@ -44,7 +45,7 @@ from .const import (
     SAVINGS_KEY_SAVINGS_TODAY,
     SAVINGS_KEY_SOLAR_TODAY,
 )
-from .coordinator import EmhassCoordinator, EmhassData
+from .coordinator import DemandChargePricing, EmhassCoordinator, EmhassData
 from .deferrable import DeferrableRuntime, state_to_watts
 from .entity import EmhassEntity, EmhassLoadEntity
 from .metering import SavingsTracker
@@ -342,6 +343,8 @@ async def async_setup_entry(
     # unavailable one on every install that has never heard of this feature.
     if coordinator.config.network and coordinator.network_calendar is not None:
         async_add_entities([NetworkTariffBandSensor(coordinator)])
+        if coordinator.network_calendar.demand_charge is not None:
+            async_add_entities([DemandChargeRateSensor(coordinator)])
 
     peak_tracker = entry.runtime_data.peak_tracker
     if peak_tracker is not None:
@@ -1058,6 +1061,60 @@ class NetworkTariffBandSensor(EmhassEntity, SensorEntity):
         if self._holidays.degraded:
             attributes["holiday_lookup_degraded"] = True
         return attributes
+
+
+class DemandChargeRateSensor(EmhassEntity, SensorEntity):
+    """The effective ``capacity_cost_per_kw`` a network profile's demand
+    charge prices out to, or 0 with the reason it isn't priced right now.
+
+    Reads no plan and no tracker -- see ``EmhassCoordinator.demand_charge_pricing``
+    -- because the arithmetic depends only on the profile, the backend
+    version and today's date, all of which change too rarely to need the
+    tracker's own publish cadence. Refreshes on the coordinator's clock tick
+    like ``NetworkTariffBandSensor``, for the same reason: the answer can
+    change (a month rolling over changes ``days_in_period``; an add-on
+    restart changes the backend version) with no new plan at all.
+    """
+
+    _attr_translation_key = DEMAND_CHARGE_RATE_KEY
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 2
+
+    def __init__(self, coordinator: EmhassCoordinator) -> None:
+        super().__init__(coordinator, DEMAND_CHARGE_RATE_KEY)
+        self._attr_native_unit_of_measurement = f"{coordinator.hass.config.currency}/kW"
+
+    @property
+    def _pricing(self) -> DemandChargePricing | None:
+        return self.coordinator.demand_charge_pricing(dt_util.utcnow())
+
+    @property
+    def available(self) -> bool:
+        return self._pricing is not None
+
+    @property
+    def native_value(self) -> float:
+        pricing = self._pricing
+        return (
+            round(pricing.effective_rate_per_kw, 4)
+            if pricing and pricing.effective_rate_per_kw
+            else 0.0
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        pricing = self._pricing
+        if pricing is None:
+            return None
+        return {
+            "sheet_rate": pricing.sheet_rate,
+            "rate_basis": pricing.rate_basis,
+            "aggregate": pricing.aggregate,
+            "n": pricing.n,
+            "active": pricing.effective_rate_per_kw is not None,
+            "reason": pricing.reason,
+        }
 
 
 class PeakSensorBase(EmhassEntity, SensorEntity):

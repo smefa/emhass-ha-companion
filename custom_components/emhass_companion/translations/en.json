@@ -570,6 +570,9 @@
       },
       "peak_headroom": {
         "name": "Peak headroom"
+      },
+      "demand_charge_rate": {
+        "name": "Demand charge rate"
       }
     },
     "binary_sensor": {
@@ -694,6 +697,9 @@
       },
       "mix_beta": {
         "name": "Live value weight"
+      },
+      "peak_target": {
+        "name": "Peak target"
       },
       "energy_needed": {
         "name": "14. Energy needed"

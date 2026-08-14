@@ -23,6 +23,8 @@ from custom_components.emhass_companion.peaks import (
     _per_day_bests,
     _top_n_intervals,
     aggregate_kw,
+    days_in_current_period,
+    effective_rate_per_kw,
     incurred_floor_kw,
 )
 
@@ -228,3 +230,48 @@ def test_local_day_and_period_are_utc_here_with_no_configured_timezone():
     when = datetime(2026, 8, 4, 13, 0, tzinfo=UTC)
     assert _local_day(when) == "2026-08-04"
     assert _local_period(when) == "2026-08"
+
+
+# --- effective_rate_per_kw ------------------------------------------------------
+#
+# The two worked examples from docs/network_tariffs_plan.md's "Pricing the
+# peak correctly", plus the two axes that produce them: rate_basis (month vs
+# day) and aggregate (max vs mean_top_n).
+
+
+def test_goteborg_divides_by_n_for_mean_top_n_monthly_rate():
+    rate = effective_rate_per_kw(
+        rate_per_kw=135.0,
+        rate_basis="month",
+        aggregate=AGGREGATE_MEAN_TOP_N,
+        n=3,
+        days_in_period=30,
+    )
+    assert rate == 45.0
+
+
+def test_amber_multiplies_by_days_for_a_daily_max_rate():
+    rate = effective_rate_per_kw(
+        rate_per_kw=0.30, rate_basis="day", aggregate=AGGREGATE_MAX, n=1, days_in_period=30
+    )
+    assert rate == 9.0
+
+
+def test_monthly_max_rate_needs_no_conversion_at_all():
+    rate = effective_rate_per_kw(
+        rate_per_kw=50.0, rate_basis="month", aggregate=AGGREGATE_MAX, n=1, days_in_period=28
+    )
+    assert rate == 50.0
+
+
+def test_daily_mean_top_n_rate_stacks_both_conversions():
+    rate = effective_rate_per_kw(
+        rate_per_kw=1.0, rate_basis="day", aggregate=AGGREGATE_MEAN_TOP_N, n=2, days_in_period=31
+    )
+    assert rate == 15.5
+
+
+def test_days_in_current_period_is_the_local_calendar_month():
+    assert days_in_current_period(datetime(2026, 2, 15, 12, 0, tzinfo=UTC)) == 28
+    assert days_in_current_period(datetime(2028, 2, 15, 12, 0, tzinfo=UTC)) == 29
+    assert days_in_current_period(datetime(2026, 8, 1, 0, 0, tzinfo=UTC)) == 31

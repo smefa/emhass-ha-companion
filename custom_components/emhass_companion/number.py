@@ -438,7 +438,13 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     coordinator: EmhassCoordinator = entry.runtime_data.coordinator
-    async_add_entities([SurplusThresholdNumber(coordinator), MixBetaNumber(coordinator)])
+    entities: list[EmhassEntity] = [SurplusThresholdNumber(coordinator), MixBetaNumber(coordinator)]
+    if entry.runtime_data.peak_tracker is not None:
+        # Same gate as sensor.PeriodPeakSensor/PeakHeadroomSensor: a demand
+        # charge is configured and has a meter to track it, so the fallback
+        # ceiling this entity supplies means something.
+        entities.append(PeakTargetNumber(coordinator))
+    async_add_entities(entities)
     for load in entry.runtime_data.loads.all():
         async_add_entities(
             (
@@ -528,6 +534,50 @@ class MixBetaNumber(EmhassEntity, RestoreNumber):
 
     async def async_set_native_value(self, value: float) -> None:
         self.coordinator.mix_beta = value
+        self.async_write_ha_state()
+
+
+class PeakTargetNumber(EmhassEntity, RestoreNumber):
+    """The v0.18.0 fallback ceiling for a windowed demand charge.
+
+    Only added when a network profile's demand charge has a peak tracker
+    behind it (same gate as sensor.PeriodPeakSensor) -- there is nothing to
+    hold anything under otherwise. Seeded from the tracker's current period
+    aggregate the first time this entity is added ("hold what has already
+    been paid for"), adjustable thereafter. A worse answer than the priced
+    peak, and it stays inert once this backend can be trusted with the window
+    mask -- ``payload.build_payload`` only reaches for it when
+    ``coordinator.demand_charge_pricing`` says the peak cannot be safely
+    priced right now. See docs/network_tariffs_plan.md, "Version gating".
+    """
+
+    _attr_translation_key = "peak_target"
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_device_class = NumberDeviceClass.POWER
+    _attr_native_unit_of_measurement = UnitOfPower.KILO_WATT
+    _attr_native_min_value = 0
+    _attr_native_max_value = 50
+    _attr_native_step = 0.1
+    _attr_mode = NumberMode.BOX
+
+    def __init__(self, coordinator: EmhassCoordinator) -> None:
+        super().__init__(coordinator, "peak_target")
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        if (last := await self.async_get_last_number_data()) is not None and (
+            last.native_value is not None
+        ):
+            self.coordinator.peak_target_kw = last.native_value
+        elif self.coordinator.peak_tracker is not None:
+            self.coordinator.peak_target_kw = self.coordinator.peak_tracker.current_aggregate_kw
+
+    @property
+    def native_value(self) -> float | None:
+        return self.coordinator.peak_target_kw
+
+    async def async_set_native_value(self, value: float) -> None:
+        self.coordinator.peak_target_kw = value
         self.async_write_ha_state()
 
 

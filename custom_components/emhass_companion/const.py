@@ -689,6 +689,12 @@ NET_HOUSE_LOAD_KEY: Final = "net_house_load"
 NETWORK_TARIFF_BAND_KEY: Final = "network_tariff_band"
 PERIOD_PEAK_KEY: Final = "period_peak"
 PEAK_HEADROOM_KEY: Final = "peak_headroom"
+DEMAND_CHARGE_RATE_KEY: Final = "demand_charge_rate"
+
+# The EMHASS release ``current_period_peak`` shipped in -- see
+# docs/network_tariffs_plan.md's version-gating table. Below this, a network
+# profile's demand charge is left unpriced; energy bands still apply.
+MIN_EMHASS_VERSION_DEMAND_CHARGE: Final = "0.18.0"
 
 # --- Cost and savings ---------------------------------------------------------
 #

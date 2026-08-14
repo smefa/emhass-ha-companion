@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 import logging
 from typing import Any
@@ -49,6 +49,7 @@ from .const import (
     LOAD_FORECAST_METHOD_LIST,
     LOAD_FORECAST_METHOD_MLFORECASTER,
     LOAD_FORECAST_METHOD_TYPICAL,
+    MIN_EMHASS_VERSION_DEMAND_CHARGE,
     ML_MIN_HISTORY_DAYS,
     MODE_AUTO,
     PROFILE_KEY_LOAD_SENSOR,
@@ -75,6 +76,7 @@ from .models import (
 )
 from .network_calendar import HolidayCache, NetworkCalendar, NetworkCalendarError
 from .payload import PayloadInputs, PayloadResult, build_payload
+from .peaks import PeakTracker, days_in_current_period, effective_rate_per_kw
 from .profiles import (
     Profile,
     ProfileError,
@@ -91,7 +93,7 @@ from .terminal import (
     EndSocDecision,
     decide_end_soc,
 )
-from .util import schema_major
+from .util import schema_major, version_at_least
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -120,6 +122,21 @@ _ML_STORE_VERSION = 1
 # costs exactly one failed run, which is what stops this masking a real
 # misconfiguration forever.
 _NO_LIST_RETRY_COOLDOWN = timedelta(hours=1)
+
+
+@dataclass(slots=True)
+class DemandChargePricing:
+    """What a network profile's demand charge prices out to right now, and
+    why not when it doesn't. See ``EmhassCoordinator.demand_charge_pricing``."""
+
+    sheet_rate: float | None
+    rate_basis: str
+    aggregate: str
+    n: int
+    effective_rate_per_kw: float | None = None
+    """The rate to actually send as ``capacity_cost_per_kw``. None means the
+    demand charge is not being priced right now -- see ``reason``."""
+    reason: str | None = None
 
 
 @dataclass(slots=True)
@@ -190,6 +207,17 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         # day" fact, and re-resolving it twice would double the
         # workday.check_date traffic for no benefit.
         self.holiday_cache = HolidayCache()
+        # Set once, right after the version probe in __init__.async_setup_entry
+        # -- the same string _check_version already gates MIN_EMHASS_VERSION
+        # against. None only for a coordinator built without going through
+        # setup (unit tests), in which case the demand charge gate below is
+        # conservative and treats it as unsupported.
+        self.backend_version: str | None = None
+        # Set once, right after __init__.async_setup_entry builds it (may be
+        # None -- see _build_peak_tracker). Held here, not just on
+        # EmhassRuntimeData, because demand_charge_pricing needs the tracker's
+        # current floor on every MPC run.
+        self.peak_tracker: PeakTracker | None = None
 
         # Owned by the control switch and the mode select. Held here rather than
         # read back out of the state machine so the executor never has to parse
@@ -212,6 +240,14 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         # correction (fired server-side, independently of blend_at) uses the
         # same weight instead of its hard-coded 50/50 default.
         self.mix_beta = DEFAULT_MIX_BETA
+        # Owned by number.PeakTargetNumber. The v0.18.0 fallback ceiling for a
+        # windowed demand charge that cannot be safely priced (see
+        # demand_charge_pricing) -- kW, seeded from the peak tracker's current
+        # aggregate the first time the entity is added, adjustable thereafter.
+        # None until that entity exists (no demand charge configured, or the
+        # platform has not set up yet), in which case the fallback simply does
+        # not apply -- see payload.build_payload's capacity_ceilings.
+        self.peak_target_kw: float | None = None
         # Owned by the cost function select. EMHASS's optimisation objective:
         # profit, cost, or self-consumption; see payload.build_payload.
         self.cost_fun = DEFAULT_COST_FUN
@@ -475,6 +511,65 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         except (ProfileError, NetworkCalendarError) as err:
             _LOGGER.warning("Network profile '%s' could not be resolved: %s", selection.key, err)
             self.network_calendar = None
+
+    def demand_charge_pricing(self, now: datetime) -> DemandChargePricing | None:
+        """What to send EMHASS for the selected network profile's demand
+        charge right now, and why -- shared by ``_build`` (what is actually
+        sent) and the rate diagnostic sensor (what a user is told).
+
+        None when no network profile with a ``demand_charge`` is selected at
+        all. Otherwise always returns a result, with ``effective_rate_per_kw``
+        left None and ``reason`` explaining why whenever the peak cannot be
+        safely priced yet -- see docs/network_tariffs_plan.md's
+        "Version gating" table. The two gates, in order:
+
+        * The backend must be new enough for ``current_period_peak`` --
+          without it, pricing a peak has no memory of what has already been
+          incurred this period, and every run would fight to hold the whole
+          horizon under a level that may already be moot.
+        * Short of the window mask (``capacity_charge_window``, master-only
+          and not sent until a later phase), a windowed demand charge cannot
+          be priced without over-shaving every hour outside its own window.
+          An all-day window needs no mask, so it is exempted.
+        """
+        calendar = self.network_calendar
+        if calendar is None or calendar.demand_charge is None:
+            return None
+        demand = calendar.demand_charge
+        base = DemandChargePricing(
+            sheet_rate=demand.rate_per_kw,
+            rate_basis=demand.rate_basis,
+            aggregate=demand.measure.aggregate,
+            n=demand.measure.n,
+        )
+        if demand.rate_per_kw is None:
+            return replace(base, reason="No demand charge rate configured on this profile.")
+        if self.backend_version is None or not version_at_least(
+            self.backend_version, MIN_EMHASS_VERSION_DEMAND_CHARGE
+        ):
+            return replace(
+                base,
+                reason=(
+                    f"Needs EMHASS {MIN_EMHASS_VERSION_DEMAND_CHARGE}+; this add-on reports "
+                    f"{self.backend_version or 'an unknown version'}."
+                ),
+            )
+        if demand.window is not None and not demand.window.is_unrestricted:
+            return replace(
+                base,
+                reason=(
+                    "This EMHASS release cannot restrict the demand charge to the tariff's own "
+                    "window, and pricing it unwindowed would over-shave every hour outside it."
+                ),
+            )
+        rate = effective_rate_per_kw(
+            rate_per_kw=demand.rate_per_kw,
+            rate_basis=demand.rate_basis,
+            aggregate=demand.measure.aggregate,
+            n=demand.measure.n,
+            days_in_period=days_in_current_period(now),
+        )
+        return replace(base, effective_rate_per_kw=rate)
 
     async def async_load_ml_state(self) -> None:
         """Restore which sensor mlforecaster was last confirmed trained against."""
@@ -1023,6 +1118,59 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             self._track_pv_tail_issue(end_soc, pv or None, horizon_end)
         self._end_soc = end_soc
 
+        demand_pricing = self.demand_charge_pricing(now)
+        current_period_peak_w = None
+        if (
+            demand_pricing is not None
+            and demand_pricing.effective_rate_per_kw is not None
+            and action == ACTION_MPC
+            and self.peak_tracker is not None
+        ):
+            # Watts, matching every other power figure this integration sends
+            # -- current_period_peak is MPC-only in EMHASS (see
+            # docs/network_tariffs_plan.md, "Day-ahead versus MPC"), so a
+            # day-ahead run gets no floor and no memory either way.
+            current_period_peak_w = self.peak_tracker.floor_kw * 1000
+
+        # Mechanism 3 (docs/network_tariffs_plan.md): the windowed hard cap.
+        # Gated on the same version as the priced peak -- maximum_power_from_grid
+        # as a *list* is verified from v0.18.0 on, same as current_period_peak,
+        # and an older backend would either reject it or (per
+        # _prepare_power_limit_array) silently collapse a wrong-length list to
+        # its first element repeated, which is worse than not sending one.
+        calendar = self.network_calendar
+        capacity_limit_w: float | None = None
+        capacity_limit_window: Callable[[datetime], bool] | None = None
+        demand_fallback_ceiling_w: float | None = None
+        demand_window: Callable[[datetime], bool] | None = None
+        array_capable = self.backend_version is not None and version_at_least(
+            self.backend_version, MIN_EMHASS_VERSION_DEMAND_CHARGE
+        )
+        if array_capable and calendar is not None:
+            if calendar.capacity_limit is not None and calendar.capacity_limit.ceiling_kw is not None:
+                # An explicit subscribed-tier ceiling, independent of whether
+                # the demand charge itself can be priced.
+                capacity_limit_w = calendar.capacity_limit.ceiling_kw * 1000
+
+                def capacity_limit_window(when: datetime) -> bool:
+                    return calendar.in_capacity_window(when, self.holiday_cache)
+
+            if (
+                demand_pricing is not None
+                and demand_pricing.sheet_rate is not None
+                and demand_pricing.effective_rate_per_kw is None
+                and self.peak_target_kw is not None
+                and calendar.demand_charge is not None
+            ):
+                # The peak cannot be safely priced right now (old backend, or
+                # a real window this backend cannot mask) but a rate is
+                # configured, so a windowed demand charge is still enforced --
+                # as a ceiling instead of a price. See number.PeakTargetNumber.
+                demand_fallback_ceiling_w = self.peak_target_kw * 1000
+
+                def demand_window(when: datetime) -> bool:
+                    return calendar.in_demand_window(when, self.holiday_cache)
+
         inputs = PayloadInputs(
             action=action,
             now=now,
@@ -1047,6 +1195,15 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             mix_beta=self.mix_beta,
             cost_fun=self.cost_fun,
             extra_settings=settings,
+            network_demand_charge_configured=demand_pricing is not None,
+            demand_charge_rate_per_kw=(
+                demand_pricing.effective_rate_per_kw if demand_pricing else None
+            ),
+            current_period_peak_w=current_period_peak_w,
+            capacity_limit_w=capacity_limit_w,
+            capacity_limit_window=capacity_limit_window,
+            demand_fallback_ceiling_w=demand_fallback_ceiling_w,
+            demand_window=demand_window,
         )
         built = build_payload(inputs)
         if network_warnings:

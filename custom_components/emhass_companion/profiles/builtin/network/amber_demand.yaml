@@ -1,0 +1,69 @@
+name: Amber Electric (demand tariff)
+kind: network
+version: 1
+description: >-
+  A DNSP demand tariff as billed through Amber: the single highest 30-minute
+  interval inside a daily window sets a per-kW charge for the whole month.
+notes: >-
+  Amber shows the window and the rate on your plan page; they come from your
+  DNSP, not from Amber, so they differ by distributor. The rate is usually
+  quoted per kW per day -- enter it exactly as quoted, this profile converts
+  it to the per-optimisation figure EMHASS actually needs. Set
+  "Time resolution" (Setup) to 30 minutes while a demand charge is active --
+  the demand window here is metered in 30-minute intervals, and a coarser
+  optimisation step under-protects it.
+
+detect:
+  always: true
+
+options:
+  demand_rate:
+    name: Demand rate
+    description: Dollars per kW per day, as quoted on your plan.
+    selector: {number: {min: 0, max: 10, step: any, mode: box}}
+  window_start:
+    name: Demand window start
+    description: Local time the daily demand window opens.
+    default: "15:00:00"
+    selector: {time: {}}
+  window_end:
+    name: Demand window end
+    description: Local time the daily demand window closes.
+    default: "20:00:00"
+    selector: {time: {}}
+  window_months:
+    name: Months the window applies
+    description: >-
+      Leave every box unticked if your DNSP's demand window runs all year.
+      Tick only the months it applies in for a summer- or winter-only window.
+    required: false
+    selector:
+      select:
+        multiple: true
+        mode: list
+        options:
+          - {value: "1", label: January}
+          - {value: "2", label: February}
+          - {value: "3", label: March}
+          - {value: "4", label: April}
+          - {value: "5", label: May}
+          - {value: "6", label: June}
+          - {value: "7", label: July}
+          - {value: "8", label: August}
+          - {value: "9", label: September}
+          - {value: "10", label: October}
+          - {value: "11", label: November}
+          - {value: "12", label: December}
+
+energy_bands: []        # Amber's energy price is the spot series; tariff.py owns it
+
+demand_charge:
+  rate_per_kw: "{{ options.demand_rate }}"
+  rate_basis: day
+  window:
+    months: "{{ options.get('window_months') or None }}"
+    hours: "{{ options.window_start }}-{{ options.window_end }}"
+  measure:
+    interval: 30min
+    aggregate: max
+  period: month

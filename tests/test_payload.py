@@ -637,6 +637,60 @@ def test_capacity_charge_defaults_to_a_no_op():
     assert payload["capacity_cost_per_kw"] == 0.0
 
 
+def test_network_demand_charge_prices_the_peak_on_mpc():
+    """A network profile's effective rate owns the field entirely -- the
+    unrelated manual number on GridConfig must not leak through underneath
+    it (see network_tariffs_plan.md's "Band adders applied twice" guardrail,
+    the same doctrine applied to this field instead)."""
+    grid = GridConfig(capacity_cost_per_kw=999.0)
+    payload = build_payload(
+        _inputs(
+            grid=grid,
+            network_demand_charge_configured=True,
+            demand_charge_rate_per_kw=45.0,
+            current_period_peak_w=3200.0,
+        )
+    ).payload
+    assert payload["capacity_cost_per_kw"] == 45.0
+    assert payload["current_period_peak"] == 3200
+
+
+def test_network_demand_charge_is_zeroed_on_dayahead():
+    """current_period_peak and the (not-yet-sent) window mask are MPC-only in
+    EMHASS, so a day-ahead run would otherwise price the whole horizon's peak
+    with neither -- the exact distortion the feature exists to remove."""
+    payload = build_payload(
+        _inputs(
+            action=ACTION_DAYAHEAD,
+            network_demand_charge_configured=True,
+            demand_charge_rate_per_kw=45.0,
+            current_period_peak_w=3200.0,
+        )
+    ).payload
+    assert payload["capacity_cost_per_kw"] == 0.0
+    assert "current_period_peak" not in payload
+
+
+def test_network_demand_charge_zeroed_rather_than_falling_back_when_not_priceable():
+    """`demand_charge_rate_per_kw=None` with the flag still set is the
+    coordinator's "configured, but not safely priceable right now" case
+    (backend too old, or a real window on a backend with no window mask) --
+    it must zero the field, not fall back to the manual number."""
+    grid = GridConfig(capacity_cost_per_kw=999.0)
+    payload = build_payload(
+        _inputs(grid=grid, network_demand_charge_configured=True, demand_charge_rate_per_kw=None)
+    ).payload
+    assert payload["capacity_cost_per_kw"] == 0.0
+
+
+def test_current_period_peak_omitted_without_a_tracker_reading():
+    payload = build_payload(
+        _inputs(network_demand_charge_configured=True, demand_charge_rate_per_kw=45.0)
+    ).payload
+    assert payload["capacity_cost_per_kw"] == 45.0
+    assert "current_period_peak" not in payload
+
+
 def test_compute_curtailment_is_sent_when_configured():
     """EMHASS produces no P_PV_curtailment column without it, so the plan-driven
     branch of decide_curtailment depends on this reaching the run."""
@@ -742,6 +796,126 @@ def test_an_unfloored_live_import_limit_is_not_reported():
     its job must not produce one on every run."""
     result = build_payload(_inputs(load_live_w=2500.0, grid_import_limit_w=6800.0))
     assert not any("import limit" in warning for warning in result.warnings)
+
+
+# --- the windowed capacity limit array (network tariffs, mechanism 3) --------
+
+
+def test_no_capacity_ceiling_configured_keeps_the_plain_scalar():
+    """The common case -- no network profile, or one with no capacity concern
+    -- must keep sending the scalar every other grid-limit test expects."""
+    payload = build_payload(_inputs()).payload
+    assert payload["maximum_power_from_grid"] == 9000  # DEFAULT_GRID_IMPORT_MAX
+    assert isinstance(payload["maximum_power_from_grid"], int)
+
+
+def test_capacity_limit_only_lowers_timesteps_inside_its_window():
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    window_start = now + HALF_HOUR
+    window_end = now + 3 * HALF_HOUR
+    result = build_payload(
+        _inputs(
+            now=now,
+            capacity_limit_w=4000.0,
+            capacity_limit_window=lambda when: window_start <= when < window_end,
+        )
+    )
+    array = result.payload["maximum_power_from_grid"]
+    assert isinstance(array, list)
+    assert len(array) == DAY_STEPS
+    assert array[0] == 9000  # before the window: the plain scalar
+    assert array[1] == 4000  # inside the window: the ceiling
+    assert array[2] == 4000
+    assert array[3] == 9000  # after the window
+
+
+def test_capacity_limit_array_length_matches_horizon_steps_on_mpc():
+    result = build_payload(_inputs(capacity_limit_w=4000.0, capacity_limit_window=lambda when: True))
+    assert len(result.payload["maximum_power_from_grid"]) == DAY_STEPS
+
+
+def test_capacity_limit_array_length_is_whole_days_on_dayahead():
+    """Not horizon_steps -- the array covers delta_forecast_daily whole days,
+    which rounds a short horizon up. See docs/network_tariffs_plan.md,
+    "Mechanism 3"."""
+    result = build_payload(
+        _inputs(
+            action=ACTION_DAYAHEAD,
+            horizon_steps=1,
+            capacity_limit_w=4000.0,
+            capacity_limit_window=lambda when: True,
+        )
+    )
+    assert len(result.payload["maximum_power_from_grid"]) == DAY_STEPS  # one whole day, 30-min steps
+
+
+def test_capacity_limit_is_floored_at_its_own_timesteps_forecast_load():
+    """The floor is that timestep's own forecast load, not the horizon's peak
+    -- a per-timestep cap below one hour's own draw makes the whole run
+    infeasible, and EMHASS answers infeasible for the entire problem."""
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    load = Series(
+        [Point(now, 1000.0), Point(now + HALF_HOUR, 5000.0), Point(now + 2 * HALF_HOUR, 1000.0)]
+    )
+    result = build_payload(
+        _inputs(
+            now=now,
+            load=load,
+            capacity_limit_w=2000.0,
+            capacity_limit_window=lambda when: True,
+        )
+    )
+    array = result.payload["maximum_power_from_grid"]
+    assert array[0] == 2000  # 1000 W forecast fits under the 2000 W ceiling
+    assert array[1] == 5000  # 5000 W forecast raises this one timestep only
+    assert array[2] == 2000
+    assert any("raised above its target" in warning for warning in result.warnings)
+
+
+def test_demand_fallback_ceiling_applies_only_when_the_peak_is_unpriced():
+    result = build_payload(
+        _inputs(
+            network_demand_charge_configured=True,
+            demand_charge_rate_per_kw=None,
+            demand_fallback_ceiling_w=3000.0,
+            demand_window=lambda when: True,
+        )
+    )
+    array = result.payload["maximum_power_from_grid"]
+    assert isinstance(array, list)
+    assert all(value == 3000 for value in array)
+
+
+def test_demand_fallback_ceiling_is_inert_once_the_peak_is_priced():
+    """Once the priced peak is safe to send, the ceiling fallback must not
+    also apply -- the two are mutually exclusive degrees of the same
+    mechanism (see docs/network_tariffs_plan.md, "Version gating")."""
+    result = build_payload(
+        _inputs(
+            network_demand_charge_configured=True,
+            demand_charge_rate_per_kw=45.0,
+            demand_fallback_ceiling_w=3000.0,
+            demand_window=lambda when: True,
+        )
+    )
+    assert result.payload["maximum_power_from_grid"] == 9000
+    assert isinstance(result.payload["maximum_power_from_grid"], int)
+
+
+def test_capacity_ceilings_compose_as_the_tighter_of_both():
+    """An explicit capacity_limit and the demand-window fallback can both be
+    configured at once; the array takes whichever is lower at each timestep."""
+    result = build_payload(
+        _inputs(
+            capacity_limit_w=5000.0,
+            capacity_limit_window=lambda when: True,
+            network_demand_charge_configured=True,
+            demand_charge_rate_per_kw=None,
+            demand_fallback_ceiling_w=3000.0,
+            demand_window=lambda when: True,
+        )
+    )
+    assert all(value == 3000 for value in result.payload["maximum_power_from_grid"])
 
 
 def test_battery_cycle_costs_are_omitted_with_no_battery():

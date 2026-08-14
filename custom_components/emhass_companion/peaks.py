@@ -1,4 +1,4 @@
-"""The billing-period demand-charge peak, tracked but not yet priced.
+"""The billing-period demand-charge peak: tracked, and now priced.
 
 Copyright (C) 2026 Tomas Smedberg.
 
@@ -8,14 +8,16 @@ Software Foundation, either version 3 of the License, or (at your option) any
 later version. It is distributed without any warranty; see the LICENSE file at
 the repository root for the full terms.
 
-Phase 2 of ``docs/network_tariffs_plan.md``, and deliberately observation-only:
-this module computes and persists a household's demand-charge peak for the
-current billing period -- Göteborg Energi's "mean of the three highest hourly
-peaks, on three distinct days" or Amber's "single highest 30-minute interval"
--- and publishes it for a sensor to read. Nothing here reaches ``payload.py``.
-Pricing the peak against EMHASS's own ``current_period_peak`` is a later
-phase, and it needs a period of honest numbers to look at before anything
-should act on them.
+Phase 2 of ``docs/network_tariffs_plan.md`` built the observation-only half of
+this: a household's demand-charge peak for the current billing period --
+Göteborg Energi's "mean of the three highest hourly peaks, on three distinct
+days" or Amber's "single highest 30-minute interval" -- persisted and
+published for a sensor to read. Phase 3 (``effective_rate_per_kw`` below) adds
+the arithmetic that turns a tariff sheet's own rate into what ``payload.py``
+sends as ``capacity_cost_per_kw``, and ``coordinator.py`` sends
+:attr:`PeakTracker.floor_kw` on as EMHASS's ``current_period_peak`` -- the
+"memory" described in the plan's "What exists today, and where it falls
+short" section.
 
 Shaped like ``metering.py``'s ``SavingsTracker`` on purpose, one level up: a
 :class:`~.metering.Meter` watched on every state change rather than a timer,
@@ -29,6 +31,7 @@ enough code to earn a second module the way a full day's ledger is.
 
 from __future__ import annotations
 
+import calendar
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -228,6 +231,46 @@ def incurred_floor_kw(
         return displacement
     todays = next((interval for interval in top if interval.local_day == today), None)
     return max(displacement, todays.kw) if todays is not None else displacement
+
+
+def effective_rate_per_kw(
+    *, rate_per_kw: float, rate_basis: str, aggregate: str, n: int, days_in_period: int
+) -> float:
+    """Convert a tariff sheet's own rate into what ``capacity_cost_per_kw``
+    actually has to be.
+
+    EMHASS charges ``rate * peak_import`` **once per optimisation** against a
+    billing period that runs for many optimisations, so ``rate_per_kw`` has to
+    be the marginal cost, over one run, of raising the period's measured peak
+    by one kW -- not the number printed on the invoice. Two conversions stack:
+
+    * ``rate_basis``: a rate quoted **per day** (Amber) is charged for every
+      day of the billing period once a new peak is set, so it is multiplied by
+      ``days_in_period``. A rate quoted **per month** (Göteborg) already covers
+      the whole period and is left alone.
+    * ``aggregate``: a plain ``max`` peak is charged in full the moment it is
+      set. A ``mean_top_n`` peak (Göteborg's "mean of the three highest,
+      on three different days") only ever contributes ``1/n`` of itself to the
+      bill, so the rate is divided by ``n``.
+
+    See ``docs/network_tariffs_plan.md``, "Pricing the peak correctly", for
+    the worked Göteborg (``135 / 3 = 45 kr/kW``) and Amber
+    (``0.30 * 30 ≈ 9 $/kW``) examples this mirrors.
+    """
+    basis_multiplier = days_in_period if rate_basis == "day" else 1
+    divisor = n if aggregate == AGGREGATE_MEAN_TOP_N else 1
+    return rate_per_kw * basis_multiplier / divisor
+
+
+def days_in_current_period(now: datetime) -> int:
+    """Days in the local calendar month ``now`` falls in.
+
+    What ``rate_basis: day`` converts against -- only ``period: month`` is
+    supported today (this module's own rollover is monthly), so "the period"
+    always means the local calendar month.
+    """
+    local = dt_util.as_local(now)
+    return calendar.monthrange(local.year, local.month)[1]
 
 
 def _bucket_start(when: datetime, interval: timedelta) -> datetime:

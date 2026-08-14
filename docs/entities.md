@@ -21,6 +21,11 @@
 | `sensor.*_forecast_cost_24h` / `*_forecast_savings_24h` | The same, priced off the current plan for the next 24 hours |
 | `sensor.*_battery_action` | What the executor did or would do, and why — see [Handing over control](handing_over_control.md) |
 | `sensor.*_last_request_to_emhass` | The exact payload of the last optimisation request. Diagnostic, disabled by default — see [Troubleshooting](troubleshooting.md) |
+| `sensor.*_network_tariff_band` | The active energy band's name, with the adder and next change in its attributes. Only if you configured a network tariff — see [Network tariffs](network_tariffs.md) |
+| `sensor.*_demand_charge_rate` | The effective `capacity_cost_per_kw` a network tariff's demand charge prices out to right now, diagnostic. Only with a network tariff configured |
+| `sensor.*_period_peak` | The demand-charge aggregate incurred so far this billing period. Only if the network tariff defines a demand charge |
+| `sensor.*_peak_headroom` | How much more can be drawn before a new billing-period peak is set. Same condition as above |
+| `number.*_peak_target` | The manual fallback ceiling used while a windowed demand charge can't yet be priced directly. Same condition as above |
 | `binary_sensor.*_plan_out_of_date` | The plan is too old to act on |
 | `binary_sensor.*_source_readings_unavailable` | One of the entities this integration reads has stopped reporting — see [Troubleshooting](troubleshooting.md#when-a-source-stops-reporting) |
 | `switch.*_control_enabled` | Master gate on acting. Ships **off** |
@@ -34,7 +39,9 @@ your meters, under **Configure → Cost and savings** — see
 
 Battery entities only exist if you configured a battery. Solar-surplus hub
 entities (`sensor.*_solar_surplus*`) only exist once a surplus load does — see
-[Surplus loads](surplus_loads.md).
+[Surplus loads](surplus_loads.md). Network-tariff entities only exist once
+you've selected a network profile under **Configure → Network tariff** — see
+[Network tariffs](network_tariffs.md).
 
 Two services mirror the recalculate buttons for use in scripts and
 automations: `emhass_companion.run_dayahead` and `emhass_companion.run_mpc`.
