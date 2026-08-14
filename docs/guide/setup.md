@@ -29,6 +29,10 @@ Every screen is listed below field by field, in the order it appears.
     - **ENTSO-E** — reads the `prices` attribute of the ENTSO-E
       integration's average-price sensor.
     - **Tibber** — asks Tibber for the price series of one of your homes.
+    - **Amber Electric** — uses the core Amber Electric integration's
+      `get_forecasts` action to fetch the AEMO wholesale price.
+    - **Amber Express** — reads the `forecast` attribute of a price sensor
+      from the Amber Express custom integration.
     - **Fixed tariff** — a flat rate, or a simple peak/off-peak split. Use
       this when you have no dynamic pricing integration; it fetches nothing
       and needs none.
@@ -63,6 +67,15 @@ else:
 - **Tibber** — **Home name**, exactly as it appears in the Tibber app.
   Tibber returns the *total* price, VAT, taxes and grid fees included, so use
   *Already includes costs* on the next screen.
+- **Amber Electric** — **Amber Electric account** (which config entry),
+  **Channel** (General, Feed-in or Controlled load) and **Price field**:
+  `spot_per_kwh`, the raw AEMO wholesale price (the default, use ordinary
+  tariff settings to build up from it), or `per_kwh`, Amber's own all-in
+  price for that channel (use *Already includes costs*).
+- **Amber Express** — **Amber Express price sensor**, the channel's price
+  sensor from the Amber Express custom integration. Its `forecast` values
+  already include fees, network charges and Amber's margin, so use *Already
+  includes costs*.
 - **Fixed tariff** — **Peak price** and **Off-peak price** (import price per
   kWh in each period), **Peak period start** / **Peak period end** (when the
   peak rate applies) and **Export price** (what you're paid per kWh

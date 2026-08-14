@@ -1,0 +1,74 @@
+name: Amber Electric
+kind: price
+version: 1
+description: >-
+  Fetches forecast prices through the core Amber Electric integration's
+  get_forecasts action.
+notes: >-
+  spot_per_kwh is the AEMO wholesale reference price -- raw, like Nord Pool
+  or ENTSO-E, exclusive of network charges, environmental costs and Amber's
+  own margin. Use the tariff settings (Setup step 3) to add those back in
+  and land near what your Amber plan page actually shows. Switch "Price
+  field" to per_kwh instead if you'd rather use Amber's own all-in price for
+  this channel directly -- set that side's tariff mode to "Already includes
+  costs" if you do, but expect the *other* side to be a poor match, since
+  it's still built from the same series.
+
+  Amber's forecast covers roughly the next day, not a published day-ahead
+  auction -- don't expect a reliable "tomorrow" series before the current
+  day is well underway.
+
+  This profile is built from Home Assistant's published documentation for
+  the action, not confirmed against a live account. Run
+  emhass_companion.test_profile after setup and check the numbers against
+  your Amber app before relying on it.
+
+detect:
+  integration: amberelectric
+
+options:
+  config_entry:
+    name: Amber Electric account
+    selector:
+      config_entry:
+        integration: amberelectric
+  channel_type:
+    name: Channel
+    description: >-
+      Which of your Amber channels to read. General covers ordinary
+      consumption; pick Feed-in if your export price matters more than
+      import, or Controlled load for a separately switched circuit.
+    default: general
+    selector:
+      select:
+        mode: dropdown
+        options:
+          - {label: General (import), value: general}
+          - {label: Feed-in (export), value: feed_in}
+          - {label: Controlled load, value: controlled_load}
+  price_field:
+    name: Price field
+    description: >-
+      spot_per_kwh is the raw AEMO wholesale price. per_kwh is Amber's own
+      all-in price for this channel, with fees and margin already included.
+    default: spot_per_kwh
+    selector:
+      select:
+        mode: dropdown
+        options:
+          - {label: "Raw spot (spot_per_kwh)", value: spot_per_kwh}
+          - {label: "Amber's all-in price (per_kwh)", value: per_kwh}
+
+source:
+  type: service
+  service: amberelectric.get_forecasts
+  data:
+    config_entry_id: "{{ options.config_entry }}"
+    channel_type: "{{ options.channel_type }}"
+  response_path: forecasts
+
+series:
+  time: start_time
+  value: "{{ options.price_field }}"
+
+unit: currency_per_kwh

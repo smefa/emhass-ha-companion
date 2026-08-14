@@ -1,0 +1,51 @@
+name: Amber Express
+kind: price
+version: 1
+description: >-
+  Reads the forecast attribute of a price sensor from the Amber Express
+  custom integration (HACS: hass-energy/amber-express).
+notes: >-
+  Amber Express creates one price sensor per channel. Point this at your
+  general (import) sensor to optimise import cost, or at the feed-in sensor
+  instead if export matters more to you -- pick one, since the whole
+  integration composes buy and sell from this single series.
+
+  The forecast attribute already reports the price you're billed for that
+  channel, fees, network charges and Amber's margin included, on whichever
+  pricing mode (AEMO-based or Amber's predicted) you chose during Amber
+  Express setup. Set this side's tariff mode to "Already includes costs"
+  rather than adding a markup a second time.
+
+  Amber Express polls faster and holds unconfirmed prices separately from
+  the core Amber Electric integration; if you have both installed, either
+  works, but don't set up both as your price source at once.
+
+  This profile is built from the integration's own documentation, not
+  confirmed against a live account. Run emhass_companion.test_profile after
+  setup and check the numbers against your Amber app before relying on it.
+
+detect:
+  integration: amber_express
+
+options:
+  entity:
+    name: Amber Express price sensor
+    description: >-
+      The channel's price sensor, for example
+      sensor.amber_express_home_general_price.
+    selector:
+      entity:
+        integration: amber_express
+        domain: sensor
+
+source:
+  type: attributes
+  entity: "{{ options.entity }}"
+  attributes:
+    - forecast
+
+series:
+  time: time
+  value: value
+
+unit: currency_per_kwh
