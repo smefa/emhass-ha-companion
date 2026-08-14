@@ -88,7 +88,7 @@
       },
       "battery": {
         "title": "Battery",
-        "description": "Leave this off if you have no home battery. Everything else on this page is then ignored.",
+        "description": "Leave this off if you have no home battery. Everything else on this page is then ignored.\n\n{round_trip}",
         "data": {
           "use_battery": "I have a battery",
           "capacity_wh": "Usable capacity",
@@ -98,6 +98,8 @@
           "hybrid_inverter": "Shared inverter (hybrid)",
           "inverter_ac_output_max_w": "Maximum AC output (discharge/export)",
           "inverter_ac_input_max_w": "Maximum AC input (charge/import)",
+          "charge_efficiency": "Battery charge efficiency",
+          "discharge_efficiency": "Battery discharge efficiency",
           "inverter_efficiency_dc_ac": "DC to AC efficiency",
           "inverter_efficiency_ac_dc": "AC to DC efficiency",
           "weight_battery_discharge": "Discharge cycle cost",
@@ -261,6 +263,7 @@
       },
       "battery": {
         "title": "Battery",
+        "description": "{round_trip}",
         "data": {
           "use_battery": "I have a battery",
           "capacity_wh": "Usable capacity",
@@ -270,6 +273,8 @@
           "hybrid_inverter": "Shared inverter (hybrid)",
           "inverter_ac_output_max_w": "Maximum AC output (discharge/export)",
           "inverter_ac_input_max_w": "Maximum AC input (charge/import)",
+          "charge_efficiency": "Battery charge efficiency",
+          "discharge_efficiency": "Battery discharge efficiency",
           "inverter_efficiency_dc_ac": "DC to AC efficiency",
           "inverter_efficiency_ac_dc": "AC to DC efficiency",
           "weight_battery_discharge": "Discharge cycle cost",

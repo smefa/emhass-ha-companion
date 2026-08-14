@@ -41,6 +41,7 @@ from .const import (
     CONF_BATTERY_STRESS_COST,
     CONF_BATTERY_STRESS_SEGMENTS,
     CONF_CAPACITY_COST_PER_KW,
+    CONF_CHARGE_EFFICIENCY,
     CONF_COMFORT_END,
     CONF_COMFORT_START,
     CONF_COMFORT_TEMPERATURE,
@@ -48,6 +49,7 @@ from .const import (
     CONF_CONTROL_ENTITY,
     CONF_COOLING_CONSTANT,
     CONF_DAYAHEAD_FALLBACK_TIME,
+    CONF_DISCHARGE_EFFICIENCY,
     CONF_EARLIEST_START,
     CONF_EMHASS_STANDARD_NAMES,
     CONF_END_SOC_MODE,
@@ -118,8 +120,10 @@ from .const import (
     DEFAULT_BATTERY_STRESS_COST,
     DEFAULT_BATTERY_STRESS_SEGMENTS,
     DEFAULT_CAPACITY_COST_PER_KW,
+    DEFAULT_CHARGE_EFFICIENCY,
     DEFAULT_COMPUTE_CURTAILMENT,
     DEFAULT_DAYAHEAD_FALLBACK_TIME,
+    DEFAULT_DISCHARGE_EFFICIENCY,
     DEFAULT_END_SOC_MODE,
     DEFAULT_GRID_EXPORT_MAX,
     DEFAULT_GRID_IMPORT_MAX,
@@ -731,7 +735,11 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
                 self._options[CONF_PV_ENTITY] = pv_live
             return await self.async_step_inverter()
 
-        return self.async_show_form(step_id="battery", data_schema=vol.Schema(battery_schema({})))
+        return self.async_show_form(
+            step_id="battery",
+            data_schema=vol.Schema(battery_schema({})),
+            description_placeholders={"round_trip": _battery_efficiency_note({})},
+        )
 
     async def async_step_inverter(
         self, user_input: dict[str, Any] | None = None
@@ -1545,6 +1553,26 @@ def _battery_storage_from_input(user_input: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _battery_efficiency_note(defaults: dict[str, Any]) -> str:
+    """The round trip the four efficiency fields multiply out to.
+
+    HA's own form renderer has no way to recalculate this as a slider moves,
+    so it reflects whatever is already saved (or the schema defaults, on
+    first setup) rather than updating live -- save and reopen the step to see
+    a change reflected here.
+    """
+    charge = defaults.get(CONF_CHARGE_EFFICIENCY, DEFAULT_CHARGE_EFFICIENCY)
+    discharge = defaults.get(CONF_DISCHARGE_EFFICIENCY, DEFAULT_DISCHARGE_EFFICIENCY)
+    inverter_ac_dc = defaults.get(CONF_INVERTER_EFFICIENCY_AC_DC, DEFAULT_INVERTER_EFFICIENCY)
+    inverter_dc_ac = defaults.get(CONF_INVERTER_EFFICIENCY_DC_AC, DEFAULT_INVERTER_EFFICIENCY)
+    round_trip = charge * discharge * inverter_ac_dc * inverter_dc_ac
+    return (
+        f"Round trip, grid to battery and back: "
+        f"{charge:.2f} x {discharge:.2f} x {inverter_ac_dc:.2f} x {inverter_dc_ac:.2f} "
+        f"~= {round_trip:.0%}."
+    )
+
+
 def battery_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
     return {
         vol.Required(
@@ -1599,6 +1627,23 @@ def battery_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
             selector.NumberSelectorConfig(
                 min=0, max=100000, step=100, unit_of_measurement="W", mode="box"
             )
+        ),
+        # Cell-level losses, grouped with the inverter's AC/DC pair below since
+        # all four multiply together into the round trip the description text
+        # above the form works out (see _battery_efficiency_note). EMHASS
+        # applies these on the DC side, inside the battery itself -- separate
+        # from the inverter's own conversion loss.
+        vol.Optional(
+            CONF_CHARGE_EFFICIENCY,
+            default=defaults.get(CONF_CHARGE_EFFICIENCY, DEFAULT_CHARGE_EFFICIENCY),
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(min=0.5, max=1.0, step=0.01, mode="slider")
+        ),
+        vol.Optional(
+            CONF_DISCHARGE_EFFICIENCY,
+            default=defaults.get(CONF_DISCHARGE_EFFICIENCY, DEFAULT_DISCHARGE_EFFICIENCY),
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(min=0.5, max=1.0, step=0.01, mode="slider")
         ),
         vol.Optional(
             CONF_INVERTER_EFFICIENCY_DC_AC,
@@ -2532,7 +2577,9 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
             CONF_PV_ENTITY: options.get(CONF_PV_ENTITY) or "",
         }
         return self.async_show_form(
-            step_id="battery", data_schema=vol.Schema(battery_schema(defaults))
+            step_id="battery",
+            data_schema=vol.Schema(battery_schema(defaults)),
+            description_placeholders={"round_trip": _battery_efficiency_note(defaults)},
         )
 
     async def async_step_grid(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
