@@ -27,7 +27,13 @@ other profile kind uses. Two ship built in:
 - **Amber Electric** (`network/amber_demand`) — a DNSP demand tariff as billed
   through Amber: the single highest 30-minute interval inside a daily window
   sets a per-kW charge for the whole month. Contributes no energy bands at all
-  — Amber's per-kWh side is already the spot series `tariff.py` composes.
+  — Amber's per-kWh side is already the spot series `tariff.py` composes. The
+  window and rate are entered by hand, off your plan page — Amber's own public
+  API can say which interval is inside the window live, but neither the core
+  `amberelectric` integration nor Amber Express passes that through, so
+  there's currently nothing in Home Assistant for the profile to read it from.
+  See [Network tariffs, plan — Open questions](network_tariffs_plan.md#open-questions)
+  for what closing that gap would take.
 
 Nothing on this page is specific to those two utilities; see
 [Writing a profile](profiles.md) to describe your own operator's tariff sheet

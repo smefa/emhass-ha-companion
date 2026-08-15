@@ -93,6 +93,19 @@ The two together span the design space well: one needs a rich calendar and a
 top-N aggregate with a modest effective rate, the other needs a trivial
 calendar and a plain max with a very large effective rate.
 
+Amber's own public API (distinct from the HA integration wrapping it) already
+knows the window live: every priced interval carries a `tariffInformation`
+object with a `demandWindow` boolean, alongside `period` and `season` — which
+is how it accounts for a DNSP's seasonal exceptions, e.g. Ausgrid's
+summer/winter-only demand window, without the caller doing anything. Neither
+the core `amberelectric` integration's `get_forecasts` action nor its sensors
+pass that field through — both stop at price, descriptor and renewables — and
+Amber Express, built on the same API, doesn't expose it either. That gap is
+why `window_start`/`window_end`/`window_months` above are plain fields the
+user copies off their plan page rather than something the profile reads off
+the account. See [Open questions](#open-questions) for what closing it would
+take.
+
 ## What exists today, and where it falls short
 
 **`tariff.py` template mode** can already express a time-of-day band —
@@ -841,6 +854,20 @@ v0.18.1 has shipped, all six steps are done.
 
 ## Open questions
 
+- **Auto-detecting the Amber demand window.** The window fields on
+  `network/amber_demand.yaml` are static copies of what the plan page says
+  today; Amber's public API (not the HA integration) can already answer "is
+  this interval inside the window" live, per interval, seasonal exceptions
+  included — see [above](#amber-electric-demand-tariffs). No new source type
+  is needed to use it: a user's own HA `rest` sensor polling Amber's
+  `/sites/{id}/prices` endpoint could expose `demandWindow`/`period`/`season`
+  as attributes, and the profile could read them the same way
+  `price/amber_express.yaml` already reads its price sensor's `forecast`
+  attribute — an `attributes` source, just pointed at the calendar match
+  instead of the price series. The rate itself (`demand_rate`) is not in that
+  API either way and stays a manual field. Not started; worth a spike once
+  someone hits a DNSP whose window changed and the profile silently kept
+  billing the old one.
 - **Export demand charges.** Some operators are introducing them. The schema
   above is import-only. Worth leaving room in the profile shape (a `sell` side
   on `demand_charge`) even if nothing implements it.
