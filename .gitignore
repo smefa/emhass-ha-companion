@@ -25,3 +25,6 @@ site/
 # Claude Code local session state (agent worktrees, local settings) -- never
 # project content, must never be committed.
 .claude/
+
+# Internal planning docs -- not for the public repo.
+planning/

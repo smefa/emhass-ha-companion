@@ -368,6 +368,7 @@ CARD_FILES = (
     "emhass-health-card.js",
     "emhass-status-card.js",
     "emhass-overview-card.js",
+    "emhass-tariff-card.js",
 )
 FRONTEND_FILES = (CORE_FILE, *CARD_FILES)
 
@@ -400,6 +401,7 @@ CARDS = (
     "emhass-health-card",
     "emhass-status-card",
     "emhass-overview-card",
+    "emhass-tariff-card",
 )
 
 

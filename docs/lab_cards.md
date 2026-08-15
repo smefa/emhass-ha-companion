@@ -426,6 +426,53 @@ excludes simply leaves that lane starting at now.
 The load lanes have no historic side yet: they show the plan only, so their
 shaded part is the plan as it stood, not what the loads did.
 
+## `emhass-tariff-card` — what a network tariff is doing to you
+
+[Network tariffs](network_tariffs.md) shipped five entities — **Network
+tariff band**, **Demand charge rate**, **Billing period peak**, **Peak
+headroom** and **Peak target** — and none of them was anywhere but the
+entity list. This card is the fourth answer alongside the three status cards
+above: not "is the optimiser healthy" or "what is it doing to the house", but
+"what is my tariff doing to me right now".
+
+- A single-line **band banner** — the current band's name, its adder or
+  multiplier, and a countdown to the next change: `höglast (+0.34) ·
+  låglast in 2 h 14 m`. Left out entirely when no network profile publishes
+  a band, not shown empty.
+- A **headroom arc** for a demand charge — a gauge rather than a timeline,
+  since a demand charge is a single number to stay under, not a series to
+  read over time. It fills toward *headroom*, not toward a fixed 100 %, and
+  turns red once headroom drops under **10 %** of the period's own peak
+  (`headroom_warn_pct`). The period's billed aggregate and days remaining sit
+  below it, and a pill underneath reads either **Priced now** or, once EMHASS
+  falls back to the windowed hard cap (see [Network tariffs, "Version
+  gating"](network_tariffs.md#version-gating)), **Holding to peak target ·
+  N kW** instead — the arc means a different thing once the peak is a cap
+  rather than a price, and the pill says which.
+- A **rate row** — the effective rate EMHASS is actually charged
+  (`capacity_cost_per_kw`) next to the sheet rate it was converted from, for
+  checking the conversion by eye.
+- Left out entirely on an install with no demand charge configured — a
+  Tibber household with a time-differentiated network fee and no demand
+  charge gets the band banner alone.
+
+```yaml
+type: custom:emhass-tariff-card
+```
+
+No required options — same "finds its own entities through the device"
+contract as the other three, with one difference: added before a network
+tariff is configured at all, it draws a sample reading instead of a blank
+card, ribboned and desaturated so it never reads as broken.
+
+| Option | Default | Hides |
+| --- | --- | --- |
+| `show_band` | `true` | the band banner |
+| `show_demand` | `true` | the headroom arc, period aggregate and pill |
+| `show_rate` | `true` | the effective-rate / sheet-rate boxes |
+| `headroom_warn_pct` | `10` | the headroom percentage below which the arc turns red |
+| `show_demo` | `true` | the sample reading shown before a network tariff exists — off restores a blank card in that case |
+
 ## Notes for anyone editing these
 
 - Same constraints as the shipping bundle, on purpose, so a design that wins
