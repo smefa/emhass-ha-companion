@@ -2,7 +2,6 @@
 
 A Home Assistant integration that makes [EMHASS](https://github.com/davidusb-geek/emhass) usable without writing YAML.
 
-## Currently in BETA!
 Join my [Discord](https://discord.gg/wvavNscm8) if you have questions or want to give input.
 
 
