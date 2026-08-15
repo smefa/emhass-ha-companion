@@ -1092,6 +1092,29 @@ def test_a_run_time_already_on_the_grid_is_not_reported():
 
 
 @pytest.mark.usefixtures("stockholm_timezone")
+def test_an_off_grid_surplus_budget_is_quantised_without_a_warning():
+    """A surplus load's hours are credit_wh / nominal_w -- essentially never on
+    a timestep boundary. Unlike a user-typed value, that is not a mistake worth
+    reporting on every solve, so the warning is skipped here even though the
+    quantisation itself still happens."""
+    loads = [
+        DeferrableLoad(
+            subentry_id="car",
+            name="Car",
+            nominal_power_w=11000,
+            operating_hours=2.6,
+            semi_continuous=True,
+            hours_from_surplus_budget=True,
+        )
+    ]
+    result = build_payload(_inputs(loads=loads))
+
+    assert result.payload["operating_hours_of_each_deferrable_load"] == [2.5]
+    assert result.payload["operating_timesteps_of_each_deferrable_load"] == [5]
+    assert result.warnings == []
+
+
+@pytest.mark.usefixtures("stockholm_timezone")
 def test_exact_timesteps_are_sent_only_for_mpc():
     """EMHASS honours this key only on the branch that takes a prediction
     horizon (utils.treat_runtimeparams); it is absent from associations.csv, so

@@ -902,6 +902,7 @@ class DeferrableRuntime:
             # A surplus load's run time is not a setting; it is however many
             # hours the exported power in the last plan can actually feed.
             operating_hours=budget.hours if surplus else self.operating_hours,
+            hours_from_surplus_budget=surplus,
             earliest_start=self.earliest_start if windowed and not surplus else None,
             latest_end=self.latest_end if windowed and not surplus else None,
             # The window the surplus itself occupies, as absolute instants

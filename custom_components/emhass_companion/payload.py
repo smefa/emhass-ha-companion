@@ -926,7 +926,8 @@ def _describe(
     # request is built.
     steps = operating_timesteps(load.operating_hours, inputs.time_step_minutes)
     quantised = steps * inputs.time_step_minutes / 60
-    if not math.isclose(quantised, load.operating_hours, rel_tol=1e-9, abs_tol=1e-9):
+    off_grid = not math.isclose(quantised, load.operating_hours, rel_tol=1e-9, abs_tol=1e-9)
+    if off_grid and not load.hours_from_surplus_budget:
         warnings.append(
             f"{load.name}: {load.operating_hours:g} h is not a whole number of "
             f"{inputs.time_step_minutes}-minute timesteps, so EMHASS is being "

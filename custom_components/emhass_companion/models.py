@@ -617,6 +617,18 @@ class DeferrableLoad:
     minimum_on_time_minutes: float = 0.0
     minimum_off_time_minutes: float = 0.0
 
+    hours_from_surplus_budget: bool = False
+    """Whether ``operating_hours`` came from a surplus budget rather than a
+    user-set value.
+
+    A surplus load's hours are ``credit_wh / nominal_w`` (see
+    :mod:`surplus`) -- a continuous division that essentially never lands on
+    a timestep boundary. The off-grid-hours warning in
+    :func:`payload._describe` exists to flag a *user* mistake (a typed value
+    that doesn't fit the step), so it is skipped here: quantising a budget is
+    routine, not something to report every solve.
+    """
+
     wants_to_run: bool = True
     """Whether this load is asking for its hours on this run.
 
