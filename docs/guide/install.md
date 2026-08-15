@@ -18,6 +18,11 @@ actually have during setup.
    container.
 2. **Add this repository to HACS** as a custom repository (category:
    *Integration*), then install **EMHASS Companion** from HACS.
+
+   <a href="https://my.home-assistant.io/redirect/hacs_repository/?owner=smefa&repository=emhass-ha-companion&category=integration" target="_blank">
+     <img src="https://my.home-assistant.io/badges/hacs_repository.svg" alt="Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.">
+   </a>
+
 3. **Restart Home Assistant.**
 4. Go to **Settings → Devices & Services → Add Integration**, and search for
    **EMHASS Companion**.
