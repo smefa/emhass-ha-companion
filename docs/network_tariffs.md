@@ -32,8 +32,11 @@ other profile kind uses. Two ship built in:
   API can say which interval is inside the window live, but neither the core
   `amberelectric` integration nor Amber Express passes that through, so
   there's currently nothing in Home Assistant for the profile to read it from.
-  See [Network tariffs, plan — Open questions](network_tariffs_plan.md#open-questions)
-  for what closing that gap would take.
+  A `rest` sensor polling Amber's `/sites/{id}/prices` endpoint could expose
+  `demandWindow`/`period`/`season` as attributes for a future `attributes`
+  source to read, the same way `price/amber_express.yaml` already reads its
+  price sensor's `forecast` attribute — but nothing wires that up today, so
+  the window and rate above are entered by hand.
 
 Nothing on this page is specific to those two utilities; see
 [Writing a profile](profiles.md) to describe your own operator's tariff sheet
@@ -193,7 +196,7 @@ unscheduled ones. Neither is a guarantee.
 **Savings don't credit it yet.** See
 [Cost and savings, "What is deliberately not measured"](savings.md#what-is-deliberately-not-measured).
 
-**End SOC doesn't know about it.** The [End SOC](end_soc_plan.md) heuristic
+**End SOC doesn't know about it.** The [End SOC](end_soc.md) heuristic
 values a stored kWh by what it displaces after the horizon; it doesn't reason
 about a demand window opening past the horizon's end, so it can hand that
 window an empty battery.

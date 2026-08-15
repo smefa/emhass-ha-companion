@@ -149,7 +149,7 @@ Changeable later under **Configure → Solar forecast**, source and all. Worth
 revisiting after an update: a source's default entity list can gain entries,
 and those are offered there rather than applied for you. Solcast users should
 add `sensor.solcast_pv_forecast_forecast_day_3`, which lets
-[End SOC](../end_soc_plan.md)'s *Optimized* mode see the next solar day past
+[End SOC](../end_soc.md)'s *Optimized* mode see the next solar day past
 the horizon instead of inferring it from the previous day.
 
 ## 5. House consumption
@@ -247,7 +247,7 @@ this screen is then ignored.
       at now.
     - *Fixed % slider* — always aims for **Target charge level** above.
 
-    Requires EMHASS 0.18 or newer. See **[End SOC](../end_soc_plan.md)** for
+    Requires EMHASS 0.18 or newer. See **[End SOC](../end_soc.md)** for
     how *Optimized* decides.
 - **Self-consumption handoff threshold** — how close to zero the grid power
   needs to be before the battery is handed back to plain self-consumption

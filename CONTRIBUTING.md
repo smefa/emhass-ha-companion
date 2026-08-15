@@ -40,6 +40,10 @@ what lets a profile for an integration none of us has installed still be
 verified, and what makes reviewing a contributed profile mechanical. See
 [docs/profiles.md](docs/profiles.md).
 
+`planning/` holds working design notes and roadmaps for in-progress features
+— not built, not published to the docs site. Once a feature ships, its
+reference material belongs in `docs/`, not there.
+
 Contributing an inverter profile specifically? Start from
 [docs/inverter_profile_roadmap.md](docs/inverter_profile_roadmap.md) — it
 covers the current schema, the archetypes already proven, and which models

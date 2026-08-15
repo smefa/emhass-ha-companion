@@ -11,7 +11,7 @@
 | `sensor.*_planned_inverter_power` | AC side of a hybrid inverter: positive = DC to AC, negative = AC to DC. Only if you configured a hybrid inverter |
 | `sensor.*_planned_battery_power` | Positive = discharge, negative = charge |
 | `sensor.*_planned_battery_level` | Percent |
-| `sensor.*_end_soc_target` | The battery level the plan aims for at the horizon's end, with the why in its attributes (`reason`, `cover_energy_wh`, `cover_until`, `sale_blocked`, …) — see [End SOC](end_soc_plan.md) |
+| `sensor.*_end_soc_target` | The battery level the plan aims for at the horizon's end, with the why in its attributes (`reason`, `cover_energy_wh`, `cover_until`, `sale_blocked`, …) — see [End SOC](end_soc.md) |
 | `sensor.*_import_price` / `*_export_price` | Composed prices |
 | `sensor.*_optimisation_status` | Result of the last solve |
 | `sensor.*_planned_cost` | EMHASS's own objective value for the current plan. Not money you can total up — see [Cost and savings](savings.md) |

@@ -167,7 +167,7 @@ tomorrow. Three modes:
 
 Requires EMHASS 0.18 or newer. The resulting target, and the reasoning behind
 it, is published on the **End SOC target** sensor. See
-[End SOC](end_soc_plan.md) for how *Optimized* decides.
+[End SOC](end_soc.md) for how *Optimized* decides.
 
 **Self-consumption handoff threshold.** When the plan's grid power is within
 this many watts of zero, the battery is handed to the inverter's own

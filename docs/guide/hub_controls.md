@@ -61,7 +61,7 @@ attribute, which is what the dashboard cards draw.
 - **Planned battery power** — positive is discharge, negative is charge.
 - **Planned battery level** — the battery percentage over the plan.
 - **End SOC target** — the level the plan aims for at the end of the horizon,
-  with the reasoning in its attributes. See **[End SOC](../end_soc_plan.md)**.
+  with the reasoning in its attributes. See **[End SOC](../end_soc.md)**.
 - **Import price** / **Export price** — your composed prices, after the
   multipliers, additions or templates from the *Buy and sell prices* step.
 - **Planned solar curtailment** — PV the plan throws away rather than produce.
