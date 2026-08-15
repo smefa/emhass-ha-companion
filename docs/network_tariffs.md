@@ -119,16 +119,18 @@ own hours are runtime parameters EMHASS documents as MPC-only:
 | Backend | What happens |
 |---|---|
 | **< 0.18.0** | Energy bands only; the demand-charge section of the config flow is shown disabled |
-| **0.18.0** (what this add-on ships today) | Priced peak **only if the window is unrestricted** (all day, every day). A real window (Göteborg's, Amber's) has no `capacity_charge_window` to restrict it on this release, so pricing it unwindowed would over-shave every hour outside the window — instead, it falls back to the hard cap below |
-| **A future release with the window mask** | Full: windowed priced peak on MPC, the incurred-peak floor, the capped array on day-ahead |
+| **0.18.0** | Priced peak **only if the window is unrestricted** (all day, every day). A real window (Göteborg's, Amber's) has no `capacity_charge_window` to restrict it on this release, so pricing it unwindowed would over-shave every hour outside the window — instead, it falls back to the hard cap below |
+| **0.18.1+** (what this add-on ships today) | Full: windowed priced peak on MPC (`capacity_cost_per_kw` + `capacity_charge_window` + `current_period_peak`), the capped array on day-ahead |
 
 The window mask (`capacity_charge_window`) landed on EMHASS's `master` branch
-in August 2026 but is not in a release yet, so every profile shipped today
-runs the 0.18.0 row above. `capacity_cost_per_kw` is also forced to `0` on
-**day-ahead** runs regardless of backend — both gating parameters only mean
-anything to `naive-mpc-optim`, so a day-ahead run prices no peak at all and
-shapes the day purely through the cap below; the MPC runs that follow correct
-it.
+in August 2026 and reached a release in **0.18.1** (PR #1066) — on that
+version or newer, a real window like Göteborg's prices cleanly, masked, and
+the hard cap below is inert for it. On 0.18.0 the profile still runs the
+middle row: the hard cap protects the window, and **Peak target** is what to
+adjust. `capacity_cost_per_kw` is also forced to `0` on **day-ahead** runs
+regardless of backend — both gating parameters only mean anything to
+`naive-mpc-optim`, so a day-ahead run prices no peak at all and shapes the day
+purely through the cap below; the MPC runs that follow correct it.
 
 ## The windowed hard cap
 
@@ -143,11 +145,14 @@ target** number (the demand-window fallback); every timestep outside it keeps
 the plain scalar.
 
 **Peak target** (`number.*_peak_target`) is the ceiling enforced whenever the
-demand charge is configured but cannot currently be priced (0.18.0, a real
-window). It's seeded from the tracker's current period aggregate the first
-time it's added — hold what you've already paid for — and is yours to adjust.
-It's a worse answer than the priced peak, and it stays inert the moment a
-released backend can be trusted with the window mask.
+demand charge is configured but cannot currently be priced — on 0.18.1+ that
+is only ever a backend-version mismatch (the add-on reports older than it was
+set up against) rather than the everyday case a real window used to be on
+0.18.0. It's seeded from the tracker's current period aggregate the first time
+it's added — hold what you've already paid for — and is yours to adjust. It's
+a worse answer than the priced peak, and stays inert once the window mask
+prices it instead. `capacity_limit:` itself is unaffected by any of this — a
+subscribed tier is a hard ceiling by nature, not a fallback for anything.
 
 A cap below a timestep's own forecast load would make the whole run
 infeasible — EMHASS answers infeasible for the entire problem, not for that

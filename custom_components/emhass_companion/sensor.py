@@ -1113,6 +1113,7 @@ class DemandChargeRateSensor(EmhassEntity, SensorEntity):
             "aggregate": pricing.aggregate,
             "n": pricing.n,
             "active": pricing.effective_rate_per_kw is not None,
+            "masked": pricing.windowed,
             "reason": pricing.reason,
         }
 

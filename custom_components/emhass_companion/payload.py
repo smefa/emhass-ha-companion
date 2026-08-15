@@ -378,6 +378,13 @@ class PayloadInputs:
     demand_window: Callable[[datetime], bool] | None = None
     """Predicate for the demand charge's own window, consulted only when
     :attr:`demand_fallback_ceiling_w` is in effect."""
+    demand_charge_window: Callable[[datetime], bool] | None = None
+    """Predicate for the demand charge's own window, consulted only when the
+    peak *is* being priced (:attr:`demand_charge_rate_per_kw` is set) and the
+    coordinator has already confirmed the backend can mask it -- see
+    docs/network_tariffs_plan.md, "The window mask". Builds
+    ``capacity_charge_window``, MPC only, same restriction as
+    ``current_period_peak``."""
 
 
 @dataclass(slots=True)
@@ -474,6 +481,26 @@ def build_capacity_limit_array(
             "a plan cannot be built below what the house is expected to draw."
         )
     return values, warnings
+
+
+def build_capacity_charge_window_mask(
+    *,
+    in_window: Callable[[datetime], bool],
+    start: datetime,
+    step: timedelta,
+    count: int,
+) -> list[float]:
+    """The ``capacity_charge_window`` mask: ``1.0`` where a timestep's local
+    start falls inside the demand charge's own window, ``0.0`` elsewhere.
+
+    Same alignment as ``load_cost_forecast`` -- ``start`` must already be
+    floored onto the timestep grid, as ``build_capacity_limit_array``'s
+    ``grid_start`` is -- and always exactly ``count`` long: EMHASS falls back
+    to an unmasked (all-ones) peak with only a warning on a short or invalid
+    vector, which would silently reintroduce the over-shaving this mask
+    exists to prevent.
+    """
+    return [1.0 if in_window(start + step * index) else 0.0 for index in range(count)]
 
 
 def _import_floor_w(inputs: PayloadInputs, horizon_end: datetime) -> float:
@@ -713,6 +740,13 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
             payload["capacity_cost_per_kw"] = round(inputs.demand_charge_rate_per_kw, 4)
             if inputs.current_period_peak_w is not None:
                 payload["current_period_peak"] = round(inputs.current_period_peak_w)
+            if inputs.demand_charge_window is not None:
+                payload["capacity_charge_window"] = build_capacity_charge_window_mask(
+                    in_window=inputs.demand_charge_window,
+                    start=floor_to_step(inputs.now, step),
+                    step=step,
+                    count=inputs.horizon_steps,
+                )
         else:
             # Day-ahead, or the peak cannot be safely priced yet (see
             # coordinator.demand_charge_pricing): zero rather than the stale

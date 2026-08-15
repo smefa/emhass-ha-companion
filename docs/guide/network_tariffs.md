@@ -69,19 +69,20 @@ New sensors appear on the integration's hub device:
   new peak. This is the one worth wiring into your own automations — e.g. hold
   an EV charger back when it's tight.
 - **Peak target** (number, under Configure) — a manual ceiling used as a
-  fallback while your EMHASS add-on can't yet price a windowed demand charge
-  directly (see the note below). Pre-filled from your current period's peak;
-  adjust it if you want the plan to hold under a different level.
+  fallback on an EMHASS add-on older than 0.18.1, which can't yet price a
+  windowed demand charge directly (see the note below). Pre-filled from your
+  current period's peak; adjust it if you want the plan to hold under a
+  different level.
 
 !!! note "Why the plan sometimes just holds a hard limit"
 
     Pricing a demand charge so the optimiser can trade it off against energy
-    cost needs a feature (a "demand window mask") that, as of this integration's
-    current release, has not yet reached a stable EMHASS release — only the
-    add-on's development branch. Until it does, a tariff with a real time
-    window (both built-in profiles have one) is enforced as a hard ceiling
-    using the **Peak target** number instead of a price. It works, but it's a
-    blunter tool than the priced version — see
+    cost needs a feature (a "demand window mask") that reached a stable EMHASS
+    release in **0.18.1**. On that version or newer, a tariff with a real time
+    window (both built-in profiles have one) prices cleanly. On an older
+    add-on it's enforced as a hard ceiling using the **Peak target** number
+    instead of a price — it works, but it's a blunter tool than the priced
+    version — see
     [Network tariffs, "Version gating"](../network_tariffs.md#version-gating)
     for the full picture.
 

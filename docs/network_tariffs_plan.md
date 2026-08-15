@@ -1,19 +1,18 @@
-# Network tariffs (planned)
+# Network tariffs
 
-*Status: phases 1-4 and 6 (energy bands, the peak tracker, the priced peak,
-the windowed hard cap, and docs — [network_tariffs.md](network_tariffs.md),
+*Status: all six phases (energy bands, the peak tracker, the priced peak, the
+windowed hard cap, the window mask, and docs —
+[network_tariffs.md](network_tariffs.md),
 [guide/network_tariffs.md](guide/network_tariffs.md), the Amber profile, the
-savings-gap note) are implemented on `dev`. Phase 5 (the window mask) is
-blocked upstream — EMHASS's `master` has it, but it has not reached a release
-yet, so there is no version number to gate on. See
-[Version gating](network_tariffs.md#version-gating) for the fallback this
-runs on in the meantime.*
+savings-gap note) are implemented on `dev`. Phase 5 was blocked on an EMHASS
+release shipping `capacity_charge_window` (PR #1066); it reached one in
+**v0.18.1** (2026-08-15), and this plan's version gate is set to it. See
+[Version gating](network_tariffs.md#version-gating) for what a backend
+between v0.18.0 and v0.18.1 still falls back to.*
 
-*Backend requirement: mixed, and the mix is the single most important
-constraint on this design. Of the three EMHASS runtime parameters this
-feature needs, two are in the released **v0.18.0** and one is only on
-master. See [What EMHASS already gives us](#what-emhass-already-gives-us).
-This HA runs v0.18.0 today.*
+*Backend requirement: all three of the EMHASS runtime parameters this
+feature needs are now in a release. See
+[What EMHASS already gives us](#what-emhass-already-gives-us).*
 
 ---
 
@@ -129,7 +128,7 @@ EMHASS issue #623 built the demand-charge machinery in three phases. The
 phases did not all ship in the same release, and the split is the main thing
 this plan has to route around.
 
-| Capability | Runtime param | v0.18.0 | master | Actions |
+| Capability | Runtime param | v0.18.0 | v0.18.1 | Actions |
 |---|---|---|---|---|
 | Price the horizon peak | `capacity_cost_per_kw` | ✅ | ✅ | all |
 | Floor at the incurred peak | `current_period_peak` | ✅ | ✅ | **MPC only** |
@@ -173,7 +172,7 @@ One new profile kind carrying a calendar, feeding three mechanisms.
   │                        → load_cost_forecast / prod_price_forecast
   │
   ├── demand_charge ─────▶ capacity_cost_per_kw   (effective rate)
-  │                        capacity_charge_window (0/1 mask, master only)
+  │                        capacity_charge_window (0/1 mask, v0.18.1+)
   │                        current_period_peak    (from the peak tracker)
   │
   └── capacity_limit ────▶ maximum_power_from_grid as a per-timestep list
@@ -495,13 +494,12 @@ one per timestep, `1.0` where the timestep's local start falls inside
 `demand_charge.window`. Built by the same `NetworkCalendar` that resolves the
 energy bands, off the same per-date holiday lookups.
 
-**Master only, and newer than the current release.** v0.18.0 was tagged
-2026-08-03; the mask landed on master in `148e6272` on 2026-08-08 (PR #1066,
-*"feat: mask the demand/capacity charge to a tariff demand window"*). It is
-not a feature that was removed — it has simply never been in a release.
-Verified against the v0.18.0 tarball: zero occurrences of
-`capacity_charge_window` or `param_capacity_window` across the whole tree,
-and the epigraph there is the plain `peak_import >= p_grid_pos`.
+**Landed on master in `148e6272` on 2026-08-08 (PR #1066,
+*"feat: mask the demand/capacity charge to a tariff demand window"*), and
+released in v0.18.1 on 2026-08-15.** v0.18.0 was tagged 2026-08-03 and does
+not have it. Verified against the v0.18.0 tarball: zero occurrences of
+`capacity_charge_window` or `param_capacity_window` across the whole tree, and
+the epigraph there is the plain `peak_import >= p_grid_pos`.
 
 On v0.18.0 the parameter is therefore not read at all, and **nothing says
 so**. Every `runtimeparams` access in that release is a named lookup plus the
@@ -509,10 +507,14 @@ fixed `associations.csv` loop — no iteration over the supplied key set, so no
 whitelist check and no unknown-key warning. The mask is dropped in silence
 and the peak is priced across the whole horizon. Silence is the problem: the
 plan would look plausible and be wrong. So the companion gates on the backend
-version it
-already records (`emhass_version` in the config entry data,
-`MIN_EMHASS_VERSION` in `const.py`) and takes the fallback below rather than
-sending a parameter it knows will be ignored.
+version it already records (`emhass_version` in the config entry data,
+`MIN_EMHASS_VERSION_DEMAND_WINDOW` in `const.py`, set to `0.18.1`) and takes
+the fallback below rather than sending a parameter it knows will be ignored.
+`EmhassCoordinator.demand_charge_pricing` is where this is decided —
+`DemandChargePricing.windowed` is true exactly when a mask both applies (the
+window is not all-day) and is safe to send (the version gate passes); `_build`
+turns that into the `capacity_charge_window` predicate `build_payload` masks
+with, via `build_capacity_charge_window_mask`.
 
 ### Metering interval versus optimisation timestep
 
@@ -674,7 +676,7 @@ belongs in a per-operator YAML note and nowhere near the code.
 
 | Backend | Behaviour |
 |---|---|
-| **master / next release** | Full: windowed priced peak on MPC, incurred-peak floor, capped array on day-ahead |
+| **v0.18.1+** | Full: windowed priced peak on MPC, incurred-peak floor, capped array on day-ahead |
 | **v0.18.0** | Priced peak **only if the window is all-day**; otherwise fall back to the windowed hard cap on both actions, with the incurred-peak floor still applied on MPC |
 | **< v0.18.0** | Energy bands only; the demand-charge section of the config flow is shown disabled with the reason |
 
@@ -822,13 +824,20 @@ Small versioned steps on `dev`, in the usual style.
 4. **The windowed cap.** `capacity_limit`, the per-timestep array and its
    floor, the peak-target number, the v0.18.0 fallback path. Update
    grid_limits.md's per-run-scalar claim.
-5. **The window mask.** `capacity_charge_window` behind the version gate,
-   once it is in a released EMHASS.
+5. **The window mask.** `capacity_charge_window` behind
+   `MIN_EMHASS_VERSION_DEMAND_WINDOW` (`0.18.1`, once it reached a release):
+   `DemandChargePricing.windowed` marks a restricted window as safe to price
+   once the gate passes, and `build_payload` sends the mask alongside
+   `capacity_cost_per_kw` on MPC, built by
+   `build_capacity_charge_window_mask` off the same `NetworkCalendar`
+   predicate the v0.18.0 fallback ceiling already used. A backend still on
+   v0.18.0 keeps taking that fallback unchanged.
 6. **Docs.** `docs/network_tariffs.md`, a guide page, the Amber profile, and
    the savings gap written down.
 
-Steps 1 and 2 are independent of every EMHASS version question and can go in
-immediately. Step 5 is the only one that waits on upstream.
+Steps 1 and 2 were independent of every EMHASS version question and went in
+immediately. Step 5 was the only one that waited on upstream, and now that
+v0.18.1 has shipped, all six steps are done.
 
 ## Open questions
 

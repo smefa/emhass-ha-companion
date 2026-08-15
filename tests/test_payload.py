@@ -23,6 +23,7 @@ from custom_components.emhass_companion.models import (
 )
 from custom_components.emhass_companion.payload import (
     PayloadInputs,
+    build_capacity_charge_window_mask,
     build_payload,
     in_window,
     operating_timesteps,
@@ -689,6 +690,76 @@ def test_current_period_peak_omitted_without_a_tracker_reading():
     ).payload
     assert payload["capacity_cost_per_kw"] == 45.0
     assert "current_period_peak" not in payload
+
+
+def test_network_demand_charge_sends_the_window_mask_on_mpc():
+    """Phase 5: capacity_charge_window, aligned like every other per-timestep
+    array -- see docs/network_tariffs_plan.md, "The window mask"."""
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    window_start = now + HALF_HOUR
+    window_end = now + 3 * HALF_HOUR
+    payload = build_payload(
+        _inputs(
+            now=now,
+            network_demand_charge_configured=True,
+            demand_charge_rate_per_kw=45.0,
+            demand_charge_window=lambda when: window_start <= when < window_end,
+        )
+    ).payload
+    mask = payload["capacity_charge_window"]
+    assert len(mask) == DAY_STEPS
+    assert mask[0] == 0.0
+    assert mask[1] == 1.0
+    assert mask[2] == 1.0
+    assert mask[3] == 0.0
+
+
+def test_window_mask_omitted_without_a_predicate():
+    """An all-day window, or a backend the coordinator has not confirmed can
+    mask it -- either way, nothing the priced peak needs a mask for."""
+    payload = build_payload(
+        _inputs(network_demand_charge_configured=True, demand_charge_rate_per_kw=45.0)
+    ).payload
+    assert "capacity_charge_window" not in payload
+
+
+def test_window_mask_omitted_on_dayahead():
+    """capacity_charge_window is MPC-only in EMHASS, same restriction as
+    current_period_peak."""
+    payload = build_payload(
+        _inputs(
+            action=ACTION_DAYAHEAD,
+            network_demand_charge_configured=True,
+            demand_charge_rate_per_kw=45.0,
+            demand_charge_window=lambda when: True,
+        )
+    ).payload
+    assert "capacity_charge_window" not in payload
+
+
+def test_window_mask_omitted_when_the_peak_cannot_be_priced():
+    """demand_charge_window is only ever set by the coordinator alongside a
+    non-None rate, but build_payload must not send a mask for a peak it is
+    not pricing even if a stray predicate were passed."""
+    payload = build_payload(
+        _inputs(
+            network_demand_charge_configured=True,
+            demand_charge_rate_per_kw=None,
+            demand_charge_window=lambda when: True,
+        )
+    ).payload
+    assert "capacity_charge_window" not in payload
+
+
+def test_build_capacity_charge_window_mask_aligns_like_load_cost_forecast():
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    mask = build_capacity_charge_window_mask(
+        in_window=lambda when: when.hour == 11,
+        start=now,
+        step=HALF_HOUR,
+        count=6,
+    )
+    assert mask == [0.0, 0.0, 1.0, 1.0, 0.0, 0.0]
 
 
 def test_compute_curtailment_is_sent_when_configured():

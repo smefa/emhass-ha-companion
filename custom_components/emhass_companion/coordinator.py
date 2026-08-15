@@ -50,6 +50,7 @@ from .const import (
     LOAD_FORECAST_METHOD_MLFORECASTER,
     LOAD_FORECAST_METHOD_TYPICAL,
     MIN_EMHASS_VERSION_DEMAND_CHARGE,
+    MIN_EMHASS_VERSION_DEMAND_WINDOW,
     ML_MIN_HISTORY_DAYS,
     MODE_AUTO,
     PROFILE_KEY_LOAD_SENSOR,
@@ -136,6 +137,11 @@ class DemandChargePricing:
     effective_rate_per_kw: float | None = None
     """The rate to actually send as ``capacity_cost_per_kw``. None means the
     demand charge is not being priced right now -- see ``reason``."""
+    windowed: bool = False
+    """Whether the priced peak needs ``capacity_charge_window`` alongside it --
+    true when the demand charge's own window is restricted (not all-day) and
+    the backend is new enough to mask it. False for an all-day window (no
+    mask needed) and, of course, whenever ``effective_rate_per_kw`` is None."""
     reason: str | None = None
 
 
@@ -527,10 +533,11 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
           without it, pricing a peak has no memory of what has already been
           incurred this period, and every run would fight to hold the whole
           horizon under a level that may already be moot.
-        * Short of the window mask (``capacity_charge_window``, master-only
-          and not sent until a later phase), a windowed demand charge cannot
-          be priced without over-shaving every hour outside its own window.
-          An all-day window needs no mask, so it is exempted.
+        * A *restricted* window (not all-day) additionally needs
+          ``capacity_charge_window`` to avoid over-shaving every hour outside
+          it, which needs a further-gated backend version
+          (``MIN_EMHASS_VERSION_DEMAND_WINDOW``). An all-day window needs no
+          mask, so it is exempted from this second gate entirely.
         """
         calendar = self.network_calendar
         if calendar is None or calendar.demand_charge is None:
@@ -554,12 +561,18 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
                     f"{self.backend_version or 'an unknown version'}."
                 ),
             )
-        if demand.window is not None and not demand.window.is_unrestricted:
+        windowed = demand.window is not None and not demand.window.is_unrestricted
+        if windowed and (
+            self.backend_version is None
+            or not version_at_least(self.backend_version, MIN_EMHASS_VERSION_DEMAND_WINDOW)
+        ):
             return replace(
                 base,
                 reason=(
                     "This EMHASS release cannot restrict the demand charge to the tariff's own "
-                    "window, and pricing it unwindowed would over-shave every hour outside it."
+                    "window, and pricing it unwindowed would over-shave every hour outside it. "
+                    f"Needs EMHASS {MIN_EMHASS_VERSION_DEMAND_WINDOW}+; this add-on reports "
+                    f"{self.backend_version or 'an unknown version'}."
                 ),
             )
         rate = effective_rate_per_kw(
@@ -569,7 +582,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             n=demand.measure.n,
             days_in_period=days_in_current_period(now),
         )
-        return replace(base, effective_rate_per_kw=rate)
+        return replace(base, effective_rate_per_kw=rate, windowed=windowed)
 
     async def async_load_ml_state(self) -> None:
         """Restore which sensor mlforecaster was last confirmed trained against."""
@@ -1143,6 +1156,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         capacity_limit_window: Callable[[datetime], bool] | None = None
         demand_fallback_ceiling_w: float | None = None
         demand_window: Callable[[datetime], bool] | None = None
+        demand_charge_window: Callable[[datetime], bool] | None = None
         array_capable = self.backend_version is not None and version_at_least(
             self.backend_version, MIN_EMHASS_VERSION_DEMAND_CHARGE
         )
@@ -1172,6 +1186,21 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
                 demand_fallback_ceiling_w = self.peak_target_kw * 1000
 
                 def demand_window(when: datetime) -> bool:
+                    return calendar.in_demand_window(when, self.holiday_cache)
+
+            if (
+                demand_pricing is not None
+                and demand_pricing.windowed
+                and demand_pricing.effective_rate_per_kw is not None
+                and calendar.demand_charge is not None
+            ):
+                # The peak *is* being priced, and its own window is
+                # restricted, so the mask must go with it -- see "The window
+                # mask" in docs/network_tariffs_plan.md. demand_pricing
+                # already confirmed the backend supports it before setting
+                # windowed=True.
+
+                def demand_charge_window(when: datetime) -> bool:
                     return calendar.in_demand_window(when, self.holiday_cache)
 
         inputs = PayloadInputs(
@@ -1207,6 +1236,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             capacity_limit_window=capacity_limit_window,
             demand_fallback_ceiling_w=demand_fallback_ceiling_w,
             demand_window=demand_window,
+            demand_charge_window=demand_charge_window,
         )
         built = build_payload(inputs)
         if network_warnings:

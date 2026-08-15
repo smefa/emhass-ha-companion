@@ -124,6 +124,45 @@ async def test_all_day_window_prices_on_a_supported_backend(hass: HomeAssistant)
     # of days_in_period -- see test_peaks.py for that arithmetic worked by hand.
     assert pricing.effective_rate_per_kw == 45.0
     assert pricing.reason is None
+    assert pricing.windowed is False  # no mask needed for an all-day window
+
+
+async def test_all_day_window_never_sets_windowed_even_on_a_masking_backend(
+    hass: HomeAssistant,
+) -> None:
+    coordinator = _coordinator(hass)
+    coordinator.network_calendar = NetworkCalendar(demand_charge=_demand(window=None))
+    coordinator.backend_version = "0.18.1"
+    pricing = coordinator.demand_charge_pricing(NOW)
+    assert pricing.effective_rate_per_kw == 45.0
+    assert pricing.windowed is False
+
+
+async def test_windowed_demand_charge_prices_on_a_backend_with_the_mask(
+    hass: HomeAssistant,
+) -> None:
+    """Phase 5: 0.18.1 has capacity_charge_window, so Göteborg's own real
+    window no longer needs the reason/fallback path -- it prices, masked."""
+    coordinator = _coordinator(hass)
+    window = Window.from_dict({"hours": "07:00-20:00"}, {})
+    coordinator.network_calendar = NetworkCalendar(demand_charge=_demand(window=window))
+    coordinator.backend_version = "0.18.1"
+    pricing = coordinator.demand_charge_pricing(NOW)
+    assert pricing.effective_rate_per_kw == 45.0
+    assert pricing.reason is None
+    assert pricing.windowed is True
+
+
+async def test_windowed_demand_charge_still_refused_just_below_the_mask_version(
+    hass: HomeAssistant,
+) -> None:
+    coordinator = _coordinator(hass)
+    window = Window.from_dict({"hours": "07:00-20:00"}, {})
+    coordinator.network_calendar = NetworkCalendar(demand_charge=_demand(window=window))
+    coordinator.backend_version = "0.18.0"
+    pricing = coordinator.demand_charge_pricing(NOW)
+    assert pricing.effective_rate_per_kw is None
+    assert "0.18.1" in pricing.reason
 
 
 # --- wired into _build() --------------------------------------------------------
@@ -141,6 +180,49 @@ async def test_build_sends_the_priced_peak_and_the_floor_on_mpc(hass: HomeAssist
     assert inputs.current_period_peak_w == 3200.0
     assert built.payload["capacity_cost_per_kw"] == 45.0
     assert built.payload["current_period_peak"] == 3200
+    assert "capacity_charge_window" not in built.payload  # all-day window, no mask needed
+
+
+async def test_build_sends_the_priced_peak_with_a_mask_on_a_masking_backend(
+    hass: HomeAssistant,
+) -> None:
+    """Phase 5, end to end: Göteborg's real window prices *and* masks, on a
+    backend new enough for capacity_charge_window, instead of falling back
+    to the array ceiling (see test_build_sends_the_fallback_ceiling_when_the_
+    window_cannot_be_priced below, which is the same profile one version
+    down)."""
+    coordinator = _coordinator(hass)
+    window = Window.from_dict({"hours": "07:00-20:00"}, {})
+    coordinator.network_calendar = NetworkCalendar(demand_charge=_demand(window=window))
+    coordinator.backend_version = "0.18.1"
+    coordinator.peak_tracker = _StubTracker(floor_kw=3.2)
+
+    inputs, built = await coordinator._build(ACTION_MPC)
+
+    assert inputs.demand_charge_rate_per_kw == 45.0
+    assert built.payload["capacity_cost_per_kw"] == 45.0
+    mask = built.payload["capacity_charge_window"]
+    assert len(mask) == inputs.horizon_steps
+    assert set(mask) <= {0.0, 1.0}
+    assert any(value == 1.0 for value in mask)  # NOW is inside 07:00-20:00
+    # The mask, not the array ceiling, protects the window on this backend.
+    assert isinstance(built.payload["maximum_power_from_grid"], int)
+
+
+async def test_build_omits_the_mask_on_dayahead_even_on_a_masking_backend(
+    hass: HomeAssistant,
+) -> None:
+    """capacity_charge_window is MPC-only in EMHASS -- a day-ahead run zeroes
+    the whole priced-peak mechanism first, so there is nothing to mask."""
+    coordinator = _coordinator(hass)
+    window = Window.from_dict({"hours": "07:00-20:00"}, {})
+    coordinator.network_calendar = NetworkCalendar(demand_charge=_demand(window=window))
+    coordinator.backend_version = "0.18.1"
+
+    _inputs, built = await coordinator._build(ACTION_DAYAHEAD)
+
+    assert built.payload["capacity_cost_per_kw"] == 0.0
+    assert "capacity_charge_window" not in built.payload
 
 
 async def test_build_zeroes_the_priced_peak_on_dayahead(hass: HomeAssistant) -> None:

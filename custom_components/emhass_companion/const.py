@@ -696,6 +696,12 @@ DEMAND_CHARGE_RATE_KEY: Final = "demand_charge_rate"
 # profile's demand charge is left unpriced; energy bands still apply.
 MIN_EMHASS_VERSION_DEMAND_CHARGE: Final = "0.18.0"
 
+# The EMHASS release ``capacity_charge_window`` shipped in (PR #1066) -- see
+# docs/network_tariffs_plan.md's "The window mask". Below this a windowed
+# demand charge cannot be masked, so it is only priced when its own window is
+# unrestricted; otherwise it falls back to the array ceiling.
+MIN_EMHASS_VERSION_DEMAND_WINDOW: Final = "0.18.1"
+
 # --- Cost and savings ---------------------------------------------------------
 #
 # Sensor keys for the savings feature. Grouped here rather than left inline in
