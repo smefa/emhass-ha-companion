@@ -560,10 +560,14 @@ class EmhassStatusCard extends LiveCard {
     /* --- the battery level, planned against measured --- */
     const now = Date.now();
     const all = series(soc);
-    // The remaining horizon, so "planned high" is a peak still to come rather
-    // than one this morning already reached. A plan that has run out entirely
-    // falls back to all of it, which at least dates itself in the sub-line.
-    const ahead = all.filter((point) => point.t >= now);
+    // The remaining horizon, bounded at midnight, so "planned high" is a peak
+    // still to come *today* rather than one this morning already reached, or
+    // one the plan reaches tomorrow -- a multi-day horizon otherwise lets a
+    // higher point past midnight upstage today's own peak. A plan that has
+    // run out entirely falls back to all of it, which at least dates itself
+    // in the sub-line.
+    const endOfToday = new Date(now).setHours(24, 0, 0, 0);
+    const ahead = all.filter((point) => point.t >= now && point.t < endOfToday);
     const points = ahead.length ? ahead : all;
     let low = null;
     let high = null;
