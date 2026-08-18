@@ -960,8 +960,9 @@ const DEFAULT_HISTORY_HOURS = 2;
 /* ------------------------------------------- info card 2: house status */
 
 /** A stat tile with a second line, for sections that are read-only status. */
-function valueBox(parent, key) {
+function valueBox(parent, key, tooltip) {
   const root = tag("div", "stat", parent);
+  if (tooltip) root.title = tooltip;
   tag("div", "k", root, key);
   const value = tag("div", "v", root, "–");
   const sub = tag("div", "s", root, "");

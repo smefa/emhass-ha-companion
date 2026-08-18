@@ -92,7 +92,16 @@ See **[docs/handing_over_control.md](docs/handing_over_control.md)** for the mig
 
 Every source is a **YAML profile** — so adding support for another integration means writing one file, no release required.
 
-See **[docs/data_sources.md](docs/data_sources.md)** for what ships built in, and **[docs/profiles.md](docs/profiles.md)** to write or contribute your own.
+| Kind | Profiles |
+|---|---|
+| Price | Nord Pool (core), Nord Pool (HACS), ENTSO-E, Tibber, Fixed tariff, Any entity attribute |
+| Solar | Solcast, EMHASS built-in (Open-Meteo), Any entity attribute, No solar |
+| Load | House load sensor, Any entity attribute, Typical household (no sensor needed) |
+| Inverter | Mode select plus power number, Scripts |
+
+The **Any entity attribute** profiles are the escape hatch: point them at any entity exposing a forecast as a list attribute, name the fields, and they work.
+
+See **[docs/data_sources.md](docs/data_sources.md)** for more detail, and **[docs/profiles.md](docs/profiles.md)** to write or contribute your own.
 
 ## Troubleshooting
 

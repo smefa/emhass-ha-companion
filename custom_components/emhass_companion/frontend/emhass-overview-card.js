@@ -704,6 +704,30 @@ class EmhassOverviewCard extends LiveCard {
   }
 
   /**
+   * The solar figure, latched to today's highest so far.
+   *
+   * The window this card draws from is a rolling few hours of history plus
+   * whatever forecast is still ahead, so once midday's real peak ages out of
+   * that window the figure would otherwise fall back to the afternoon's lower
+   * window max -- a solar number that drops as the sun goes down reads as a
+   * fault. Bounding to today and latching it to the running max keeps the
+   * day's actual best on screen until the day turns over, at which point it
+   * has to fall since the new day hasn't produced one yet. Tomorrow's
+   * forecast is excluded on purpose: this figure describes today, not a
+   * preview of the plan running past midnight.
+   */
+  _solarDayPeak(points, now) {
+    const day = new Date(now).toDateString();
+    if (!this._solarPeak || this._solarPeak.day !== day) {
+      this._solarPeak = { day, value: 0 };
+    }
+    const endOfToday = new Date(now).setHours(24, 0, 0, 0);
+    const today = clipSeries(points, -Infinity, endOfToday);
+    this._solarPeak.value = Math.max(this._solarPeak.value, integrate(today, endOfToday).peak);
+    return this._solarPeak.value;
+  }
+
+  /**
    * Solar and the battery as profiles under the same ribbon as the loads.
    *
    * The figure on the right of each lane is that lane's *peak*, because the
@@ -731,7 +755,7 @@ class EmhassOverviewCard extends LiveCard {
             color: "var(--emh-solar)",
           }),
         );
-        ui.solarRow.setFigure(formatPower(solar.peak));
+        ui.solarRow.setFigure(formatPower(this._solarDayPeak(solarPoints, now)));
         // Which record the shaded part is, named rather than implied: a
         // forecast and a meter reading look identical once they are drawn.
         ui.solarRow.title = this._config.solar_entity

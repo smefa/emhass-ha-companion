@@ -1,0 +1,281 @@
+name: Solis S6-EH3P Gen6 HV Hybrid (solax_modbus)
+kind: inverter
+version: 2
+
+brand: Solis
+
+models:
+  - S6-EH3P8K-H
+  - S6-EH3P10K-H
+  - S6-EH3P12K-H
+  - S6-EH3P15K-H
+
+requires: wills106/homeassistant-solax-modbus (HACS) — the core "solis" integration path does not exist; this plugin serves Solis, SolaX, Growatt, Sofar, Alpha ESS and more from one HACS repo with per-plugin entity naming
+
+docs: https://github.com/wills106/homeassistant-solax-modbus
+
+untested: true
+
+description: >-
+  Solis S6-EH3P Gen6 HV three-phase hybrids (8/10/12/15 kW) via the
+  solax_modbus HACS integration's Solis plugin, with separate charge and
+  discharge power registers rather than one shared magnitude.
+
+notes: >-
+  Requires the wills106/homeassistant-solax-modbus HACS integration talking
+  to the inverter over local Modbus TCP or RS485 — there is no core "solis"
+  integration. This repo's current Solis support lives in
+  plugin_solis_fb00.py, not the older plugin_solis.py, which serves earlier
+  hardware with a different register map; make sure your install is actually
+  using the fb00 plugin. This profile targets the S6-EH3P Gen6 HV
+  three-phase hybrid family only.
+
+
+  **Direction and magnitude are split across three registers, and magnitude
+  is split again by direction.** Register 43135
+  (battery_control_override_switch) is Off / Force charge / Force discharge.
+  Unlike Sungrow's single shared power number, Solis gives force charge and
+  force discharge each their own power register — 43136 for charging, 43129
+  for discharging — so every force_charge action here writes the charge
+  number and every force_discharge action writes the discharge number; there
+  is no single magnitude entity that both directions share.
+
+
+  **Autorepeat is handled inside the integration, not by this profile.** The
+  plugin's own value function re-issues the write to register 43135 on every
+  poll cycle for as long as it reads Force charge or Force discharge, and it
+  stops re-issuing the instant it reads Off. So, unlike SolaX on this same
+  HACS repo, there is no autorepeat-duration number or trigger button to
+  manage here — Home Assistant does that bookkeeping for you as long as it is
+  running. That is not the same as the inverter reverting on its own: the
+  register still holds whatever it was last set to until something writes
+  Off, so restore_required stays essential — a Home Assistant restart, or a
+  forgotten handback, during a live force session leaves the battery forcing
+  exactly as it would on Sungrow.
+
+
+  **Both power registers cap out at 9900 W regardless of the inverter
+  model.** native_max_value=9900 is hardcoded in the integration's number
+  entity for both 43136 and 43129, not read from the inverter's own rating.
+  A 15 kW unit's true charge/discharge ceiling could in principle exceed
+  that, but 9900 W already sits above what a single hybrid inverter this
+  size typically pushes through its battery port, so in practice it is
+  unlikely to bind — worth knowing about rather than worth worrying about.
+
+
+  **The "No Grid Charging" gate, and whether Force charge respects it.** The
+  self-use mode select (register 43110, energy_storage_control_switch) has
+  paired options — "Self-Use" vs "Self-Use - No Grid Charging",
+  "Backup/Reserve" vs "Backup/Reserve - No Grid Charging", and so on — which
+  is Solis's own permission for charging the battery from the grid at all.
+  force_charge below defensively selects the grid-charging-allowed variant
+  before arming Force charge. Whether battery_control_override_switch =
+  Force charge actually needs that gate open, or bypasses it entirely as an
+  explicit override arguably should, is not established from the plugin
+  source — it could genuinely go either way, and asserting the
+  grid-charging-allowed option first is the safe move regardless of which is
+  true.
+
+
+  **battery_power's own sign is not confirmed.** The plugin derives charge
+  vs discharge direction from a separate bit, battery_charge_direction
+  (register 33135): 0 means charging, 1 means discharging, per the source's
+  value_function_battery_input_solis / value_function_battery_output_solis.
+  What is not established from that source is which sign the raw
+  battery_power register (33149) itself uses relative to EMHASS's
+  negative-is-charging convention. Both battery_power and
+  battery_charge_direction are also disabled by default in the entity
+  registry and must be enabled on the device page before either can be read.
+  If you want a signed figure without guessing, the plugin also derives two
+  unsigned magnitudes from the same two registers — confusingly named
+  "Battery Input Energy" and "Battery Output Energy" despite being
+  instantaneous Watts, not energy — charge power and discharge power
+  respectively, already split by the confirmed direction bit. Subtracting
+  one from the other gives a signed EMHASS-convention figure without relying
+  on battery_power's own polarity, though both still depend on the same two
+  disabled-by-default registers underneath.
+
+
+  **The grid meter's sign is not confirmed either.** meter_active_power_total
+  (register 33263, reported in kW) is a signed 32-bit register; whether
+  positive means import or export was not established from the plugin
+  source. Check it against a known import or export condition before
+  relying on it.
+
+
+  **No curtailment.** No export-limit register was identified in the Solis
+  plugin source for this family, so this profile does not offer curtail /
+  uncurtail.
+
+
+  Entity ids below assume the integration's default device name "Solis"
+  (lower-cased to a "solis_" prefix); if you renamed the device at setup,
+  use the bare, unprefixed names instead — both are listed in each field's
+  suggestions.
+
+control:
+  archetype: mode_and_magnitude
+  power_unit: w
+  signed: false
+  invert_sign: false
+  charge_boost: 1.0
+  # The number entities' own step: scale=10 on both 43136 and 43129.
+  round_to: 10
+  lifetime: persistent
+  duration_min: 30
+  deadband_w: 100
+  min_write_interval_s: 0
+  restore_required: true
+
+options:
+  mode_select:
+    name: Energy storage control mode
+    description: >-
+      The self-use / backup / feed-in priority select, and also the "No Grid
+      Charging" permission gate — see notes.
+    suggest:
+      - select.solis_energy_storage_control_switch
+      - select.energy_storage_control_switch
+    selector:
+      entity:
+        domain: select
+
+  direction_select:
+    name: Battery control override
+    description: >-
+      Off / Force charge / Force discharge. The integration re-issues this
+      write on every poll cycle by itself while forced, so this profile does
+      not need to manage an autorepeat duration or a trigger button.
+    suggest:
+      - select.solis_battery_control_override
+      - select.battery_control_override
+    selector:
+      entity:
+        domain: select
+
+  charge_power_number:
+    name: Battery control override charge power
+    suggest:
+      - number.solis_battery_control_override_charge_power
+      - number.battery_control_override_charge_power
+    selector:
+      entity:
+        domain: number
+
+  discharge_power_number:
+    name: Battery control override discharge power
+    suggest:
+      - number.solis_battery_control_override_discharge_power
+      - number.battery_control_override_discharge_power
+    selector:
+      entity:
+        domain: number
+
+  direction_off:
+    name: Battery control override — off option name
+    default: "Off"
+    selector:
+      text: {}
+
+  direction_charge:
+    name: Battery control override — force charge option name
+    default: "Force charge"
+    selector:
+      text: {}
+
+  direction_discharge:
+    name: Battery control override — force discharge option name
+    default: "Force discharge"
+    selector:
+      text: {}
+
+  self_consume_mode:
+    name: Energy storage mode — normal (no grid charging) option name
+    description: >-
+      What idle and self_consume put the storage-control mode back to.
+      Defaults to keeping grid charging off outside a planned window; set it
+      to whichever "No Grid Charging" variant matches your normal mode
+      (Self-Use / Backup-Reserve) if it is not Self-Use.
+    default: "Self-Use - No Grid Charging"
+    selector:
+      text: {}
+
+  grid_charge_allowed_mode:
+    name: Energy storage mode — grid charging allowed option name
+    description: >-
+      What force_charge selects so the "No Grid Charging" gate is open
+      during a planned grid-charge window. Whether Force charge actually
+      needs this open is unconfirmed — see notes.
+    default: "Self-Use"
+    selector:
+      text: {}
+
+sensors:
+  battery_soc: sensor.solis_battery_soc
+  # Disabled by default — enable it on the device page. Sign relative to
+  # EMHASS's negative-is-charging convention is not confirmed; see notes.
+  battery_power: sensor.solis_battery_power
+  # Sign (import vs export) not confirmed from the plugin source — see notes.
+  grid_power: sensor.solis_meter_active_power_total
+  pv_power: sensor.solis_pv_total_power
+  load_power: sensor.solis_house_load
+
+limits:
+  # No single readable "true" capacity or charge/discharge ceiling register
+  # was found in the plugin source — the S6-EH3P range pairs with more than
+  # one battery stack. The 9900 W register ceiling noted above is a limit of
+  # the integration's number entity, not a per-model rating. Left for the
+  # user to type in.
+
+actions:
+  force_charge:
+    - service: number.set_value
+      target: { entity_id: "{{ options.charge_power_number }}" }
+      data: { value: "{{ power }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.mode_select }}" }
+      data: { option: "{{ options.grid_charge_allowed_mode }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.direction_select }}" }
+      data: { option: "{{ options.direction_charge }}" }
+
+  force_discharge:
+    - service: number.set_value
+      target: { entity_id: "{{ options.discharge_power_number }}" }
+      data: { value: "{{ power }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.mode_select }}" }
+      data: { option: "{{ options.self_consume_mode }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.direction_select }}" }
+      data: { option: "{{ options.direction_discharge }}" }
+
+  idle:
+    # No dedicated hold state on this hardware beyond a power target of zero.
+    # This profile holds through the charge-power path (Force charge at 0 W)
+    # rather than the discharge path — an arbitrary pick between two
+    # equivalent zeros, noted here so it is not mistaken for a confirmed
+    # asymmetry.
+    - service: number.set_value
+      target: { entity_id: "{{ options.charge_power_number }}" }
+      data: { value: 0 }
+    - service: select.select_option
+      target: { entity_id: "{{ options.mode_select }}" }
+      data: { option: "{{ options.self_consume_mode }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.direction_select }}" }
+      data: { option: "{{ options.direction_charge }}" }
+
+  self_consume:
+    - service: select.select_option
+      target: { entity_id: "{{ options.mode_select }}" }
+      data: { option: "{{ options.self_consume_mode }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.direction_select }}" }
+      data: { option: "{{ options.direction_off }}" }
+    - service: number.set_value
+      target: { entity_id: "{{ options.charge_power_number }}" }
+      data: { value: 0 }
+    - service: number.set_value
+      target: { entity_id: "{{ options.discharge_power_number }}" }
+      data: { value: 0 }

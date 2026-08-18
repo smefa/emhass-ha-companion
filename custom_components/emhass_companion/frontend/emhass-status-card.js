@@ -67,8 +67,9 @@ const SOC_LOW_PCT = 20;
  * that ends the day full can still empty the battery at 3pm, and neither the
  * fill nor the peak band ever says so.
  */
-function socBar(parent, label) {
+function socBar(parent, label, tooltip) {
   const root = tag("div", "soc", parent);
+  if (tooltip) root.title = tooltip;
   const head = tag("div", "meter-head", root);
   tag("span", null, head, label);
   const value = tag("span", "meter-value", head, "");
@@ -166,6 +167,13 @@ const STATUS_SECTIONS = [
   ["show_system", "System tiles", "Mode, cost function, curtailment, loads, timing"],
   ["show_rules", "Why it decided that", "The executor's own rule trace"],
 ];
+
+/** A section's own blurb, keyed the same way `showsStatusPart` is -- the text
+ *  that already sells the block in the visual editor, reused as its mouseover
+ *  explanation so the two never drift apart. */
+const STATUS_SECTION_DESC = Object.fromEntries(
+  STATUS_SECTIONS.map((section) => [section[0], section[2]]),
+);
 
 /** How close the decision's own timestamp has to sit to the action sensor's
  *  `last_changed` for the two to count as the same run. Generous, because the
@@ -292,6 +300,7 @@ class EmhassStatusCard extends LiveCard {
 
     if (shows("show_banner")) {
       ui.banner = tag("div", "banner", pad);
+      ui.banner.title = STATUS_SECTION_DESC.show_banner;
       const bannerIcon = tag("div", "sq", ui.banner);
       ui.bannerIconEl = document.createElement("ha-icon");
       bannerIcon.appendChild(ui.bannerIconEl);
@@ -314,6 +323,7 @@ class EmhassStatusCard extends LiveCard {
 
     if (shows("show_decision")) {
       const decision = tag("div", "decision", pad);
+      decision.title = STATUS_SECTION_DESC.show_decision;
       ui.decisionIconWrap = tag("div", "sq big", decision);
       ui.decisionIcon = document.createElement("ha-icon");
       ui.decisionIconWrap.appendChild(ui.decisionIcon);
@@ -331,18 +341,20 @@ class EmhassStatusCard extends LiveCard {
       ui.decisionPowerNote = tag("div", "dp-c", powerWrap, "");
     }
 
-    if (shows("show_soc")) ui.soc = socBar(pad, "Planned battery level");
+    if (shows("show_soc")) {
+      ui.soc = socBar(pad, "Planned battery level", STATUS_SECTION_DESC.show_soc);
+    }
 
     if (batteryTiles.length) {
       const stats = tag("div", "stats", pad);
-      for (const tile of batteryTiles) ui.box[tile[1]] = valueBox(stats, tile[2]);
+      for (const tile of batteryTiles) ui.box[tile[1]] = valueBox(stats, tile[2], tile[3]);
     }
 
     const systemTiles = this._tilesIn("show_system");
     if (systemTiles.length) {
       tag("div", "section", pad, "System");
       const stats = tag("div", "stats", pad);
-      for (const tile of systemTiles) ui.box[tile[1]] = valueBox(stats, tile[2]);
+      for (const tile of systemTiles) ui.box[tile[1]] = valueBox(stats, tile[2], tile[3]);
     }
 
     ui.problems = tag("div", "problems", pad);
@@ -731,6 +743,9 @@ class EmhassStatusCard extends LiveCard {
 
 EmhassStatusCard.ticks = true;
 EmhassStatusCard.css = `
+  /* Every one of these carries a title attribute as its mouseover
+     explanation; the help cursor is the only visible hint that it is there. */
+  .banner, .decision, .soc, .stat { cursor: help; }
   .banner { display: flex; align-items: center; gap: 12px; padding: 12px;
             border-radius: var(--emh-radius); background: var(--emh-surface);
             transition: background 300ms; }
