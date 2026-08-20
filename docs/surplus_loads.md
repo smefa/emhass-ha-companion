@@ -151,160 +151,86 @@ It changes the window and nothing else — not the hours, not the energy, not
 which timesteps were credited. The budget is already "however much the surplus
 supports"; all this decides is where in the block those hours land.
 
-### The modulation margin
+### The modulation pad
 
-The slack the switch closes is the gap between `hours` and the span they were
-derived from — and an uncapped budget has none. The target handed to EMHASS is
-
-```
-energy_wh = hours * nominal_w
-hours     = min(credit_wh / nominal_w, span_hours, max_energy_wh / nominal_w)
-```
-
-while what the block can actually put into this load is `Σ draw · step`, where
-`draw` is `min(net, nominal_w)` for a modulating load and `nominal_w` for a
-full-power-only one. Narrowing requires `energy_wh` to be *below* that total —
-otherwise the earliest window that covers the target is the last qualifying
-timestep, which is the whole block. And two of the three terms can never get
-there:
-
-- `credit_wh` = `Σ net · step` over the same qualifying slots, so it is always
-  **at or above** the deliverable total.
-- `span_hours * nominal_w` is at least `(qualifying slots) * nominal_w * step`,
-  which is also at or above it.
-
-Which leaves `max_energy_wh`, unrelated to the block and so the one term that
-can sit under it. Before the margin existed, that made the switch a **complete
-no-op** on any load without an *Energy needed* cap: the ask was the block, the
-only window covering the block was the block, and the clamp handed back exactly
-the window it was meant to narrow. Two things that look like they would open a
-gap and do not: **the battery reservation** and **weak or sub-threshold
-timesteps** — both shrink the ask and the deliverable by the same amount.
-
-So a start-asap run **gives up a slice of the surplus** to buy the gap:
+The window is a fixed span, not something derived from the block's shape:
 
 ```
-margin = clamp(1 / run_steps, 5%, 25%)
-hours *= 1 - margin
+run_steps = ceil(hours / step)
+margin    = clamp(1 / run_steps, 5%, 25%)
+pad_steps = max(1, round(hours * margin / step))
+window_last = window_first + (run_steps - 1 + pad_steps) * step
 ```
 
-Scaled by the run length because the margin has to absorb the difference
-between a slot's forecast surplus and its real one, and a short run averages
-fewer slots — so one bad slot moves it further. A four-step run gives up a
-quarter; a twenty-step run a twentieth.
+`hours` and `energy_wh` are untouched — the switch has never changed the
+budget, only where it may land, and that is still true. What changed is how
+`window_last` is found. `pad_steps` reuses the run-length scaling `hours`
+itself used to be derated by: a short run needs proportionally more shaping
+room than a long one, because it averages fewer slots and so is more exposed
+to any single one coming in under forecast. A four-step run gets a quarter
+of its own hours back as padding; a twenty-step run a twentieth. It exists
+for the same reason it always has: a load pinned to exactly its bare hours
+would have to hold the block's *peak* power through every one of them, and
+the front of a block is usually its weakest end — EMHASS treats the energy
+total as an equality, so a window with no room to spread the run down a ramp
+just imports the difference instead. The pad is what buys the solver
+somewhere to shape the run into.
 
-**The margin is only charged when it actually buys a shorter window.** The
-window is computed twice — once for the full ask, once for the derated one — and
-the margin is kept only if the second is strictly narrower. Otherwise the full
-ask stands.
+**This used to be derived from the block's deliverable energy instead** —
+walking slot by slot from `window_first` until cumulative delivery covered
+the ask, on the theory that this was the earliest window EMHASS could fill
+without importing. That walk is gone. The reason: "deliverable" is net of
+whatever the battery's own charging already claims from the same slots
+(`battery_reserved_series`, below), and that claim is read from the
+*previous* MPC cycle's plan — it is not a constraint this cycle's solve is
+bound to keep. A block whose early slots the battery has already claimed
+read, to the walk, as if the sun did not rise until the battery was done
+with it: on a car charging off a battery that still has most of its SoC to
+find, the walk would reach past two or three hours of genuine sun the
+battery was mid-claim on, and hand back a window starting whenever that
+claim happened to taper off — the exact opposite of "as early as possible",
+and for a reason (a stale reservation) the running solve was always free to
+override by simply charging the battery later instead.
 
-That check is doing real work, not guarding a corner case. Whether a margin buys
-anything is a property of the block's *shape*: it removes energy from the ask,
-but if the tail slots the run stops needing are the weakest ones, the covering
-slot barely moves and the single slack step puts it straight back. Measured on a
-real 13-slot block, a 10% margin gave up **1.36 kWh for exactly zero
-timesteps**. The cheaper test — "is there placement freedom in principle",
-comparing the run length against the qualifying slot count — does not catch
-that, because the freedom exists and derating still cannot reach it.
-
-**An `Energy needed` cap is never derated**, either. It already sits below what
-the block delivers, which is the gap the margin exists to manufacture, and
-delivering less of a number the user typed would be a different feature. The
-test is `cap_hours < hours_from_block`, checked *before* derating rather than
-clamping to the cap afterwards — that ordering matters for a cap landing
-*inside* the margin. 9.5 h of cap against a 10 h block and a 25% margin would
-otherwise come out as 7.5 h, a full hour short, and only in that narrow band.
-
-Together these mean the margin does nothing on a **flat** block — where
-`credit_wh / peak` is exactly the slot count, so the run fills the block by
-construction — and most on a **peaked or declining** one whose weak tail
-contributes little to `credit_wh`.
-
-Whenever `hours` genuinely is short of the span, EMHASS picks where they go —
-and its cost function has **no reason to prefer early**. On flat prices, which
-end of the block a thin day's run lands on comes down to solver tie-break, not
-to anything about the sun. With the switch on, the window is pulled in to the
-earliest stretch that can still deliver the budget, leaving as little room to
-drift late as the day allows.
-
-### How wide is "as early as possible"
-
-Not simply the hours asked for. The power ceiling handed to EMHASS is the
-block's **peak** surplus, and the front of a block is its weakest end — so a
-window clamped to the bare hours would ask a load to hold midday power through
-morning slots that never offered it. EMHASS treats the energy total as an
-equality, so it has no choice but to import the difference.
-
-The fix is width rather than a lower ceiling. EMHASS pays the buy price for
-imports and gives up the sell price on exports, so the cost of one more watt
-in a timestep steps up sharply the moment that timestep stops exporting. That
-kink is what makes the solver *modulate* — spreading a run down the morning
-ramp and tracking the surplus curve, rather than running flat out in the
-fewest possible slots. It can only spread into window it has been given.
-
-So the window grows until the surplus inside it actually covers the energy being
-asked for, and stops **one timestep** past the first slot where it does — the
-covering slot is the first whose *cumulative* surplus clears the target, so the
-run may need part of the next one.
-
-Deliberately one step, and not scaled with the run. Adding room proportional to
-the run's length is the obvious thing to reach for — "a longer run needs more
-space to shape itself in" — but it double-counts the margin and loses to it. The
-margin *is* the shaping room: an ask a few per cent under what the window
-supplies leaves that few per cent as slack spread across every slot, which is
-exactly the freedom the solver needs to track the surplus curve. Measured on a
-real 24-slot block, a proportional slack of a quarter of the run added four
-timesteps back while a 6% margin removed three — the two together narrowed
-nothing, and the switch stayed the no-op it had always been.
-
-That keeps the window the earliest one that can deliver the budget without
-importing, and it stays self-tightening: a window that only just covers the
-target leaves little room to drift late with. On a block flat enough that every
-timestep can deliver the ceiling, the cover is reached at exactly the hours asked for and
-nothing is widened at all.
+The fixed span trusts that instead: it does not know or care what the
+battery reserved last cycle, so the window opens at the first *gross*-
+qualifying slot and holds for `run_steps + pad_steps`, regardless of how
+much of that span the previous plan had already spoken for. **This is a
+bet, not a guarantee.** If the current solve does not, in fact, reschedule
+the battery's charging to make room — some other constraint holds it where
+it was — EMHASS imports for the shortfall in that window, the same way any
+ordinary deferrable would on a day the forecast came in wrong. That is an
+accepted cost, scoped to the one window on the one day the bet doesn't pay
+off; the alternative (waiting for the walk to catch up with wherever the
+battery's claim happens to end) reliably produces exactly the late start
+this switch exists to avoid.
 
 ### What it does in practice
 
-Measured against a real plan — a car on a 24-slot afternoon block, ceiling
-clipped to the 6188 W peak, no *Energy needed* cap:
+A pool needing 2.5 h (10 steps) inside four hours of flat 800 W sun: the
+window closes 12 steps after it opens — ten steps of run, one of padding
+(`clamp(1/10, 5%, 25%) = 10%`, `2.5 h × 10% ≈ 1 step`), one more that
+`window_end` always carries against payload rounding. Switch off, EMHASS
+gets the full 21-step block to place the same run in instead.
 
-| | window | slots | run | asked |
-|---|---|---|---|---|
-| switch off | 11:00–17:15 | 26 | 16 | 24.55 kWh |
-| switch on, before the margin | 11:00–17:15 | 26 | 16 | 24.55 kWh |
-| switch on, with the margin | 11:00–16:45 | 24 | 15 | 23.02 kWh |
+A load whose early slots the battery has claimed almost entirely — 200 W of
+3000 W left over each, say, in the first four of an eight-slot block — asks
+for its energy as usual and gets a window that opens right there anyway: the
+four reserved slots still count as gross-qualifying, so `window_first` sits
+at the front of them regardless of how little they can currently deliver.
+Whether that resolves to a clean early start or a slot or two of import
+comes down to whether the running solve actually moves the battery's charge
+elsewhere — which is between EMHASS and the battery, not something this
+budget can see in advance.
 
-Two timesteps of placement freedom removed for 1.53 kWh of surplus given up. The
-same car later the same afternoon, on a 14-slot block whose ceiling had dropped
-to 5683 W — a shorter run, so a larger margin:
-
-| | window | slots | run | asked |
-|---|---|---|---|---|
-| switch off | 12:00–18:15 | 26 | 8 | 10.01 kWh |
-| switch on (12.5% margin, 1/8) | 12:00–17:15 | 22 | 7 | 8.75 kWh |
-
-Four timesteps for 1.25 kWh. Raising the margin trades more sun for more of the
-day, and on the morning block it was close to linear:
-
-| margin | window | slots | asked | given up |
-|---|---|---|---|---|
-| 6.25% (default at 16 steps) | 11:00–16:45 | 24 | 23.02 kWh | 1.53 kWh |
-| 10% | 11:00–16:30 | 23 | 22.09 kWh | 2.45 kWh |
-| 15% | 11:00–16:00 | 21 | 20.87 kWh | 3.68 kWh |
-| 20% | 11:00–15:30 | 19 | 19.64 kWh | 4.91 kWh |
-| 25% | 11:00–15:15 | 18 | 18.41 kWh | 6.14 kWh |
-
-The clamps on `modulation_margin` are where to change that trade, and the shape
-of the day decides how much a given margin buys: a block whose sun tails off
-loses several timesteps to a small margin, a flat one loses none to any margin.
-
-**It is still usually the worse choice for self-consumption**, and that is the
-point of leaving it off by default. Widening buys the run somewhere to spread,
-but it cannot conjure sun that isn't up yet: a car asked for 20 kWh at first
-light will still be started into a morning that cannot fill it, where EMHASS
-left alone would have waited for midday. Turn it on when you want the energy
-*early* more than you want it *cheap* — a car leaving at noon, or a forecast
-you don't trust — not as a general improvement.
+**It is still usually the worse choice for self-consumption**, and that is
+the point of leaving it off by default. Pulling the window in buys the run
+somewhere to shape itself and a real shot at running earlier, but it cannot
+conjure sun that isn't up yet, and now it can also ask for a slot the
+battery genuinely still needs. Turn it on when you want the energy *early*
+more than you want it *cheap* or *free of import* — a car leaving at noon, a
+battery you are content to have charge later in the day instead — not as a
+general improvement.
 
 A widened window is logged at debug level, naming the load and how many
 timesteps it grew by; a run that starts later than expected on a peaked day

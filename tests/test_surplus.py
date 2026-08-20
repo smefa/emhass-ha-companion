@@ -632,25 +632,27 @@ def _modulating(**overrides) -> SurplusSpec:
     return _spec(**{**defaults, **overrides})
 
 
-def test_asap_widens_the_window_until_the_surplus_can_cover_the_run():
-    """A run clamped to its bare hours would hold peak power through slots
-    that never offered it.
+def test_asap_no_longer_widens_for_a_weak_ramp():
+    """The window is a fixed span now, not a chase after the block's shape.
 
     The ceiling is the block's peak, 3000 W, but the front of this ramp starts
-    at 600 W. EMHASS holds the energy total as an equality, so a two-step
-    window means 900 Wh has to come out of two slots offering 150 and 300 Wh
-    of sun -- the remaining 450 Wh is imported. Reaching one step further is
-    what lets the solver spread the run down the ramp instead.
+    at 600 W. An earlier version of this rule would widen the window until
+    cumulative deliverable energy covered the 900 Wh ask, reaching a third
+    step to do it. This version does not look at the ramp at all: the window
+    is ``run_steps + pad`` from ``window_first``, full stop -- two steps of
+    run plus one of padding, regardless of how weak those two steps are. See
+    ``_asap_window_last`` for why: a block's *deliverable* shape is one MPC
+    cycle stale, no more trustworthy here than the battery reservation that
+    motivated dropping the walk in the first place.
     """
     series = _series(600, 1200, 1800, 3000, 3000, 3000)
 
     free = allocate(series, [_modulating(max_energy_wh=900.0)], STEP)["pool"]
     asap = allocate(series, [_modulating(max_energy_wh=900.0, start_asap=True)], STEP)["pool"]
 
-    # 0.3 h rounds up to two steps, which would have ended the window at
-    # START + 3 * STEP once padded. The first three slots are what actually
-    # add up to the 900 Wh being asked for, plus one step of modulation slack.
-    assert asap.window_end == START + 5 * STEP
+    # Two steps of run, one of padding, plus the one step window_end always
+    # carries -- nothing here depends on the ramp's shape.
+    assert asap.window_end == START + 4 * STEP
     # Still far tighter than leaving the placement to EMHASS.
     assert free.window_end == START + 7 * STEP
     assert asap.window_start == free.window_start == START
@@ -731,37 +733,42 @@ def test_asap_leaves_the_window_alone_when_the_block_can_never_cover_it():
     assert asap.hours == free.hours == 0.75
 
 
-def test_asap_gives_up_a_margin_of_an_uncapped_block_to_buy_a_window():
-    """Without this the switch is a no-op on every uncapped load.
+def test_asap_narrows_an_uncapped_block_without_touching_the_energy():
+    """The window still narrows on an uncapped load -- it just no longer
+    costs any of the block's energy to do it.
 
     ``credit_wh`` sums ``net`` over the same slots whose ``min(net, nominal_w)``
     the deliverables are, and ``span_hours * nominal_w`` covers at least as many
     steps as there are qualifying slots -- so an uncapped ask always equals what
-    the block delivers, the only window covering it is the block, and the clamp
-    hands back exactly the window it was meant to narrow. Giving up a margin of
-    the surplus is what manufactures the gap.
+    the block delivers. An earlier version of this rule needed a margin taken
+    out of the energy ask to open any gap between the run and the block at all.
+    This version does not: the window is clamped straight to ``run_steps + pad``
+    regardless of the block's shape, so it narrows here from nine steps to
+    seven while ``hours`` stays exactly what the block credits.
     """
     # Three strong slots then a long weak tail: 3250 Wh over eight qualifying
     # slots, ceiling clipped to the 3000 W peak, so the uncapped ask is 13/12 h
-    # -- five steps of run inside an eight-slot block. That is the gap the
-    # margin can act on, and a flat block is precisely the shape where it
-    # cannot (there, credit/peak *is* the slot count; see the test below).
+    # -- five steps of run inside an eight-slot block.
     series = _series(3000, 3000, 3000, 800, 800, 800, 800, 800)
 
     free = allocate(series, [_modulating()], STEP)["pool"]
     asap = allocate(series, [_modulating(start_asap=True)], STEP)["pool"]
 
     assert free.hours == pytest.approx(13 / 12)
-    # A five-step run keeps 1/5 -- inside both clamps.
-    assert asap.hours == pytest.approx(13 / 12 * 0.8)
-    # ...and that buys a window two steps shorter than the block.
+    assert asap.hours == free.hours
+    assert asap.energy_wh == free.energy_wh
+    # Five steps of run plus one of padding narrows the window by two steps,
+    # not by however much energy giving up would have bought.
     assert free.window_end == START + 9 * STEP
     assert asap.window_end == START + 7 * STEP
 
 
 def test_asap_margin_scales_up_as_the_run_gets_shorter():
-    """ "Higher margin on fewer slots": a short run averages fewer timesteps, so
-    one coming in under forecast moves it further."""
+    """ "More padding on fewer slots": a short run averages fewer timesteps, so
+    it has less shaping room built in already, and one slot coming in under
+    forecast moves it further. ``modulation_margin`` is the fraction of a
+    start-asap run's hours added back as window padding (see
+    ``_asap_window_last``), and it scales up to compensate."""
     assert modulation_margin(2) == 0.25  # clamped at the ceiling
     assert modulation_margin(4) == 0.25
     assert modulation_margin(8) == 0.125
@@ -769,10 +776,10 @@ def test_asap_margin_scales_up_as_the_run_gets_shorter():
     assert modulation_margin(100) == 0.05  # clamped at the floor
 
 
-def test_asap_never_takes_a_margin_out_of_an_energy_cap():
-    """A cap is a number the user typed. It already sits below what the block
-    delivers -- which is the gap the margin exists to manufacture -- so taking a
-    margin out of it as well would just quietly under-deliver the ask."""
+def test_asap_delivers_an_energy_cap_in_full_and_still_narrows_the_window():
+    """A cap is a number the user typed, and start-asap never touches energy
+    for any load, capped or not -- there is no derating step left for a cap
+    to need exempting from. The window still narrows around it."""
     series = _series(600, 1200, 1800, 2400, 3000, 2400, 1200)
 
     free = allocate(series, [_modulating(max_energy_wh=300.0)], STEP)["pool"]
@@ -783,11 +790,13 @@ def test_asap_never_takes_a_margin_out_of_an_energy_cap():
     assert asap.window_end < free.window_end
 
 
-def test_asap_takes_no_margin_when_the_run_needs_every_qualifying_slot():
-    """No placement freedom exists to buy, at any price.
+def test_asap_padding_has_nowhere_to_go_when_the_run_needs_every_slot():
+    """No placement freedom exists, at any price.
 
-    Four qualifying slots and a run that needs all four: derating would trade
-    sun for a window that cannot narrow.
+    Four qualifying slots and a run that needs all four: ``_asap_window_last``
+    still computes a pad, but its clamp against the block's own last
+    qualifying timestep leaves nothing for that pad to add. The window lands
+    exactly where free placement would have put it anyway.
     """
     series = _series(3000, 3000, 3000, 3000)
 
@@ -798,15 +807,15 @@ def test_asap_takes_no_margin_when_the_run_needs_every_qualifying_slot():
     assert asap.window_end == free.window_end
 
 
-def test_asap_drops_the_margin_when_it_would_not_narrow_the_window():
-    """Whether a margin buys anything is a property of the block's *shape*.
+def test_asap_padding_cannot_narrow_a_window_the_block_already_fills():
+    """Same shape, a different way to reach it: a run that already needs
+    (almost) every qualifying slot leaves the padding nothing to work with,
+    whatever the block's shape looks like along the way.
 
-    Five strong slots and one weak one: the margin stops the run needing that
-    last slot, but it was only worth 150 Wh of the 3900 Wh block, so the
-    covering slot moves one step and MODULATION_SLACK_STEPS puts it straight
-    back. Charging the margin here would give up sun for zero timesteps --
-    measured on a real 13-slot block, 1.36 kWh for nothing. "Is there placement
-    freedom in principle" does not catch this; computing both windows does.
+    Five strong slots and one weak one, needing all six: the pad computed
+    from ``run_steps`` would reach past the block's own last qualifying
+    timestep, and the clamp against ``window_last`` pulls it straight back
+    to where free placement already sits.
     """
     series = _series(3000, 3000, 3000, 3000, 3000, 600)
 
@@ -818,26 +827,35 @@ def test_asap_drops_the_margin_when_it_would_not_narrow_the_window():
     assert asap.window_end == free.window_end
 
 
-def test_asap_delivers_a_cap_that_lands_inside_the_margin_in_full():
-    """The ordering that makes the cap exemption real rather than approximate.
+def test_asap_window_ignores_a_battery_reservation():
+    """The whole reason the coverage walk was dropped.
 
-    A 4000 Wh cap on a block worth 4500 Wh sits *between* the full ask and the
-    ask minus a 1/6 margin (3750 Wh). Derating first and clamping to the cap
-    afterwards would deliver 3750 -- 250 Wh short of a number the user typed,
-    and only in the narrow band where the cap falls inside the margin, which is
-    exactly the kind of bug that never shows up in a round-numbers test.
+    The first four slots here are almost entirely claimed by the battery --
+    200 W of 3000 W left over each. They still count as gross-qualifying (see
+    ``allocate``: qualification is read off the sun, not the reservation), so
+    they still credit real, if small, energy -- but a coverage walk would have
+    to reach past all four, into the untouched second half of the block,
+    before the run's 900 Wh was actually covered. That reservation is read
+    from the *previous* cycle's plan, not a constraint this cycle's solve is
+    bound to keep, so dragging the window out to respect it was exactly the
+    bug ``_asap_window_last`` no longer has: the window here comes straight
+    from ``window_first`` and the run's own step count, landing entirely
+    inside the four reserved slots regardless of how little they can
+    currently deliver.
     """
-    series = _series(3000, 3000, 3000, 3000, 3000, 3000)
+    gross = _series(3000, 3000, 3000, 3000, 3000, 3000, 3000, 3000)
+    reserved = _series(2800, 2800, 2800, 2800, 0, 0, 0, 0)
 
-    free = allocate(series, [_modulating(max_energy_wh=4000.0)], STEP)["pool"]
-    asap = allocate(series, [_modulating(max_energy_wh=4000.0, start_asap=True)], STEP)["pool"]
+    budget = allocate(
+        gross, [_modulating(max_energy_wh=900.0, start_asap=True)], STEP, reserved=reserved
+    )["pool"]
 
-    assert free.energy_wh == pytest.approx(4000.0)
-    assert asap.energy_wh == pytest.approx(4000.0)
-    # No window assertion to make here: 4000 Wh of a 4500 Wh flat block is a
-    # six-step run in a six-slot block, so there is nothing to narrow either
-    # way. The point is only that the cap arrives whole.
-    assert asap.window_end == free.window_end
+    assert budget.window_start == START
+    # Two steps of run, one of padding, one of window_end's usual carry --
+    # entirely inside slots 0-3, the ones the battery has claimed.
+    assert budget.window_end == START + 4 * STEP
+    assert budget.hours == 0.3
+    assert budget.energy_wh == 900.0
 
 
 def test_asap_on_an_empty_block_stays_empty():

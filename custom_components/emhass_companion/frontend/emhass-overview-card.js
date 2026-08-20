@@ -229,14 +229,20 @@ const TILE_METRICS = {
   none: { label: "Nothing", read: () => ({ k: "", v: "" }) },
   solar: {
     label: "Solar now",
+    hint: "Solar power the plan forecast for this moment.",
+    entity: "sensor.pv_forecast",
     read: (c) => ({ k: "Solar", v: formatPower(num(c.pv)) }),
   },
   house: {
     label: "House now",
+    hint: "The whole house's forecast power draw for this moment.",
+    entity: "sensor.load_forecast",
     read: (c) => ({ k: "House", v: formatPower(num(c.house)) }),
   },
   grid: {
     label: "Grid now",
+    hint: "Power crossing the meter: import when positive, export when negative.",
+    entity: "sensor.grid_forecast",
     read: (c) => {
       const watts = num(c.grid);
       return {
@@ -247,6 +253,8 @@ const TILE_METRICS = {
   },
   battery: {
     label: "Battery now",
+    hint: "Battery power and charge level: discharging when positive, charging when negative.",
+    entity: "sensor.battery_power",
     read: (c) => {
       const watts = num(c.battery);
       return {
@@ -259,6 +267,8 @@ const TILE_METRICS = {
   },
   soc: {
     label: "Charge level",
+    hint: "The battery's state of charge right now.",
+    entity: "sensor.battery_soc",
     read: (c) => ({
       k: "Charge level",
       v: isUsable(c.soc) ? `${num(c.soc).toFixed(0)} %` : "–",
@@ -266,6 +276,8 @@ const TILE_METRICS = {
   },
   end_soc: {
     label: "End charge target",
+    hint: "The state of charge the plan is aiming to end its horizon at.",
+    entity: "sensor.end_soc_target",
     read: (c) => ({
       k: "Target at end",
       v: isUsable(c.endSoc) ? `${num(c.endSoc).toFixed(0)} %` : "–",
@@ -273,26 +285,38 @@ const TILE_METRICS = {
   },
   price: {
     label: "Import price now",
+    hint: "What buying a kWh from the grid costs right now.",
+    entity: "sensor.buy_price",
     read: (c) => ({ k: "Price now", v: isUsable(c.buy) ? num(c.buy).toFixed(3) : "–" }),
   },
   sell_price: {
     label: "Export price now",
+    hint: "What selling a kWh back to the grid pays right now.",
+    entity: "sensor.sell_price",
     read: (c) => ({ k: "Export price", v: isUsable(c.sell) ? num(c.sell).toFixed(3) : "–" }),
   },
   cost: {
     label: "Planned cost",
+    hint: "The total cost the optimiser expects over the plan's horizon.",
+    entity: "sensor.plan_cost",
     read: (c) => ({ k: "Plan cost", v: isUsable(c.cost) ? num(c.cost).toFixed(2) : "–" }),
   },
   solar_planned: {
     label: "Solar in the plan",
+    hint: "Solar energy the plan expects to generate over its horizon.",
+    entity: "sensor.pv_forecast",
     read: (c) => ({ k: "Solar planned", v: formatEnergy(c.solarEnergy) }),
   },
   charge_planned: {
     label: "Charging in the plan",
+    hint: "Energy the plan expects to put into the battery over its horizon.",
+    entity: "sensor.battery_power",
     read: (c) => ({ k: "Charging planned", v: formatEnergy(c.chargeEnergy) }),
   },
   surplus: {
     label: "Spare solar",
+    hint: "Solar the plan expects to have no use for during the surplus window.",
+    entity: "sensor.solar_surplus_energy",
     read: (c) => ({
       k: "Spare solar",
       v: isUsable(c.surplusEnergy) ? formatEnergy(num(c.surplusEnergy)) : "–",
@@ -300,6 +324,7 @@ const TILE_METRICS = {
   },
   loads: {
     label: "Loads running",
+    hint: "How many deferrable loads are on right now, out of how many are configured.",
     read: (c) => ({
       k: "Loads on",
       v: c.loadsTotal ? `${c.loadsOn} of ${c.loadsTotal}` : "–",
@@ -307,6 +332,8 @@ const TILE_METRICS = {
   },
   age: {
     label: "Plan age",
+    hint: "How long ago the last successful optimisation finished.",
+    entity: "binary_sensor.plan_stale",
     read: (c) => ({
       k: "Planned",
       v: Number.isFinite(c.plannedAt) ? formatAgo(c.plannedAt, c.hass) : "–",
@@ -400,8 +427,14 @@ class EmhassOverviewCard extends LiveCard {
       ui.tiles = TILE_DEFAULTS.map((_default, index) => {
         const metric = tileMetric(this._config, index + 1);
         if (metric === "none") return null;
-        const tile = statTile(ui.stats, TILE_METRICS[metric].label);
+        const spec = TILE_METRICS[metric];
+        const tile = statTile(ui.stats, spec.label);
         tile.metric = metric;
+        if (spec.hint) tile.title = spec.hint;
+        if (spec.entity) {
+          tile.classList.add("tap");
+          tile.addEventListener("click", () => moreInfo(this, this._hubId(spec.entity)));
+        }
         return tile;
       });
       if (!ui.stats.childElementCount) ui.stats.style.display = "none";
@@ -413,12 +446,20 @@ class EmhassOverviewCard extends LiveCard {
       // it lines up with the lanes below it. A ribbon that is 90 px wider than
       // the loads it explains puts every block under the wrong hour.
       ui.priceRow = laneRow(pad, "Price", "var(--emh-accent)");
+      ui.priceRow.title = "Import price, cheapest to most expensive by colour. Click for the price history.";
       ui.ribbon = tag("div", "ribbon", ui.priceRow.lane);
       ui.ribbonScale = tag("div", "scale", pad);
       ui.priceRow.addEventListener("click", () => moreInfo(this, this._hubId("sensor.buy_price")));
     }
 
-    if (shows("show_surplus")) ui.surplusNote = tag("div", "surplus", pad);
+    if (shows("show_surplus")) {
+      ui.surplusNote = tag("div", "surplus tap", pad);
+      ui.surplusNote.title =
+        "The window during which the plan expects more solar than the house can use. Click for the surplus energy history.";
+      ui.surplusNote.addEventListener("click", () =>
+        moreInfo(this, this._hubId("sensor.solar_surplus_energy")),
+      );
+    }
 
     ui.showSolar = shows("show_solar");
     ui.showBattery = shows("show_battery");
@@ -758,9 +799,11 @@ class EmhassOverviewCard extends LiveCard {
         ui.solarRow.setFigure(formatPower(this._solarDayPeak(solarPoints, now)));
         // Which record the shaded part is, named rather than implied: a
         // forecast and a meter reading look identical once they are drawn.
-        ui.solarRow.title = this._config.solar_entity
-          ? `Past: measured, from ${this._config.solar_entity}`
-          : "Past: the forecast the plan was using at the time";
+        ui.solarRow.title = `Solar forecast, today's peak on the right. ${
+          this._config.solar_entity
+            ? `Past: measured, from ${this._config.solar_entity}`
+            : "Past: the forecast the plan was using at the time"
+        }. Click for the history.`;
       }
     }
 
@@ -788,9 +831,11 @@ class EmhassOverviewCard extends LiveCard {
           }),
         );
         ui.batteryRow.setFigure(formatPower(battery.peak));
-        ui.batteryRow.title = this._config.battery_entity
-          ? `Past: measured, from ${this._config.battery_entity}`
-          : "Past: the battery power the plan had for that moment";
+        ui.batteryRow.title = `Battery power: discharging above the line, charging below it. ${
+          this._config.battery_entity
+            ? `Past: measured, from ${this._config.battery_entity}`
+            : "Past: the battery power the plan had for that moment"
+        }. Click for the history.`;
       }
     }
 
@@ -845,6 +890,7 @@ class EmhassOverviewCard extends LiveCard {
         }),
       );
       row.setFigure(Number.isFinite(view.ranToday) ? formatHours(view.ranToday) : "–");
+      row.title = "Filled blocks show when the plan expects this load to run. Click for its history.";
       row.addEventListener("click", () =>
         moreInfo(this, view.find("should_run") ? view.find("should_run").entity_id : null),
       );
@@ -880,6 +926,8 @@ EmhassOverviewCard.css = `
   .surplus { display: flex; align-items: center; gap: 6px; font-size: .78rem;
              color: var(--emh-solar); margin-top: 10px; }
   .surplus ha-icon { --mdc-icon-size: 17px; }
+  .surplus.tap { cursor: pointer; }
+  .surplus.tap:hover { opacity: .8; }
   .gantt { display: grid; gap: 4px; }
   .grow-row { display: flex; align-items: center; gap: var(--gcol-gap);
               cursor: pointer; border-radius: 8px; padding: 2px 0;

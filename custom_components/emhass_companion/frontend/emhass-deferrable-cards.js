@@ -119,16 +119,21 @@ function sliderRow(parent, label, format) {
     dragging = false;
   });
 
-  row.setState = (stateObj) => {
+  // `floor` lets a caller raise the minimum past the entity's own `min`
+  // attribute -- e.g. "Run within" should never go below the hours the load
+  // still needs, even though the number entity itself allows a lower value.
+  row.setState = (stateObj, floor) => {
     if (!stateObj) return;
     const attrs = stateObj.attributes || {};
-    input.min = attrs.min !== undefined ? attrs.min : 0;
+    const attrMin = attrs.min !== undefined ? attrs.min : 0;
+    input.min = Number.isFinite(floor) ? Math.max(attrMin, floor) : attrMin;
     input.max = attrs.max !== undefined ? attrs.max : 100;
     input.step = attrs.step !== undefined ? attrs.step : 1;
     if (dragging) return;
     const current = num(stateObj);
+    // Setting a value below input.min clamps it to min, so re-read it.
     input.value = Number.isFinite(current) ? current : input.min;
-    value.textContent = Number.isFinite(current) ? format(current) : "–";
+    value.textContent = Number.isFinite(current) ? format(Number(input.value)) : "–";
   };
   return row;
 }
@@ -836,7 +841,7 @@ class EmhassDeferrableSwipeCard extends LiveCard {
     ui.requestRow.style.display = asks ? "" : "none";
     ui.requestRow.setState(view.isRequested);
     ui.withinRow.style.display = view.onDemand ? "" : "none";
-    ui.withinRow.setState(view.find("run_within"));
+    ui.withinRow.setState(view.find("run_within"), num(view.find("operating_hours")));
     ui.energyRow.style.display = view.onSurplus ? "" : "none";
     ui.energyRow.setState(view.find("energy_needed"));
 
@@ -996,7 +1001,7 @@ class EmhassDeferrableStripCard extends LiveCard {
     ui.requestRow.style.display = asks ? "" : "none";
     ui.requestRow.setState(view.isRequested);
     ui.withinRow.style.display = view.onDemand ? "" : "none";
-    ui.withinRow.setState(view.find("run_within"));
+    ui.withinRow.setState(view.find("run_within"), num(view.find("operating_hours")));
     if (this._expanded) this._syncDrawer();
   }
 
