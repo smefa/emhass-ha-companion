@@ -570,9 +570,8 @@ class EmhassStatusCard extends LiveCard {
     }
 
     /* --- the battery level, planned against measured --- */
-    const now = Date.now();
     const all = series(soc);
-    const { low, high } = this._socDayRange(all, now);
+    const { low, high } = this._socDayRange(soc);
 
     // The Companion already has to know this one -- it is what it sends EMHASS
     // as the plan's starting level -- so the card asks it rather than making
@@ -700,31 +699,30 @@ class EmhassStatusCard extends LiveCard {
   }
 
   /**
-   * Today's planned low and high, latched across optimiser re-runs.
+   * Today's planned low and high.
    *
    * The SOC forecast is forward-looking from whichever run produced it, so a
    * later run drops the portion of today it no longer looks back on -- a
    * morning peak or dip vanishes from the raw series once the optimiser
-   * moves past it, not just once "now" moves past it. Bounding to today's
-   * calendar day alone still recedes as that happens; latching the extremes
-   * as they're seen keeps today's actual low/high on screen for the rest of
-   * the day, the same fix `_solarDayPeak` already applies to the overview
-   * card's solar figure. The day turning over drops the latch, since nothing
-   * has run yet for the new one.
+   * moves past it, not just once "now" moves past it. Latching that on the
+   * card itself (tried twice: bounding to today's calendar day alone still
+   * recedes, and a per-instance latch only ever sees what its own browser
+   * session was open for) is why this still receded after a reload or a
+   * dashboard reopened later in the day. The coordinator now latches it
+   * instead -- see DayRange in coordinator.py -- so this just reads what the
+   * backend already worked out, the same as every other box on this card.
    */
-  _socDayRange(all, now) {
-    const day = new Date(now).toDateString();
-    if (!this._socRange || this._socRange.day !== day) {
-      this._socRange = { day, low: null, high: null };
-    }
-    const startOfToday = new Date(now).setHours(0, 0, 0, 0);
-    const endOfToday = new Date(now).setHours(24, 0, 0, 0);
-    for (const point of all) {
-      if (point.t < startOfToday || point.t >= endOfToday) continue;
-      if (!this._socRange.low || point.v < this._socRange.low.v) this._socRange.low = point;
-      if (!this._socRange.high || point.v > this._socRange.high.v) this._socRange.high = point;
-    }
-    return this._socRange;
+  _socDayRange(soc) {
+    const attrs = soc && soc.attributes ? soc.attributes : {};
+    const low =
+      Number.isFinite(attrs.day_low) && attrs.day_low_at
+        ? { v: Number(attrs.day_low), t: Date.parse(attrs.day_low_at) }
+        : null;
+    const high =
+      Number.isFinite(attrs.day_high) && attrs.day_high_at
+        ? { v: Number(attrs.day_high), t: Date.parse(attrs.day_high_at) }
+        : null;
+    return { low, high };
   }
 
   _problems(attrs) {

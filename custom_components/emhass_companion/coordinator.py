@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 import logging
 from typing import Any
 
@@ -146,6 +146,26 @@ class DemandChargePricing:
 
 
 @dataclass(slots=True)
+class DayRange:
+    """A running min/max latched across today's local calendar day.
+
+    The SOC forecast a plan carries is forward-looking from whichever run
+    produced it (EMHASS.retrieve_hass.get_attr_data_dict starts at the current
+    timestep, not at the plan's start), so today's actual peak or dip drops out
+    of the raw series the moment a later run's horizon moves past it -- not
+    just once "now" does. Latching the extremes as each run is seen, on the
+    coordinator rather than in a dashboard card, keeps them correct across
+    every browser tab and page reload for the rest of the day: a client-side
+    latch (tried twice, see the frontend git history) only ever sees what its
+    own session happened to be open for.
+    """
+
+    day: date
+    low: Point | None = None
+    high: Point | None = None
+
+
+@dataclass(slots=True)
 class EmhassData:
     """Everything the entities render from."""
 
@@ -159,6 +179,7 @@ class EmhassData:
     warnings: list[str] = field(default_factory=list)
     load_order: list[str] = field(default_factory=list)
     end_soc: EndSocDecision | None = None
+    soc_day_range: DayRange | None = None
     last_action: str | None = None
     last_success: datetime | None = None
 
@@ -261,6 +282,10 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         # the hysteresis anchor. In-memory only: after a restart the first run
         # simply computes fresh.
         self._end_soc: EndSocDecision | None = None
+        # Today's planned SOC low/high, latched across runs -- see DayRange.
+        # In-memory only, same as _end_soc: after a restart the latch starts
+        # over rather than replaying the part of today already missed.
+        self._soc_day_range: DayRange | None = None
 
         self._unsub_tick: Callable[[], None] | None = None
         # Smooths the live PV entity the same way NetHouseLoadSensor smooths
@@ -823,6 +848,9 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         window_start = floor_to_step(inputs.now, step)
         horizon_end = window_start + step * inputs.horizon_steps
 
+        if plan is not None:
+            self._update_soc_day_range(plan.series("soc_percent"), inputs.now)
+
         return EmhassData(
             plan=plan,
             last_run=last_run,
@@ -842,12 +870,35 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             warnings=built.warnings,
             load_order=built.load_order,
             end_soc=self._end_soc,
+            soc_day_range=self._soc_day_range,
             last_action=action,
             # Only a genuinely successful solve counts. "no-run" and infeasible
             # both leave the staleness watchdog tripped, which is what stops an
             # executor from acting on a plan that was never actually produced.
             last_success=dt_util.utcnow() if last_run.ok else None,
         )
+
+    def _update_soc_day_range(self, series: Series, now: datetime) -> None:
+        """Latch today's planned SOC low/high onto ``self._soc_day_range``.
+
+        See DayRange for why this has to live here rather than in a dashboard
+        card: a run's series only ever looks forward from itself, so the
+        running extreme has to be carried forward across runs by something
+        that outlives a single card instance.
+        """
+        local_now = dt_util.as_local(now)
+        today = local_now.date()
+        if self._soc_day_range is None or self._soc_day_range.day != today:
+            self._soc_day_range = DayRange(day=today)
+        start = dt_util.start_of_local_day(local_now)
+        end = start + timedelta(days=1)
+        for point in series:
+            if point.time < start or point.time >= end:
+                continue
+            if self._soc_day_range.low is None or point.value < self._soc_day_range.low.value:
+                self._soc_day_range.low = point
+            if self._soc_day_range.high is None or point.value > self._soc_day_range.high.value:
+                self._soc_day_range.high = point
 
     def _schema_supported(self, plan: Plan) -> bool:
         """Refuse a plan written to a schema major we do not understand.

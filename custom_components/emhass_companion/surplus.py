@@ -348,6 +348,16 @@ def allocate(
             )
             if qualifying_peak > 0:
                 nominal_w = min(spec.nominal_w, qualifying_peak)
+            # The battery's reservation is excluded from qualification (see
+            # above) precisely so a slot's *gross* surplus can clear the
+            # floor while its *usable* share, net of that reservation,
+            # doesn't -- qualifying_peak can land under run_floor_w. Never
+            # hand EMHASS a ceiling below what this load can actually draw:
+            # that's the same "sub-floor slot" case payload.py's
+            # minimum/nominal clamp exists to prevent, just arrived at from
+            # the other direction. Fewer, full-floor hours and some import
+            # beats a plan the hardware can't execute.
+            nominal_w = max(nominal_w, min(spec.run_floor_w, spec.nominal_w))
 
         # ``credit_wh`` is the *aggregate* surplus the block offers, uncapped
         # by what this load can draw in any one slot -- a run of strong slots

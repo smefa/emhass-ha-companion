@@ -181,6 +181,7 @@ BATTERY_SENSORS: tuple[EmhassSensorDescription, ...] = (
         value_fn=_plan_value("soc_percent"),
         series_fn=lambda data: data.plan.series("soc_percent") if data.plan else Series.empty(),
         measured_fn=lambda config: {"measured_entity": config.soc_entity},
+        attrs_fn=lambda data: _soc_day_range_attributes(data),
     ),
     EmhassSensorDescription(
         key="end_soc_target",
@@ -201,6 +202,29 @@ def _end_soc_attributes(data: EmhassData) -> dict[str, Any]:
     if data.end_soc is None:
         return {}
     return {"reason": data.end_soc.reason, **data.end_soc.details}
+
+
+def _soc_day_range_attributes(data: EmhassData) -> dict[str, Any]:
+    """Today's planned SOC low/high, latched on the coordinator -- see DayRange.
+
+    Read directly rather than recomputed here: the card used to derive this
+    itself from the raw forecast series, which only ever looks forward from
+    whichever run produced it, so a dashboard reloaded after today's peak had
+    already passed could never see it. Latching on the coordinator instead of
+    in the card means every session reads the same answer regardless of when
+    it happened to be open.
+    """
+    day_range = data.soc_day_range
+    if day_range is None:
+        return {}
+    attrs: dict[str, Any] = {}
+    if day_range.low is not None:
+        attrs["day_low"] = round(day_range.low.value, 1)
+        attrs["day_low_at"] = dt_util.as_local(day_range.low.time).isoformat()
+    if day_range.high is not None:
+        attrs["day_high"] = round(day_range.high.value, 1)
+        attrs["day_high_at"] = dt_util.as_local(day_range.high.time).isoformat()
+    return attrs
 
 
 PRICE_SENSORS: tuple[EmhassSensorDescription, ...] = (
