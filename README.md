@@ -2,6 +2,8 @@
 
 A Home Assistant integration that makes [EMHASS](https://github.com/davidusb-geek/emhass) usable without writing YAML.
 
+EMHASS automatically analyzes your solar forecasts, household usage patterns, and dynamic grid pricing to schedule your batteries and heavy appliances for maximum financial savings.
+
 Join my [Discord](https://discord.gg/wvavNscm8) if you have questions or want to give input.
 
 
@@ -11,9 +13,8 @@ EMHASS is an excellent energy optimiser with a difficult front door. Using it to
 
 This integration answers that. Install the EMHASS add-on, install this, answer a short config flow, and get a working optimised home.
 
-> **Status: early.** Plan retrieval, scheduling, deferrable loads, dashboard cards and battery control are implemented. Control ships **off** — see [Handing over control](docs/handing_over_control.md). See [Roadmap](#roadmap).
->
-> New to the integration? The docs site has a plain, screen-by-screen [User Guide](https://smefa.github.io/emhass-ha-companion/guide/) alongside the technical reference below.
+
+> The docs site has a plain, screen-by-screen [User Guide](https://smefa.github.io/emhass-ha-companion/guide/) alongside the technical reference below.
 
 ---
 
@@ -35,16 +36,16 @@ Home Assistant owns all state. EMHASS is treated as a **stateless calculator**.
 
 Three consequences worth knowing:
 
-**Your existing integrations are the data sources.** This integration ships no API clients. Prices come from your Nord Pool / ENTSO-E / Tibber integration, solar from Solcast, hardware from whatever inverter integration you already run. Reading Solcast's cached forecast attribute costs **zero** API calls, so re-optimising every few minutes never touches your daily quota. See [Data sources](docs/data_sources.md).
+**Your existing integrations are the data sources.** This integration ships no API clients. Prices come from existing price integrations, solar from Solcast, hardware from whatever inverter integration you already run. See [Data sources](docs/data_sources.md).
 
-**Configuration cannot drift.** Every optimisation request carries the full set of settings as runtime parameters. EMHASS's own `config.json` is written once at setup and never consulted for those values afterwards. (A consequence: EMHASS's own web UI will show stale values. The *Last request to EMHASS* diagnostic sensor is the authoritative record.)
+**Configuration cannot drift.** Every optimisation request carries the full set of settings as runtime parameters. EMHASS's own `config.json` is written once at setup and never consulted for those values afterwards. (A consequence: EMHASS's own web UI will show stale values.)
 
-**It ships unable to touch your hardware.** `switch.emhass_control_enabled` starts **off**. You almost certainly arrive with working automations; the integration computes and records what it *would* do so you can compare its judgement against your existing setup before handing anything over. See [Handing over control](docs/handing_over_control.md).
+**It ships unable to touch your hardware.** `switch.emhass_control_enabled` starts **off**. The integration computes and records what it *would* do so you can compare its judgement against your existing setup before handing anything over. See [Handing over control](docs/handing_over_control.md).
 
 ## Requirements
 
 - Home Assistant 2026.7 or newer
-- **EMHASS 0.17.9 or newer** — this integration reads the optimisation plan through the JSON API introduced in that release, and does not use EMHASS's `publish-data` mechanism at all
+- **EMHASS 0.18.1 or newer** — this integration reads the optimisation plan through the JSON API.
 
 Nothing else is required. No battery, no solar, no dynamic tariff and no supported inverter are each valid configurations.
 
@@ -76,17 +77,12 @@ See **[docs/deferrable_loads.md](docs/deferrable_loads.md)** and **[docs/thermal
 
 ## Dashboard cards
 
-Two cards ship with the integration and register themselves automatically — a plan overview and a per-load view, both following your Home Assistant theme. See **[docs/dashboard_cards.md](docs/dashboard_cards.md)**.
+Dashboard cards ship with the integration and register themselves automatically — a plan overview and a per-load view, both following your Home Assistant theme. See **[docs/dashboard_cards.md](docs/dashboard_cards.md)**.
 
 ## Entities
 
 See **[docs/entities.md](docs/entities.md)** for the full list of sensors, switches and controls the integration creates.
 
-## Handing over control
-
-The integration can command your battery and switch your deferrable loads, but ships unable to do either. While off, it still records exactly what it *would* have done, so you can compare its judgement against your existing automations before switching over.
-
-See **[docs/handing_over_control.md](docs/handing_over_control.md)** for the migration path and the safety behaviours (staleness watchdog, deadband, manual override).
 
 ## Data sources
 
@@ -94,20 +90,18 @@ Every source is a **YAML profile** — so adding support for another integration
 
 | Kind | Profiles |
 |---|---|
-| Price | Nord Pool (core), Nord Pool (HACS), ENTSO-E, Tibber, Fixed tariff, Any entity attribute |
+| Price | Nord Pool (core), Nord Pool (HACS), ENTSO-E, Amber, Tibber, Fixed tariff, Any entity attribute |
 | Solar | Solcast, EMHASS built-in (Open-Meteo), Any entity attribute, No solar |
 | Load | House load sensor, Any entity attribute, Typical household (no sensor needed) |
 | Inverter | Mode select plus power number, Scripts |
+| Tariffs | Amber Electric, Göteborg Energi |
 
-The **Any entity attribute** profiles are the escape hatch: point them at any entity exposing a forecast as a list attribute, name the fields, and they work.
 
-See **[docs/data_sources.md](docs/data_sources.md)** for more detail, and **[docs/profiles.md](docs/profiles.md)** to write or contribute your own.
+See **[docs/data_sources.md](docs/data_sources.md)** for more detail, and **[docs/profiles.md](docs/profiles.md)** to write or contribute your own profile.
 
 ## Troubleshooting
 
 See **[docs/troubleshooting.md](docs/troubleshooting.md)** — testing a data source in isolation, diagnosing a wrong-looking plan, and resolving an infeasible optimisation.
-
-Control is implemented but ships off; see [Handing over control](docs/handing_over_control.md).
 
 ## Contributing
 
