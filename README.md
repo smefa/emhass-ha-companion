@@ -93,7 +93,7 @@ Every source is a **YAML profile** — so adding support for another integration
 | Price | Nord Pool (core), Nord Pool (HACS), ENTSO-E, Amber, Tibber, Fixed tariff, Any entity attribute |
 | Solar | Solcast, EMHASS built-in (Open-Meteo), Any entity attribute, No solar |
 | Load | House load sensor, Any entity attribute, Typical household (no sensor needed) |
-| Inverter | Mode select plus power number, Scripts |
+| Inverter | Deye, Growatt, Sungrow, Sigenergy, Solax, Solis, Generic |
 | Tariffs | Amber Electric, Göteborg Energi |
 
 
