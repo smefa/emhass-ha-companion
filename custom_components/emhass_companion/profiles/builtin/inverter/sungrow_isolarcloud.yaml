@@ -1,0 +1,209 @@
+name: Sungrow iSolarCloud (Cloud API)
+kind: inverter
+version: 2
+
+brand: Sungrow
+
+models:
+  - Any Sungrow plant registered on iSolarCloud (SH/SG-series hybrids with a battery)
+
+requires: Sungrow iSolarCloud (HACS, KRoperUK) — a cloud API integration, not the mkaiser local Modbus package used by the SH-RT and SH-T profiles
+
+docs: https://github.com/KRoperUK/sungrow-hass
+
+untested: true
+
+description: >-
+  Sungrow inverters via KRoperUK's iSolarCloud cloud API integration — no
+  local Modbus dongle required, but writes go over the internet.
+
+notes: >-
+  This talks to Sungrow's iSolarCloud API, not the inverter directly. Setup
+  needs a Developer Platform app (App Key, App Secret, App ID from the
+  platform URL, and the right region gateway) with OAuth 2.0 enabled, which
+  Sungrow can take up to a week to approve. If you have a WiNet-S dongle and
+  can reach the inverter locally, prefer the `sungrow_sh10rt` / `sungrow_sh_t`
+  profiles instead — they write over local Modbus TCP, where this profile's
+  writes go through the same cloud API as its 5-minute polling and can be
+  delayed or throttled (Sungrow backs off up to an hour on repeated E998/E999
+  rate-limit errors). `min_write_interval_s` below is set to match that
+  polling cadence rather than the millisecond-scale default other profiles
+  use, specifically to avoid tripping that backoff.
+
+  Battery controls (`select.battery_mode`, `number.charge_discharge_power`,
+  the feed-in limitation pair) only appear on plants with an actual battery —
+  they're hidden entirely on PV-only systems.
+
+  `select.battery_mode`'s four options ("Self-consumption", "Force charge",
+  "Force discharge", "Stop") set the EMS mode and charge/discharge direction
+  together, unlike the SH-RT/SH-T Modbus profiles which need two separate
+  selects for the same thing. Confirm the exact option text against your own
+  entity — these must match character for character.
+
+  Sensor entity ids are not listed below because they aren't fixed: this
+  integration creates sensors dynamically from whichever iSolarCloud "points"
+  your plant and device model actually report, nested under per-device names
+  you may have changed. After setup, check Developer Tools → States for your
+  battery SOC, battery/grid/PV/load power sensors and fill in the `sensors:`
+  block yourself — a local copy of this file overrides the shipped one. The
+  sign convention for battery and grid power (which direction is positive)
+  is not documented and hasn't been confirmed against real hardware; verify
+  it matches EMHASS's convention (negative battery power = charging) before
+  relying on it.
+
+  The integration's own `number.forced_dispatch_duration` is a client-side
+  auto-revert timeout it applies to forced commands, separate from this
+  profile's `restore`. It is not written by any action here — set it by hand
+  to a little more than your planning interval as a second line of defence in
+  case this integration is killed before `restore` runs (e.g. an unclean
+  Home Assistant shutdown).
+
+control:
+  archetype: mode_and_magnitude
+  power_unit: w
+  signed: false
+  invert_sign: false
+  charge_boost: 1.0
+  round_to: 100
+  lifetime: persistent
+  duration_min: 30
+  deadband_w: 200
+  # Matches the API's own default poll/backoff cadence -- see notes. Writing
+  # more often than this risks tripping iSolarCloud's E998/E999 rate limit.
+  min_write_interval_s: 300
+  restore_required: true
+  # Feed-in limitation is a plain export cap in watts -- PV still serves load
+  # and battery underneath it.
+  curtail_mode: export_limit
+  curtail_unit: w
+
+options:
+  battery_mode_select:
+    name: Battery mode
+    description: Single select carrying both the forced-mode gate and the direction — Self-consumption, Force charge, Force discharge, Stop.
+    suggest:
+      - select.battery_mode
+    selector:
+      entity:
+        domain: select
+
+  power_number:
+    name: Charge/discharge power
+    suggest:
+      - number.charge_discharge_power
+    selector:
+      entity:
+        domain: number
+
+  mode_self_consume:
+    name: Battery mode — self-consumption option name
+    default: Self-consumption
+    selector:
+      text: {}
+
+  mode_force_charge:
+    name: Battery mode — force charge option name
+    default: Force charge
+    selector:
+      text: {}
+
+  mode_force_discharge:
+    name: Battery mode — force discharge option name
+    default: Force discharge
+    selector:
+      text: {}
+
+  mode_stop:
+    name: Battery mode — stop option name
+    default: Stop
+    selector:
+      text: {}
+
+  feed_in_limitation_select:
+    name: Feed-in limitation
+    description: Arms the export power limit set below.
+    suggest:
+      - select.feed_in_limitation
+    selector:
+      entity:
+        domain: select
+
+  feed_in_limitation_number:
+    name: Feed-in limitation power
+    suggest:
+      - number.feed_in_limitation_value
+    selector:
+      entity:
+        domain: number
+
+  feed_in_limitation_enable:
+    name: Feed-in limitation — enable option name
+    default: Enable
+    selector:
+      text: {}
+
+  feed_in_limitation_disable:
+    name: Feed-in limitation — disable option name
+    default: Disable
+    selector:
+      text: {}
+
+sensors:
+  # Not filled in -- entity ids depend on which iSolarCloud points your plant
+  # reports. See notes above. Example shapes, uncomment and fix up:
+  # battery_soc: sensor.plant_battery_level
+  # battery_power: sensor.plant_energy_storage_active_power   # sign not confirmed -- verify against EMHASS convention (negative = charging)
+  # grid_power: sensor.plant_grid_active_power                # sign not confirmed
+  # pv_power: sensor.plant_total_active_power_of_pv
+  # load_power: sensor.plant_load_power
+
+limits:
+  # battery_capacity_wh: depends on the battery pack reported by iSolarCloud — let the user type it in
+  # charge_power_max_w: "{{ states('number.charge_discharge_power') | float }}"
+  # discharge_power_max_w: "{{ states('number.charge_discharge_power') | float }}"
+
+actions:
+  self_consume:
+    - service: select.select_option
+      target: { entity_id: "{{ options.battery_mode_select }}" }
+      data: { option: "{{ options.mode_self_consume }}" }
+    - service: number.set_value
+      target: { entity_id: "{{ options.power_number }}" }
+      data: { value: 0 }
+
+  force_charge:
+    - service: number.set_value
+      target: { entity_id: "{{ options.power_number }}" }
+      data: { value: "{{ power }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.battery_mode_select }}" }
+      data: { option: "{{ options.mode_force_charge }}" }
+
+  force_discharge:
+    - service: number.set_value
+      target: { entity_id: "{{ options.power_number }}" }
+      data: { value: "{{ power }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.battery_mode_select }}" }
+      data: { option: "{{ options.mode_force_discharge }}" }
+
+  idle:
+    - service: number.set_value
+      target: { entity_id: "{{ options.power_number }}" }
+      data: { value: 0 }
+    - service: select.select_option
+      target: { entity_id: "{{ options.battery_mode_select }}" }
+      data: { option: "{{ options.mode_stop }}" }
+
+  curtail:
+    - service: number.set_value
+      target: { entity_id: "{{ options.feed_in_limitation_number }}" }
+      data: { value: "{{ curtail_w }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.feed_in_limitation_select }}" }
+      data: { option: "{{ options.feed_in_limitation_enable }}" }
+
+  uncurtail:
+    - service: select.select_option
+      target: { entity_id: "{{ options.feed_in_limitation_select }}" }
+      data: { option: "{{ options.feed_in_limitation_disable }}" }

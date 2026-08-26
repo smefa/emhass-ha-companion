@@ -6,6 +6,7 @@ venv/
 .ruff_cache/
 .mypy_cache/
 .coverage
+.github/agents/
 htmlcov/
 dist/
 build/
