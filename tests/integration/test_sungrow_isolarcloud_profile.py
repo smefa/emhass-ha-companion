@@ -57,7 +57,10 @@ def test_force_discharge_selects_discharge_option(hass: HomeAssistant) -> None:
     steps = render_action(hass, _profile(), OPTIONS, "force_discharge", power_w=1800)
     by_entity = _by_entity(steps)
     assert by_entity[OPTIONS["power_number"]]["data"]["value"] == 1800
-    assert by_entity[OPTIONS["battery_mode_select"]]["data"]["option"] == OPTIONS["mode_force_discharge"]
+    assert (
+        by_entity[OPTIONS["battery_mode_select"]]["data"]["option"]
+        == OPTIONS["mode_force_discharge"]
+    )
 
 
 def test_idle_zeroes_power_and_stops_without_a_separate_arm_step(hass: HomeAssistant) -> None:
@@ -71,7 +74,9 @@ def test_idle_zeroes_power_and_stops_without_a_separate_arm_step(hass: HomeAssis
 def test_self_consume_selects_self_consumption_and_zeroes_power(hass: HomeAssistant) -> None:
     steps = render_action(hass, _profile(), OPTIONS, "self_consume", power_w=0)
     by_entity = _by_entity(steps)
-    assert by_entity[OPTIONS["battery_mode_select"]]["data"]["option"] == OPTIONS["mode_self_consume"]
+    assert (
+        by_entity[OPTIONS["battery_mode_select"]]["data"]["option"] == OPTIONS["mode_self_consume"]
+    )
     assert by_entity[OPTIONS["power_number"]]["data"]["value"] == 0
 
 
