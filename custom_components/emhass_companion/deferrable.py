@@ -19,6 +19,7 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 import logging
+from typing import Any, Final
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
@@ -281,6 +282,13 @@ class DeferrableRuntime:
     # How far the plan-trusting fallback below has already replayed. Only ever
     # advanced for a load with no running_source; irrelevant otherwise.
     plan_assumed_until: datetime | None = field(default=None, repr=False)
+
+    # Whether the plan currently in force already asked for this load at this
+    # moment -- refreshed once per cycle by the registry, never inferred here.
+    # The distinction it carries is between a run this integration chose and one
+    # that merely happened, and only the first may be pinned into EMHASS's
+    # timestep 0. See to_load's current_power_w.
+    plan_scheduled_now: bool = field(default=False, repr=False)
 
     _listeners: list[Callable[[], None]] = field(default_factory=list, repr=False)
 
@@ -935,8 +943,35 @@ class DeferrableRuntime:
             wants_to_run=self.enabled and self.participates and not (surplus and budget.is_empty),
             # A load that is already running should not be charged a startup
             # penalty again, nor be re-scheduled for work it has done today.
+            # This alone is what credits the startup: EMHASS reads the flag
+            # straight into its own current-state parameter, and neither it nor
+            # current_on_timesteps can pin a timestep.
             current_state=self.is_running or self.mode == LOAD_MODE_FORCE_ON,
-            current_power_w=nominal_power_w if self.is_running else 0.0,
+            # Only ever a power this integration is itself commanding, never one
+            # it has merely observed. EMHASS turns def_current_power into a hard
+            # equality on timestep 0 -- p_deferrable[k][0] == this, plus a
+            # forced-on binary that widens the load's own window mask to let it
+            # through. Sent for being *seen* running it latches: the pin holds
+            # the load on, so it is still running at the next solve, so the pin
+            # re-applies, and price never gets a vote. The block the optimiser
+            # actually wants keeps being re-placed a timestep further out while
+            # the load burns its hours at whatever the spot price happens to be.
+            #
+            # Two commands qualify, and neither can feed itself. A forced run,
+            # because the executor is holding the load on whatever the plan
+            # says, so the horizon has to be solved around that timestep being
+            # spent. And a timestep the plan in force already asked for --
+            # which is a decision the optimiser reached against real prices one
+            # cycle ago, at an index it was free to place, not the pinned index
+            # it is being read back into. Honouring it is what keeps a block
+            # continuing instead of being re-litigated every 15 minutes; a car
+            # that started charging on its own satisfies neither, and stays the
+            # optimiser's to schedule.
+            current_power_w=(
+                nominal_power_w
+                if self.mode == LOAD_MODE_FORCE_ON or self.plan_scheduled_now
+                else 0.0
+            ),
             # Completed work is measured against an operating-hours target,
             # which a thermal load does not have -- its temperature *is* its
             # state, reported through start_temperature instead.
@@ -1207,6 +1242,41 @@ class DeferrableRegistry:
                 continue
             load.assume_from_plan(plan.rows, index, now)
 
+    def adopt_plan_commitments(
+        self, plan: Plan | None, load_order: list[str], now: datetime, *, stale: bool
+    ) -> None:
+        """Record which loads the plan in force already asks for right now.
+
+        Called once per run with the *previous* plan -- the same pairing
+        :meth:`assume_from_plan` gets, and for a related reason: it is the only
+        record of what this integration actually chose, as opposed to what the
+        appliances happen to be doing. Only the former may be pinned into
+        EMHASS's timestep 0, so without this the payload cannot tell a block it
+        scheduled from a car someone plugged in.
+
+        Reset first and unconditionally, so a load that drops out of the plan --
+        or out of its load order -- stops being committed to rather than
+        keeping the last answer it was given.
+
+        A stale plan commits to nothing. Its rows were solved against prices
+        that have since been superseded, and pinning from them is exactly the
+        latch this flag exists to avoid, just with a slower clock.
+        """
+        for load in self._loads.values():
+            load.plan_scheduled_now = False
+        if plan is None or stale:
+            return
+        row = plan.row_at(now)
+        if row is None:
+            return
+        for load in self._loads.values():
+            try:
+                index = load_order.index(load.subentry_id)
+            except ValueError:
+                continue
+            if index < len(row.deferrables):
+                load.plan_scheduled_now = row.deferrables[index] > load.running_threshold_w
+
     def check_auto_disarm(self, now: datetime, step_minutes: int = DEFAULT_TIME_STEP) -> None:
         """Clear every request and forced run that has had what it asked for.
 
@@ -1264,6 +1334,53 @@ class DeferrableRegistry:
 
 
 # --- helpers -----------------------------------------------------------------
+
+
+# Every field a subentry only *seeds*, as (config key, runtime attribute).
+# These are entity-owned from the moment the load exists, which is why
+# _apply_subentry_fields leaves them alone -- so the subentry's copy is frozen
+# at whatever the config flow last wrote while the value the optimiser uses
+# lives on the number or select. Kept here, beside the seeding it mirrors, so
+# that adding a field to _from_subentry and forgetting it here is a one-file
+# mistake rather than a silent gap in every support bundle.
+SEEDED_FIELDS: Final[tuple[tuple[str, str], ...]] = (
+    (CONF_RECURRENCE, "recurrence"),
+    (CONF_NOMINAL_POWER, "nominal_power_w"),
+    (CONF_MINIMUM_POWER, "minimum_power_w"),
+    (CONF_OPERATING_HOURS, "operating_hours"),
+    (CONF_EARLIEST_START, "earliest_start"),
+    (CONF_LATEST_END, "latest_end"),
+    (CONF_SEMI_CONTINUOUS, "semi_continuous"),
+    (CONF_SINGLE_CONSTANT, "single_constant"),
+    (CONF_STARTUP_PENALTY, "startup_penalty"),
+    (CONF_MAX_STARTUPS, "max_startups"),
+    (CONF_MINIMUM_ON_TIME, "minimum_on_time_minutes"),
+    (CONF_MINIMUM_OFF_TIME, "minimum_off_time_minutes"),
+    (CONF_SURPLUS_HEADROOM, "surplus_headroom_w"),
+    (CONF_ENERGY_NEEDED, "energy_needed_kwh"),
+    (CONF_SURPLUS_PRIORITY, "surplus_priority"),
+)
+
+# Offered only for a thermal load, and seeded only for one.
+SEEDED_THERMAL_FIELDS: Final[tuple[tuple[str, str], ...]] = (
+    (CONF_HEATING_RATE, "heating_rate"),
+    (CONF_COOLING_CONSTANT, "cooling_constant"),
+    (CONF_THERMAL_INERTIA, "thermal_inertia"),
+    (CONF_COMFORT_TEMPERATURE, "comfort_temperature"),
+    (CONF_SETBACK_TEMPERATURE, "setback_temperature"),
+    (CONF_MAX_TEMPERATURE, "max_temperature"),
+    (CONF_COMFORT_START, "comfort_start"),
+    (CONF_COMFORT_END, "comfort_end"),
+)
+
+
+def live_settings(load: DeferrableRuntime) -> dict[str, Any]:
+    """What the optimiser is actually told, for every entity-owned field.
+
+    The counterpart to a subentry's ``data`` -- same keys, current values.
+    """
+    fields = SEEDED_FIELDS + (SEEDED_THERMAL_FIELDS if load.is_thermal else ())
+    return {key: getattr(load, attr, None) for key, attr in fields}
 
 
 def _from_subentry(

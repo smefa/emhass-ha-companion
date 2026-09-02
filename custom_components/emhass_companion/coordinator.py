@@ -1140,6 +1140,17 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         # before deferrable_loads() below reads completed_timesteps out of it.
         if self.data is not None:
             self.loads.assume_from_plan(self.data.plan, self.data.load_order, now)
+        # Which loads that same plan already commits to at this instant -- read
+        # before it is replaced, for the same reason, and the only thing that
+        # lets the payload distinguish a block this integration scheduled from
+        # an appliance that started on its own. Unconditional: with no previous
+        # data every load must be reset to uncommitted, not left as it was.
+        self.loads.adopt_plan_commitments(
+            self.data.plan if self.data else None,
+            self.data.load_order if self.data else [],
+            now,
+            stale=self.plan_is_stale,
+        )
         # Every load, every cycle. Deliberately outside the branch above and
         # not folded back into assume_from_plan: a request or forced run that
         # has had what it asked for must clear itself whether or not there is a
