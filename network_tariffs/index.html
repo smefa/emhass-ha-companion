@@ -1,0 +1,1906 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A Home Assistant integration that makes EMHASS usable without writing YAML.">
+      
+      
+      
+        <link rel="canonical" href="https://smefa.github.io/emhass-ha-companion/network_tariffs/">
+      
+      
+        <link rel="prev" href="../grid_limits/">
+      
+      
+        <link rel="next" href="../template_additions/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/icon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Network tariffs - EMHASS Companion</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#network-tariffs" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="EMHASS Companion" class="md-header__button md-logo" aria-label="EMHASS Companion" data-md-component="logo">
+      
+  <img src="../assets/logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            EMHASS Companion
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Network tariffs
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="teal" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/smefa/emhass-ha-companion" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    smefa/emhass-ha-companion
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="EMHASS Companion" class="md-nav__button md-logo" aria-label="EMHASS Companion" data-md-component="logo">
+      
+  <img src="../assets/logo.png" alt="logo">
+
+    </a>
+    EMHASS Companion
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/smefa/emhass-ha-companion" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    smefa/emhass-ha-companion
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    User Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/deferrable_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deferrable loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/thermal_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Thermal loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/surplus_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Surplus loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/inverter_control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inverter control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/hub_controls/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hub controls
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/network_tariffs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Network tariffs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/dashboard_cards/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dashboard cards
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Technical reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Technical reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_2" id="__nav_3_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Loads
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Loads
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deferrable_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deferrable loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../thermal_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Thermal loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../surplus_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Surplus loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../on_demand_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    On-demand loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../load_groups/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Load groups
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../request_run_service/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Request-run service (planned)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dashboard_cards/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dashboard cards
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../lab_cards/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Lab cards (experimental)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../entities/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Entities
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../savings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cost and savings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../end_soc/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    End SOC
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../handing_over_control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Handing over control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../inverter_control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inverter control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fronius_gen24_scripts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fronius GEN24 scripts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data_sources/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data sources
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../grid_limits/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dynamic grid limits
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Network tariffs
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Network tariffs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#energy-bands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Energy bands
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-demand-charge" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The demand charge
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The demand charge">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#version-gating" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Version gating
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-windowed-hard-cap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The windowed hard cap
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#entities" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Entities
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-this-does-not-do" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What this does not do
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../template_additions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Template additions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../profiles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Writing a profile
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../inverter_profile_roadmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inverter profile roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#energy-bands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Energy bands
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-demand-charge" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The demand charge
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The demand charge">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#version-gating" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Version gating
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-windowed-hard-cap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The windowed hard cap
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#entities" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Entities
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-this-does-not-do" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What this does not do
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/smefa/emhass-ha-companion/edit/main/docs/network_tariffs.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="network-tariffs">Network tariffs<a class="headerlink" href="#network-tariffs" title="Permanent link">&para;</a></h1>
+<p><code>tariff.py</code>'s buy/sell composition is the <em>supplier</em> side of a bill — a pure
+function of <code>(spot, time)</code>, per kWh. A growing number of network operators
+bill a second, structurally different side of the same bill: a per-kWh fee
+that depends on a calendar rather than the spot market, and a <strong>demand
+(capacity) charge</strong> on the highest power you drew in a window, over a whole
+billing period. A planner that only sees per-kWh prices has no reason to avoid
+a spike during that window — the energy is the same energy — and will happily
+start the EV, the water heater and the heat pump in the same cheap timestep,
+handing you a demand charge on top.</p>
+<p>A <strong>network profile</strong> (<code>kind: network</code>) describes that second side: a
+calendar, a set of time-of-day/season price bands, and a demand charge. It
+stacks with an ordinary price profile rather than replacing it — a Tibber
+household with a time-differentiated network fee runs both, and the buy price
+EMHASS sees is <code>tariff(spot) + band_adder</code>.</p>
+<p>Pick one under <strong>Configure → Network tariff</strong>, the same config-flow step every
+other profile kind uses. Two ship built in:</p>
+<ul>
+<li><strong>Göteborg Energi</strong> (<code>network/goteborg_energi</code>) — a high-load season and
+  window (Nov–Mar, weekdays 07:00–20:00, red days excluded via the
+  <a href="https://www.home-assistant.io/integrations/workday/">Workday</a> integration)
+  and a demand charge on the mean of the three highest hourly peaks, on three
+  distinct days, inside it.</li>
+<li><strong>Amber Electric</strong> (<code>network/amber_demand</code>) — a DNSP demand tariff as billed
+  through Amber: the single highest 30-minute interval inside a daily window
+  sets a per-kW charge for the whole month. Contributes no energy bands at all
+  — Amber's per-kWh side is already the spot series <code>tariff.py</code> composes. The
+  window and rate are entered by hand, off your plan page — Amber's own public
+  API can say which interval is inside the window live, but neither the core
+  <code>amberelectric</code> integration nor Amber Express passes that through, so
+  there's currently nothing in Home Assistant for the profile to read it from.
+  A <code>rest</code> sensor polling Amber's <code>/sites/{id}/prices</code> endpoint could expose
+  <code>demandWindow</code>/<code>period</code>/<code>season</code> as attributes for a future <code>attributes</code>
+  source to read, the same way <code>price/amber_express.yaml</code> already reads its
+  price sensor's <code>forecast</code> attribute — but nothing wires that up today, so
+  the window and rate above are entered by hand.</li>
+</ul>
+<p>Nothing on this page is specific to those two utilities; see
+<a href="../profiles/">Writing a profile</a> to describe your own operator's tariff sheet
+the same way.</p>
+<h2 id="energy-bands">Energy bands<a class="headerlink" href="#energy-bands" title="Permanent link">&para;</a></h2>
+<p><code>energy_bands:</code> is a list of windows — a season (<code>months:</code>), a day-type
+(<code>days:</code>, referencing a named <code>calendar:</code> entry), an hour range (<code>hours:</code>,
+which may wrap midnight) — each carrying a <code>buy</code>/<code>sell</code> <code>multiplier</code>/<code>adder</code>.
+First match wins, so the list reads like the tariff sheet does: exceptions
+first, the unconditional fallback band last.</p>
+<p>After the price profile composes <code>(buy, sell)</code>, the first matching band's
+adder/multiplier is applied to every point — same series in, same series out.
+Matching runs against <strong>local</strong> wall-clock time: "07:00–20:00" means your own
+clock, not UTC, and the boundary correctly follows daylight saving in both
+directions.</p>
+<p>A day-type reference (<code>days: business_day</code>) resolves against Home Assistant's
+<a href="https://www.home-assistant.io/integrations/workday/">Workday</a> integration,
+configured for your own country, subdivision and extra dates — this
+integration ships no holiday calendar of its own. Every distinct local date in
+the horizon is resolved once per run and cached for the lifetime of the
+process (a public holiday calendar doesn't change once the year has passed).
+If the Workday entity is unavailable or unconfigured, every day is treated as
+a business day — the safe direction, since it over-prices a high-load band
+rather than under-pricing it.</p>
+<p>The <strong>Network tariff band</strong> sensor reports which band is in force right now,
+with the adder, the next change, and the next band's name in its attributes.</p>
+<h2 id="the-demand-charge">The demand charge<a class="headerlink" href="#the-demand-charge" title="Permanent link">&para;</a></h2>
+<p>Two things make a sheet's demand-charge rate unsafe to send to EMHASS as-is.</p>
+<p><strong>The rate needs converting.</strong> EMHASS charges <code>rate × peak_import</code> <strong>once per
+optimisation</strong> as <code>capacity_cost_per_kw</code>, so the number sent has to be the
+<em>marginal cost, this horizon, of raising the billing period's measured peak by
+one kW</em> — a different number for each tariff shape:</p>
+<table>
+<thead>
+<tr>
+<th>Tariff</th>
+<th>Sheet rate</th>
+<th>Aggregation</th>
+<th>Effective rate</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Göteborg</td>
+<td>135 kr/kW/month</td>
+<td>mean of top 3, distinct days</td>
+<td><code>135 / 3</code> = 45 kr/kW</td>
+</tr>
+<tr>
+<td>Amber</td>
+<td>$0.30/kW/day</td>
+<td>single monthly max</td>
+<td><code>0.30 × days_in_month</code> ≈ $9/kW</td>
+</tr>
+</tbody>
+</table>
+<p>Sending Göteborg's undivided 135 would over-price today's peak threefold: a
+new peak only displaces the current third-highest, so the bill only moves by a
+third of the difference. Sending Amber's raw per-day figure would understate
+the marginal cost by a factor of ~30: a new monthly max is charged for every
+remaining day of the month. <code>rate_basis</code> (<code>month</code> or <code>day</code>) plus
+<code>measure.aggregate</code>/<code>n</code> in the profile is what lets the integration compute
+this instead of asking you to. The <strong>Demand charge rate</strong> diagnostic sensor
+publishes the effective figure, with the sheet rate and the arithmetic in its
+attributes — the answer to "why is the plan avoiding 17:00 so hard" is one
+click away.</p>
+<p><strong>The charge needs memory.</strong> Sent alone, <code>capacity_cost_per_kw</code> prices the
+peak import across the <em>entire</em> horizon with no memory of what has already
+been incurred this billing period — so a run on the 20th of the month still
+spends battery and defers loads to hold today under a level that was already
+exceeded on the 3rd, buying nothing. A <code>peaks.py</code> tracker (shaped like
+<code>metering.py</code>'s savings tracker: a <code>Store</code>, restore-on-restart, monthly
+rollover at local midnight) maintains the billing period's qualifying
+intervals and derives:</p>
+<ul>
+<li><strong>The billed aggregate</strong> — <code>max</code> for a single-peak tariff (Amber), or the
+  mean of the top <em>n</em> across distinct days for Göteborg's shape.</li>
+<li><strong>The floor</strong> to send as <code>current_period_peak</code> — the level at which shaving
+  starts to pay. For <code>mean_top_n</code>, that is <code>max(third_highest_across_days,
+  today's_own_existing_peak)</code>: if today already holds one of the top three, a
+  bigger peak today doesn't add a fourth entry, it replaces today's own, so
+  fighting to stay under the (now superseded) third-highest would buy
+  nothing.</li>
+</ul>
+<p>The <strong>Billing period peak</strong> sensor reports the current aggregate, with every
+contributing interval and days remaining in its attributes. The <strong>Peak
+headroom</strong> sensor reports how much more can be drawn right now before a new
+peak raises the bill — read off the plan's current grid-power row, so it lags
+a real load spike by up to one MPC interval, but it's the one built for your
+own automations to subscribe to (hold an EV charger back when the forecast
+turns out wrong).</p>
+<h3 id="version-gating">Version gating<a class="headerlink" href="#version-gating" title="Permanent link">&para;</a></h3>
+<p>Both <code>current_period_peak</code> and the window that restricts the charge to its
+own hours are runtime parameters EMHASS documents as MPC-only:</p>
+<table>
+<thead>
+<tr>
+<th>Backend</th>
+<th>What happens</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>&lt; 0.18.0</strong></td>
+<td>Energy bands only; the demand-charge section of the config flow is shown disabled</td>
+</tr>
+<tr>
+<td><strong>0.18.0</strong></td>
+<td>Priced peak <strong>only if the window is unrestricted</strong> (all day, every day). A real window (Göteborg's, Amber's) has no <code>capacity_charge_window</code> to restrict it on this release, so pricing it unwindowed would over-shave every hour outside the window — instead, it falls back to the hard cap below</td>
+</tr>
+<tr>
+<td><strong>0.18.1+</strong> (what this add-on ships today)</td>
+<td>Full: windowed priced peak on MPC (<code>capacity_cost_per_kw</code> + <code>capacity_charge_window</code> + <code>current_period_peak</code>), the capped array on day-ahead</td>
+</tr>
+</tbody>
+</table>
+<p>The window mask (<code>capacity_charge_window</code>) landed on EMHASS's <code>master</code> branch
+in August 2026 and reached a release in <strong>0.18.1</strong> (PR #1066) — on that
+version or newer, a real window like Göteborg's prices cleanly, masked, and
+the hard cap below is inert for it. On 0.18.0 the profile still runs the
+middle row: the hard cap protects the window, and <strong>Peak target</strong> is what to
+adjust. <code>capacity_cost_per_kw</code> is also forced to <code>0</code> on <strong>day-ahead</strong> runs
+regardless of backend — both gating parameters only mean anything to
+<code>naive-mpc-optim</code>, so a day-ahead run prices no peak at all and shapes the day
+purely through the cap below; the MPC runs that follow correct it.</p>
+<h2 id="the-windowed-hard-cap">The windowed hard cap<a class="headerlink" href="#the-windowed-hard-cap" title="Permanent link">&para;</a></h2>
+<p>The <strong>v0.18.0 fallback</strong>, and the mechanism behind an explicit
+<code>capacity_limit:</code> block (a subscribed capacity tier you're contractually
+inside, independent of whether it's priced): <code>maximum_power_from_grid</code> sent as
+a <strong>per-timestep list</strong> rather than a scalar — see
+<a href="../grid_limits/">Dynamic grid limits</a> for how it composes with the ordinary
+scalar import limit. Every timestep inside the relevant window is capped at
+<code>subscribed_kw − headroom_kw</code> (an explicit <code>capacity_limit</code>) or at the <strong>Peak
+target</strong> number (the demand-window fallback); every timestep outside it keeps
+the plain scalar.</p>
+<p><strong>Peak target</strong> (<code>number.*_peak_target</code>) is the ceiling enforced whenever the
+demand charge is configured but cannot currently be priced — on 0.18.1+ that
+is only ever a backend-version mismatch (the add-on reports older than it was
+set up against) rather than the everyday case a real window used to be on
+0.18.0. It's seeded from the tracker's current period aggregate the first time
+it's added — hold what you've already paid for — and is yours to adjust. It's
+a worse answer than the priced peak, and stays inert once the window mask
+prices it instead. <code>capacity_limit:</code> itself is unaffected by any of this — a
+subscribed tier is a hard ceiling by nature, not a fallback for anything.</p>
+<p>A cap below a timestep's own forecast load would make the whole run
+infeasible — EMHASS answers infeasible for the entire problem, not for that
+timestep — so each element is floored at its own forecast load, and a run
+warning names any timestep that had to be raised above its target.</p>
+<h2 id="entities">Entities<a class="headerlink" href="#entities" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Entity</th>
+<th>Type</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>sensor.*_network_tariff_band</code></td>
+<td>sensor</td>
+<td>Current band name; <code>adder</code>, <code>multiplier</code>, <code>next_change</code>, <code>next_band</code> attributes</td>
+</tr>
+<tr>
+<td><code>sensor.*_demand_charge_rate</code></td>
+<td>sensor, diagnostic</td>
+<td>The effective <code>capacity_cost_per_kw</code>; <code>sheet_rate</code>, <code>rate_basis</code>, <code>aggregate</code>, <code>active</code>, <code>reason</code> attributes</td>
+</tr>
+<tr>
+<td><code>sensor.*_period_peak</code></td>
+<td>sensor (kW)</td>
+<td>The billed aggregate so far this period; <code>period</code>, <code>days_remaining</code>, <code>floor_kw</code>, <code>contributing_intervals</code> attributes</td>
+</tr>
+<tr>
+<td><code>sensor.*_peak_headroom</code></td>
+<td>sensor (kW)</td>
+<td>Current aggregate minus current draw</td>
+</tr>
+<tr>
+<td><code>number.*_peak_target</code></td>
+<td>number (kW)</td>
+<td>The 0.18.0 fallback ceiling; also usable as a manual override</td>
+</tr>
+</tbody>
+</table>
+<p>The band and rate sensors exist whenever a network profile is selected; the
+peak, headroom and peak-target entities exist only once that profile defines
+a <code>demand_charge</code>.</p>
+<h2 id="what-this-does-not-do">What this does not do<a class="headerlink" href="#what-this-does-not-do" title="Permanent link">&para;</a></h2>
+<p><strong>None of this is real-time.</strong> The optimiser plans against a load forecast
+and re-plans every MPC interval; a kettle, an oven and a car on the same
+half-hour will blow a demand window the plan believed was safe, and nothing
+here stops it — the same boundary <a href="../grid_limits/#smoothing">Dynamic grid limits</a>
+draws for fuses: <em>anything that must be enforced in real time belongs in a
+load-balancing device, not in a planner.</em> The plan avoids <strong>scheduling</strong>
+peaks; the peak-headroom sensor lets your own automations react to
+unscheduled ones. Neither is a guarantee.</p>
+<p><strong>Savings don't credit it yet.</strong> See
+<a href="../savings/#what-is-deliberately-not-measured">Cost and savings, "What is deliberately not measured"</a>.</p>
+<p><strong>End SOC doesn't know about it.</strong> The <a href="../end_soc/">End SOC</a> heuristic
+values a stored kWh by what it displaces after the horizon; it doesn't reason
+about a demand window opening past the horizon's end, so it can hand that
+window an empty battery.</p>
+<p><strong>Surplus and on-demand loads don't see it either.</strong> Both push power into
+windows the optimiser chose for price reasons; once a demand charge is active
+those choices carry a second cost neither load type accounts for.</p>
+<p><strong>Two deferrable loads that used to share a cheap hour may separate on their
+own</strong> once a demand charge is active — peak shaving and load spreading are the
+same lever. That's the feature working, not a regression, but it will look
+like one if you don't know it's on.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "navigation.tracking", "search.suggest", "search.highlight", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

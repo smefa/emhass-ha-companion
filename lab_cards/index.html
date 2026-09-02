@@ -1,0 +1,2657 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A Home Assistant integration that makes EMHASS usable without writing YAML.">
+      
+      
+      
+        <link rel="canonical" href="https://smefa.github.io/emhass-ha-companion/lab_cards/">
+      
+      
+        <link rel="prev" href="../dashboard_cards/">
+      
+      
+        <link rel="next" href="../entities/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/icon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Lab cards (experimental) - EMHASS Companion</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#lab-cards-experimental" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="EMHASS Companion" class="md-header__button md-logo" aria-label="EMHASS Companion" data-md-component="logo">
+      
+  <img src="../assets/logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            EMHASS Companion
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Lab cards (experimental)
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="teal" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/smefa/emhass-ha-companion" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    smefa/emhass-ha-companion
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="EMHASS Companion" class="md-nav__button md-logo" aria-label="EMHASS Companion" data-md-component="logo">
+      
+  <img src="../assets/logo.png" alt="logo">
+
+    </a>
+    EMHASS Companion
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/smefa/emhass-ha-companion" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    smefa/emhass-ha-companion
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    User Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/deferrable_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deferrable loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/thermal_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Thermal loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/surplus_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Surplus loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/inverter_control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inverter control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/hub_controls/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hub controls
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/network_tariffs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Network tariffs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/dashboard_cards/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dashboard cards
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Technical reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Technical reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_2" id="__nav_3_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Loads
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Loads
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deferrable_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deferrable loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../thermal_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Thermal loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../surplus_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Surplus loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../on_demand_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    On-demand loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../load_groups/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Load groups
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../request_run_service/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Request-run service (planned)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dashboard_cards/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dashboard cards
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Lab cards (experimental)
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Lab cards (experimental)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#two-takes-on-one-deferrable-load" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Two takes on one deferrable load
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Two takes on one deferrable load">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#swipe-emhass-deferrable-swipe-card" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Swipe — emhass-deferrable-swipe-card
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#strip-emhass-deferrable-strip-card" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Strip — emhass-deferrable-strip-card
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#three-status-cards" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Three status cards
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Three status cards">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#emhass-health-card-is-the-optimiser-healthy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        emhass-health-card — is the optimiser healthy
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="emhass-health-card — is the optimiser healthy">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-two-chosen-boxes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The two chosen boxes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#filtering-the-back-fill-warning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Filtering the back-fill warning
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#emhass-status-card-what-it-is-doing-to-the-house" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        emhass-status-card — what it is doing to the house
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="emhass-status-card — what it is doing to the house">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-the-banner-states-mean" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the banner states mean
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-decisions-power" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The decision's power
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#measured-entities-usually-nothing-to-set" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Measured entities: usually nothing to set
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#choosing-what-to-show" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Choosing what to show
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#emhass-overview-card-the-household-on-one-axis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        emhass-overview-card — the household, on one axis
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="emhass-overview-card — the household, on one axis">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-window" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The window
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-the-historic-side-is-drawn-from" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the historic side is drawn from
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#emhass-tariff-card-what-a-network-tariff-is-doing-to-you" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        emhass-tariff-card — what a network tariff is doing to you
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#notes-for-anyone-editing-these" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notes for anyone editing these
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../entities/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Entities
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../savings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cost and savings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../end_soc/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    End SOC
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../handing_over_control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Handing over control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../inverter_control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inverter control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fronius_gen24_scripts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fronius GEN24 scripts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data_sources/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data sources
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../grid_limits/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dynamic grid limits
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../network_tariffs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Network tariffs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../template_additions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Template additions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../profiles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Writing a profile
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../inverter_profile_roadmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inverter profile roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#two-takes-on-one-deferrable-load" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Two takes on one deferrable load
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Two takes on one deferrable load">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#swipe-emhass-deferrable-swipe-card" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Swipe — emhass-deferrable-swipe-card
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#strip-emhass-deferrable-strip-card" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Strip — emhass-deferrable-strip-card
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#three-status-cards" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Three status cards
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Three status cards">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#emhass-health-card-is-the-optimiser-healthy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        emhass-health-card — is the optimiser healthy
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="emhass-health-card — is the optimiser healthy">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-two-chosen-boxes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The two chosen boxes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#filtering-the-back-fill-warning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Filtering the back-fill warning
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#emhass-status-card-what-it-is-doing-to-the-house" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        emhass-status-card — what it is doing to the house
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="emhass-status-card — what it is doing to the house">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-the-banner-states-mean" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the banner states mean
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-decisions-power" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The decision's power
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#measured-entities-usually-nothing-to-set" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Measured entities: usually nothing to set
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#choosing-what-to-show" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Choosing what to show
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#emhass-overview-card-the-household-on-one-axis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        emhass-overview-card — the household, on one axis
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="emhass-overview-card — the household, on one axis">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-window" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The window
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-the-historic-side-is-drawn-from" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the historic side is drawn from
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#emhass-tariff-card-what-a-network-tariff-is-doing-to-you" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        emhass-tariff-card — what a network tariff is doing to you
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#notes-for-anyone-editing-these" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notes for anyone editing these
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/smefa/emhass-ha-companion/edit/main/docs/lab_cards.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="lab-cards-experimental">Lab cards (experimental)<a class="headerlink" href="#lab-cards-experimental" title="Permanent link">&para;</a></h1>
+<p>Five card designs that are being tried on real dashboards before any of them
+replaces what <a href="../dashboard_cards/">Dashboard cards</a> documents. They ship in
+their own bundle, <code>frontend/emhass-cards-lab.js</code>, registered as a second
+Lovelace resource alongside the stable one — so an experiment cannot break a
+card an existing dashboard depends on, and the whole set can be withdrawn by
+deleting one file and one entry in <code>frontend.py</code>'s <code>BUNDLES</code>.</p>
+<p>They appear in the card picker as "EMHASS … (lab)". None of them is stable:
+names, options and behaviour will change, and the ones that do not earn their
+place will be deleted outright.</p>
+<h2 id="two-takes-on-one-deferrable-load">Two takes on one deferrable load<a class="headerlink" href="#two-takes-on-one-deferrable-load" title="Permanent link">&para;</a></h2>
+<p>Both keep the existing card's top half — name, <code>P_deferrableN</code> slot,
+status, and the numbers — and differ in what they do with the space below it,
+which today is a fixed list of entity rows.</p>
+<p>Each takes an optional <code>load:</code>, matched against the load's name (the device
+name). Left out, they show the first load.</p>
+<h3 id="swipe-emhass-deferrable-swipe-card">Swipe — <code>emhass-deferrable-swipe-card</code><a class="headerlink" href="#swipe-emhass-deferrable-swipe-card" title="Permanent link">&para;</a></h3>
+<p><img alt="The swipe card's Now page: scheduled power, next start, deadline and runtime today, over a plan track, with dots for the other two pages" src="../assets/deferrable-swipe-card.png" /></p>
+<p>Three swiped pages under a shared header, on CSS scroll snapping — the browser
+does the physics, so there is no carousel library and no drag handling to get
+wrong. Dots below double as buttons on a desktop.</p>
+<ul>
+<li><strong>Now</strong> — scheduled power, next start, runtime today, and either the
+  deadline or the recurrence, over a plan track.</li>
+<li><strong>Control</strong> — Requested, Run within / Energy needed, and a full-width
+  <strong>Run now</strong>. Only the rows that mean something for the load's mode appear.</li>
+<li><strong>Plan</strong> — a taller track with hour ticks, plus every run window written out
+  as <code>13:30 – 15:30 · 3.0 kW</code>.</li>
+</ul>
+<p><strong>Enabled</strong> is not on this card or the strip below, for the same reason it is
+not on the <a href="../dashboard_cards/">shipping card</a>: it takes the load out of the
+optimisation entirely, which is a setup decision rather than a daily one. The
+header still reads "Disabled" while it is off.</p>
+<div class="highlight"><pre><span></span><code><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">custom:emhass-deferrable-swipe-card</span>
+<span class="nt">load</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Hot water</span>
+</code></pre></div>
+<h3 id="strip-emhass-deferrable-strip-card">Strip — <code>emhass-deferrable-strip-card</code><a class="headerlink" href="#strip-emhass-deferrable-strip-card" title="Permanent link">&para;</a></h3>
+<p><img alt="The strip card: a load in the height of a tile, with a 48-bucket schedule bar and two round buttons" src="../assets/deferrable-strip-card.png" /></p>
+<p>One load in the height of a tile, for a dashboard that lists eight of them.
+The day is drawn as 48 fixed-width buckets rather than proportional blocks, so
+a load that switches twenty times and one that switches twice have the same
+visual density. Two pinned round sub-buttons run it now and open a drawer with
+Requested and Run within in it.</p>
+<div class="highlight"><pre><span></span><code><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">custom:emhass-deferrable-strip-card</span>
+<span class="nt">load</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Hot water</span>
+</code></pre></div>
+<h2 id="three-status-cards">Three status cards<a class="headerlink" href="#three-status-cards" title="Permanent link">&para;</a></h2>
+<h3 id="emhass-health-card-is-the-optimiser-healthy"><code>emhass-health-card</code> — is the optimiser healthy<a class="headerlink" href="#emhass-health-card-is-the-optimiser-healthy" title="Permanent link">&para;</a></h3>
+<p><img alt="The health card: plan freshness, last run stats, the where-the-time-went stage bar, warnings, and the Recalculate / Day-ahead / Train buttons" src="../assets/health-card.png" /></p>
+<p>Almost everything here already exists as attributes on <strong>Optimisation status</strong>,
+where nobody looks: the run's duration, its stage-by-stage breakdown, the
+EMHASS version that answered and the warnings it collected.</p>
+<ul>
+<li>A freshness meter reading the plan's age against <code>stale_after</code>, so "out of
+  date" is a bar approaching a limit rather than a boolean that flips.</li>
+<li>Last run, solve time, planned cost, plan horizon — plus <strong>two more boxes you
+  choose</strong>, see below.</li>
+<li><code>stage_times</code> as one stacked bar — the only question asked of stage timings
+  is which stage dominates, which is a length.</li>
+<li>Warnings and <code>error_message</code>, or an explicit "no warnings" when there are
+  none.</li>
+<li>Buttons for <strong>Recalculate now</strong>, <strong>Rebuild day-ahead</strong> and <strong>Train load
+  forecaster</strong>.</li>
+</ul>
+<p>Every section can be turned off from the card's own <strong>visual editor</strong> — no
+YAML needed. The switches write only what is off, so the config stays short:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">custom:emhass-health-card</span>
+<span class="nt">title</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">EMHASS</span>
+<span class="nt">show_stages</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Default</th>
+<th>Hides</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>show_freshness</code></td>
+<td><code>true</code></td>
+<td>the plan-freshness meter</td>
+</tr>
+<tr>
+<td><code>show_stats</code></td>
+<td><code>true</code></td>
+<td>the whole row of info boxes</td>
+</tr>
+<tr>
+<td><code>show_stages</code></td>
+<td><code>true</code></td>
+<td>the stage-timing bar and its key</td>
+</tr>
+<tr>
+<td><code>show_problems</code></td>
+<td><code>true</code></td>
+<td>the warnings and errors</td>
+</tr>
+<tr>
+<td><code>show_actions</code></td>
+<td><code>true</code></td>
+<td>the three buttons</td>
+</tr>
+</tbody>
+</table>
+<h4 id="the-two-chosen-boxes">The two chosen boxes<a class="headerlink" href="#the-two-chosen-boxes" title="Permanent link">&para;</a></h4>
+<p>Boxes five and six of the row are picked from a dropdown, since the four fixed
+ones already answer "did the run go well" and what is worth having beside that
+answer differs per house. They default to <strong>Goes stale in</strong> and <strong>System
+mode</strong> — both context the card could not show before rather than a second copy
+of something it already does. Set either to <strong>Nothing</strong> and it is not drawn at
+all, rather than drawn empty.</p>
+<div class="highlight"><pre><span></span><code><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">custom:emhass-health-card</span>
+<span class="nt">box_5</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">slowest_stage</span>
+<span class="nt">box_6</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">price</span>
+</code></pre></div>
+<p>The choices are <code>goes_stale</code>, <code>action</code>, <code>version</code>, <code>warnings</code>,
+<code>slowest_stage</code>, <code>mode</code>, <code>goal</code>, <code>control</code>, <code>soc</code>, <code>end_soc</code>, <code>battery</code>,
+<code>battery_action</code>, <code>solar</code>, <code>house</code>, <code>grid</code>, <code>price</code>, <code>sell_price</code>, <code>surplus</code>,
+<code>plan_end</code>, <code>steps</code>, <code>loads</code> — and <code>none</code>. Each carries a second line saying
+what its value is measured against ("limit 30 m", "charging", "12 min apart"),
+and tapping one opens the entity behind it.</p>
+<h4 id="filtering-the-back-fill-warning">Filtering the back-fill warning<a class="headerlink" href="#filtering-the-back-fill-warning" title="Permanent link">&para;</a></h4>
+<p>A day-ahead price source does not publish tomorrow until early afternoon, so
+the payload extends the tail of the horizon by repeating the previous day's
+prices — and says so, every run, for well over half of every day. It is
+correct and expected, and a warnings box that carries it permanently is one
+the eye learns to skip, including on the day something real turns up in it.</p>
+<p><strong>Hide price back-fill warnings</strong> in the editor drops it, and only it: the
+other short-series warning ("EMHASS will hold the last value for the
+remainder") means a forecast genuinely ran out and always stays. What was
+filtered is still counted on the card, so a silenced warning never looks like
+a clean run.</p>
+<div class="highlight"><pre><span></span><code><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">custom:emhass-health-card</span>
+<span class="nt">hide_fill_warnings</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</code></pre></div>
+<h3 id="emhass-status-card-what-it-is-doing-to-the-house"><code>emhass-status-card</code> — what it is doing to the house<a class="headerlink" href="#emhass-status-card-what-it-is-doing-to-the-house" title="Permanent link">&para;</a></h3>
+<p><img alt="The status card: the control banner, the battery decision, the planned battery level rail, and the Battery and System tile rows" src="../assets/status-card.png" /></p>
+<p>Status only: there is not a switch, chip or slider on it. The dry-run gate and
+the system mode are the two settings most easily changed by accident from a
+phone in a pocket, and a card that is glanced at many times for every time it
+is operated is the wrong place to keep them. Tapping any icon opens the
+entity, so the settings are one tap away rather than absent.</p>
+<ul>
+<li>A banner that goes <strong>green when the Companion is in charge and the hardware
+  is doing what the plan asks</strong> — control enabled, commands resolved, and
+  nothing left to correct. The gate shut reads "Dry run / Watching", a failed
+  command turns it red, a command that has just gone out takes the accent
+  ("Updated"), and no resolvable command at all turns it amber (see below).</li>
+<li>The battery decision with its reason and its power, and — separately —
+  whether the command actually went out. A decision that is already in force
+  is not re-sent every run, so "already in effect" and "not sent" are
+  different states and the card says which.</li>
+<li><strong>Planned battery level</strong> on one rail: the plan's level now as the fill, the
+  peak still to come as a lighter band beyond it, the lowest level still to
+  come as a tick, and the <em>measured</em> level as a marker. A visible gap between
+  marker and fill is a plan running on a stale SOC, which no single-value
+  display can show; the low tick is the other half of the same question, since
+  a plan that ends the day full can still empty the battery on the way, and it
+  turns red when the trough goes under 20 %.</li>
+<li>Value boxes under <strong>Battery</strong> — the measured level with its gap to the
+  plan, battery power with its charge/discharge sense, the end SOC target
+  against where the plan actually ends, and the planned low and high with the
+  times they fall.</li>
+<li>Value boxes under <strong>System</strong> — mode, cost function, curtailment, how many
+  deferrable loads the decision has switched on, how the last optimisation run
+  ended, and how long ago the decision was taken.</li>
+<li>The executor's own <code>rules</code> for the current decision, and its <code>error</code> if
+  there is one. The error is never hidden, whatever the card is configured
+  down to.</li>
+</ul>
+<h4 id="what-the-banner-states-mean">What the banner states mean<a class="headerlink" href="#what-the-banner-states-mean" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Banner</th>
+<th>Pill</th>
+<th>Means</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Control failed (red)</td>
+<td>Error</td>
+<td>The last command did not go through. Checked first: a failure outranks everything below.</td>
+</tr>
+<tr>
+<td>Dry run (grey)</td>
+<td>Watching</td>
+<td>The control gate is off. Decisions are computed in full and none of them is sent.</td>
+</tr>
+<tr>
+<td>Armed (amber)</td>
+<td>No command</td>
+<td>Nothing resolved at all — no inverter profile, or the profile defines no action for what was decided.</td>
+</tr>
+<tr>
+<td>Controlling your house (accent)</td>
+<td>Updated</td>
+<td>The plan changed its mind, and the new decision went out on this run.</td>
+</tr>
+<tr>
+<td>Controlling your house (green)</td>
+<td>In sync</td>
+<td>The hardware is doing what the plan asks — whether that took a write this run or not.</td>
+</tr>
+</tbody>
+</table>
+<p>Green is the state a working install sits in nearly all the time, and that is
+deliberate. Reserving it for the runs that <em>wrote</em> something leaves a perfectly
+healthy system reading "Armed / Standby" for most of the day, which is exactly
+what the earlier wording did: the executor writes only on a change, past the
+deadband, or before a time-limited command lapses, so a battery charging at
+full power sends nothing at all for most of the hour it charges.</p>
+<p>"Updated" is an event rather than a state, and it means the <em>decision</em> changed
+— self-consumption to force-charge, say. It deliberately does not fire when the
+same action is re-sent at a new power, which is a much commoner thing: a charge
+window holds one action for an hour while the plan revises its power every few
+minutes, and each revision past the 100 W deadband is a fresh write. Treating
+those as news would put the banner in the accent colour for the whole of a
+working charge, which is the opposite of what the colour is for. The settled
+banner says "command refreshed" instead when the last run did write.</p>
+<p>The card tells the two apart from the decision sensor itself: its state <em>is</em>
+the action, so <code>last_changed</code> moves only when the action does, while the <code>at</code>
+attribute advances every run. The run that changed the action is the one where
+those two timestamps coincide; a re-send leaves them minutes apart.</p>
+<p>Amber is kept for the one case that wants attention. Loads are still switched
+when it shows — the sub-line says "Loads only" if any are configured — but the
+battery is not being touched at all. See <a href="../inverter_control/">Inverter control</a>.</p>
+<p>One deliberate gap: a profile that sets <code>min_write_interval_s</code> can have a
+<em>wanted</em> change suppressed by its own rate limit, and the banner reads green
+for that run rather than admitting the command is pending. It clears on the
+next run, and only profiles that set the field can reach it.</p>
+<h4 id="the-decisions-power">The decision's power<a class="headerlink" href="#the-decisions-power" title="Permanent link">&para;</a></h4>
+<p>The big figure beside the decision is labelled with <em>which</em> power it is:</p>
+<ul>
+<li><strong>charging now / discharging now / now</strong> — the live reading from the battery's
+  own power sensor. Preferred over everything below it, and the direction is
+  named whenever the Companion is the one that was told which sensor to read,
+  since only then is its sign convention known.</li>
+<li><strong>target</strong> — the power the last command carried, for a forced charge or
+  discharge, when there is no live sensor to read.</li>
+<li><strong>planned in / planned out</strong> — the plan's own figure for this moment, as a
+  last resort.</li>
+</ul>
+<p>Live first, because the two below it describe an intention rather than an
+outcome. A target outlives its command: the decision taken at the top of the
+quarter hour is still the last decision after the executor has stopped the
+battery, so a stale "2.7 kW" would sit beside a battery at rest. And a
+<strong>self-consumption</strong> decision carries no target at all — the point of it is
+handing the battery back to the inverter to follow the house, so the executor
+sends a zero that means "not my number", which printed as power reads as a
+battery doing nothing at the moment it is usually working hardest.</p>
+<h4 id="measured-entities-usually-nothing-to-set">Measured entities: usually nothing to set<a class="headerlink" href="#measured-entities-usually-nothing-to-set" title="Permanent link">&para;</a></h4>
+<p>The card draws the measured battery against the planned one, so it needs to know
+which of your sensors those are. It asks the Companion, not you: the integration
+is already configured with both — <strong>Battery SOC sensor</strong> and <strong>Battery power
+sensor</strong>, under Settings → Battery — and publishes them as attributes on its own
+planned sensors, where every card can find them.</p>
+<p>So on a configured install this section is empty. The two options below exist to
+override that per card, for pointing one card at a different meter:</p>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Used for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>soc_entity</code></td>
+<td>The measured level: the marker on the rail, the "now" legend, and the gap in <strong>Level now</strong>. Left unset, the Companion's own SOC sensor is used; with neither, the marker is not drawn.</td>
+</tr>
+<tr>
+<td><code>power_entity</code></td>
+<td>The live battery power, for the decision's power. Left unset, the Companion's own battery power sensor is used — which is also what lets the card say <em>charging</em> or <em>discharging</em> rather than only how hard, since the Companion is told which way that sensor counts and a card option is not.</td>
+</tr>
+</tbody>
+</table>
+<p>Both are read directly, so they update live rather than at the optimiser's
+cadence.</p>
+<h4 id="choosing-what-to-show">Choosing what to show<a class="headerlink" href="#choosing-what-to-show" title="Permanent link">&para;</a></h4>
+<p>Every block and every value box can be turned off from the card's own <strong>visual
+editor</strong> — no YAML needed. The switches write only what differs from the
+default, so the config stays short:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">custom:emhass-status-card</span>
+<span class="nt">show_rules</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Default</th>
+<th>Hides</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>show_banner</code></td>
+<td><code>true</code></td>
+<td>the control banner</td>
+</tr>
+<tr>
+<td><code>show_decision</code></td>
+<td><code>true</code></td>
+<td>the battery decision, its reason and its power</td>
+</tr>
+<tr>
+<td><code>show_soc</code></td>
+<td><code>true</code></td>
+<td>the planned battery level rail</td>
+</tr>
+<tr>
+<td><code>show_battery</code></td>
+<td><code>true</code></td>
+<td>every tile under <strong>Battery</strong></td>
+</tr>
+<tr>
+<td><code>show_system</code></td>
+<td><code>true</code></td>
+<td>every tile under <strong>System</strong></td>
+</tr>
+<tr>
+<td><code>show_rules</code></td>
+<td><code>true</code></td>
+<td>the executor's rule trace</td>
+</tr>
+<tr>
+<td><code>show_level</code></td>
+<td><code>true</code></td>
+<td>Level now</td>
+</tr>
+<tr>
+<td><code>show_power</code></td>
+<td><code>true</code></td>
+<td>Battery power</td>
+</tr>
+<tr>
+<td><code>show_target</code></td>
+<td><code>true</code></td>
+<td>End target</td>
+</tr>
+<tr>
+<td><code>show_plan_end</code></td>
+<td><code>true</code></td>
+<td>Plan ends at</td>
+</tr>
+<tr>
+<td><code>show_low</code></td>
+<td><code>true</code></td>
+<td>Planned low</td>
+</tr>
+<tr>
+<td><code>show_high</code></td>
+<td><code>true</code></td>
+<td>Planned high</td>
+</tr>
+<tr>
+<td><code>show_mode</code></td>
+<td><code>true</code></td>
+<td>Mode</td>
+</tr>
+<tr>
+<td><code>show_cost</code></td>
+<td><code>true</code></td>
+<td>Optimising for</td>
+</tr>
+<tr>
+<td><code>show_curtail</code></td>
+<td><code>true</code></td>
+<td>Curtailment</td>
+</tr>
+<tr>
+<td><code>show_loads</code></td>
+<td><code>true</code></td>
+<td>Loads on</td>
+</tr>
+<tr>
+<td><code>show_optim</code></td>
+<td><code>true</code></td>
+<td>Optim status</td>
+</tr>
+<tr>
+<td><code>show_decided</code></td>
+<td><code>true</code></td>
+<td>Decided</td>
+</tr>
+<tr>
+<td><code>show_commands</code></td>
+<td><strong><code>false</code></strong></td>
+<td>— set it to <code>true</code> to <em>show</em> the command count</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Commands</strong> is the one tile that starts off. It counts the service calls the
+decision resolved to, which answers "what would actually be sent" while an
+inverter profile is being set up and nothing much afterwards. <strong>Optim status</strong>
+took its place in the default layout: it is the state of the last EMHASS run,
+and everything else on the card is downstream of it — a decision taken off an
+infeasible or failed run is still reported confidently, and that tile is what
+says not to trust it. The health card above has the full account.</p>
+<p>Values in the tiles are written to fit 84 px: "Maximize self-consumption"
+appears as <strong>Self-use</strong>, "Maximize profit" as <strong>Max profit</strong>, "Minimize cost" as
+<strong>Min cost</strong>, and <strong>Decided</strong> counts in <code>3 min</code> / <code>2 h</code> rather than "3 minutes
+ago", with the wall-clock time underneath. A truncated value is not a value.</p>
+<h3 id="emhass-overview-card-the-household-on-one-axis"><code>emhass-overview-card</code> — the household, on one axis<a class="headerlink" href="#emhass-overview-card-the-household-on-one-axis" title="Permanent link">&para;</a></h3>
+<p><img alt="The overview card: the info-box row, the import price ribbon, solar and battery lanes, and a row per deferrable load, all on the same rolling time axis" src="../assets/overview-card.png" /></p>
+<p>The plan card answers "what will the power do". This answers "why", by putting
+the import price, the solar forecast, the battery and every load on the <em>same</em>
+time axis, in rows that start and end on the same pixel. The price is a colour
+ribbon rather than a line: what everything else is being compared against is
+only ever "is this hour cheap", and one dimension fits in colour. A load block
+under the greenest part of the ribbon, or a charge block under the fattest part
+of the solar curve, is the optimiser explaining itself.</p>
+<ul>
+<li><strong>Info boxes</strong> — six value boxes, each set from a dropdown (see below).</li>
+<li><strong>Import price</strong> — the ribbon, with the cheapest and most expensive values
+  under it. Hours the market has not published yet are hatched rather than
+  coloured: for most of the morning the plan runs past the last known price,
+  and a colour there would be an invention.</li>
+<li><strong>Spare solar</strong> — the surplus window and its energy, when there is one.</li>
+<li><strong>Solar</strong> — the forecast as a filled profile.</li>
+<li><strong>Battery</strong> — the planned power, drawn from a centre line: discharge above
+  it in the battery colour, charging below it in the accent. The planned
+  <strong>charge level</strong> rides over the lane as a thin 0–100 % line, so the cause
+  (a charge block) and the effect (the level rising) are read together.</li>
+<li><strong>Loads</strong> — one lane per deferrable load, as before.</li>
+</ul>
+<p>The figure on the right of the solar and battery lanes is that lane's <strong>peak</strong>,
+since a profile has no y-axis of its own; the energies are spelled out in the
+key underneath. Any row opens its entity when tapped.</p>
+<p>Every section can be turned off, from the card's own <strong>visual editor</strong> — no
+YAML needed. The switches write only what is off, so the config stays short:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">custom:emhass-overview-card</span>
+<span class="nt">title</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Today's plan</span>
+<span class="nt">show_stats</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Default</th>
+<th>Hides</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>show_stats</code></td>
+<td><code>true</code></td>
+<td>the whole row of info boxes</td>
+</tr>
+<tr>
+<td><code>show_price</code></td>
+<td><code>true</code></td>
+<td>the price ribbon and its scale</td>
+</tr>
+<tr>
+<td><code>show_surplus</code></td>
+<td><code>true</code></td>
+<td>the spare-solar line</td>
+</tr>
+<tr>
+<td><code>show_solar</code></td>
+<td><code>true</code></td>
+<td>the solar lane</td>
+</tr>
+<tr>
+<td><code>show_battery</code></td>
+<td><code>true</code></td>
+<td>the battery lane</td>
+</tr>
+<tr>
+<td><code>show_soc</code></td>
+<td><code>true</code></td>
+<td>the charge-level line over the battery lane</td>
+</tr>
+<tr>
+<td><code>show_loads</code></td>
+<td><code>true</code></td>
+<td>the per-load lanes</td>
+</tr>
+</tbody>
+</table>
+<p>A lane with no data behind it hides itself regardless — a house without a
+battery does not get an empty battery row.</p>
+<p>The six info boxes are set individually, from <strong>Info boxes</strong> in the editor or
+as <code>tile_1</code> … <code>tile_6</code> in YAML. Each caption follows its own value, so a box
+set to <code>grid</code> reads "Grid import" or "Grid export" depending on which way the
+power is going. A box set to <code>none</code> is not drawn at all, and the five
+remaining ones spread to fill the row.</p>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Shows</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>none</code></td>
+<td>nothing — the box is left out</td>
+</tr>
+<tr>
+<td><code>solar</code> <code>house</code> <code>grid</code> <code>battery</code></td>
+<td>the four live power readings (the default first four)</td>
+</tr>
+<tr>
+<td><code>soc</code></td>
+<td>the planned charge level now</td>
+</tr>
+<tr>
+<td><code>end_soc</code></td>
+<td>the end-of-horizon charge target</td>
+</tr>
+<tr>
+<td><code>price</code> <code>sell_price</code></td>
+<td>import and export price for the current slot</td>
+</tr>
+<tr>
+<td><code>cost</code></td>
+<td>what the plan is expected to cost</td>
+</tr>
+<tr>
+<td><code>solar_planned</code> <code>charge_planned</code></td>
+<td>kWh of solar, and of charging, across the plan</td>
+</tr>
+<tr>
+<td><code>surplus</code></td>
+<td>the spare-solar energy</td>
+</tr>
+<tr>
+<td><code>loads</code></td>
+<td>how many deferrable loads are on, of how many</td>
+</tr>
+<tr>
+<td><code>age</code></td>
+<td>how long ago the last successful optimisation ran</td>
+</tr>
+</tbody>
+</table>
+<h4 id="the-window">The window<a class="headerlink" href="#the-window" title="Permanent link">&para;</a></h4>
+<p>The card draws a <strong>rolling window</strong>: two hours back from now, out to the end of
+the plan. It rolls with the clock, so the present is always at the same place
+and the part of the plan that can still be changed always has the same width.</p>
+<p>The alternative — drawing whatever extent the data happens to have — puts the
+start at last midnight, because that is where a day-ahead price sensor begins
+publishing. At noon that is a third of the card spent on a morning nobody can
+do anything about. The heading under the title is that window, with the end
+labelled by day when it crosses midnight, so <code>09:26 → 11:00 tomorrow</code> cannot be
+misread as a morning.</p>
+<p>The past is shaded on every lane, and spent price cells are faded. Set
+<code>history_hours: 0</code> for a card that starts at now.</p>
+<h4 id="what-the-historic-side-is-drawn-from">What the historic side is drawn from<a class="headerlink" href="#what-the-historic-side-is-drawn-from" title="Permanent link">&para;</a></h4>
+<p>The plan is no help behind the present — an MPC run begins at the timestep it
+was made in — so the solar and battery lanes fill their historic side from the
+<strong>recorder</strong>, in one call, refreshed at most once a minute.</p>
+<p>By default that is the Companion's own sensors: the solar lane's past is <em>the
+forecast the plan was using at the time</em>, and the battery lane's past is the
+power the plan had for that moment. No configuration, and the battery's sign
+convention is known to be the plan's.</p>
+<p>Point it at the house's own meters instead to see what actually happened,
+which is the more interesting comparison — the shaded side then disagrees with
+the plan when reality did:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">custom:emhass-overview-card</span>
+<span class="nt">history_hours</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3</span>
+<span class="nt">solar_entity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sensor.inverter_pv_power</span>
+<span class="nt">battery_entity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sensor.inverter_battery_power</span>
+<span class="nt">invert_battery</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Default</th>
+<th>Does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>history_hours</code></td>
+<td><code>2</code></td>
+<td>how far back the window reaches; <code>0</code> starts at now</td>
+</tr>
+<tr>
+<td><code>solar_entity</code></td>
+<td>—</td>
+<td>measured solar power for the historic side</td>
+</tr>
+<tr>
+<td><code>battery_entity</code></td>
+<td>the Companion's <strong>Battery power sensor</strong></td>
+<td>measured battery power for the historic side; set only to draw this card from a different meter</td>
+</tr>
+<tr>
+<td><code>invert_battery</code></td>
+<td><code>false</code></td>
+<td>for a sensor that is positive while <em>charging</em> — the card draws positive as discharge, following the plan. Read only when <code>battery_entity</code> is set; the Companion carries its own convention</td>
+</tr>
+</tbody>
+</table>
+<p>Each lane's tooltip names which record its shaded side is, since a forecast and
+a meter reading look identical once they are drawn. A sensor the recorder
+excludes simply leaves that lane starting at now.</p>
+<p>The load lanes have no historic side yet: they show the plan only, so their
+shaded part is the plan as it stood, not what the loads did.</p>
+<h2 id="emhass-tariff-card-what-a-network-tariff-is-doing-to-you"><code>emhass-tariff-card</code> — what a network tariff is doing to you<a class="headerlink" href="#emhass-tariff-card-what-a-network-tariff-is-doing-to-you" title="Permanent link">&para;</a></h2>
+<p><a href="../network_tariffs/">Network tariffs</a> shipped five entities — <strong>Network
+tariff band</strong>, <strong>Demand charge rate</strong>, <strong>Billing period peak</strong>, <strong>Peak
+headroom</strong> and <strong>Peak target</strong> — and none of them was anywhere but the
+entity list. This card is the fourth answer alongside the three status cards
+above: not "is the optimiser healthy" or "what is it doing to the house", but
+"what is my tariff doing to me right now".</p>
+<ul>
+<li>A single-line <strong>band banner</strong> — the current band's name, its adder or
+  multiplier, and a countdown to the next change: <code>höglast (+0.34) ·
+  låglast in 2 h 14 m</code>. Left out entirely when no network profile publishes
+  a band, not shown empty.</li>
+<li>A <strong>headroom arc</strong> for a demand charge — a gauge rather than a timeline,
+  since a demand charge is a single number to stay under, not a series to
+  read over time. It fills toward <em>headroom</em>, not toward a fixed 100 %, and
+  turns red once headroom drops under <strong>10 %</strong> of the period's own peak
+  (<code>headroom_warn_pct</code>). The period's billed aggregate and days remaining sit
+  below it, and a pill underneath reads either <strong>Priced now</strong> or, once EMHASS
+  falls back to the windowed hard cap (see <a href="../network_tariffs/#version-gating">Network tariffs, "Version
+  gating"</a>), <strong>Holding to peak target ·
+  N kW</strong> instead — the arc means a different thing once the peak is a cap
+  rather than a price, and the pill says which.</li>
+<li>A <strong>rate row</strong> — the effective rate EMHASS is actually charged
+  (<code>capacity_cost_per_kw</code>) next to the sheet rate it was converted from, for
+  checking the conversion by eye.</li>
+<li>Left out entirely on an install with no demand charge configured — a
+  Tibber household with a time-differentiated network fee and no demand
+  charge gets the band banner alone.</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">custom:emhass-tariff-card</span>
+</code></pre></div>
+<p>No required options — same "finds its own entities through the device"
+contract as the other three, with one difference: added before a network
+tariff is configured at all, it draws a sample reading instead of a blank
+card, ribboned and desaturated so it never reads as broken.</p>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Default</th>
+<th>Hides</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>show_band</code></td>
+<td><code>true</code></td>
+<td>the band banner</td>
+</tr>
+<tr>
+<td><code>show_demand</code></td>
+<td><code>true</code></td>
+<td>the headroom arc, period aggregate and pill</td>
+</tr>
+<tr>
+<td><code>show_rate</code></td>
+<td><code>true</code></td>
+<td>the effective-rate / sheet-rate boxes</td>
+</tr>
+<tr>
+<td><code>headroom_warn_pct</code></td>
+<td><code>10</code></td>
+<td>the headroom percentage below which the arc turns red</td>
+</tr>
+<tr>
+<td><code>show_demo</code></td>
+<td><code>true</code></td>
+<td>the sample reading shown before a network tariff exists — off restores a blank card in that case</td>
+</tr>
+</tbody>
+</table>
+<h2 id="notes-for-anyone-editing-these">Notes for anyone editing these<a class="headerlink" href="#notes-for-anyone-editing-these" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Same constraints as the shipping bundle, on purpose, so a design that wins
+  moves across unchanged: plain custom elements, inline SVG, no Lit, no build
+  step, ES2017 only — no optional chaining, no nullish coalescing. Both are
+  checked by <code>tests/test_packaging.py</code>.</li>
+<li>Unlike the shipping cards, these build their DOM once and update it in
+  place. A rebuild on every <code>hass</code> object would throw away the element under a
+  finger mid-drag, several times a second.</li>
+<li>Hub entities are looked up by <code>domain.translation_key</code>, not by
+  <code>translation_key</code> alone: <code>solar_surplus</code> is published twice, once as a
+  sensor and once as a binary sensor.</li>
+<li>Colours come from Home Assistant's own theme variables. Every <code>color-mix()</code>
+  is preceded by a flat <code>rgba()</code> fallback, so a browser without it keeps a
+  usable grey instead of rendering nothing.</li>
+<li>The health, overview and status editors are built on <code>ha-form</code>, which no card
+  can import: it arrives with whichever built-in card editor the frontend
+  happens to have loaded. <code>loadHaForm()</code> forces that by creating an <code>entities</code>
+  card and asking it for its own editor, then waits on
+  <code>customElements.whenDefined</code>.</li>
+<li>Both editors are driven by the same list the card builds itself from —
+  <code>OVERVIEW_SECTIONS</code>, <code>STATUS_SECTIONS</code> and <code>STATUS_TILES</code>. A block added to
+  one of those lists appears in its editor without the editor being touched,
+  which is the only way the two stay in step. Editors write back only what
+  differs from the default, so the YAML never fills with <code>show_x: true</code>.</li>
+<li>A card whose <code>setConfig</code> runs again rebuilds its DOM (<code>LabCard</code> clears
+  <code>_built</code>), so a section the config removes is genuinely absent rather than
+  hidden. That is why every <code>update()</code> on the status card writes through
+  <code>setBox</code>, which no-ops on a box that was never built.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "navigation.tracking", "search.suggest", "search.highlight", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

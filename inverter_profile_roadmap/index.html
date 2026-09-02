@@ -1,0 +1,2729 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A Home Assistant integration that makes EMHASS usable without writing YAML.">
+      
+      
+      
+        <link rel="canonical" href="https://smefa.github.io/emhass-ha-companion/inverter_profile_roadmap/">
+      
+      
+        <link rel="prev" href="../profiles/">
+      
+      
+        <link rel="next" href="../troubleshooting/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/icon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Inverter profile roadmap - EMHASS Companion</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#inverter-profile-roadmap" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="EMHASS Companion" class="md-header__button md-logo" aria-label="EMHASS Companion" data-md-component="logo">
+      
+  <img src="../assets/logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            EMHASS Companion
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Inverter profile roadmap
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="teal" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/smefa/emhass-ha-companion" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    smefa/emhass-ha-companion
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="EMHASS Companion" class="md-nav__button md-logo" aria-label="EMHASS Companion" data-md-component="logo">
+      
+  <img src="../assets/logo.png" alt="logo">
+
+    </a>
+    EMHASS Companion
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/smefa/emhass-ha-companion" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    smefa/emhass-ha-companion
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    User Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/deferrable_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deferrable loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/thermal_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Thermal loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/surplus_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Surplus loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/inverter_control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inverter control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/hub_controls/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hub controls
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/network_tariffs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Network tariffs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/dashboard_cards/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dashboard cards
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Technical reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Technical reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_2" id="__nav_3_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Loads
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Loads
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deferrable_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deferrable loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../thermal_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Thermal loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../surplus_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Surplus loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../on_demand_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    On-demand loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../load_groups/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Load groups
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../request_run_service/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Request-run service (planned)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dashboard_cards/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dashboard cards
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../lab_cards/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Lab cards (experimental)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../entities/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Entities
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../savings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cost and savings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../end_soc/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    End SOC
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../handing_over_control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Handing over control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../inverter_control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inverter control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fronius_gen24_scripts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fronius GEN24 scripts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data_sources/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data sources
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../grid_limits/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dynamic grid limits
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../network_tariffs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Network tariffs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../template_additions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Template additions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../profiles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Writing a profile
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inverter profile roadmap
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inverter profile roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#untested-profiles-are-marked-as-such" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Untested profiles are marked as such
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-goal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The goal
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-the-research-changed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the research changed
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What the research changed">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-brand-is-the-wrong-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Brand is the wrong key
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-there-are-five-control-archetypes-not-one" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. There are five control archetypes, not one
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-command-lifetime-is-a-property-of-the-inverter-and-the-executor-gets-it-wrong" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Command lifetime is a property of the inverter, and the executor gets it wrong
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-not-everything-is-watts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Not everything is watts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-forced-control-usually-has-a-prerequisite-and-grid-charging-a-separate-one" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Forced control usually has a prerequisite, and grid charging a separate one
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-auto-detection-is-not-worth-building-the-user-knows-what-they-own" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Auto-detection is not worth building — the user knows what they own
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-design" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The design
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The design">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#selection-one-question-then-a-confirmation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Selection: one question, then a confirmation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#schema-version-2-inverter-profiles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Schema — version: 2 inverter profiles
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#unit-conversion-belongs-in-the-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Unit conversion belongs in the engine
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lifetime-replaces-the-global-deadband" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lifetime replaces the global deadband
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#restore-is-a-first-class-action-and-runs-on-shutdown" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Restore is a first-class action, and runs on shutdown
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#preconditions-and-the-grid-charge-gate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Preconditions and the grid-charge gate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#honest-degradation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Honest degradation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#loose-ends-this-closes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Loose ends this closes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#build-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build order
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#catalogue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Catalogue
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Catalogue">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#not-planned-fronius-gen24" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Not planned: Fronius GEN24
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#verification-status" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verification status
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#untested-profiles-are-marked-as-such" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Untested profiles are marked as such
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-goal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The goal
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-the-research-changed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the research changed
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What the research changed">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-brand-is-the-wrong-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Brand is the wrong key
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-there-are-five-control-archetypes-not-one" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. There are five control archetypes, not one
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-command-lifetime-is-a-property-of-the-inverter-and-the-executor-gets-it-wrong" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Command lifetime is a property of the inverter, and the executor gets it wrong
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-not-everything-is-watts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Not everything is watts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-forced-control-usually-has-a-prerequisite-and-grid-charging-a-separate-one" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Forced control usually has a prerequisite, and grid charging a separate one
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-auto-detection-is-not-worth-building-the-user-knows-what-they-own" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Auto-detection is not worth building — the user knows what they own
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-design" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The design
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The design">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#selection-one-question-then-a-confirmation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Selection: one question, then a confirmation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#schema-version-2-inverter-profiles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Schema — version: 2 inverter profiles
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#unit-conversion-belongs-in-the-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Unit conversion belongs in the engine
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lifetime-replaces-the-global-deadband" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lifetime replaces the global deadband
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#restore-is-a-first-class-action-and-runs-on-shutdown" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Restore is a first-class action, and runs on shutdown
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#preconditions-and-the-grid-charge-gate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Preconditions and the grid-charge gate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#honest-degradation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Honest degradation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#loose-ends-this-closes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Loose ends this closes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#build-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build order
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#catalogue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Catalogue
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Catalogue">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#not-planned-fronius-gen24" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Not planned: Fronius GEN24
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#verification-status" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verification status
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/smefa/emhass-ha-companion/edit/main/docs/inverter_profile_roadmap.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="inverter-profile-roadmap">Inverter profile roadmap<a class="headerlink" href="#inverter-profile-roadmap" title="Permanent link">&para;</a></h1>
+<p><em>For contributors, and for anyone checking whether their inverter is on the
+way. To configure battery control with what ships today, see
+<a href="../inverter_control/">Inverter control</a>.</em></p>
+<p><strong>Status:</strong> the framework is built. The profile catalogue is meant to grow by
+contribution, one inverter at a time, using
+<strong><a href="../inverter_profile_template.yaml">inverter_profile_template.yaml</a></strong> — a single
+self-contained file to copy. The goal was to make contributing an inverter
+cheap, not to ship every inverter up front.</p>
+<p>Built (schema <code>version: 2</code>, all tested):</p>
+<ul>
+<li><code>control:</code> block — archetype, power unit, sign, lifetime, deadband, write floor</li>
+<li>engine-side unit conversion (<code>w</code> / <code>kw</code> / <code>percent_of_rated</code> / <code>percent_hundredths</code>)
+  plus <code>charge_boost</code>, <code>invert_sign</code> and <code>round_to</code></li>
+<li>lifetime-driven re-issue, replacing the single global deadband</li>
+<li><code>prepare</code> once per session, <code>restore</code> on shutdown / unload / control-off</li>
+<li><code>suggest:</code> entity pre-fill in the setup form</li>
+<li><code>p_pv_curtailment</code> on <code>PlanRow</code>; <code>curtail</code> / <code>allow_grid_charge</code> action names</li>
+</ul>
+<p>Shipped built-in inverter profiles:</p>
+<ul>
+<li><strong>Sungrow SH-RT</strong> — the first profile built against the template, for the
+  mkaiser Modbus package. The only one validated against real hardware.</li>
+<li><strong>Sungrow SH-T 15–25 kW</strong> <em>(untested)</em> — same package, same registers; a
+  separate entry because of the 5000 W default power ceiling, the T-series
+  export-limit scaling history and the SBH pack's different Modbus path.</li>
+<li><strong>Huawei SUN2000 M1 / MB0</strong> <em>(untested)</em> — <code>wlcrs/huawei_solar</code>,
+  <code>command_with_duration</code>, the first profile using <code>lifetime: expires</code>.</li>
+<li><strong>Deye SUN-5K–25K-SG01HP3-EU</strong> <em>(untested)</em> — <code>davidrapan/ha-solarman</code>.</li>
+<li><strong>SolaX X3-Hybrid G4 / X3-Ultra</strong> <em>(untested)</em> — <code>solax_modbus</code>, the first
+  <code>signed_power</code> profile and the first using <code>invert_sign</code>.</li>
+<li><strong>Growatt MOD / MID TL3-XH</strong> <em>(untested)</em> — <code>solax_modbus</code>, the first
+  <code>tou_rewrite</code> profile and the first using <code>percent_of_rated</code>.</li>
+<li><strong>Sigenergy SigenStor</strong> <em>(untested)</em> — <code>TypQxQ/Sigenergy-Local-Modbus</code>, the
+  first profile to use <code>prepare</code>, and the first in kilowatts.</li>
+<li><strong>Scripts (works with any inverter)</strong> — the fallback for anything without a
+  dedicated profile yet, <code>version: 1</code>, given the pre-<code>control</code> defaults. Pinned
+  to the bottom of the picker however many brands sit above it.</li>
+</ul>
+<h3 id="untested-profiles-are-marked-as-such">Untested profiles are marked as such<a class="headerlink" href="#untested-profiles-are-marked-as-such" title="Permanent link">&para;</a></h3>
+<p>The catalogue below used to say that shipping an unvalidated profile was worse
+than shipping none, because the script escape hatch at least fails visibly.
+That was the right instinct and the wrong conclusion: it left owners of the
+most common inverters in Europe with nothing, in order to avoid a risk that a
+label fixes.</p>
+<p>So a profile now carries <code>untested: true</code> until somebody with the hardware
+confirms it. That adds <strong>"— UNTESTED"</strong> to the picker label and a warning above
+the setup form, saying what it means and asking for a report back. The
+alternative — a profile that looks exactly as trustworthy as a validated one —
+is what actually makes the first person to try it an unwitting tester of writes
+to their own battery.</p>
+<p>Two things make this a fair trade rather than a gamble. Control is off until
+the user turns it on, and turning it back off hands the inverter back
+immediately. And every profile below was written from the integration's own
+source and the inverter's register map, with the parts that could not be
+confirmed from source written into that profile's notes rather than guessed —
+sign conventions, scaling and gating prerequisites especially.</p>
+<p>The older <em>mode select plus a power number</em> profile was removed once Sungrow —
+the inverter it existed to approximate — got a real, correctly-shaped profile
+of its own. It could not express Sungrow's actual control model (one select to
+arm forced mode, a second to choose direction) in the first place; see finding
+1 below. There is no longer a middle tier between "a profile for your exact
+hardware" and "write a script" — a generic single-select profile turned out to
+be a worse fit for real hardware than either end of that spectrum.</p>
+<h2 id="the-goal">The goal<a class="headerlink" href="#the-goal" title="Permanent link">&para;</a></h2>
+<p>All inverters should eventually be listed by name. Until a given one is, the
+script profile is the answer — never "approximate it with a generic profile
+that doesn't quite match your hardware's actual shape."</p>
+<p>The user should choose <strong>their inverter</strong>, and everything else should follow.</p>
+<hr />
+<h2 id="what-the-research-changed">What the research changed<a class="headerlink" href="#what-the-research-changed" title="Permanent link">&para;</a></h2>
+<p>Five brand surveys (Huawei, Sungrow, SolarEdge, Fronius, GoodWe, Deye/Sunsynk,
+Growatt, SolaX, Fox ESS, Sigenergy, Ferroamp, Tesla, sonnen, Victron) plus a
+survey of <em>how those brands are exposed in Home Assistant</em> produced six findings
+that the current design cannot express.</p>
+<h3 id="1-brand-is-the-wrong-key">1. Brand is the wrong key<a class="headerlink" href="#1-brand-is-the-wrong-key" title="Permanent link">&para;</a></h3>
+<p>Growatt alone spans three incompatible control schemes by inverter family: TOU
+slots (SPH GEN3), TOU periods gated on a grid-charge enable (MOD GEN4), and a
+signed ±100 % setpoint with a watchdog (WIT only). Deye, Sunsynk and Sol-Ark are
+the same silicon under three badges. <code>wills106/homeassistant-solax-modbus</code> is
+<em>one</em> HACS repo covering SolaX, Growatt, Sofar, Solis, Alpha ESS, Sunsynk/Deye
+and more — with <strong>per-plugin entity naming</strong>, so one adapter for that repo is
+impossible.</p>
+<blockquote>
+<p>A profile is keyed on <strong>(how it is installed, model family)</strong>, and <em>carries</em> a
+brand label for display. Brand is a grouping in the picker, never an identity.</p>
+</blockquote>
+<h3 id="2-there-are-five-control-archetypes-not-one">2. There are five control archetypes, not one<a class="headerlink" href="#2-there-are-five-control-archetypes-not-one" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Archetype</th>
+<th>Command shape</th>
+<th>Examples</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>signed_power</code></td>
+<td>one signed number, magnitude <em>and</em> direction</td>
+<td>SolaX GEN4/5/6 (<code>remotecontrol_active_power</code>, ±30000 W), Sigenergy (<code>active_power_fixed_adjustment</code>, ±100 <strong>kW</strong>)</td>
+</tr>
+<tr>
+<td><code>mode_and_magnitude</code></td>
+<td>direction from a select, magnitude from a number</td>
+<td>Sungrow, SolarEdge, GoodWe, Fox ESS</td>
+</tr>
+<tr>
+<td><code>command_with_duration</code></td>
+<td>a service call carrying power <strong>and</strong> a lifetime</td>
+<td>Huawei (<code>forcible_charge</code>), Growatt WIT</td>
+</tr>
+<tr>
+<td><code>grid_setpoint</code></td>
+<td>the write is a <em>grid</em> target, not a battery one</td>
+<td>Victron ESS <code>AcPowerSetPoint</code></td>
+</tr>
+<tr>
+<td><code>tou_rewrite</code></td>
+<td>rewrite a time-of-use slot, no session concept</td>
+<td>Deye/Sunsynk (Prog1–6), Growatt SPH/MOD</td>
+</tr>
+</tbody>
+</table>
+<h3 id="3-command-lifetime-is-a-property-of-the-inverter-and-the-executor-gets-it-wrong">3. Command lifetime is a property of the inverter, and the executor gets it wrong<a class="headerlink" href="#3-command-lifetime-is-a-property-of-the-inverter-and-the-executor-gets-it-wrong" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Huawei</strong> forced charge <strong>auto-reverts</strong> after its <code>duration</code> — it must be
+  re-issued every slot. <a href="https://github.com/smefa/emhass-ha-companion/blob/main/custom_components/emhass_companion/executor.py"><code>executor.py</code></a>
+  <code>_unchanged()</code> would suppress exactly that re-issue, and the battery silently
+  falls back mid-plan.</li>
+<li><strong>Sungrow, GoodWe, Deye, Sigenergy</strong> registers <strong>persist forever</strong>. Here the
+  deadband is correct — but nothing must ever leave them stuck in forced mode.</li>
+<li><strong>SolaX and Fox ESS</strong> have a <em>watchdog reload</em>: a countdown that must be
+  refreshed or the inverter reverts on its own.</li>
+<li><strong>Victron</strong> reverts to internal ESS control unless the setpoint is re-sent.</li>
+</ul>
+<p>One global <code>DEFAULT_POWER_DEADBAND_W</code> cannot serve all four.</p>
+<h3 id="4-not-everything-is-watts">4. Not everything is watts<a class="headerlink" href="#4-not-everything-is-watts" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>GoodWe</strong> <code>eco_mode_power</code> is <strong>% of rated inverter power</strong>.</li>
+<li><strong>Fronius</strong> SunSpec <code>InWRte</code>/<code>OutWRte</code> are <strong>% in hundredths</strong> (0–10000).</li>
+<li><strong>Growatt</strong> (most families) is % of rated.</li>
+<li><strong>Sigenergy</strong> is <strong>kW</strong>; <strong>Fox ESS</strong> is kW.</li>
+<li><strong>Victron</strong> needs a negative value encoded as unsigned 16-bit two's complement.</li>
+</ul>
+<p>Every profile author hand-rolling <code>{{ (power_w / rated * 10000) | round }}</code> is
+how a 100× error reaches somebody's inverter.</p>
+<h3 id="5-forced-control-usually-has-a-prerequisite-and-grid-charging-a-separate-one">5. Forced control usually has a prerequisite, and grid charging a <em>separate</em> one<a class="headerlink" href="#5-forced-control-usually-has-a-prerequisite-and-grid-charging-a-separate-one" title="Permanent link">&para;</a></h3>
+<p>Nearly every brand gates control behind a mode that must be set first:
+SolarEdge <code>storage_control_mode = Remote Control</code>, Victron ESS <em>External
+control</em>, Sigenergy <code>remote_ems_enable</code>, SolaX <code>remotecontrol_power_control</code>.</p>
+<p>Independently, <strong>grid charging is usually a separate permission</strong>: Growatt
+<code>allow_grid_charge</code> (reg 3049), Deye <code>grid_charge_enabled</code> (reg 232), SolarEdge
+<code>ac_charge_policy</code>, Huawei <code>storage_power_of_charge_from_grid</code>, SolaX
+<code>remotecontrol_import_limit</code>. EMHASS knows nothing about it. If it is off, EMHASS
+plans a cheap-hours grid charge, the inverter quietly refuses, and nothing in the
+current executor notices.</p>
+<h3 id="6-auto-detection-is-not-worth-building-the-user-knows-what-they-own">6. Auto-detection is not worth building — the user knows what they own<a class="headerlink" href="#6-auto-detection-is-not-worth-building-the-user-knows-what-they-own" title="Permanent link">&para;</a></h3>
+<p><code>detect: {integration: ...}</code> is the only mechanism today, and it cannot be made
+to work for inverters:</p>
+<ul>
+<li><strong>GoodWe core and <code>mletenay/home-assistant-goodwe-inverter</code> share the domain
+  <code>goodwe</code></strong> — core was merged <em>from</em> that repo. The domain cannot distinguish
+  them.</li>
+<li><strong>The Sungrow mkaiser package has no domain at all</strong> — it is a core <code>modbus:</code>
+  YAML package, and it is the most popular Sungrow route.</li>
+<li><strong>ESPHome and MQTT setups</strong> (Solar Assistant is very common) have no
+  brand-specific domain either.</li>
+</ul>
+<p>Rather than build entity-shape fingerprinting to work around this, <strong>inverter
+profiles do not auto-detect at all.</strong> The list is a plain list; the user picks
+their own hardware, which they know and we can only guess at. Source profiles
+(price, PV, load) keep <code>detect:</code> — there the question is "is Solcast installed",
+which the domain genuinely answers.</p>
+<blockquote>
+<p><strong>Detection moves down a level: we do not guess the <em>model</em>, but once told the
+model we pre-fill the <em>entities</em>.</strong> That is the <code>suggest:</code> mechanism in
+<code>roles:</code>, and it is safe precisely because the user has already told us what
+the hardware is.</p>
+</blockquote>
+<p>What survives from this finding is a <strong>labelling</strong> requirement, not a detection
+one. Several core integrations expose good battery sensors and <strong>cannot write a
+setpoint at all</strong>: <code>solaredge</code> (cloud), <code>fronius</code>, <code>growatt_server</code>, <code>powerwall</code>,
+<code>enphase_envoy</code>, <code>solax</code>, <code>victron_ble</code>. A user picking "SolarEdge" and finding
+control impossible is the worst outcome available, so each profile name states
+the route it needs — <em>"SolarEdge Home Hybrid (needs solaredge-modbus-multi)"</em> —
+and the picker carries a one-line note when the required integration is a
+different one from the obvious core integration of the same name.</p>
+<hr />
+<h2 id="the-design">The design<a class="headerlink" href="#the-design" title="Permanent link">&para;</a></h2>
+<h3 id="selection-one-question-then-a-confirmation">Selection: one question, then a confirmation<a class="headerlink" href="#selection-one-question-then-a-confirmation" title="Permanent link">&para;</a></h3>
+<p><strong>Step 1 — "Which inverter do you have?"</strong></p>
+<p>A single searchable list of model profiles, grouped by brand, alphabetical. No
+detection, no reordering, no cleverness — the user knows what is bolted to their
+wall:</p>
+<div class="highlight"><pre><span></span><code>Deye SUN-5K-25K-SG01HP3-EU       (needs davidrapan/ha-solarman)               — UNTESTED
+Fox ESS H1 / H3                  (needs nathanmarlor/foxess_modbus)           [not yet shipped]
+GoodWe ET / EH                   (needs the goodwe integration)               [not yet shipped]
+Growatt MOD / MID TL3-XH         (needs solax_modbus — not growatt_server)    — UNTESTED
+Huawei SUN2000 M1 / MB0          (needs wlcrs/huawei_solar)                   — UNTESTED
+Sigenergy SigenStor              (needs Sigenergy-Local-Modbus)              — UNTESTED
+SolaX X3-Hybrid G4 / X3-Ultra    (needs solax_modbus — not core solax)        — UNTESTED
+SolarEdge Home Hybrid            (needs solaredge-modbus-multi — not core solaredge)  [not yet shipped]
+Sungrow SH-RT                    (needs the mkaiser Modbus package)           ✓ shipped
+Sungrow SH-T 15–25 kW            (needs the mkaiser Modbus package)           — UNTESTED
+─────
+My inverter isn't listed
+  Custom — call my scripts
+</code></pre></div>
+<p>The parenthetical is part of the profile and always shown: it is the only defence
+against someone picking their brand when the integration they have installed is
+the read-only cloud one. The goal is every row above eventually shipped; until
+then, the script profile is the honest answer, not a generic approximation. The
+older <em>mode select plus a power number</em> profile that used to sit at the bottom
+was removed — see the note at the top of this document for why.</p>
+<p><strong>Step 2 — "Confirm the entities."</strong></p>
+<p>The profile declares <em>roles</em>; the flow pre-fills each from the profile's
+<code>suggest:</code> patterns matched against entities that actually exist. Normally the
+user reads a filled-in form and presses Next. This is the "select its sensors"
+step — but as <em>verification</em>, not data entry.</p>
+<p>This is where the guessing lives, and it is safe here in a way model detection
+never was: the user has already said what the hardware is, so a wrong suggestion
+is a visibly wrong entity id in a form field, not a silently wrong control model.
+A role whose <code>suggest:</code> finds nothing is simply left blank for the user to fill.</p>
+<p><strong>Step 3 — "Use this model's defaults?"</strong></p>
+<p>A model profile carries <code>limits:</code> (capacity, max charge/discharge, rated AC
+power). Accepting them fills in the Battery and hybrid-inverter settings that are
+typed by hand today (<a href="https://github.com/smefa/emhass-ha-companion/blob/main/custom_components/emhass_companion/models.py"><code>models.py</code></a>
+<code>BatteryConfig</code>, <code>HybridInverterConfig</code>), including EMHASS's <code>inverter_is_hybrid</code>.</p>
+<h3 id="schema-version-2-inverter-profiles">Schema — <code>version: 2</code> inverter profiles<a class="headerlink" href="#schema-version-2-inverter-profiles" title="Permanent link">&para;</a></h3>
+<p>The engine gains <strong>no brand knowledge</strong>. It gains a vocabulary for describing
+<em>command semantics</em>, so the executor can decide <strong>when</strong> to write. <strong>What</strong> to
+write stays in <code>actions:</code>, exactly as now.</p>
+<div class="highlight"><pre><span></span><code><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Sungrow SH-RT hybrid (Modbus package)</span>
+<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">inverter</span>
+<span class="nt">version</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2</span>
+
+<span class="nt">brand</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Sungrow</span><span class="w">                    </span><span class="c1"># display grouping only</span>
+<span class="nt">models</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">SH5.0RT</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">SH6.0RT</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">SH8.0RT</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">SH10RT</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">SH15T</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">SH20T</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">SH25T</span><span class="p p-Indicator">]</span>
+<span class="nt">requires</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Sungrow-SHx Modbus package</span><span class="w">   </span><span class="c1"># shown in the picker, always</span>
+<span class="nt">docs</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://github.com/mkaiser/Sungrow-SHx-Inverter-Modbus-Home-Assistant</span>
+
+<span class="c1"># No `detect:` block. Inverter profiles are always offered; the user picks.</span>
+
+<span class="nt">control</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">archetype</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">mode_and_magnitude</span>
+<span class="w">  </span><span class="nt">power_unit</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">w</span><span class="w">                   </span><span class="c1"># w | kw | percent_of_rated | percent_hundredths</span>
+<span class="w">  </span><span class="nt">lifetime</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">persistent</span><span class="w">            </span><span class="c1"># persistent | expires | watchdog | until_soc</span>
+<span class="w">  </span><span class="nt">deadband_w</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100</span>
+<span class="w">  </span><span class="nt">min_write_interval</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1s</span><span class="w">          </span><span class="c1"># never hammer a Modbus bus</span>
+<span class="w">  </span><span class="nt">restore_required</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">          </span><span class="c1"># persistent registers MUST be handed back</span>
+
+<span class="nt">capabilities</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">force_charge</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">force_discharge</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">idle</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">self_consume</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">curtail</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">grid_charge_gate</span>
+
+<span class="nt">roles</span><span class="p">:</span><span class="w">                            </span><span class="c1"># what step 2 asks about</span>
+<span class="w">  </span><span class="nt">mode_select</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">EMS mode</span>
+<span class="w">    </span><span class="nt">suggest</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">select.ems_mode</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">selector</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">entity</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">domain</span><span class="p">:</span><span class="w"> </span><span class="nv">select</span><span class="p p-Indicator">}}</span>
+<span class="w">  </span><span class="nt">direction_select</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Forced charge/discharge</span>
+<span class="w">    </span><span class="nt">suggest</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">select.battery_forced_charge_discharge</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">selector</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">entity</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">domain</span><span class="p">:</span><span class="w"> </span><span class="nv">select</span><span class="p p-Indicator">}}</span>
+<span class="w">  </span><span class="nt">power_number</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">suggest</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">number.battery_forced_charge_discharge_power</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">selector</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">entity</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">domain</span><span class="p">:</span><span class="w"> </span><span class="nv">number</span><span class="p p-Indicator">}}</span>
+
+<span class="nt">sensors</span><span class="p">:</span><span class="w">                          </span><span class="c1"># finally wired up — see "loose ends"</span>
+<span class="w">  </span><span class="nt">battery_soc</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sensor.battery_level</span>
+<span class="w">  </span><span class="nt">battery_power</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sensor.battery_power</span>
+<span class="w">  </span><span class="nt">grid_power</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sensor.total_active_power</span>
+<span class="w">  </span><span class="nt">pv_power</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sensor.total_dc_power</span>
+<span class="w">  </span><span class="nt">load_power</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sensor.load_power</span>
+
+<span class="nt">limits</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">battery_capacity_wh</span><span class="p">:</span><span class="w"> </span><span class="s">"{{</span><span class="nv"> </span><span class="s">states('sensor.battery_capacity_high_precision')</span><span class="nv"> </span><span class="s">|</span><span class="nv"> </span><span class="s">float</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">1000</span><span class="nv"> </span><span class="s">}}"</span>
+<span class="w">  </span><span class="nt">charge_power_max_w</span><span class="p">:</span><span class="w"> </span><span class="s">"{{</span><span class="nv"> </span><span class="s">states('number.battery_max_charge_power')</span><span class="nv"> </span><span class="s">|</span><span class="nv"> </span><span class="s">float</span><span class="nv"> </span><span class="s">}}"</span>
+<span class="w">  </span><span class="nt">discharge_power_max_w</span><span class="p">:</span><span class="w"> </span><span class="s">"{{</span><span class="nv"> </span><span class="s">states('number.battery_max_discharge_power')</span><span class="nv"> </span><span class="s">|</span><span class="nv"> </span><span class="s">float</span><span class="nv"> </span><span class="s">}}"</span>
+
+<span class="nt">actions</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">prepare</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[]</span><span class="w">                     </span><span class="c1"># nothing needed before forcing on Sungrow</span>
+<span class="w">  </span><span class="nt">force_charge</span><span class="p">:</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">service</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">number.set_value</span>
+<span class="w">      </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">entity_id</span><span class="p">:</span><span class="w"> </span><span class="s">"{{</span><span class="nv"> </span><span class="s">roles.power_number</span><span class="nv"> </span><span class="s">}}"</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="nt">data</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="s">"{{</span><span class="nv"> </span><span class="s">power</span><span class="nv"> </span><span class="s">}}"</span><span class="p p-Indicator">}</span><span class="w">       </span><span class="c1"># already unit-converted by the engine</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">service</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">select.select_option</span>
+<span class="w">      </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">entity_id</span><span class="p">:</span><span class="w"> </span><span class="s">"{{</span><span class="nv"> </span><span class="s">roles.mode_select</span><span class="nv"> </span><span class="s">}}"</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="nt">data</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">option</span><span class="p">:</span><span class="w"> </span><span class="nv">Forced mode</span><span class="p p-Indicator">}</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">service</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">select.select_option</span>
+<span class="w">      </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">entity_id</span><span class="p">:</span><span class="w"> </span><span class="s">"{{</span><span class="nv"> </span><span class="s">roles.direction_select</span><span class="nv"> </span><span class="s">}}"</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="nt">data</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">option</span><span class="p">:</span><span class="w"> </span><span class="nv">Forced charge</span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="nt">force_discharge</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">…</span>
+<span class="w">  </span><span class="nt">idle</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">…</span>
+<span class="w">  </span><span class="nt">self_consume</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">…</span>
+<span class="w">  </span><span class="nt">restore</span><span class="p">:</span><span class="w"> </span><span class="nv">*self_consume</span><span class="w">           </span><span class="c1"># what to write when handing control back</span>
+<span class="w">  </span><span class="nt">curtail</span><span class="p">:</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">service</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">switch.turn_on</span>
+<span class="w">      </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">entity_id</span><span class="p">:</span><span class="w"> </span><span class="s">"{{</span><span class="nv"> </span><span class="s">roles.export_limit_switch</span><span class="nv"> </span><span class="s">}}"</span><span class="p p-Indicator">}</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">service</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">number.set_value</span>
+<span class="w">      </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">entity_id</span><span class="p">:</span><span class="w"> </span><span class="s">"{{</span><span class="nv"> </span><span class="s">roles.export_limit_number</span><span class="nv"> </span><span class="s">}}"</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="nt">data</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="s">"{{</span><span class="nv"> </span><span class="s">curtail_w</span><span class="nv"> </span><span class="s">}}"</span><span class="p p-Indicator">}</span>
+</code></pre></div>
+<p>Two deliberate constraints carried over from
+<a href="../profiles/">profiles.md</a>: a profile is <strong>data, never code</strong>, and anything the
+vocabulary cannot express falls back to a <code>script</code> action rather than a new
+keyword.</p>
+<h3 id="unit-conversion-belongs-in-the-engine">Unit conversion belongs in the engine<a class="headerlink" href="#unit-conversion-belongs-in-the-engine" title="Permanent link">&para;</a></h3>
+<p><code>control.power_unit</code> plus a <code>rated_power_w</code> role means the engine hands each
+action a ready-to-write <code>{{ power }}</code>:</p>
+<table>
+<thead>
+<tr>
+<th><code>power_unit</code></th>
+<th>Engine renders</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>w</code></td>
+<td><code>1500</code></td>
+</tr>
+<tr>
+<td><code>kw</code></td>
+<td><code>1.5</code></td>
+</tr>
+<tr>
+<td><code>percent_of_rated</code></td>
+<td><code>15</code> (of a 10 kW unit)</td>
+</tr>
+<tr>
+<td><code>percent_hundredths</code></td>
+<td><code>1500</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>{{ power_w }}</code> stays available as the raw signed watts for anything unusual.</p>
+<h3 id="lifetime-replaces-the-global-deadband">Lifetime replaces the global deadband<a class="headerlink" href="#lifetime-replaces-the-global-deadband" title="Permanent link">&para;</a></h3>
+<p>The executor re-issues when <strong>any</strong> holds:</p>
+<ol>
+<li>the action changed (never suppressed — already true today), or</li>
+<li><code>|Δpower| &gt; control.deadband_w</code>, or</li>
+<li><code>lifetime != persistent</code> <strong>and</strong> the command is closer than half its lifetime
+   to expiring.</li>
+</ol>
+<p>For <code>lifetime: expires</code>, actions additionally receive <code>{{ duration_min }}</code>, sized
+to cover the slot plus refresh margin — which is what makes Huawei's
+<code>forcible_charge</code> correct rather than a battery that quietly stops after 60 min.</p>
+<h3 id="restore-is-a-first-class-action-and-runs-on-shutdown">Restore is a first-class action, and runs on shutdown<a class="headerlink" href="#restore-is-a-first-class-action-and-runs-on-shutdown" title="Permanent link">&para;</a></h3>
+<p><code>restore_required: true</code> brands (Sungrow, GoodWe, Deye, Sigenergy — every
+persistent-register system) must never be left in forced mode. The <code>restore</code>
+action runs on:</p>
+<ul>
+<li>plan going stale (already implemented),</li>
+<li><code>switch.emhass_control_enabled</code> being turned <strong>off</strong> (not implemented),</li>
+<li>config entry unload / reload (not implemented),</li>
+<li><code>EVENT_HOMEASSISTANT_STOP</code> (not implemented).</li>
+</ul>
+<p>The last three are the gap that leaves a battery force-charging at peak price
+because somebody restarted Home Assistant at the wrong moment.</p>
+<h3 id="preconditions-and-the-grid-charge-gate">Preconditions and the grid-charge gate<a class="headerlink" href="#preconditions-and-the-grid-charge-gate" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>actions.prepare</code> runs before the first forced command of a session — SolarEdge
+  into <code>Remote Control</code>, Victron into <em>External control</em>, Sigenergy
+  <code>remote_ems_enable</code>, SolaX <code>remotecontrol_power_control</code>.</li>
+<li><code>capabilities: [grid_charge_gate]</code> declares that grid charging is separately
+  permissioned. When the plan schedules charging while PV cannot cover it, the
+  executor asserts the gate — and if the profile cannot, it raises a <strong>repair
+  issue</strong> rather than letting EMHASS plan something the hardware will refuse.</li>
+</ul>
+<h3 id="honest-degradation">Honest degradation<a class="headerlink" href="#honest-degradation" title="Permanent link">&para;</a></h3>
+<p><code>capabilities:</code> is also how a profile says what it <em>cannot</em> do. Tesla Powerwall
+has no watt setpoint at all — only operation mode and <code>backup_reserve</code> %. A
+profile declaring no <code>force_charge</code> capability makes the config flow say so at
+setup, and makes the executor record the fidelity loss in
+<code>sensor.emhass_battery_action</code>'s reason, instead of silently pretending the plan
+was followed.</p>
+<hr />
+<h2 id="loose-ends-this-closes">Loose ends this closes<a class="headerlink" href="#loose-ends-this-closes" title="Permanent link">&para;</a></h2>
+<p>Found while reading the current implementation:</p>
+<table>
+<thead>
+<tr>
+<th>Gap</th>
+<th>Location</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>sensors:</code> and <code>limits:</code> are in the schema but have <strong>no non-test callers</strong> — <code>resolve_sensors</code> / <code>resolve_limits</code> are dead</td>
+<td><code>profiles/engine.py</code></td>
+</tr>
+<tr>
+<td><code>p_pv_curtailment</code> is absent from <code>PlanRow</code>, so curtailment cannot be acted on at all</td>
+<td><code>models.py</code></td>
+</tr>
+<tr>
+<td><code>p_grid</code> exists on <code>PlanRow</code> but is never passed to an action — a <code>grid_setpoint</code> profile is impossible</td>
+<td><code>executor.py</code></td>
+</tr>
+<tr>
+<td>Action templates receive only <code>power_w</code>, <code>soc</code>, <code>soc_target</code> — no duration, no slot length, no grid target</td>
+<td><code>executor.py</code></td>
+</tr>
+<tr>
+<td><code>test_profile</code> on an inverter profile falls through to <code>produces_series == False</code> and returns a misleading "contributes EMHASS settings" note</td>
+<td><code>services.py</code></td>
+</tr>
+<tr>
+<td>Nothing restores inverter state on unload, shutdown, or control-switch-off</td>
+<td><code>executor.py</code>, <code>__init__.py</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="build-order">Build order<a class="headerlink" href="#build-order" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong>Schema <code>version: 2</code></strong> — <code>brand</code>, <code>models</code>, <code>requires</code>, <code>control</code>,
+   <code>capabilities</code>, <code>roles</code>, <code>restore</code>. <code>version: 1</code> profiles keep loading.</li>
+<li><strong>Engine</strong> — unit conversion, <code>roles</code> (with <code>suggest:</code> prefill) replacing bare
+   <code>options</code> for entity mapping, <code>duration_min</code> / <code>curtail_w</code> / <code>p_grid</code> in the
+   action scope.</li>
+<li><strong>Executor</strong> — lifetime-driven refresh, <code>prepare</code>, <code>restore</code> on all four
+   triggers, capability-aware degradation, grid-charge gate assertion.</li>
+<li><strong>Config flow</strong> — the three-step selection above, with prefill.</li>
+<li><strong>Plan plumbing</strong> — <code>p_pv_curtailment</code> on <code>PlanRow</code>, <code>curtail</code> action.</li>
+<li><strong>Profile catalogue</strong> — the eight below.</li>
+<li><strong>Contribution pipeline</strong> — <code>test_profile</code> dry-runs an inverter action;
+   a <code>dump_inverter_entities</code> diagnostic service produces a fixture from a
+   contributor's own install.</li>
+</ol>
+<h2 id="catalogue">Catalogue<a class="headerlink" href="#catalogue" title="Permanent link">&para;</a></h2>
+<p>Scope is <strong>current-generation DC-coupled hybrids from the major brands</strong>.
+Rebadges (Sol-Ark, Ginlong), legacy generations that lack a remote-control
+register (SolaX GEN2/GEN3), and off-grid-only lines (Growatt SPF) are out —
+they are served by the script escape hatch, not by a profile.</p>
+<p><strong>Phase 1 — six of seven shipped, one validated:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Profile</th>
+<th>Route</th>
+<th>Archetype</th>
+<th>Lifetime</th>
+<th>Confidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Sungrow SH-RT</td>
+<td>mkaiser Modbus package</td>
+<td><code>mode_and_magnitude</code></td>
+<td>persistent</td>
+<td><strong>shipped</strong> — validated against a live install</td>
+</tr>
+<tr>
+<td>Huawei SUN2000 M1 / MB0</td>
+<td><code>wlcrs/huawei_solar</code></td>
+<td><code>command_with_duration</code></td>
+<td>expires</td>
+<td><strong>shipped, untested</strong> — services and units confirmed from source; what the inverter does at duration expiry is firmware behaviour nobody has documented</td>
+</tr>
+<tr>
+<td>SolaX X3-Hybrid G4 / X3-Ultra</td>
+<td><code>solax_modbus</code></td>
+<td><code>signed_power</code></td>
+<td>watchdog</td>
+<td><strong>shipped, untested</strong> — one plugin serves both; entity ids may carry a "(mode 1)" suffix on a recent install</td>
+</tr>
+<tr>
+<td>Fox ESS H1 / H3</td>
+<td><code>nathanmarlor/foxess_modbus</code></td>
+<td><code>mode_and_magnitude</code></td>
+<td>watchdog</td>
+<td>high</td>
+</tr>
+<tr>
+<td>SolarEdge Home Hybrid</td>
+<td><code>solaredge_modbus_multi</code></td>
+<td><code>mode_and_magnitude</code></td>
+<td>watchdog (writable timeout)</td>
+<td>high</td>
+</tr>
+<tr>
+<td>GoodWe ET / EH</td>
+<td><code>goodwe</code></td>
+<td><code>mode_and_magnitude</code> (% of rated)</td>
+<td>persistent</td>
+<td>medium — <code>eco_mode_power</code> is a percentage, easiest unit trap in the set</td>
+</tr>
+<tr>
+<td>Sigenergy SigenStor</td>
+<td><code>TypQxQ/Sigenergy-Local-Modbus</code></td>
+<td><code>mode_and_magnitude</code> (kW)</td>
+<td>persistent</td>
+<td><strong>shipped, untested</strong> — deliberately <em>not</em> <code>signed_power</code>: the signed setpoint's sign is undocumented and it targets AC output rather than the battery, so direction comes from the mode select instead</td>
+</tr>
+</tbody>
+</table>
+<p>These seven need only <strong>three</strong> archetypes: <code>signed_power</code>,
+<code>mode_and_magnitude</code>, <code>command_with_duration</code>.</p>
+<p><strong>Phase 2:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Profile</th>
+<th>Route</th>
+<th>Archetype</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Deye SUN-5K–25K-SG01HP3-EU</td>
+<td><code>davidrapan/ha-solarman</code></td>
+<td>—</td>
+<td><strong>shipped, untested.</strong> Brought forward. The <code>tou_rewrite</code> lifecycle that made this the deferred case turned out to be avoidable: the profile steers work mode and the battery <strong>current</strong> limits, which act immediately, and never touches the user's six TOU programs. The cost is that the plan becomes a ceiling rather than a setpoint, and that the watts-to-amps conversion needs the pack voltage</td>
+</tr>
+<tr>
+<td>Growatt MOD / MID TL3-XH</td>
+<td><code>solax_modbus</code></td>
+<td><code>tou_rewrite</code></td>
+<td><strong>shipped, untested.</strong> Genuinely TOU-based — there is no setpoint register on this family — so it dedicates one slot to the plan and moves that slot's priority mode. Percentages of rated power, so it needs the nameplate rating. No curtailment: two candidate export-limit registers exist, in different units, and which one the family honours is unresolved</td>
+</tr>
+<tr>
+<td>Ferroamp EnergyHub</td>
+<td><code>henricm/ha-ferroamp</code></td>
+<td>service charge/discharge</td>
+<td>Swedish and worth having, but the sign convention is undocumented and needs a live install</td>
+</tr>
+</tbody>
+</table>
+<h3 id="not-planned-fronius-gen24">Not planned: Fronius GEN24<a class="headerlink" href="#not-planned-fronius-gen24" title="Permanent link">&para;</a></h3>
+<p>This one was investigated three times, because each answer looked like it was
+about the wrong thing.</p>
+<p>The core <code>fronius</code> integration is read-only — Solar API, no write platforms at
+all. The obvious alternative, hand-written core <code>modbus:</code> YAML against SunSpec
+model 124, is reported to <em>report success while the write fails</em> underneath on
+this hardware, which is why every serious community project writes its own
+Modbus client instead of using it.</p>
+<p>That looked like an argument against the transport rather than against the
+brand, so the second pass asked whether a profile driving a real custom
+integration — <code>callifo/fronius_modbus</code>, the maintained fork of
+<code>redpomodoro/fronius_modbus</code> — would sidestep it. A component that owns its
+client <em>should</em> be able to manage the watchdog and the scaling internally. It
+does not:</p>
+<ul>
+<li><strong>Control writes are silently dropped while the hub is polling.</strong> Every
+  control method is wrapped in a busy flag that returns without writing, and
+  without raising or logging, if a poll is in flight. An automation calling
+  <code>number.set_value</code> cannot tell the difference between a write that landed and
+  one that was eaten. This is an open issue against the integration.</li>
+<li><strong>The revert watchdog is never touched.</strong> <code>InOutWRte_RvrtTms</code> appears nowhere
+  in the register table or in any write path — the integration inherits
+  whatever timeout the inverter already had. There is a live report of the
+  resulting desync, where the inverter stayed in forced recharge after Auto was
+  written.</li>
+<li><strong>Firmware caps grid charging to roughly 500 W</strong> on at least one current
+  GEN24 build paired with a BYD HVM, with external control correctly enabled.
+  No amount of software above it can route around that.</li>
+<li>Grid charging also depends on an undocumented sign trick (a negative
+  <code>OutWRte</code>) AND-linked to a web-UI toggle that the integration only asserts
+  when web-API credentials were configured, best-effort, in a try/except that
+  logs a warning and carries on.</li>
+</ul>
+<p>Any one of those is survivable with a warning. Together they describe a route
+where a profile can look configured, look applied, and have changed nothing —
+and that is the one failure mode the <code>untested:</code> marking does <em>not</em> cover. That
+marking says "nobody has confirmed this yet", not "commands may silently
+vanish".</p>
+<p>A correction to an earlier draft of this section: the silent-drop behaviour was
+described here as an open issue upstream. It is not — no such issue exists in
+that tracker. The finding is first-hand from the source, which is stronger
+evidence but has no corroboration from other users.</p>
+<p><strong>The third pass</strong> asked the obvious follow-up: is there a <em>better</em> component
+to drive? Four routes were checked, at source rather than at README:</p>
+<table>
+<thead>
+<tr>
+<th>Route</th>
+<th>Verdict</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>callifo/fronius_modbus</code></td>
+<td>Re-verified at HEAD (2026-08-01). <code>toggle_busy</code> still returns bare on collision, decorating ~15 control methods; <code>RvrtTms</code> still appears nowhere. New: open issue #121 — the integration <strong>fails to load on HA 2026.7+</strong> (<code>unpack_bitstring</code> removed from pymodbus) without a hand patch. Closed issue #97 is the tell: grid charge power was displayed in W while holding raw SunSpec percent, ≈205× off on a BYD HVM</td>
+</tr>
+<tr>
+<td><code>redpomodoro/fronius_modbus</code></td>
+<td>The sibling repo. Same <code>toggle_busy</code> pattern, last commit 2025-09-09. Strictly worse. The <code>smartenergycontrol-be</code> and <code>Bigert</code> forks are copies of callifo</td>
+</tr>
+<tr>
+<td><code>tz8/home-assistant-gen24-energy-control</code></td>
+<td>A genuinely different transport — local HTTP <code>/config/timeofuse</code>, no Modbus. Not usable as an executor: it is a <strong>rival planner</strong> (its own EPEX + Solcast logic; its only service is <code>apply_policy</code>, meaning <em>apply my plan</em>), it writes 00:00–23:59 <code>CHARGE_MAX</code>/<code>DISCHARGE_MAX</code> limits rather than a setpoint, it POSTs the whole TOU table — an unwritable decision posts <code>{"timeofuse": []}</code>, wiping the owner's entries — and its HTTP client carries <strong>no authentication at all</strong></td>
+</tr>
+<tr>
+<td><code>evcc</code></td>
+<td>The most-deployed Fronius battery controller anywhere, and it confirms the ceiling rather than clearing it: four <em>modes</em> only, no watt setpoint, <code>maxchargerate</code> a static config percentage. It does not manage the revert timer either. Its value here is corroboration — the negative-<code>OutWRte</code> grid-charge trick and <code>ChaGriSet</code> semantics are now cross-confirmed</td>
+</tr>
+</tbody>
+</table>
+<p>Honourable mentions, neither an executor: <code>wiggal/GEN24_Ladesteuerung</code> (a
+standalone forecast/price planner that writes charge power over HTTP — it would
+fight EMHASS for the same battery) and <code>jtbnz/fronius-modbus-controller</code> (a
+Python library, so it lands where a script lands, plus a dependency).</p>
+<p>So the verdict stands, and the survey strengthens it: every serious project on
+this hardware either drops to modes or owns the whole plan. Neither shape fits
+a setpoint executor.</p>
+<p>Fronius GEN24 owners get the script escape hatch, where a script can read back
+what it wrote and fail visibly — written up concretely in
+<a href="../fronius_gen24_scripts/">Fronius GEN24 — the scripts recipe</a>. The register
+semantics themselves are well understood and cross-confirmed by three
+independent implementations; it is only the delivery that has no home.</p>
+<p><strong>If this is ever revisited</strong>, the interesting finding is the web-API route.
+<code>/config/timeofuse</code> is persistent configuration — no watchdog to desync
+against — and it is readable back with a <code>GET</code>. What makes it a script recipe
+rather than a profile is the authentication: the GEN24 uses a non-standard
+digest handshake, challenged over <code>X-WWW-Authenticate</code> with a SHA-256 (or MD5,
+per <code>authenticationOptions</code>) secret, which neither <code>rest_command</code> nor
+<code>curl --digest</code> can speak. That needs a helper of ~60 lines, which is a
+dependency the Companion should not grow. The Modbus-plus-read-back recipe
+needs no authentication at all, which is why it is the one documented.</p>
+<p>Also not planned: Tesla Powerwall, sonnen, Victron (AC-coupled, and Powerwall
+has no watt setpoint at all).</p>
+<blockquote>
+<p><strong>Note on the archetypes.</strong> Shipping Deye and Growatt did not require the
+executor to learn <code>tou_rewrite</code> semantics after all. Growatt's profile expresses
+the whole slot rewrite — mode, times, enable flag, then the commit button — as
+ordinary service calls, and Deye's sidesteps TOU entirely. <code>tou_rewrite</code>
+remains a label on the <code>control:</code> block describing what the hardware is, not a
+code path in the executor. That is the outcome the original recommendation was
+reaching for.</p>
+</blockquote>
+<h2 id="verification-status">Verification status<a class="headerlink" href="#verification-status" title="Permanent link">&para;</a></h2>
+<p>Verified from source or official docs: entity ids, option strings and register
+semantics for Sungrow, Huawei, SolarEdge, SolaX, Fox ESS, Sigenergy, GoodWe,
+Deye, Growatt; EMHASS's own sign convention (<code>p_batt_forecast</code> negative =
+charging).</p>
+<p>Only <strong>Sungrow SH-RT</strong> can be validated on this system. Everything else ships
+marked <code>untested: true</code> and carries what could not be confirmed in its own
+notes, where the person setting it up will actually read it. The specific gaps,
+per profile:</p>
+<table>
+<thead>
+<tr>
+<th>Profile</th>
+<th>What is not confirmed</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Sungrow SH-T</td>
+<td>Register 13052 is Watts per Sungrow's V1.1.9 spec, which lists these models in the same table — but no field report from a T-series owner exists. The export-limit register has had a factor-of-ten bug on SH15T</td>
+</tr>
+<tr>
+<td>Huawei</td>
+<td>What the inverter does when a <code>forcible_charge</code> duration elapses; whether power 0 is a genuine hold (which is why the profile defines no <code>idle</code>); the exact battery sensor entity ids</td>
+</tr>
+<tr>
+<td>Deye</td>
+<td>The battery and grid power sign — the two integrations that read this hardware disagree, one negating what the other passes through. Whether the global grid-charge switch or a per-program bit takes precedence</td>
+</tr>
+<tr>
+<td>SolaX</td>
+<td>Whether a recent install's entity ids carry the "(mode 1)" suffix the current display names imply</td>
+</tr>
+<tr>
+<td>Growatt</td>
+<td>Whether Battery First at a zero charge rate is a true idle; which of the two export-limit registers this family honours</td>
+</tr>
+<tr>
+<td>Sigenergy</td>
+<td>Nothing load-bearing: the profile avoids the one undocumented fact (the signed setpoint's sign) rather than guessing it. Whether the per-inverter setpoint needs the plant-level enable is unconfirmed, but this profile uses the plant-level entities throughout</td>
+</tr>
+<tr>
+<td>Ferroamp</td>
+<td>Charge/discharge sign (not yet shipped)</td>
+</tr>
+<tr>
+<td>Fronius GEN24</td>
+<td>Not shipped at all — see "Not planned" above. The register semantics are well confirmed; the delivery path is not. The <a href="../fronius_gen24_scripts/">scripts recipe</a> documents the registers but has not been run against hardware, and <code>InOutWRte_RvrtTms</code> in particular is derived from the model 124 layout rather than read out of a working implementation</td>
+</tr>
+</tbody>
+</table>
+<p>The earlier conclusion here — that shipping an unvalidated profile is worse
+than shipping none — has been replaced by the <code>untested:</code> marking described at
+the top of this document.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "navigation.tracking", "search.suggest", "search.highlight", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

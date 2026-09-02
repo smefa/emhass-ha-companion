@@ -1,0 +1,2377 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A Home Assistant integration that makes EMHASS usable without writing YAML.">
+      
+      
+      
+        <link rel="canonical" href="https://smefa.github.io/emhass-ha-companion/surplus_loads/">
+      
+      
+        <link rel="prev" href="../thermal_loads/">
+      
+      
+        <link rel="next" href="../on_demand_loads/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/icon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Surplus loads - EMHASS Companion</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#surplus-loads" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="EMHASS Companion" class="md-header__button md-logo" aria-label="EMHASS Companion" data-md-component="logo">
+      
+  <img src="../assets/logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            EMHASS Companion
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Surplus loads
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="teal" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/smefa/emhass-ha-companion" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    smefa/emhass-ha-companion
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="EMHASS Companion" class="md-nav__button md-logo" aria-label="EMHASS Companion" data-md-component="logo">
+      
+  <img src="../assets/logo.png" alt="logo">
+
+    </a>
+    EMHASS Companion
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/smefa/emhass-ha-companion" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    smefa/emhass-ha-companion
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    User Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/deferrable_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deferrable loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/thermal_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Thermal loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/surplus_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Surplus loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/inverter_control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inverter control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/hub_controls/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hub controls
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/network_tariffs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Network tariffs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/dashboard_cards/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dashboard cards
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Technical reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Technical reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3_2" id="__nav_3_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Loads
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Loads
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deferrable_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deferrable loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../thermal_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Thermal loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Surplus loads
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Surplus loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#why-this-cannot-be-an-ordinary-deferrable-load" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why this cannot be an ordinary deferrable load
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-the-budget-is-derived" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How the budget is derived
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="How the budget is derived">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-add-back" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The add-back
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-budget-cap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The budget cap
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#start-as-early-as-possible" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Start as early as possible
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Start as early as possible">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-modulation-pad" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The modulation pad
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-it-does-in-practice" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it does in practice
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-battery-reservation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The battery reservation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-currently-running-unbroken-load-whose-window-moved-on" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A currently-running unbroken load whose window moved on
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-the-previous-plan" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why the previous plan
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-no-completed-timesteps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why no completed timesteps
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Settings
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Settings">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#headroom" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Headroom
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#energy-needed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Energy needed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#several-surplus-loads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Several surplus loads
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-is-published" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What is published
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-this-is-not" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What this is not
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../on_demand_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    On-demand loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../load_groups/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Load groups
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../request_run_service/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Request-run service (planned)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dashboard_cards/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dashboard cards
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../lab_cards/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Lab cards (experimental)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../entities/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Entities
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../savings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cost and savings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../end_soc/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    End SOC
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../handing_over_control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Handing over control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../inverter_control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inverter control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fronius_gen24_scripts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fronius GEN24 scripts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data_sources/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data sources
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../grid_limits/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dynamic grid limits
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../network_tariffs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Network tariffs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../template_additions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Template additions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../profiles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Writing a profile
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../inverter_profile_roadmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inverter profile roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#why-this-cannot-be-an-ordinary-deferrable-load" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why this cannot be an ordinary deferrable load
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-the-budget-is-derived" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How the budget is derived
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="How the budget is derived">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-add-back" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The add-back
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-budget-cap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The budget cap
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#start-as-early-as-possible" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Start as early as possible
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Start as early as possible">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-modulation-pad" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The modulation pad
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-it-does-in-practice" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it does in practice
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-battery-reservation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The battery reservation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-currently-running-unbroken-load-whose-window-moved-on" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A currently-running unbroken load whose window moved on
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-the-previous-plan" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why the previous plan
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-no-completed-timesteps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why no completed timesteps
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Settings
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Settings">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#headroom" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Headroom
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#energy-needed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Energy needed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#several-surplus-loads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Several surplus loads
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-is-published" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What is published
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-this-is-not" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What this is not
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/smefa/emhass-ha-companion/edit/main/docs/surplus_loads.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="surplus-loads">Surplus loads<a class="headerlink" href="#surplus-loads" title="Permanent link">&para;</a></h1>
+<p>A load that only ever wants energy which would otherwise leave the house.</p>
+<p>The motivating case is a pool heater: 800 W, on or off, and worth running only
+when the sun is producing more than the house and its other deferrable loads
+need. There is no deadline, no target run time and no "hours per day" — it
+takes what is spare for as long as it is armed. <em>When</em> it may run is decided
+without any regard for the battery or the grid — see <a href="#the-add-back">the add-back</a>
+for why — but <em>how much</em> it is asked for still leaves room for the battery to
+reach its own target first; see <a href="#the-battery-reservation">the battery reservation</a>.</p>
+<p>This is a <strong>Companion construct</strong>, not an EMHASS feature — see
+<a href="#why-this-cannot-be-an-ordinary-deferrable-load">why this cannot be an ordinary deferrable load</a>.</p>
+<p>Choose <em>On spare solar</em> under <strong>Runs</strong> when adding the load, then arm it with its
+<strong>Requested</strong> switch. Turn the switch off to stop. That is the whole
+user-facing feature, plus one optional switch —
+<a href="#start-as-early-as-possible">Start as early as possible</a> — for a load you
+want served at the front of the sun rather than wherever the day suits it
+best.</p>
+<p><img alt="The Add a deferrable load dialog, with On spare solar chosen under Runs" src="../assets/deferrable-add-load.png" /></p>
+<p><img alt="A surplus load's Controls and Sensors: Requested switch, next start, running, runtime today, scheduled power, should run" src="../assets/surplus-load-controls-sensors.png" /></p>
+<p>Adding a deferrable load asks two questions first — its name and what makes it
+want to run — because that answer decides which settings it even has. A config
+flow cannot show or hide a field in reaction to another field in the same form,
+and a surplus load has no operating hours and no time window to offer. An
+existing load can be switched over at any time with its <code>recurrence</code> select.</p>
+<h2 id="why-this-cannot-be-an-ordinary-deferrable-load">Why this cannot be an ordinary deferrable load<a class="headerlink" href="#why-this-cannot-be-an-ordinary-deferrable-load" title="Permanent link">&para;</a></h2>
+<p><strong>There is no surplus mode in EMHASS.</strong> No self-consumption mode either, and no
+config option, payload field or API endpoint that corresponds to one — nothing
+in EMHASS's own configuration, the add-on's options, or the upstream docs will
+match anything on this page, and looking for it there is a dead end. Everything
+described here is computed by the Companion; what EMHASS is finally sent for a
+surplus load is a completely ordinary deferrable load with an hours target and a
+window, indistinguishable from any other.</p>
+<p>EMHASS's cost function is imports minus export revenue. It has <strong>no value term
+for consumption at all</strong>, so any load it is not forced to run is pure cost and
+the solver sets it to zero at every timestep. There is no way to express "run
+this if it happens to be free" in the MILP.</p>
+<p>The only lever is <code>def_total_hours</code>, which is a hard constraint. So a surplus
+load's run time has to be computed outside the optimiser, from the surplus the
+plan itself predicts, and handed back as an ordinary hours target.</p>
+<h2 id="how-the-budget-is-derived">How the budget is derived<a class="headerlink" href="#how-the-budget-is-derived" title="Permanent link">&para;</a></h2>
+<p>Once per run, in <code>surplus.py</code>, from the <strong>previous</strong> run's plan:</p>
+<ol>
+<li><strong>The series.</strong> <code>max(0, P_PV - P_load - ordinary deferrables)</code> — PV the
+   house and its <em>ordinary</em> scheduled deferrables don't need, plus the surplus
+   loads' own <code>P_deferrable</code> added back (see below). Deliberately not
+   <code>-p_grid</code>: what the battery charges on, or what gets exported, is the
+   optimiser's call about where to put spare PV, not a statement about
+   whether there was any. Reading <code>-p_grid</code> instead would let the battery
+   silently outrank every surplus load for the same watt, any time it still
+   has room to charge.</li>
+<li><strong>The current block.</strong> From here to the first stretch that can't even feed
+   the load's run floor — the run floor being its nominal power when it can
+   only be on or off, and its minimum power when it can modulate. A horizon
+   that starts mid-morning also reaches past sunset into tomorrow's sunrise;
+   without this cut, the block would splice today's tail onto tomorrow's,
+   and everything below would be sized against a "day" that is really two
+   days with a night spliced out of the middle.</li>
+<li><strong>Qualifying timesteps</strong>, within that block. Those where the surplus is at
+   least the run floor plus <em>headroom</em> — measured after any higher-priority
+   surplus load has taken its draw, but before the battery's own reservation
+   is taken off (see below).</li>
+<li><strong>The window.</strong> First to last <em>gross</em>-qualifying timestep <em>in the block</em>,
+   sent as an absolute <code>start_at</code>/<code>end_at</code> pair rather than a wall-clock one.</li>
+<li><strong>The budget.</strong> <code>hours = credited energy / nominal power</code>, capped at the
+   qualifying span itself. Each qualifying timestep's <em>full</em> surplus is
+   credited (not clipped at what the load can draw in that one slot), so a
+   run of strong slots can cover for a few that only just clear the bar —
+   but the total can never ask for more hours than the span physically has
+   room for, which is the cap doing the same job the per-slot clip used to.
+   See <a href="#the-budget-cap">the budget cap</a> below.</li>
+</ol>
+<p>The load is then sent to EMHASS as a completely ordinary deferrable with those
+hours and that window. The optimiser still decides <em>when</em> inside it — but only
+inside it, and <a href="#start-as-early-as-possible">Start as early as possible</a>
+narrows the window until there is no <em>inside</em> left to decide, on the loads
+where it can. Without the block cut, a window spanning a whole night is still a
+technically valid window, and EMHASS will place the load at 3 a.m. if that
+happens to be the cheapest way to fill it — solar never entered its decision,
+only the (wrongly wide) window did.</p>
+<h3 id="the-add-back">The add-back<a class="headerlink" href="#the-add-back" title="Permanent link">&para;</a></h3>
+<p>Only <em>ordinary</em> deferrables are subtracted from <code>P_PV - P_load</code>. Every surplus
+load's own <code>P_deferrable</code> is left out of the subtraction entirely, which makes
+the series <strong>invariant to whether those loads are scheduled</strong>: a surplus load
+that is currently running must not see its own draw counted against next
+cycle's budget, or it would switch itself off every time it switched on. An
+ordinary deferrable's consumption stays subtracted because it is a real claim
+on the house's energy — leaving it out too would promise the same
+kilowatt-hour to the pool as well, selling it twice.</p>
+<h3 id="the-budget-cap">The budget cap<a class="headerlink" href="#the-budget-cap" title="Permanent link">&para;</a></h3>
+<p>Each qualifying timestep credits what it can still hand over — everything the
+sun offered there, less the battery's reservation and less what the
+higher-priority surplus loads already took — and not just what this load could
+draw in that one slot: a 3 kW timestep credits an 800 W pool the full 750 Wh,
+not 200 Wh. That lets a run of strong slots make up for a few that only just
+clear the bar, or for a slot the battery reserved most of, rather than every
+single timestep having to individually justify itself before it counts at all.</p>
+<p>The total is then capped at the qualifying span itself: the load can never be
+asked to run more hours than the span has timesteps for, because there would
+be nowhere left to place the rest — EMHASS would report the whole problem
+infeasible rather than just this one load. That cap is deliberately the
+<em>tight</em> span (the last qualifying timestep's own interval, one step wide),
+not the wider window sent to EMHASS — the window carries an extra step of
+padding to absorb rounding in <code>payload.resolve_load_window</code>, and letting the
+cap eat into that padding too would ask for a step nobody's surplus actually
+backed. A capped variable load's own ceiling (see below) is subject to the
+same cap, sized against <code>nominal_w</code> rather than against energy directly —
+exact for a semi-continuous load, an accepted approximation for one that
+modulates.</p>
+<p>On an abundant day this converges on "run for the whole window" — a small
+number of weak or reserved slots inside an otherwise strong block no longer
+shrink <code>hours</code> at all, they just get absorbed by it. On a thin day it still
+falls back to something close to the old per-slot count, because there is
+no surplus elsewhere in the span to borrow from.</p>
+<p>And below one timestep, the budget is dropped outright. EMHASS can only place
+a load in whole timesteps — <code>payload.operating_timesteps</code> floors any non-zero
+request at one — so a sub-step budget does not buy a shorter run, it buys a
+<em>full</em> step at nominal power with only the fraction below it backed by
+surplus. The rest is imported, which is the one thing a surplus load exists
+not to do, so the choice is between one partial step and nothing at all. The
+window is still reported: the sun was up, there was simply nothing left of it
+worth a timestep. An explicit <code>max_energy_wh</code> is exempt — a small number the
+user typed is still an instruction, and the rounding is warned about
+separately.</p>
+<h2 id="start-as-early-as-possible">Start as early as possible<a class="headerlink" href="#start-as-early-as-possible" title="Permanent link">&para;</a></h2>
+<p>Off by default. On, the load takes the <strong>front</strong> of the sunny stretch instead
+of leaving EMHASS free to place its hours anywhere inside it.</p>
+<p>It changes the window and nothing else — not the hours, not the energy, not
+which timesteps were credited. The budget is already "however much the surplus
+supports"; all this decides is where in the block those hours land.</p>
+<h3 id="the-modulation-pad">The modulation pad<a class="headerlink" href="#the-modulation-pad" title="Permanent link">&para;</a></h3>
+<p>The window is a fixed span, not something derived from the block's shape:</p>
+<div class="highlight"><pre><span></span><code>run_steps = ceil(hours / step)
+margin    = clamp(1 / run_steps, 5%, 25%)
+pad_steps = max(1, round(hours * margin / step))
+window_last = window_first + (run_steps - 1 + pad_steps) * step
+</code></pre></div>
+<p><code>hours</code> and <code>energy_wh</code> are untouched — the switch has never changed the
+budget, only where it may land, and that is still true. What changed is how
+<code>window_last</code> is found. <code>pad_steps</code> reuses the run-length scaling <code>hours</code>
+itself used to be derated by: a short run needs proportionally more shaping
+room than a long one, because it averages fewer slots and so is more exposed
+to any single one coming in under forecast. A four-step run gets a quarter
+of its own hours back as padding; a twenty-step run a twentieth. It exists
+for the same reason it always has: a load pinned to exactly its bare hours
+would have to hold the block's <em>peak</em> power through every one of them, and
+the front of a block is usually its weakest end — EMHASS treats the energy
+total as an equality, so a window with no room to spread the run down a ramp
+just imports the difference instead. The pad is what buys the solver
+somewhere to shape the run into.</p>
+<p><strong>This used to be derived from the block's deliverable energy instead</strong> —
+walking slot by slot from <code>window_first</code> until cumulative delivery covered
+the ask, on the theory that this was the earliest window EMHASS could fill
+without importing. That walk is gone. The reason: "deliverable" is net of
+whatever the battery's own charging already claims from the same slots
+(<code>battery_reserved_series</code>, below), and that claim is read from the
+<em>previous</em> MPC cycle's plan — it is not a constraint this cycle's solve is
+bound to keep. A block whose early slots the battery has already claimed
+read, to the walk, as if the sun did not rise until the battery was done
+with it: on a car charging off a battery that still has most of its SoC to
+find, the walk would reach past two or three hours of genuine sun the
+battery was mid-claim on, and hand back a window starting whenever that
+claim happened to taper off — the exact opposite of "as early as possible",
+and for a reason (a stale reservation) the running solve was always free to
+override by simply charging the battery later instead.</p>
+<p>The fixed span trusts that instead: it does not know or care what the
+battery reserved last cycle, so the window opens at the first <em>gross</em>-
+qualifying slot and holds for <code>run_steps + pad_steps</code>, regardless of how
+much of that span the previous plan had already spoken for. <strong>This is a
+bet, not a guarantee.</strong> If the current solve does not, in fact, reschedule
+the battery's charging to make room — some other constraint holds it where
+it was — EMHASS imports for the shortfall in that window, the same way any
+ordinary deferrable would on a day the forecast came in wrong. That is an
+accepted cost, scoped to the one window on the one day the bet doesn't pay
+off; the alternative (waiting for the walk to catch up with wherever the
+battery's claim happens to end) reliably produces exactly the late start
+this switch exists to avoid.</p>
+<h3 id="what-it-does-in-practice">What it does in practice<a class="headerlink" href="#what-it-does-in-practice" title="Permanent link">&para;</a></h3>
+<p>A pool needing 2.5 h (10 steps) inside four hours of flat 800 W sun: the
+window closes 12 steps after it opens — ten steps of run, one of padding
+(<code>clamp(1/10, 5%, 25%) = 10%</code>, <code>2.5 h × 10% ≈ 1 step</code>), one more that
+<code>window_end</code> always carries against payload rounding. Switch off, EMHASS
+gets the full 21-step block to place the same run in instead.</p>
+<p>A load whose early slots the battery has claimed almost entirely — 200 W of
+3000 W left over each, say, in the first four of an eight-slot block — asks
+for its energy as usual and gets a window that opens right there anyway: the
+four reserved slots still count as gross-qualifying, so <code>window_first</code> sits
+at the front of them regardless of how little they can currently deliver.
+Whether that resolves to a clean early start or a slot or two of import
+comes down to whether the running solve actually moves the battery's charge
+elsewhere — which is between EMHASS and the battery, not something this
+budget can see in advance.</p>
+<p><strong>It is still usually the worse choice for self-consumption</strong>, and that is
+the point of leaving it off by default. Pulling the window in buys the run
+somewhere to shape itself and a real shot at running earlier, but it cannot
+conjure sun that isn't up yet, and now it can also ask for a slot the
+battery genuinely still needs. Turn it on when you want the energy <em>early</em>
+more than you want it <em>cheap</em> or <em>free of import</em> — a car leaving at noon, a
+battery you are content to have charge later in the day instead — not as a
+general improvement.</p>
+<p>A widened window is logged at debug level, naming the load and how many
+timesteps it grew by; a run that starts later than expected on a peaked day
+is usually this. It is also how to confirm the uncapped case above — a line
+widening the window back to the full block, run after run, means the switch is
+doing nothing:</p>
+<div class="highlight"><pre><span></span><code>01KZF7RZDVQXFMCGJD9ZFNBT74: start-as-early-as-possible window widened from 21
+to 38 timesteps -- the front of the block cannot deliver 36607 Wh at 7022 W
+without importing
+</code></pre></div>
+<p>This is also why <strong>Run now</strong> is unavailable on a surplus load. That button
+forces the load on regardless of the plan, which here means charging off the
+grid at midnight, and it clears itself against an <code>operating_hours</code> a surplus
+load structurally does not have — so once pressed it stayed on until Home
+Assistant was restarted. This switch is the honest version of the same intent.</p>
+<p>The load is still surplus-gated throughout: the window can never open before
+the first qualifying timestep, so "as early as possible" means early within
+the sun, never before it. And because the whole budget is rebuilt from
+scratch every cycle, a run cut short by cloud is not a request spent — a
+later cycle simply derives a fresh window from whatever sun is left.</p>
+<h3 id="the-battery-reservation">The battery reservation<a class="headerlink" href="#the-battery-reservation" title="Permanent link">&para;</a></h3>
+<p>The window is gross, but the <em>hours</em> asked for are net of one more thing: what
+the battery's own charging already claims from the same slot, read straight
+from the previous plan's <code>P_batt</code> (<code>battery_reserved_series</code> in <code>surplus.py</code>).
+That plan was solved honouring <code>battery_target_state_of_charge</code> already — SOC,
+timing, price, efficiency, all of it — so reusing its own charging schedule is
+both simpler and more faithful than re-deriving "energy still needed to reach
+70 %" from SOC and capacity here and risking it disagreeing with what EMHASS
+actually intends to do.</p>
+<p>This narrows <code>hours</code>, never the window and never which timesteps qualify: a
+slot the battery is charging hard on is still qualifying, so it still counts
+towards <em>when</em> the load may run, it just may contribute little or nothing
+towards <em>how much</em>. Keeping the two separate is what stops this turning back
+into the <code>-p_grid</code> bug — a battery that is still short of its target must not
+be able to push the load's start out, only to leave it fewer hours once it's
+running.</p>
+<p>That separation is also what keeps the budget from oscillating, and it is a
+subtler point than it looks. The reservation is read from a plan the load was
+already <em>in</em>, and that plan charged the battery on precisely the PV the load
+did not take — so in every slot the load is running, gross minus the
+reservation comes back as the load's own draw and nothing more. Qualify a slot
+on that residual and it can never clear the load's own run floor <em>plus
+headroom</em>, so the whole block drops out, the budget collapses to zero, the
+battery reclaims the block, and the next cycle hands back a full budget again:
+a two-cycle oscillation between "all of it" and "none of it". Headroom is
+margin against the <em>forecast</em> being wrong; measuring it against a residual the
+load's own consumption is already inside of is a category error.</p>
+<p>Sharing among multiple surplus loads (priority order, see above) is the claim
+that <em>does</em> gate qualification, because a load that is running really has
+emptied the slot. Each load in turn is measured against what its seniors left,
+and credits what is left of that after the reservation.</p>
+<h3 id="a-currently-running-unbroken-load-whose-window-moved-on">A currently-running unbroken load whose window moved on<a class="headerlink" href="#a-currently-running-unbroken-load-whose-window-moved-on" title="Permanent link">&para;</a></h3>
+<p><em>Must run in one unbroken block</em> (<code>single_constant</code>) and the surplus window
+interact badly if left alone. EMHASS pins a currently-on single-constant load
+to run from t=0 for its full requested duration and widens the window mask to
+fit — an unbroken block can't be split, so it just lets an in-progress one run
+to completion rather than interrupt it. That is correct when the window still
+covers now: the pin is simply continuing the block that opened it. It is wrong
+when the block that justified starting has ended and the window has moved to
+a later, unrelated one (this page's motivating case: dishwasher claims the
+last of today's sun, and the next real block is tomorrow) — the pin would
+still fire, off the <em>new</em> block's fresh multi-hour total, starting immediately
+on grid or battery power the load was never meant to draw.</p>
+<p>Because a surplus load always reports zero completed timesteps (see below),
+there is no "remaining" figure for EMHASS's own progress tracking to release
+it with, either — every cycle re-pins a full fresh block, so left alone this
+does not merely run once, it can keep re-arming indefinitely.</p>
+<p>The fix is in <code>payload._describe</code>: when a load is both <code>current_state</code> (really
+running) and <code>single_constant</code>, and its freshly-resolved window's start index
+is past zero, its hours are sent as 0 for that request instead of the later
+block's total. With no operating requirement, EMHASS has nothing to pin and is
+free to plan the load off starting now. The later block is asked for normally
+on its own cycle, once "now" actually reaches it and <code>current_state</code> has had
+the chance to catch up. A load that has not started yet is unaffected — its
+future window is the ordinary, correct way to ask for it — and so is a
+non-single-constant load, which only ever gets a one-timestep force-on from
+EMHASS's current-power pin, not a multi-hour one.</p>
+<h3 id="why-the-previous-plan">Why the previous plan<a class="headerlink" href="#why-the-previous-plan" title="Permanent link">&para;</a></h3>
+<p>This is a lagged single pass. Solving twice per cycle — once to find the
+surplus, once with the load in it — would feed the second solve's output back
+into its own input, and the budget would oscillate between runs. Using the last
+plan costs one MPC interval of lag on a load that heats a swimming pool, and
+the whole budget is recomputed from scratch every cycle, so an error corrects
+itself immediately.</p>
+<p>Before the first optimisation after a restart there is no plan, so the budget is
+empty and the load is parked. It picks up on the next run.</p>
+<h3 id="why-no-completed-timesteps">Why no completed timesteps<a class="headerlink" href="#why-no-completed-timesteps" title="Permanent link">&para;</a></h3>
+<p><code>def_current_operating_timesteps</code> is sent as <strong>zero</strong> for a surplus load.</p>
+<p>The budget is derived from the <em>forward</em> surplus, which shrinks on its own as
+the day's sunny timesteps fall behind the horizon — so the hours being sent are
+already "what is left". Letting EMHASS subtract completed timesteps as well
+double-counts every hour served: a pool two hours into a four-hour surplus
+would be told it needs two more hours and has already done two, and would stop
+at noon with half the sun still ahead of it.</p>
+<p><code>def_current_state</code> is still sent, so a running load is not charged a startup
+penalty twice.</p>
+<h2 id="settings">Settings<a class="headerlink" href="#settings" title="Permanent link">&para;</a></h2>
+<p><img alt="A surplus load's Configuration section, with hours/window fields greyed out and Spare solar headroom, Energy needed and Surplus priority active" src="../assets/surplus-load-configuration.png" /></p>
+<p>Greyed-out fields above are the ones a surplus load has taken over — see the
+table below for exactly which.</p>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Surplus load</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Power when running</td>
+<td><strong>configured</strong> — the load's rating, and its run floor when on/off</td>
+</tr>
+<tr>
+<td>Runs at full power only</td>
+<td><strong>configured</strong></td>
+</tr>
+<tr>
+<td>Lowest power while running</td>
+<td><strong>configured</strong>, when the above is off</td>
+</tr>
+<tr>
+<td>Cost of starting</td>
+<td><strong>configured</strong></td>
+</tr>
+<tr>
+<td>Energy needed</td>
+<td><strong>configured</strong> — optional cap, 0 for none</td>
+</tr>
+<tr>
+<td>Spare solar headroom</td>
+<td><strong>configured</strong></td>
+</tr>
+<tr>
+<td>Surplus priority</td>
+<td><strong>configured</strong> — only matters with more than one surplus load</td>
+</tr>
+<tr>
+<td>Hours needed per day</td>
+<td><em>derived</em></td>
+</tr>
+<tr>
+<td>Restrict to a time window</td>
+<td><em>derived</em></td>
+</tr>
+<tr>
+<td>Run within</td>
+<td>not applicable</td>
+</tr>
+</tbody>
+</table>
+<p>The two power settings are the same pair every deferrable load has, and they
+interact the same way: with <em>Runs at full power only</em> on, the load is either off
+or at its nominal power, and <em>Lowest power while running</em> is not read.</p>
+<p>They also decide what <code>nominal_w</code> the budget is divided by (see
+<a href="#the-budget-cap">the budget cap</a> above), which is easy to get wrong:</p>
+<ul>
+<li><strong>Full power only</strong> — the load draws exactly its nominal power whenever it
+  runs, so <code>hours</code> is credited energy divided by that fixed figure, capped at
+  the qualifying span. A timestep offering 3 kW still only ever draws the
+  pool's 800 W once it's actually running — the 3 kW is credit <em>towards how
+  many hours it may run</em>, not power it will actually pull in that one slot.</li>
+<li><strong>Variable</strong> — the same division and cap, but against a ceiling that
+  adapts to the day (below) rather than a fixed one.</li>
+</ul>
+<p>The <em>ceiling</em> EMHASS is given for the run is not always the configured
+  nominal power, either. It is clamped down to the best surplus actually seen
+  in a qualifying slot this run — so an 11 kW charger on a 3 kW day is sent as
+  a 3 kW load, not an 11 kW one. Without that clamp, <code>hours</code> is computed
+  against a ceiling the day cannot reach, which understates the hours needed
+  and leaves EMHASS free to run near the unreachable ceiling for a short
+  burst instead of at the achievable power for the whole window — importing
+  the difference either way. The configured value is still a hard cap in the
+  other direction: the clamp only ever pulls the ceiling down, never raises
+  it past what the appliance can actually take. A full-power-only load has no
+  ceiling to clamp — it is always either off or at its configured power.</p>
+<h3 id="headroom">Headroom<a class="headerlink" href="#headroom" title="Permanent link">&para;</a></h3>
+<p>The margin a timestep must clear <em>above</em> the load's own draw before it counts.</p>
+<p>Its main job is absorbing PV forecast error: a slot counted at exactly the
+load's power imports the moment the forecast comes in light. It also opens a
+band — between the load's power and the load's power plus the headroom — of
+timesteps that do not add to the budget but are still safe to run <em>through</em>,
+because the load's draw still fits inside the surplus there.</p>
+<p>That band is why <strong>Cost of starting</strong> is the right way to keep an on/off load
+from short-cycling, rather than <em>Must run in one unbroken block</em>. A startup
+penalty prices each start, so EMHASS runs one contiguous block on a clear day
+(splitting costs the penalty and buys nothing) and splits across two peaks on a
+broken-cloud day (straddling the gap costs more than the penalty). One unbroken
+block is a hard constraint, and on a day with a deep midday gap it will drive
+the load through that gap and import to satisfy itself.</p>
+<h3 id="energy-needed">Energy needed<a class="headerlink" href="#energy-needed" title="Permanent link">&para;</a></h3>
+<p>A total, not a rate: "put 20 kWh in the car and stop". Zero means no cap, which
+is the pool's case and the default.</p>
+<p>Progress is tracked locally against the current request and subtracted from the
+cap; it is never sent to EMHASS (see above). When the cap is met the request
+disarms itself. Without a cap the load stays armed until the switch is turned
+off — a temperature limit is then an automation that turns the switch off, not a
+feature of the load.</p>
+<p>The cap is exact for a full-power load, where delivered energy is runtime times
+nominal power. For a variable-power load it over-states delivery whenever the
+load modulates below nominal, so the cap is reached early and the load stops
+short rather than over-running.</p>
+<h2 id="several-surplus-loads">Several surplus loads<a class="headerlink" href="#several-surplus-loads" title="Permanent link">&para;</a></h2>
+<p>They share one series, allocated by <strong>Surplus priority</strong> (lower claims the
+series first, ties broken by name), with each load's draw subtracted from what
+the next one sees.</p>
+<p>Without that every surplus load reads the same number, all of them are told the
+whole surplus is theirs, and running two together imports the difference. The
+optimiser cannot arbitrate it, because none of these loads is in the plan the
+budget was derived from.</p>
+<p>Priority only matters once there are two or more surplus loads competing for
+the same series — with a single one there is nothing to be first <em>ahead of</em>.
+Every load defaults to the same priority, so nothing changes until you set one
+lower than another's — a car charger given a lower number than a pool, say,
+takes what it needs first and leaves the pool whatever surplus is left.</p>
+<h2 id="what-is-published">What is published<a class="headerlink" href="#what-is-published" title="Permanent link">&para;</a></h2>
+<p>On the hub device:</p>
+<ul>
+<li><code>sensor.…_solar_surplus</code> — spare solar now, with the whole series in
+  <code>forecast</code> and the reporting window in the attributes</li>
+<li><code>sensor.…_solar_surplus_energy</code> — kWh still ahead in the horizon. Usually the
+  more useful trigger: whether to start heating a pool is a question about
+  kilowatt-hours coming, not watts at this instant</li>
+<li><code>sensor.…_solar_surplus_start</code> / <code>_end</code> — the reporting window's ends</li>
+<li><code>binary_sensor.…_solar_surplus</code> — above the reporting threshold now</li>
+<li><code>number.…_surplus_threshold</code> — what those four call a surplus</li>
+</ul>
+<p>That threshold is <strong>reporting only</strong>. No load budgets against it: a load's own
+threshold is its run floor plus its own headroom, because "is there enough spare
+sun for the pool" and "…for the car" are different questions.</p>
+<p>The two "now" entities read <code>unknown</code>, never zero, when there is no plan
+covering this moment — a made-up zero is indistinguishable from a real "the sun
+has gone in", and anything you gate on it would switch off on the strength of a
+missing reading. A numeric-state trigger ignores <code>unknown</code>, so this is usually
+what you want. Note that a new plan's horizon starts at the <em>next</em> timestep
+boundary, leaving the minutes since the run finished uncovered; the last reading
+of the outgoing plan is carried across that seam, so it is not a source of
+<code>unknown</code> in normal running.</p>
+<p>Per load, <code>sensor.&lt;load&gt;_surplus_budget</code> reports the hours the last run was
+allowed to ask for, with the window, the energy, the qualifying threshold and
+any remaining cap as attributes. A load that is not running is either short of
+surplus, short of headroom, or was beaten to it by a higher-priority load, and
+those look identical from the outside without it.</p>
+<p><img alt="A surplus load's Diagnostic section: EMHASS deferrable number and Spare solar budget" src="../assets/surplus-load-diagnostic.png" /></p>
+<p>Also diagnostic: <code>sensor.&lt;load&gt;_emhass_deferrable_number</code> — see
+<a href="../on_demand_loads/#deferrable-numbering-stays-stable">on-demand loads</a> for
+why it stays stable.</p>
+<h2 id="what-this-is-not">What this is not<a class="headerlink" href="#what-this-is-not" title="Permanent link">&para;</a></h2>
+<p>Exported power is worth the sell price, so consuming it here forgoes that
+revenue — it is not free energy, it is simply the only energy no other part of
+the plan has already claimed. On a tariff where selling pays more than the load
+is worth to you, a surplus load is a bad trade, and nothing here will notice.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "navigation.tracking", "search.suggest", "search.highlight", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
