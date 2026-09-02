@@ -115,7 +115,7 @@ def _tracker(
         capacity_kwh=None,
         prices=prices,
         plan_forecast=lambda _now, _window: None,
-        add_price_listener=add_price_listener or (lambda _listener: (lambda: None)),
+        add_price_listener=add_price_listener or (lambda _listener: lambda: None),
     )
 
 
@@ -169,9 +169,7 @@ def _patched_history(per_entity: dict[str, list[State]]):
     )
 
 
-async def test_all_meters_stale_builds_a_pending_gap_replay(
-    hass: HomeAssistant, freezer
-) -> None:
+async def test_all_meters_stale_builds_a_pending_gap_replay(hass: HomeAssistant, freezer) -> None:
     await hass.config.async_set_time_zone("UTC")
     freezer.move_to(datetime(2026, 8, 10, 8, 0, tzinfo=UTC))
     entry = _entry(hass)
@@ -465,9 +463,7 @@ async def test_a_fully_covered_gap_nets_unpriced_kwh_back_to_zero(
     assert ledger.unpriced_kwh == pytest.approx(0.0)
 
 
-async def test_replay_against_a_real_recorder(
-    recorder_mock, hass: HomeAssistant, freezer
-) -> None:
+async def test_replay_against_a_real_recorder(recorder_mock, hass: HomeAssistant, freezer) -> None:
     """No stubbing: proves the executor-job/history-API wiring itself.
 
     The scenarios above pin the fetch/merge/walk logic against hand-built
@@ -559,9 +555,7 @@ async def test_listener_fires_before_prices_exist_does_nothing(
     bus = _FakePriceListenerBus()
     price_holder: dict[str, Prices | None] = {"value": None}
 
-    with patch(
-        "custom_components.emhass_companion.metering_replay.async_replay_gap"
-    ) as replay:
+    with patch("custom_components.emhass_companion.metering_replay.async_replay_gap") as replay:
         tracker = await _restart_with_pending_gap(
             hass, freezer, prices=lambda _now: price_holder["value"], add_price_listener=bus.add
         )
@@ -590,9 +584,7 @@ async def test_listener_fires_after_prices_exist_runs_replay_and_unsubscribes(
     assert bus.unsub_calls == 0  # still unresolved after the load-time call
 
     price_holder["value"] = _PRICES
-    with patch(
-        "custom_components.emhass_companion.metering_replay.async_replay_gap"
-    ) as replay:
+    with patch("custom_components.emhass_companion.metering_replay.async_replay_gap") as replay:
         replay.return_value = True
         assert bus.listener is not None
         bus.listener()

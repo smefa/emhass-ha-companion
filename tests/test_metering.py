@@ -102,9 +102,7 @@ def test_power_integrates_the_held_previous_reading_over_elapsed_time():
 def test_power_refuses_to_integrate_across_a_long_gap():
     meter = Meter("sensor.power", kind="power")
     meter.take_from(_power_state(2000.0), T0)
-    moved = meter.take_from(
-        _power_state(1000.0), T0 + _RESTORE_MAX_GAP + timedelta(minutes=1)
-    )
+    moved = meter.take_from(_power_state(1000.0), T0 + _RESTORE_MAX_GAP + timedelta(minutes=1))
     assert moved == 0.0
 
 
@@ -144,9 +142,7 @@ def test_a_reset_mid_sequence_is_caught_at_the_right_step():
 
 
 def test_seeded_meter_resumes_instead_of_baselining():
-    meter = Meter.seeded(
-        "sensor.meter", kind="energy", last_value=10.0, last_time=T0
-    )
+    meter = Meter.seeded("sensor.meter", kind="energy", last_value=10.0, last_time=T0)
     moved = meter.take_from(_energy_state(12.0), T0 + timedelta(minutes=5))
     assert moved == pytest.approx(2.0)
 
@@ -161,23 +157,43 @@ def test_seeded_meter_with_no_reading_still_baselines_blind():
 
 def test_pending_gap_is_none_for_a_mismatched_entity_or_kind():
     meter = Meter("sensor.meter", kind="energy")
-    data = {"entity_id": "sensor.other", "kind": "energy", "last_value": 1.0, "last_time": T0.isoformat()}
+    data = {
+        "entity_id": "sensor.other",
+        "kind": "energy",
+        "last_value": 1.0,
+        "last_time": T0.isoformat(),
+    }
     assert meter.pending_gap(data, now=T0 + timedelta(hours=1)) is None
 
-    data = {"entity_id": "sensor.meter", "kind": "power", "last_value": 1.0, "last_time": T0.isoformat()}
+    data = {
+        "entity_id": "sensor.meter",
+        "kind": "power",
+        "last_value": 1.0,
+        "last_time": T0.isoformat(),
+    }
     assert meter.pending_gap(data, now=T0 + timedelta(hours=1)) is None
 
 
 def test_pending_gap_is_none_under_the_threshold():
     meter = Meter("sensor.meter", kind="energy")
-    data = {"entity_id": "sensor.meter", "kind": "energy", "last_value": 1.0, "last_time": T0.isoformat()}
+    data = {
+        "entity_id": "sensor.meter",
+        "kind": "energy",
+        "last_value": 1.0,
+        "last_time": T0.isoformat(),
+    }
     now = T0 + _RESTORE_MAX_GAP - timedelta(seconds=1)
     assert meter.pending_gap(data, now=now) is None
 
 
 def test_pending_gap_returns_the_stored_time_once_over_the_threshold():
     meter = Meter("sensor.meter", kind="energy")
-    data = {"entity_id": "sensor.meter", "kind": "energy", "last_value": 1.0, "last_time": T0.isoformat()}
+    data = {
+        "entity_id": "sensor.meter",
+        "kind": "energy",
+        "last_value": 1.0,
+        "last_time": T0.isoformat(),
+    }
     now = T0 + _RESTORE_MAX_GAP + timedelta(seconds=1)
     assert meter.pending_gap(data, now=now) == T0
 
@@ -194,7 +210,12 @@ def test_restore_agrees_with_pending_gap(last_time, now_offset, expect_gap):
     given stored reading falls into -- replay's bookkeeping (step 3) trusts
     pending_gap() to know exactly which meters restore() is about to disown.
     """
-    data = {"entity_id": "sensor.meter", "kind": "energy", "last_value": 1.0, "last_time": last_time}
+    data = {
+        "entity_id": "sensor.meter",
+        "kind": "energy",
+        "last_value": 1.0,
+        "last_time": last_time,
+    }
     now = T0 + now_offset
 
     probe = Meter("sensor.meter", kind="energy")
@@ -214,7 +235,7 @@ class _FakeHass:
     """A stand-in for HomeAssistant.states.get, used only by restore()'s
     energy-kind write-off branch when the gap is over threshold."""
 
-    class states:  # noqa: N801 - mirrors hass.states' shape
+    class states:  # mirrors hass.states' shape
         @staticmethod
         def get(entity_id: str) -> State | None:
             return None
