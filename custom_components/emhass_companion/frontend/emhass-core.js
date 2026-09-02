@@ -96,6 +96,21 @@ function isUsable(stateObj) {
   return Boolean(stateObj) && stateObj.state !== "unknown" && stateObj.state !== "unavailable";
 }
 
+/**
+ * A money sensor, sign flipped so it reads like a balance rather than an
+ * accounting cost line: these sensors report positive when something cost
+ * money, but a *balance* is backwards under that rule -- a positive balance
+ * is the good outcome, the way a bank balance is, so a net export credit
+ * shows positive and a net cost negative. `sign` drives a tile's colour; 0
+ * means no usable value yet, not a real balance of zero.
+ */
+function balanceText(stateObj) {
+  if (!isUsable(stateObj)) return { text: "–", sign: 0 };
+  const unit = stateObj.attributes ? stateObj.attributes.unit_of_measurement : null;
+  const value = -Number(stateObj.state) || 0;
+  return { text: `${value.toFixed(2)}${unit ? ` ${unit}` : ""}`, sign: value < 0 ? -1 : 1 };
+}
+
 function formatPower(watts) {
   if (!Number.isFinite(watts)) return "–";
   return Math.abs(watts) >= 1000
@@ -1119,6 +1134,7 @@ function sectionGrid(sections) {
  * is a deliberate line here rather than a keyword that quietly widens it.
  */
 export {
+  balanceText,
   callService,
   CardEditor,
   cleanSections,
@@ -1131,6 +1147,7 @@ export {
   formatAgo,
   formatCountdown,
   formatEnergy,
+  formatHour,
   formatHours,
   formatPower,
   formatSpan,

@@ -54,6 +54,7 @@ BUNDLES: tuple[tuple[str, str], ...] = (
     ("emhass-status-card.js", f"/{DOMAIN}/emhass-status-card.js"),
     ("emhass-overview-card.js", f"/{DOMAIN}/emhass-overview-card.js"),
     ("emhass-tariff-card.js", f"/{DOMAIN}/emhass-tariff-card.js"),
+    ("emhass-economy-card.js", f"/{DOMAIN}/emhass-economy-card.js"),
 )
 
 _STATIC_PATH_KEY = f"{DOMAIN}_static_path_registered"

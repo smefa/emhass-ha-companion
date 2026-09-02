@@ -39,6 +39,7 @@ _EXPECTED_ELEMENTS = {
     "emhass-status-card.js": ["emhass-status-card", "emhass-status-card-editor"],
     "emhass-overview-card.js": ["emhass-overview-card", "emhass-overview-card-editor"],
     "emhass-tariff-card.js": ["emhass-tariff-card", "emhass-tariff-card-editor"],
+    "emhass-economy-card.js": ["emhass-economy-card", "emhass-economy-card-editor"],
 }
 
 

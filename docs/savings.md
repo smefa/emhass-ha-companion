@@ -135,7 +135,11 @@ by hand. Three attributes are worth looking at first when something seems off:
 
 - **`unpriced_kwh`** — energy that flowed while no price was known, so it was
   counted but not costed. Non-zero after a restart, before the first successful
-  optimisation. A large value means the day is understated.
+  optimisation. If the recorder still holds history for that gap, it clears
+  itself back out shortly after the first successful run once real prices
+  exist. A value that stays non-zero for longer means recorder history
+  couldn't cover it (purged, disabled, or a reconfigured entity), not "just
+  restarted" — a large value means the day is understated.
 - **`balance_residual_kwh`** — how far your measured house load drifts from
   what the other meters imply it should be. This is your own sensors
   disagreeing with each other, not an error in this integration, and it is the

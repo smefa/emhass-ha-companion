@@ -168,8 +168,8 @@ class Meter:
 
     # -- energy counters ------------------------------------------------------
 
-    def _take_energy(self, hass: HomeAssistant, now: datetime) -> float:
-        reading = _energy_kwh(hass.states.get(self.entity_id))
+    def _take_energy_from(self, state: State | None, now: datetime) -> float:
+        reading = _energy_kwh(state)
         if reading is None:
             # Unavailable is not zero. Holding the previous reading means the
             # energy that flowed while the meter was out is picked up on the
@@ -191,10 +191,13 @@ class Meter:
             return max(reading, 0.0)
         return reading - previous
 
+    def _take_energy(self, hass: HomeAssistant, now: datetime) -> float:
+        return self._take_energy_from(hass.states.get(self.entity_id), now)
+
     # -- power sensors --------------------------------------------------------
 
-    def _take_power(self, hass: HomeAssistant, now: datetime) -> float:
-        reading = _power_kw(hass.states.get(self.entity_id))
+    def _take_power_from(self, state: State | None, now: datetime) -> float:
+        reading = _power_kw(state)
         previous, since = self._last_value, self._last_time
         self._last_value = reading
         self._last_time = now
@@ -210,14 +213,33 @@ class Meter:
             return 0.0
         return previous * hours
 
+    def _take_power(self, hass: HomeAssistant, now: datetime) -> float:
+        return self._take_power_from(hass.states.get(self.entity_id), now)
+
     # -- shared ---------------------------------------------------------------
+
+    def take_from(self, state: State | None, now: datetime) -> float:
+        """:meth:`take`, given an already-known ``State`` instead of a live
+        lookup.
+
+        The seam a historical replay walks: the same reset/unit-conversion
+        rules, driven from a recorder sample instead of ``hass.states.get``.
+        """
+        value = (
+            self._take_energy_from(state, now)
+            if self.kind == "energy"
+            else self._take_power_from(state, now)
+        )
+        return -value if self.invert else value
+
+    def take_signed_from(self, state: State | None, now: datetime) -> tuple[float, float]:
+        """:meth:`take_signed`, given an already-known ``State``."""
+        value = self.take_from(state, now)
+        return max(value, 0.0), max(-value, 0.0)
 
     def take(self, hass: HomeAssistant, now: datetime) -> float:
         """Energy since the previous take, in kWh, and advance the state."""
-        value = (
-            self._take_energy(hass, now) if self.kind == "energy" else self._take_power(hass, now)
-        )
-        return -value if self.invert else value
+        return self.take_from(hass.states.get(self.entity_id), now)
 
     def take_signed(self, hass: HomeAssistant, now: datetime) -> tuple[float, float]:
         """A signed source split into its two directions, ``(positive, negative)``.
@@ -228,8 +250,7 @@ class Meter:
         the sign convention in one place -- and left-Riemann integration means
         the sign is constant across the sub-interval, so the split is exact.
         """
-        value = self.take(hass, now)
-        return max(value, 0.0), max(-value, 0.0)
+        return self.take_signed_from(hass.states.get(self.entity_id), now)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -238,6 +259,43 @@ class Meter:
             "last_value": self._last_value,
             "last_time": self._last_time.isoformat() if self._last_time else None,
         }
+
+    @classmethod
+    def seeded(
+        cls,
+        entity_id: str,
+        *,
+        kind: str,
+        invert: bool = False,
+        last_value: float | None,
+        last_time: datetime | None,
+    ) -> Meter:
+        """A meter pre-loaded with a known reading.
+
+        For a historical replay to resume from a gap's own starting point
+        rather than baselining blind on its first sample, the way a fresh
+        live :class:`Meter` always does.
+        """
+        meter = cls(entity_id, kind=kind, invert=invert)
+        meter._last_value = last_value
+        meter._last_time = last_time
+        return meter
+
+    def pending_gap(self, data: dict[str, Any] | None, *, now: datetime) -> datetime | None:
+        """The stored ``last_time``, if :meth:`restore` would disown it right
+        now -- else ``None``.
+
+        Read-only mirror of the same gap test :meth:`restore` applies, for a
+        caller that needs to know *which* meters have a gap worth
+        reconstructing from history before :meth:`restore` mutates anything.
+        """
+        if not data or data.get("entity_id") != self.entity_id or data.get("kind") != self.kind:
+            return None
+        raw_time = data.get("last_time")
+        when = dt_util.parse_datetime(raw_time) if isinstance(raw_time, str) else None
+        if when is None or now - when > _RESTORE_MAX_GAP:
+            return when
+        return None
 
     def restore(self, hass: HomeAssistant, data: dict[str, Any] | None, *, now: datetime) -> float:
         """Re-adopt a stored reading, or disown it if too much time has passed.
@@ -426,6 +484,93 @@ def build_meters(config: EmhassConfig, options: dict[str, Any] | None) -> MeterS
     return spec
 
 
+def read_meters(
+    meters: MeterSpec, now: datetime, state_of: Callable[[str], State | None]
+) -> IntervalEnergy:
+    """Take every configured meter once, in the shape :mod:`savings` settles.
+
+    ``state_of`` is the only difference between a live settle and a
+    historical replay: ``hass.states.get`` for one, a hold-last recorder
+    lookup for the other. Everything else -- which meters are read, how a
+    signed battery-power sensor is split, house_load's None-when-unconfigured
+    fallback -- lives here once, shared by both.
+    """
+    imported = (
+        meters.grid_import.take_from(state_of(meters.grid_import.entity_id), now)
+        if meters.grid_import
+        else 0.0
+    )
+    exported = (
+        meters.grid_export.take_from(state_of(meters.grid_export.entity_id), now)
+        if meters.grid_export
+        else 0.0
+    )
+
+    if meters.battery_power is not None:
+        # EMHASS's convention throughout this integration: positive is
+        # discharge. ``battery_power_invert`` has already been folded into
+        # the meter, so the sign here is always the same way round.
+        discharge, charge = meters.battery_power.take_signed_from(
+            state_of(meters.battery_power.entity_id), now
+        )
+    else:
+        charge = (
+            meters.battery_charge.take_from(state_of(meters.battery_charge.entity_id), now)
+            if meters.battery_charge
+            else 0.0
+        )
+        discharge = (
+            meters.battery_discharge.take_from(state_of(meters.battery_discharge.entity_id), now)
+            if meters.battery_discharge
+            else 0.0
+        )
+
+    return IntervalEnergy(
+        imported=imported,
+        exported=exported,
+        pv=meters.pv.take_from(state_of(meters.pv.entity_id), now) if meters.pv else 0.0,
+        battery_charge=charge,
+        battery_discharge=discharge,
+        house_load=(
+            meters.house_load.take_from(state_of(meters.house_load.entity_id), now)
+            if meters.house_load
+            else None
+        ),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class GapSeed:
+    """One meter's own starting point for a historical replay.
+
+    Mirrors the arguments to :meth:`Meter.seeded` exactly, because that is
+    what a replay builds each of its scratch meters from -- never the live
+    tracker's own :class:`Meter` objects.
+    """
+
+    entity_id: str
+    kind: str
+    invert: bool
+    last_value: float | None
+    last_time: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class PendingGapReplay:
+    """A restart gap noted at load time, waiting for real prices to replay
+    against.
+
+    Captured once in :meth:`SavingsTracker.async_load`, in memory only --
+    never persisted, so a second restart before replay runs simply leaves
+    today's standing write-off in place rather than compounding anything.
+    """
+
+    window_start: datetime
+    window_end: datetime
+    missed_kwh: float
+    seeds: dict[str, GapSeed]
+
+
 class SavingsTracker:
     """Keeps the day's ledger current and answers for the forecast.
 
@@ -445,6 +590,7 @@ class SavingsTracker:
         capacity_kwh: float | None,
         prices: Callable[[datetime], Prices | None],
         plan_forecast: Callable[[datetime, timedelta], Forecast | None],
+        add_price_listener: Callable[[CALLBACK_TYPE], CALLBACK_TYPE],
     ) -> None:
         self.hass = hass
         self.entry = entry
@@ -453,6 +599,7 @@ class SavingsTracker:
         self._capacity_kwh = capacity_kwh
         self._prices = prices
         self._plan_forecast = plan_forecast
+        self._add_price_listener = add_price_listener
 
         self.ledger = Ledger(day=_local_day(dt_util.utcnow()))
         self._store: Store[dict[str, Any]] = Store(
@@ -462,6 +609,8 @@ class SavingsTracker:
         self._unsubs: list[CALLBACK_TYPE] = []
         self._last_published: datetime | None = None
         self._last_snapshot: tuple[float, ...] = ()
+        self._pending_gap: PendingGapReplay | None = None
+        self._gap_replay_unsub: CALLBACK_TYPE | None = None
 
     # -- lifecycle ------------------------------------------------------------
 
@@ -491,12 +640,53 @@ class SavingsTracker:
         self.ledger = ledger
 
         meter_state = stored.get("meters") or {}
+
+        # One pass to see which meters have a gap worth reconstructing, before
+        # the restore loop below mutates any of them. A gap is only replayed
+        # as a whole: one meter with a fresh baseline (an entity reconfigured
+        # mid-gap, say) means mixing a replayed meter with one still carrying
+        # a live baseline, which is worse than leaving the lot unpriced.
+        gap_seeds: dict[str, GapSeed] = {}
+        all_gapped = True
+        for name, meter in self._named_meters():
+            data = meter_state.get(name)
+            when = meter.pending_gap(data, now=now)
+            if when is None:
+                all_gapped = False
+                continue
+            gap_seeds[name] = GapSeed(
+                entity_id=meter.entity_id,
+                kind=meter.kind,
+                invert=meter.invert,
+                last_value=data.get("last_value"),
+                last_time=when,
+            )
+
         unpriced = 0.0
         for name, meter in self._named_meters():
             unpriced += meter.restore(self.hass, meter_state.get(name), now=now)
         if unpriced:
             _LOGGER.debug("Disowning %.3f kWh of meter movement across downtime", unpriced)
             self.ledger.unpriced_kwh += unpriced
+
+        if all_gapped and gap_seeds:
+            # Clamped to today: the ledger above already closed out any day
+            # this gap crossed into, so there is nothing to replay it against.
+            window_start = max(
+                min(seed.last_time for seed in gap_seeds.values()),
+                dt_util.start_of_local_day(now),
+            )
+            self._pending_gap = PendingGapReplay(
+                window_start=window_start,
+                window_end=now,
+                missed_kwh=unpriced,
+                seeds=gap_seeds,
+            )
+            self._gap_replay_unsub = self._add_price_listener(self._on_coordinator_updated)
+            # Covers a reload where prices are already loaded -- otherwise
+            # replay would wait for the next coordinator refresh for no
+            # reason, even though the data it needs is already sitting there.
+            self._on_coordinator_updated()
 
         self._seed_storage(now)
 
@@ -541,6 +731,9 @@ class SavingsTracker:
     async def async_shutdown(self) -> None:
         """Flush the ledger before the entry goes away."""
         self.async_stop()
+        if self._gap_replay_unsub is not None:
+            self._gap_replay_unsub()
+            self._gap_replay_unsub = None
         self._settle(dt_util.utcnow())
         await self._store.async_save(self._data_to_save())
 
@@ -554,6 +747,52 @@ class SavingsTracker:
                 self._listeners.remove(listener)
 
         return _remove
+
+    # -- gap replay -------------------------------------------------------------
+
+    @callback
+    def _on_coordinator_updated(self) -> None:
+        """Fire once real prices cover the pending gap, then unsubscribe.
+
+        Registered with ``add_price_listener`` only while ``_pending_gap`` is
+        set, and also invoked once directly at the end of ``async_load`` --
+        the same callback either way, since a reload can already have prices
+        loaded and there is no reason to wait for the next coordinator tick.
+        """
+        pending = self._pending_gap
+        if pending is None or self._prices(pending.window_end) is None:
+            return
+        if self._gap_replay_unsub is not None:
+            self._gap_replay_unsub()
+            self._gap_replay_unsub = None
+        self.entry.async_create_background_task(
+            self.hass, self._async_run_gap_replay(pending), "emhass_gap_replay", eager_start=False
+        )
+
+    async def _async_run_gap_replay(self, pending: PendingGapReplay) -> None:
+        """Run the replay and fold its outcome back into the tracker.
+
+        Imports :mod:`metering_replay` locally -- that module imports back
+        from here at its own top level, so a module-level import here would
+        be circular.
+        """
+        from . import metering_replay
+
+        try:
+            replayed = await metering_replay.async_replay_gap(
+                self.hass, self.meters, self._prices, self.ledger, pending
+            )
+        except Exception:  # a failed replay must not corrupt the ledger or wedge the entry
+            _LOGGER.exception("Replaying a restart gap failed; the write-off stands")
+            replayed = False
+
+        # Either way, this gap is resolved: on success it is now priced, and
+        # on failure or an exception the existing write-off already stands
+        # and there is nothing left to retry against.
+        self._pending_gap = None
+        if replayed:
+            self._store.async_delay_save(self._data_to_save, _SAVE_DELAY)
+            self._publish(force=True)
 
     # -- accumulation ---------------------------------------------------------
 
@@ -586,29 +825,7 @@ class SavingsTracker:
 
     def _read_energy(self, now: datetime) -> IntervalEnergy:
         """Take every meter once, in the shape :mod:`savings` settles."""
-        meters = self.meters
-        imported = meters.grid_import.take(self.hass, now) if meters.grid_import else 0.0
-        exported = meters.grid_export.take(self.hass, now) if meters.grid_export else 0.0
-
-        if meters.battery_power is not None:
-            # EMHASS's convention throughout this integration: positive is
-            # discharge. ``battery_power_invert`` has already been folded into
-            # the meter, so the sign here is always the same way round.
-            discharge, charge = meters.battery_power.take_signed(self.hass, now)
-        else:
-            charge = meters.battery_charge.take(self.hass, now) if meters.battery_charge else 0.0
-            discharge = (
-                meters.battery_discharge.take(self.hass, now) if meters.battery_discharge else 0.0
-            )
-
-        return IntervalEnergy(
-            imported=imported,
-            exported=exported,
-            pv=meters.pv.take(self.hass, now) if meters.pv else 0.0,
-            battery_charge=charge,
-            battery_discharge=discharge,
-            house_load=meters.house_load.take(self.hass, now) if meters.house_load else None,
-        )
+        return read_meters(self.meters, now, self.hass.states.get)
 
     def _roll_over(self, now: datetime) -> None:
         """Start a fresh ledger when the local date has moved on.

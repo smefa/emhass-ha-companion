@@ -18,6 +18,8 @@ This integration answers that. Install the EMHASS add-on, install this, answer a
 
 ---
 
+![Plan graph](docs/assets/graph.png)
+
 ## How it works
 
 Home Assistant owns all state. EMHASS is treated as a **stateless calculator**.

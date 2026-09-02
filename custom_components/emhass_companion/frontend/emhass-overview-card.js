@@ -11,6 +11,7 @@ import {
   DEFAULT_HISTORY_HOURS,
   DEFAULT_PLAN_HISTORY_HOURS,
   LiveCard,
+  balanceText,
   cleanSections,
   clipSeries,
   findHub,
@@ -296,10 +297,13 @@ const TILE_METRICS = {
     read: (c) => ({ k: "Export price", v: isUsable(c.sell) ? num(c.sell).toFixed(3) : "–" }),
   },
   cost: {
-    label: "Planned cost",
-    hint: "The total cost the optimiser expects over the plan's horizon.",
-    entity: "sensor.plan_cost",
-    read: (c) => ({ k: "Plan cost", v: isUsable(c.cost) ? num(c.cost).toFixed(2) : "–" }),
+    label: "Forecast balance",
+    hint:
+      "What the plan expects buying and selling grid electricity to net out to -- positive is a " +
+      "net gain, negative a net cost. Not EMHASS's own objective value: that one stops being real " +
+      "money under some cost functions, so this reads the Companion's own forecast instead.",
+    entity: "sensor.forecast_cost_24h",
+    read: (c) => ({ k: "Forecast balance", v: balanceText(c.cost).text }),
   },
   solar_planned: {
     label: "Solar in the plan",
@@ -549,7 +553,7 @@ class EmhassOverviewCard extends LiveCard {
     const soc = stateOf(hass, hub["sensor.battery_soc"]);
     const buy = stateOf(hass, hub["sensor.buy_price"]);
     const sell = stateOf(hass, hub["sensor.sell_price"]);
-    const cost = stateOf(hass, hub["sensor.plan_cost"]);
+    const cost = stateOf(hass, hub["sensor.forecast_cost_24h"]);
     const endSoc = stateOf(hass, hub["sensor.end_soc_target"]);
     const status = stateOf(hass, hub["sensor.optimization_status"]);
     const stale = stateOf(hass, hub["binary_sensor.plan_stale"]);

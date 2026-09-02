@@ -175,6 +175,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
         else None,
         prices=build_prices_callable(coordinator),
         plan_forecast=build_forecast_callable(coordinator),
+        add_price_listener=coordinator.async_add_listener,
     )
     await tracker.async_load()
 
