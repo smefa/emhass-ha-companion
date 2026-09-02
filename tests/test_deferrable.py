@@ -26,9 +26,11 @@ from custom_components.emhass_companion.const import (
     RECURRENCE_SURPLUS,
 )
 from custom_components.emhass_companion.deferrable import (
+    DeferrableRegistry,
     DeferrableRuntime,
     resolve_should_run,
 )
+from custom_components.emhass_companion.models import Plan, PlanRow
 from custom_components.emhass_companion.surplus import SurplusBudget
 
 T0 = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
@@ -300,14 +302,32 @@ def test_time_window_is_passed_when_the_switch_is_on():
     assert projected.latest_end == time(6, 0)
 
 
-def test_a_running_load_reports_its_state_and_power():
-    """Without this EMHASS re-charges a startup penalty for a running load."""
+def test_a_running_load_reports_its_state_but_not_its_power():
+    """The state credits the startup; the power would pin the timestep.
+
+    EMHASS reads def_current_power as an equality on timestep 0, so reporting an
+    observed run there latches the load on: pinned this solve, therefore still
+    running at the next, therefore pinned again, with price never getting a
+    vote. Only a run this integration is commanding may go in that field, and
+    an appliance that started on its own is not one.
+    """
     load = _load()
     load.observe_power(1900, T0)
 
     projected = load.to_load(T0 + timedelta(minutes=10), 30)
     assert projected.current_state is True
-    assert projected.current_power_w == 2000.0
+    assert projected.current_power_w == 0.0
+
+
+def test_a_timestep_the_plan_already_asked_for_is_pinned():
+    """The optimiser placed this step itself, a cycle ago, at an index it was
+    free to choose -- honouring it is what stops a block being re-litigated
+    every 15 minutes. It cannot feed itself: the flag is only ever set from the
+    previous plan, never from the pin it produces."""
+    load = _load(plan_scheduled_now=True)
+    load.observe_power(1900, T0)
+
+    assert load.to_load(T0 + timedelta(minutes=10), 30).current_power_w == 2000.0
 
 
 def test_an_idle_load_reports_no_current_power():
@@ -319,6 +339,16 @@ def test_an_idle_load_reports_no_current_power():
 def test_force_on_tells_emhass_the_load_is_on():
     projected = _load(mode=LOAD_MODE_FORCE_ON).to_load(T0, 30)
     assert projected.current_state is True
+
+
+def test_force_on_pins_the_timestep_it_is_commanding():
+    """The one run EMHASS must plan around rather than reconsider.
+
+    The executor holds a forced load on whatever the plan says, so the rest of
+    the horizon has to be solved knowing that timestep is already spent.
+    """
+    projected = _load(mode=LOAD_MODE_FORCE_ON).to_load(T0, 30)
+    assert projected.current_power_w == 2000.0
 
 
 def test_completed_timesteps_reach_the_payload():
@@ -1030,3 +1060,81 @@ def test_completed_timesteps_follow_the_commanded_clock():
     load.observe_power(5, T0 + timedelta(minutes=20))
 
     assert load.completed_timesteps(T0 + timedelta(hours=1), STEP) == 4
+
+
+# --- plan commitments --------------------------------------------------------
+#
+# adopt_plan_commitments touches neither hass nor the entry, so these drive the
+# registry's loads directly rather than standing up a config entry to reach a
+# method that would ignore it.
+
+
+def _registry(*loads: DeferrableRuntime) -> DeferrableRegistry:
+    registry = DeferrableRegistry(None, None)
+    registry._loads = {load.subentry_id: load for load in loads}
+    return registry
+
+
+def _plan(*deferrables: float) -> Plan:
+    return Plan(
+        generated_at=T0,
+        schema_version="1.0",
+        rows=[PlanRow(timestamp=T0, deferrables=tuple(deferrables))],
+    )
+
+
+def test_a_load_the_plan_asks_for_is_committed():
+    load = _load()
+    _registry(load).adopt_plan_commitments(_plan(2000.0), ["abc"], T0, stale=False)
+
+    assert load.plan_scheduled_now is True
+
+
+def test_a_load_the_plan_leaves_off_is_not():
+    load = _load()
+    _registry(load).adopt_plan_commitments(_plan(0.0), ["abc"], T0, stale=False)
+
+    assert load.plan_scheduled_now is False
+
+
+def test_a_stale_plan_commits_to_nothing():
+    """Its rows were solved against prices that have since been superseded, so
+    pinning from them is the same latch on a slower clock."""
+    load = _load()
+    _registry(load).adopt_plan_commitments(_plan(2000.0), ["abc"], T0, stale=True)
+
+    assert load.plan_scheduled_now is False
+
+
+def test_a_commitment_is_cleared_when_the_plan_stops_asking():
+    load = _load()
+    registry = _registry(load)
+    registry.adopt_plan_commitments(_plan(2000.0), ["abc"], T0, stale=False)
+    registry.adopt_plan_commitments(_plan(0.0), ["abc"], T0, stale=False)
+
+    assert load.plan_scheduled_now is False
+
+
+def test_a_load_missing_from_the_plans_order_is_not_committed():
+    """Its index means nothing in that plan, so no row can speak for it."""
+    load = _load()
+    _registry(load).adopt_plan_commitments(_plan(2000.0), ["other"], T0, stale=False)
+
+    assert load.plan_scheduled_now is False
+
+
+def test_no_plan_at_all_clears_every_commitment():
+    load = _load()
+    registry = _registry(load)
+    registry.adopt_plan_commitments(_plan(2000.0), ["abc"], T0, stale=False)
+    registry.adopt_plan_commitments(None, [], T0, stale=False)
+
+    assert load.plan_scheduled_now is False
+
+
+def test_standby_draw_in_the_plan_is_not_a_commitment():
+    """The same threshold that decides the load is running decides this."""
+    load = _load(nominal_power_w=2000.0)
+    _registry(load).adopt_plan_commitments(_plan(150.0), ["abc"], T0, stale=False)
+
+    assert load.plan_scheduled_now is False

@@ -37,6 +37,7 @@ from yarl import URL
 
 from .const import CONF_URL, DOMAIN, ML_MIN_HISTORY_DAYS, USER_PROFILE_DIR
 from .coordinator import EmhassCoordinator
+from .deferrable import live_settings
 from .health import collect_entity_references
 
 # A down add-on must produce a finding, not a 30s hang -- api.py's own
@@ -79,6 +80,7 @@ async def async_get_config_entry_diagnostics(
     environment_section = await _async_environment_section(hass)
     backend_section = await _async_backend_section(hass, entry)
     subentries_section = _subentries_section(entry)
+    loads_section = _loads_section(coordinator, entry)
     custom_profiles_section = await _async_custom_profiles_section(hass)
     logs_section = _logs_section(entry)
     triage_section = _triage_section(coordinator, backend_section, entities_section)
@@ -151,6 +153,7 @@ async def async_get_config_entry_diagnostics(
         "environment": environment_section,
         "backend": backend_section,
         "subentries": subentries_section,
+        "loads": loads_section,
         "entities": entities_section,
         "custom_profiles": custom_profiles_section,
         "logs": logs_section,
@@ -341,6 +344,12 @@ def _subentries_section(entry: ConfigEntry) -> list[dict[str, Any]]:
                 "subentry_id": subentry_id,
                 "subentry_type": subentry.subentry_type,
                 "title": subentry.title,
+                # Not the values the optimiser uses. Most of this dict is only a
+                # seed: the numbers and selects take ownership once the load
+                # exists and never write back, so a load whose power or hours
+                # have been nudged from a dashboard reports the original here
+                # forever. `loads` below carries the live values.
+                "seeds_only": True,
                 # Entity ids stay in plain text here -- they are not secrets
                 # and they are the whole point of a support bundle.
                 "data": _redact_config(subentry.data),
@@ -350,6 +359,69 @@ def _subentries_section(entry: ConfigEntry) -> list[dict[str, Any]]:
     except Exception as err:  # noqa: BLE001
         return [{"error": str(err)}]
     return sorted(items, key=lambda item: (item["subentry_type"], item["title"]))
+
+
+# -- live load settings -------------------------------------------------------
+
+
+def _comparable(value: Any) -> Any:
+    """Flatten a setting to something a seed and a live value can be judged by.
+
+    A seed arrives from storage as JSON -- 8500 where the runtime holds 8500.0,
+    "22:00:00" where it holds a ``time`` -- so a plain ``!=`` would report every
+    load as diverged and the flag would mean nothing.
+    """
+    if value is None or isinstance(value, bool | str):
+        return value
+    if isinstance(value, int | float):
+        return float(value)
+    return str(value)
+
+
+def _loads_section(coordinator: EmhassCoordinator, entry: ConfigEntry) -> list[dict[str, Any]]:
+    """The entity-owned settings as they actually stand, per load.
+
+    Without this the bundle shows only `subentries`, whose entity-owned fields
+    stopped being true the first time anyone moved a slider -- a reader then
+    reasons about the wrong nominal power, and nothing in the file says so.
+    """
+    try:
+        items = []
+        for load in coordinator.loads.all():
+            subentry = entry.subentries.get(load.subentry_id)
+            seed = subentry.data if subentry else {}
+            live = live_settings(load)
+            items.append(
+                {
+                    "subentry_id": load.subentry_id,
+                    "name": load.name,
+                    "load_type": load.load_type,
+                    "settings": {key: _jsonable(value) for key, value in live.items()},
+                    # Named rather than counted: which field drifted is the
+                    # question a reader has, and it is also the only warning
+                    # that the seed above must not be reasoned from.
+                    "diverged_from_seed": sorted(
+                        key
+                        for key, value in live.items()
+                        if key in seed and _comparable(seed[key]) != _comparable(value)
+                    ),
+                    # Runtime state, not a setting, but it is what decides
+                    # whether the load is described to EMHASS as running at all.
+                    "mode": load.mode,
+                    "enabled": load.enabled,
+                    "requested": load.requested,
+                    "is_running": load.is_running,
+                }
+            )
+    except Exception as err:  # noqa: BLE001
+        return [{"error": str(err)}]
+    return sorted(items, key=lambda item: (item["load_type"], item["name"]))
+
+
+def _jsonable(value: Any) -> Any:
+    if value is None or isinstance(value, bool | int | float | str):
+        return value
+    return str(value)
 
 
 # -- entity health ------------------------------------------------------------
