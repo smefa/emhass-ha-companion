@@ -619,9 +619,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         if self.backend_version is not None and version_at_least(
             self.backend_version, MIN_EMHASS_VERSION_CAPACITY_INTERVAL
         ):
-            interval_timesteps = demand.measure.interval_timesteps(
-                self.config.time_step_minutes
-            )
+            interval_timesteps = demand.measure.interval_timesteps(self.config.time_step_minutes)
         return replace(
             base,
             effective_rate_per_kw=rate,

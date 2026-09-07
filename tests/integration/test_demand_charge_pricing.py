@@ -237,7 +237,9 @@ async def test_capacity_interval_history_at_the_interval_boundary_is_empty(
 ) -> None:
     """Solving exactly at :00 -- zero elapsed timesteps, nothing to spread."""
     coordinator = _coordinator(hass)
-    coordinator.peak_tracker = _StubTracker(floor_kw=3.2, open_interval_start=NOW, open_interval_kwh=2.4)
+    coordinator.peak_tracker = _StubTracker(
+        floor_kw=3.2, open_interval_start=NOW, open_interval_kwh=2.4
+    )
     history = coordinator._capacity_interval_history_w(NOW, timedelta(minutes=15), 4)
     assert history == []
 
@@ -245,7 +247,9 @@ async def test_capacity_interval_history_at_the_interval_boundary_is_empty(
 async def test_capacity_interval_history_mid_interval_has_length_m(hass: HomeAssistant) -> None:
     """Solving at :45 into a 60min/4-timestep interval -- 3 elapsed timesteps."""
     coordinator = _coordinator(hass)
-    coordinator.peak_tracker = _StubTracker(floor_kw=3.2, open_interval_start=NOW, open_interval_kwh=2.4)
+    coordinator.peak_tracker = _StubTracker(
+        floor_kw=3.2, open_interval_start=NOW, open_interval_kwh=2.4
+    )
     history = coordinator._capacity_interval_history_w(
         NOW + timedelta(minutes=45), timedelta(minutes=15), 4
     )
@@ -259,7 +263,9 @@ async def test_capacity_interval_history_spread_is_exact(hass: HomeAssistant) ->
     finding"."""
     coordinator = _coordinator(hass)
     kwh = 2.4
-    coordinator.peak_tracker = _StubTracker(floor_kw=3.2, open_interval_start=NOW, open_interval_kwh=kwh)
+    coordinator.peak_tracker = _StubTracker(
+        floor_kw=3.2, open_interval_start=NOW, open_interval_kwh=kwh
+    )
     step = timedelta(minutes=15)
     step_hours = step.total_seconds() / 3600
     for m in (1, 2, 3):
@@ -281,7 +287,9 @@ async def test_capacity_interval_history_empty_when_m_reaches_n(hass: HomeAssist
     """A full interval elapsed without a rollover being seen yet -- must never
     hand EMHASS an N-length (or longer) vector."""
     coordinator = _coordinator(hass)
-    coordinator.peak_tracker = _StubTracker(floor_kw=3.2, open_interval_start=NOW, open_interval_kwh=2.4)
+    coordinator.peak_tracker = _StubTracker(
+        floor_kw=3.2, open_interval_start=NOW, open_interval_kwh=2.4
+    )
     history = coordinator._capacity_interval_history_w(
         NOW + timedelta(minutes=60), timedelta(minutes=15), 4
     )
@@ -302,7 +310,9 @@ async def test_capacity_interval_history_empty_when_interval_timesteps_is_one(
     hass: HomeAssistant,
 ) -> None:
     coordinator = _coordinator(hass)
-    coordinator.peak_tracker = _StubTracker(floor_kw=3.2, open_interval_start=NOW, open_interval_kwh=2.4)
+    coordinator.peak_tracker = _StubTracker(
+        floor_kw=3.2, open_interval_start=NOW, open_interval_kwh=2.4
+    )
     history = coordinator._capacity_interval_history_w(
         NOW + timedelta(minutes=45), timedelta(minutes=15), 1
     )
