@@ -88,6 +88,7 @@ from .const import (
     SUBENTRY_TYPE_THERMAL,
 )
 from .models import DeferrableLoad, Plan, PlanRow, Series
+from .payload import operating_timesteps
 from .stored_time import parse_stored_time
 from .surplus import SurplusBudget, SurplusSpec, allocate, battery_reserved_series, surplus_series
 from .thermal import (
@@ -853,6 +854,44 @@ class DeferrableRuntime:
             return 0
         return max(0, int((now - self.running_since).total_seconds() / 60 // step_minutes))
 
+    @property
+    def commanded_run(self) -> bool:
+        """Whether the run in progress is one this integration asked for.
+
+        A forced run, or a timestep the plan in force already scheduled --
+        the two cases that cannot feed themselves, argued in :meth:`to_load`.
+        Only these may be pinned into EMHASS's timestep 0.
+        """
+        return self.mode == LOAD_MODE_FORCE_ON or self.plan_scheduled_now
+
+    def reported_on_timesteps(self, now: datetime, step_minutes: int) -> int:
+        """The on-time streak to report as ``def_current_on_timesteps``.
+
+        Truthful for a run we commanded. For one merely *observed*, the streak
+        is reported as already satisfying the minimum on time, because EMHASS
+        reads any shortfall as a force rather than as information: Block B of
+        its optimization.py pins ``max(0, def_minimum_on_time - elapsed)``
+        timesteps ON from t=0 and widens the load's window mask so neither its
+        own hours nor the price can block them.
+
+        With the 15-minute minimum a charger carries by default that is a
+        single slot -- but it is the slot that starts the appliance, and once
+        it lands in the plan the commitment feeds ``plan_scheduled_now`` next
+        cycle and the load latches on at whatever the spot price happens to
+        be. A car that started charging on its own is exactly the case
+        :attr:`current_power_w` already refuses to pin; this is the same
+        refusal at the other door into the same constraint.
+
+        Only the *remainder* is suppressed. ``def_current_state`` stays
+        truthful, so EMHASS still credits the startup rather than charging a
+        penalty for a load that is visibly already running, and every other
+        min-on/min-off constraint is untouched.
+        """
+        elapsed = self.continuous_on_timesteps(now, step_minutes)
+        if self.commanded_run:
+            return elapsed
+        return max(elapsed, operating_timesteps(self.minimum_on_time_minutes / 60, step_minutes))
+
     def continuous_off_timesteps(self, now: datetime, step_minutes: int) -> int:
         """How many whole timesteps this load has been continuously off.
 
@@ -930,7 +969,7 @@ class DeferrableRuntime:
             max_startups=self.max_startups,
             minimum_on_time_minutes=self.minimum_on_time_minutes,
             minimum_off_time_minutes=self.minimum_off_time_minutes,
-            current_on_timesteps=self.continuous_on_timesteps(now, step_minutes),
+            current_on_timesteps=self.reported_on_timesteps(now, step_minutes),
             current_off_timesteps=self.continuous_off_timesteps(now, step_minutes),
             # Enabled/disabled and armed/unarmed are independent gates; both
             # must pass for this load to ask EMHASS for any run time. It is
@@ -943,9 +982,15 @@ class DeferrableRuntime:
             wants_to_run=self.enabled and self.participates and not (surplus and budget.is_empty),
             # A load that is already running should not be charged a startup
             # penalty again, nor be re-scheduled for work it has done today.
-            # This alone is what credits the startup: EMHASS reads the flag
-            # straight into its own current-state parameter, and neither it nor
-            # current_on_timesteps can pin a timestep.
+            # This is what credits the startup: EMHASS reads the flag straight
+            # into its own current-state parameter.
+            #
+            # It is *not* inert beyond that, whatever an earlier revision of
+            # this comment claimed. The flag is also the gate on EMHASS's
+            # min-on-time remainder, which forces timestep 0 on whenever the
+            # streak reported alongside it falls short of the minimum. That
+            # door is closed in :meth:`reported_on_timesteps`, not here: the
+            # startup credit is worth keeping and only the remainder is not.
             current_state=self.is_running or self.mode == LOAD_MODE_FORCE_ON,
             # Only ever a power this integration is itself commanding, never one
             # it has merely observed. EMHASS turns def_current_power into a hard
@@ -967,11 +1012,7 @@ class DeferrableRuntime:
             # continuing instead of being re-litigated every 15 minutes; a car
             # that started charging on its own satisfies neither, and stays the
             # optimiser's to schedule.
-            current_power_w=(
-                nominal_power_w
-                if self.mode == LOAD_MODE_FORCE_ON or self.plan_scheduled_now
-                else 0.0
-            ),
+            current_power_w=nominal_power_w if self.commanded_run else 0.0,
             # Completed work is measured against an operating-hours target,
             # which a thermal load does not have -- its temperature *is* its
             # state, reported through start_temperature instead.

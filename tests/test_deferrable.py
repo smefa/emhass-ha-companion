@@ -351,6 +351,48 @@ def test_force_on_pins_the_timestep_it_is_commanding():
     assert projected.current_power_w == 2000.0
 
 
+def test_an_observed_run_does_not_force_the_min_on_remainder():
+    """The other door into EMHASS's timestep-0 force, and the same argument.
+
+    EMHASS pins max(0, def_minimum_on_time - def_current_on_timesteps) steps ON
+    from t=0 and widens the window mask to fit them, so a truthful "just
+    started" streak on a run nobody commanded turns a car that plugged itself
+    in into a scheduled block at whatever the spot price happens to be.
+    Reporting the minimum as already served leaves the remainder at zero.
+    """
+    load = _load(minimum_on_time_minutes=60)
+    load.observe_power(1900, T0)
+
+    projected = load.to_load(T0 + timedelta(minutes=10), 30)
+    assert projected.current_state is True
+    assert projected.current_on_timesteps >= projected.minimum_on_time_minutes / 30
+
+
+def test_a_commanded_run_reports_its_real_on_time_streak():
+    """The remainder is dwell-time protection for a block we chose, and has to
+    keep working: only an *observed* run is refused."""
+    load = _load(minimum_on_time_minutes=60, plan_scheduled_now=True)
+    load.observe_power(1900, T0)
+
+    assert load.to_load(T0 + timedelta(minutes=10), 30).current_on_timesteps == 0
+
+
+def test_force_on_reports_its_real_on_time_streak():
+    load = _load(minimum_on_time_minutes=60, mode=LOAD_MODE_FORCE_ON)
+    load.observe_power(1900, T0)
+
+    assert load.to_load(T0 + timedelta(minutes=10), 30).current_on_timesteps == 0
+
+
+def test_a_long_observed_run_still_reports_the_longer_streak():
+    """The clamp is a floor, not a replacement: a genuine streak past the
+    minimum is still the truth EMHASS should have."""
+    load = _load(minimum_on_time_minutes=30)
+    load.observe_power(1900, T0)
+
+    assert load.to_load(T0 + timedelta(hours=2), 30).current_on_timesteps == 4
+
+
 def test_completed_timesteps_reach_the_payload():
     load = _load()
     load.observe_power(1900, T0)
