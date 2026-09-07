@@ -762,6 +762,101 @@ def test_build_capacity_charge_window_mask_aligns_like_load_cost_forecast():
     assert mask == [0.0, 0.0, 1.0, 1.0, 0.0, 0.0]
 
 
+# --- capacity_charge_interval_timesteps / _current_interval_history (Step 6) --
+
+
+def test_capacity_interval_keys_sent_on_mpc_when_timesteps_greater_than_one():
+    """The regression the feature exists for: a 60min tariff over a 15min
+    step reaches EMHASS as N=4, alongside the spread history."""
+    payload = build_payload(
+        _inputs(
+            network_demand_charge_configured=True,
+            demand_charge_rate_per_kw=45.0,
+            capacity_interval_timesteps=4,
+            capacity_interval_history_w=[600.0, 600.0, 600.0],
+        )
+    ).payload
+    assert payload["capacity_charge_interval_timesteps"] == 4
+    assert payload["capacity_charge_current_interval_history"] == [600, 600, 600]
+
+
+def test_capacity_interval_history_values_are_rounded_to_whole_watts():
+    payload = build_payload(
+        _inputs(
+            network_demand_charge_configured=True,
+            demand_charge_rate_per_kw=45.0,
+            capacity_interval_timesteps=4,
+            capacity_interval_history_w=[599.6, 600.4],
+        )
+    ).payload
+    assert payload["capacity_charge_current_interval_history"] == [600, 600]
+
+
+def test_capacity_interval_history_defaults_to_empty_list():
+    """m == 0 (solving exactly at an interval boundary) -- None must not
+    reach EMHASS as null."""
+    payload = build_payload(
+        _inputs(
+            network_demand_charge_configured=True,
+            demand_charge_rate_per_kw=45.0,
+            capacity_interval_timesteps=4,
+        )
+    ).payload
+    assert payload["capacity_charge_current_interval_history"] == []
+
+
+def test_capacity_interval_keys_omitted_when_timesteps_is_one():
+    """N=1 is both the pre-0.18.2 default and an inexact-division fallback --
+    either way the payload must stay byte-identical to today's: no interval
+    keys at all, not even zero/empty ones."""
+    payload = build_payload(
+        _inputs(
+            network_demand_charge_configured=True,
+            demand_charge_rate_per_kw=45.0,
+            capacity_interval_history_w=[600.0],  # must be ignored at N=1
+        )
+    ).payload
+    assert "capacity_charge_interval_timesteps" not in payload
+    assert "capacity_charge_current_interval_history" not in payload
+
+
+def test_capacity_interval_keys_omitted_on_dayahead():
+    """capacity_charge_interval_timesteps is a structural optim_conf key --
+    sending it on the branch that already zeroes capacity_cost_per_kw would
+    flip EMHASS's OptimizationCacheKey for no effect."""
+    payload = build_payload(
+        _inputs(
+            action=ACTION_DAYAHEAD,
+            network_demand_charge_configured=True,
+            demand_charge_rate_per_kw=45.0,
+            capacity_interval_timesteps=4,
+            capacity_interval_history_w=[600.0, 600.0, 600.0],
+        )
+    ).payload
+    assert "capacity_charge_interval_timesteps" not in payload
+    assert "capacity_charge_current_interval_history" not in payload
+
+
+def test_window_mask_is_constant_across_every_completed_interval_span():
+    """At N>1 EMHASS bills a whole interval at once, so a window boundary
+    falling mid-interval is unrepresentable -- a profile's window must stay
+    aligned to the tariff's own measurement interval, which build_payload
+    itself cannot enforce but must not silently corrupt either. With an
+    hour-aligned window over a 15min step (N=4, one interval per hour), every
+    4-element span is either all-in or all-out."""
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    mask = build_capacity_charge_window_mask(
+        in_window=lambda when: when.hour == 11,
+        start=now,
+        step=timedelta(minutes=15),
+        count=8,  # two hours = two interval spans
+    )
+    interval_timesteps = 4
+    for start in range(0, len(mask), interval_timesteps):
+        span = mask[start : start + interval_timesteps]
+        assert len(set(span)) == 1, f"span {span} straddles an interval boundary"
+
+
 def test_compute_curtailment_is_sent_when_configured():
     """EMHASS produces no P_PV_curtailment column without it, so the plan-driven
     branch of decide_curtailment depends on this reaching the run."""

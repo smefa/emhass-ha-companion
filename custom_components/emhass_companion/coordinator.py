@@ -49,6 +49,7 @@ from .const import (
     LOAD_FORECAST_METHOD_LIST,
     LOAD_FORECAST_METHOD_MLFORECASTER,
     LOAD_FORECAST_METHOD_TYPICAL,
+    MIN_EMHASS_VERSION_CAPACITY_INTERVAL,
     MIN_EMHASS_VERSION_DEMAND_CHARGE,
     MIN_EMHASS_VERSION_DEMAND_WINDOW,
     ML_MIN_HISTORY_DAYS,
@@ -142,6 +143,13 @@ class DemandChargePricing:
     true when the demand charge's own window is restricted (not all-day) and
     the backend is new enough to mask it. False for an all-day window (no
     mask needed) and, of course, whenever ``effective_rate_per_kw`` is None."""
+    interval_timesteps: int = 1
+    """N for ``capacity_charge_interval_timesteps`` -- the tariff's own
+    measurement interval expressed in optimizer timesteps, from
+    ``DemandMeasure.interval_timesteps``. Stays 1 (today's behaviour, no new
+    key sent) on a backend older than ``MIN_EMHASS_VERSION_CAPACITY_INTERVAL``
+    -- narrowing this gate never blocks pricing, so unlike the two gates above
+    it carries no ``reason``. See planning/capacity_interval_plan.md."""
     reason: str | None = None
 
 
@@ -607,7 +615,57 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             n=demand.measure.n,
             days_in_period=days_in_current_period(now),
         )
-        return replace(base, effective_rate_per_kw=rate, windowed=windowed)
+        interval_timesteps = 1
+        if self.backend_version is not None and version_at_least(
+            self.backend_version, MIN_EMHASS_VERSION_CAPACITY_INTERVAL
+        ):
+            interval_timesteps = demand.measure.interval_timesteps(
+                self.config.time_step_minutes
+            )
+        return replace(
+            base,
+            effective_rate_per_kw=rate,
+            windowed=windowed,
+            interval_timesteps=interval_timesteps,
+        )
+
+    def _capacity_interval_history_w(
+        self, now: datetime, step: timedelta, interval_timesteps: int
+    ) -> list[float]:
+        """``capacity_charge_interval_history_w`` for the still-open interval.
+
+        Spreads :attr:`PeakTracker.open_interval_kwh` flat across its ``m``
+        elapsed timesteps -- this reproduces the completed-interval average
+        EMHASS actually uses exactly, not approximately, because that average
+        only ever depends on the history's *sum*. See
+        planning/capacity_interval_plan.md's "Key design finding".
+
+        Empty whenever the open interval cannot be trusted on this tick: no
+        settle has happened yet (``open_interval_start`` is None), or ``m``
+        falls outside ``0..interval_timesteps - 1`` (clock skew, a missed
+        rollover). EMHASS then reads t0 as an interval boundary, which is the
+        safe fallback -- an over-length vector would make it reject the whole
+        payload instead.
+        """
+        if interval_timesteps <= 1 or self.peak_tracker is None:
+            return []
+        start = self.peak_tracker.open_interval_start
+        if start is None:
+            _LOGGER.debug("Capacity interval history: no open interval settled yet")
+            return []
+        m = int((floor_to_step(now, step) - start) / step)
+        if not 0 <= m < interval_timesteps:
+            _LOGGER.debug(
+                "Capacity interval history: elapsed timestep %d outside 0..%d, sending none",
+                m,
+                interval_timesteps - 1,
+            )
+            return []
+        if m == 0:
+            return []
+        step_hours = step.total_seconds() / 3600
+        entry_w = self.peak_tracker.open_interval_kwh * 1000 / (m * step_hours)
+        return [entry_w] * m
 
     async def async_load_ml_state(self) -> None:
         """Restore which sensor mlforecaster was last confirmed trained against."""
@@ -1195,6 +1253,8 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
 
         demand_pricing = self.demand_charge_pricing(now)
         current_period_peak_w = None
+        capacity_interval_timesteps = demand_pricing.interval_timesteps if demand_pricing else 1
+        capacity_interval_history_w: list[float] | None = None
         if (
             demand_pricing is not None
             and demand_pricing.effective_rate_per_kw is not None
@@ -1206,6 +1266,9 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             # docs/network_tariffs_plan.md, "Day-ahead versus MPC"), so a
             # day-ahead run gets no floor and no memory either way.
             current_period_peak_w = self.peak_tracker.floor_kw * 1000
+            capacity_interval_history_w = self._capacity_interval_history_w(
+                now, step, capacity_interval_timesteps
+            )
 
         # Mechanism 3 (docs/network_tariffs_plan.md): the windowed hard cap.
         # Gated on the same version as the priced peak -- maximum_power_from_grid
@@ -1294,6 +1357,8 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
                 demand_pricing.effective_rate_per_kw if demand_pricing else None
             ),
             current_period_peak_w=current_period_peak_w,
+            capacity_interval_timesteps=capacity_interval_timesteps,
+            capacity_interval_history_w=capacity_interval_history_w,
             capacity_limit_w=capacity_limit_w,
             capacity_limit_window=capacity_limit_window,
             demand_fallback_ceiling_w=demand_fallback_ceiling_w,

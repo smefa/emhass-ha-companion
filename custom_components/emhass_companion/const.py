@@ -702,6 +702,12 @@ MIN_EMHASS_VERSION_DEMAND_CHARGE: Final = "0.18.0"
 # unrestricted; otherwise it falls back to the array ceiling.
 MIN_EMHASS_VERSION_DEMAND_WINDOW: Final = "0.18.1"
 
+# The EMHASS release ``capacity_charge_interval_timesteps`` shipped in (#540)
+# -- see planning/capacity_interval_plan.md. Below this, the peak/floor
+# comparison is read at the optimizer timestep instead of the tariff's own
+# measurement interval, biasing toward over-shaving.
+MIN_EMHASS_VERSION_CAPACITY_INTERVAL: Final = "0.18.2"
+
 # --- Cost and savings ---------------------------------------------------------
 #
 # Sensor keys for the savings feature. Grouped here rather than left inline in

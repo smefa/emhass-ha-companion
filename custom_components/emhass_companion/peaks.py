@@ -605,6 +605,29 @@ class PeakTracker:
         )
 
     @property
+    def open_interval_start(self) -> datetime | None:
+        """The still-open bucket's start, or ``None`` before the first settle.
+
+        Read-only over :attr:`_current_start` -- does not call
+        :meth:`Meter.take`, which only ever runs from :meth:`_settle` (see
+        line 496). Calling it again here to bring the value fully up to date
+        would double-count the energy it returns. The figure therefore lags
+        by at most one meter tick, the same lag :attr:`floor_kw` already
+        carries.
+        """
+        return self._current_start
+
+    @property
+    def open_interval_kwh(self) -> float:
+        """Energy folded into the still-open bucket so far.
+
+        Same one-tick lag as :attr:`open_interval_start`, and for the same
+        reason: this reads :attr:`_current_kwh` as it stood after the last
+        settle, rather than calling :meth:`Meter.take` again to catch it up.
+        """
+        return self._current_kwh
+
+    @property
     def contributing_intervals(self) -> tuple[Interval, ...]:
         """The completed intervals :attr:`current_aggregate_kw` is built from.
 

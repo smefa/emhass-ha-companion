@@ -360,6 +360,16 @@ class PayloadInputs:
     current_period_peak_w: float | None = None
     """``PeakTracker.floor_kw`` in watts, MPC only -- see
     docs/network_tariffs_plan.md, "The incurred-peak floor"."""
+    capacity_interval_timesteps: int = 1
+    """N for ``capacity_charge_interval_timesteps`` -- the tariff's own
+    measurement interval in optimizer timesteps, from
+    ``DemandChargePricing.interval_timesteps``. Sent only when > 1; see
+    planning/capacity_interval_plan.md."""
+    capacity_interval_history_w: list[float] | None = None
+    """``capacity_charge_current_interval_history`` -- the still-open
+    interval's elapsed timesteps in watts, oldest to newest, from
+    ``EmhassCoordinator._capacity_interval_history_w``. Only meaningful
+    alongside :attr:`capacity_interval_timesteps` > 1."""
     capacity_limit_w: float | None = None
     """An explicit ``capacity_limit:`` block's ceiling
     (``subscribed_kw - headroom_kw``, in watts). None when the profile
@@ -747,6 +757,11 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
                     step=step,
                     count=inputs.horizon_steps,
                 )
+            if inputs.capacity_interval_timesteps > 1:
+                payload["capacity_charge_interval_timesteps"] = inputs.capacity_interval_timesteps
+                payload["capacity_charge_current_interval_history"] = [
+                    round(w) for w in (inputs.capacity_interval_history_w or [])
+                ]
         else:
             # Day-ahead, or the peak cannot be safely priced yet (see
             # coordinator.demand_charge_pricing): zero rather than the stale

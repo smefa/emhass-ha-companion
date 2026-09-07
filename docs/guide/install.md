@@ -5,7 +5,10 @@
 - Home Assistant 2026.7 or newer.
 - EMHASS itself, already installed and running — either the add-on or a
   container. EMHASS Companion talks to it; it doesn't include it.
-- **EMHASS version 0.17.9 or newer.**
+- **EMHASS version 0.17.9 or newer.** A network tariff's demand charge needs
+  0.18.0+ to price at all, 0.18.1+ for a windowed charge, and 0.18.2+ to price
+  it on the tariff's own measurement interval rather than the optimizer
+  timestep.
 - [HACS](https://hacs.xyz/), to install the integration.
 
 Nothing else is required. No battery, no solar panels and no dynamic

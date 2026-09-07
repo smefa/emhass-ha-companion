@@ -82,7 +82,13 @@ New sensors appear on the integration's hub device:
     window (both built-in profiles have one) prices cleanly. On an older
     add-on it's enforced as a hard ceiling using the **Peak target** number
     instead of a price — it works, but it's a blunter tool than the priced
-    version — see
+    version.
+
+    On 0.18.1, the priced peak is still compared over the optimiser's own
+    step rather than your tariff's own measurement window, which nudges the
+    plan to shave a bit harder than the bill actually requires. **EMHASS
+    0.18.2 or newer** closes that gap — the peak is priced on the same
+    measurement interval your tariff bills on — see
     [Network tariffs, "Version gating"](../network_tariffs.md#version-gating)
     for the full picture.
 

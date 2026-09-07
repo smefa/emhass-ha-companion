@@ -16,12 +16,14 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
 from homeassistant.core import HomeAssistant
+from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.emhass_companion.api import EmhassClient
 from custom_components.emhass_companion.const import ACTION_DAYAHEAD, ACTION_MPC, DOMAIN
 from custom_components.emhass_companion.coordinator import EmhassCoordinator
 from custom_components.emhass_companion.deferrable import DeferrableRegistry
+from custom_components.emhass_companion.models import floor_to_step
 from custom_components.emhass_companion.network_calendar import (
     CapacityLimit,
     DemandCharge,
@@ -54,8 +56,16 @@ def _demand(*, window: Window | None, rate_per_kw: float | None = 135.0) -> Dema
 
 
 class _StubTracker:
-    def __init__(self, floor_kw: float) -> None:
+    def __init__(
+        self,
+        floor_kw: float,
+        *,
+        open_interval_start: datetime | None = None,
+        open_interval_kwh: float = 0.0,
+    ) -> None:
         self.floor_kw = floor_kw
+        self.open_interval_start = open_interval_start
+        self.open_interval_kwh = open_interval_kwh
 
 
 # --- demand_charge_pricing -----------------------------------------------------
@@ -165,6 +175,149 @@ async def test_windowed_demand_charge_still_refused_just_below_the_mask_version(
     assert "0.18.1" in pricing.reason
 
 
+# --- interval_timesteps (planning/capacity_interval_plan.md, Step 4) ---------
+
+
+async def test_interval_timesteps_stays_one_below_the_capacity_interval_gate(
+    hass: HomeAssistant,
+) -> None:
+    """0.18.1 has the window mask but not capacity_charge_interval_timesteps
+    yet -- narrowing this gate must not disturb the two gates above it."""
+    coordinator = _coordinator(hass)
+    coordinator.network_calendar = NetworkCalendar(demand_charge=_demand(window=None))
+    coordinator.backend_version = "0.18.1"
+    pricing = coordinator.demand_charge_pricing(NOW)
+    assert pricing.effective_rate_per_kw == 45.0  # unaffected: this gate never blocks pricing
+    assert pricing.reason is None
+    assert pricing.interval_timesteps == 1
+
+
+async def test_interval_timesteps_stays_one_on_unknown_backend_version(
+    hass: HomeAssistant,
+) -> None:
+    coordinator = _coordinator(hass)
+    coordinator.network_calendar = NetworkCalendar(demand_charge=_demand(window=None))
+    coordinator.backend_version = None
+    pricing = coordinator.demand_charge_pricing(NOW)
+    assert pricing.interval_timesteps == 1
+
+
+async def test_interval_timesteps_computed_on_a_supported_backend(hass: HomeAssistant) -> None:
+    """_demand()'s 60min measure over the default 15min timestep -- the
+    regression the feature exists for."""
+    coordinator = _coordinator(hass)
+    coordinator.network_calendar = NetworkCalendar(demand_charge=_demand(window=None))
+    coordinator.backend_version = "0.18.2"
+    pricing = coordinator.demand_charge_pricing(NOW)
+    assert pricing.interval_timesteps == 4
+
+
+async def test_interval_timesteps_falls_back_to_one_when_inexact(hass: HomeAssistant) -> None:
+    coordinator = _coordinator(hass)
+    demand = DemandCharge(
+        window=None,
+        measure=DemandMeasure(
+            interval=timedelta(minutes=40), aggregate="mean_top_n", n=3, distinct_days=True
+        ),
+        period="month",
+        rate_per_kw=135.0,
+        rate_basis="month",
+    )
+    coordinator.network_calendar = NetworkCalendar(demand_charge=demand)
+    coordinator.backend_version = "0.18.2"
+    pricing = coordinator.demand_charge_pricing(NOW)
+    assert pricing.interval_timesteps == 1  # 40 / 15 does not divide exactly
+
+
+# --- _capacity_interval_history_w (planning/capacity_interval_plan.md, Step 4) --
+
+
+async def test_capacity_interval_history_at_the_interval_boundary_is_empty(
+    hass: HomeAssistant,
+) -> None:
+    """Solving exactly at :00 -- zero elapsed timesteps, nothing to spread."""
+    coordinator = _coordinator(hass)
+    coordinator.peak_tracker = _StubTracker(floor_kw=3.2, open_interval_start=NOW, open_interval_kwh=2.4)
+    history = coordinator._capacity_interval_history_w(NOW, timedelta(minutes=15), 4)
+    assert history == []
+
+
+async def test_capacity_interval_history_mid_interval_has_length_m(hass: HomeAssistant) -> None:
+    """Solving at :45 into a 60min/4-timestep interval -- 3 elapsed timesteps."""
+    coordinator = _coordinator(hass)
+    coordinator.peak_tracker = _StubTracker(floor_kw=3.2, open_interval_start=NOW, open_interval_kwh=2.4)
+    history = coordinator._capacity_interval_history_w(
+        NOW + timedelta(minutes=45), timedelta(minutes=15), 4
+    )
+    assert len(history) == 3
+    assert all(value == history[0] for value in history)
+
+
+async def test_capacity_interval_history_spread_is_exact(hass: HomeAssistant) -> None:
+    """sum(history) reproduces the open interval's own energy exactly, for
+    every valid elapsed-timestep count -- see the plan's "Key design
+    finding"."""
+    coordinator = _coordinator(hass)
+    kwh = 2.4
+    coordinator.peak_tracker = _StubTracker(floor_kw=3.2, open_interval_start=NOW, open_interval_kwh=kwh)
+    step = timedelta(minutes=15)
+    step_hours = step.total_seconds() / 3600
+    for m in (1, 2, 3):
+        history = coordinator._capacity_interval_history_w(NOW + step * m, step, 4)
+        assert len(history) == m
+        assert sum(history) * step_hours / 1000 == kwh
+
+
+async def test_capacity_interval_history_empty_with_no_open_interval_yet(
+    hass: HomeAssistant,
+) -> None:
+    coordinator = _coordinator(hass)
+    coordinator.peak_tracker = _StubTracker(floor_kw=3.2, open_interval_start=None)
+    history = coordinator._capacity_interval_history_w(NOW, timedelta(minutes=15), 4)
+    assert history == []
+
+
+async def test_capacity_interval_history_empty_when_m_reaches_n(hass: HomeAssistant) -> None:
+    """A full interval elapsed without a rollover being seen yet -- must never
+    hand EMHASS an N-length (or longer) vector."""
+    coordinator = _coordinator(hass)
+    coordinator.peak_tracker = _StubTracker(floor_kw=3.2, open_interval_start=NOW, open_interval_kwh=2.4)
+    history = coordinator._capacity_interval_history_w(
+        NOW + timedelta(minutes=60), timedelta(minutes=15), 4
+    )
+    assert history == []
+
+
+async def test_capacity_interval_history_empty_when_m_is_negative(hass: HomeAssistant) -> None:
+    """Clock skew: the open interval appears to start after ``now``."""
+    coordinator = _coordinator(hass)
+    coordinator.peak_tracker = _StubTracker(
+        floor_kw=3.2, open_interval_start=NOW + timedelta(minutes=15), open_interval_kwh=2.4
+    )
+    history = coordinator._capacity_interval_history_w(NOW, timedelta(minutes=15), 4)
+    assert history == []
+
+
+async def test_capacity_interval_history_empty_when_interval_timesteps_is_one(
+    hass: HomeAssistant,
+) -> None:
+    coordinator = _coordinator(hass)
+    coordinator.peak_tracker = _StubTracker(floor_kw=3.2, open_interval_start=NOW, open_interval_kwh=2.4)
+    history = coordinator._capacity_interval_history_w(
+        NOW + timedelta(minutes=45), timedelta(minutes=15), 1
+    )
+    assert history == []
+
+
+async def test_capacity_interval_history_empty_without_a_peak_tracker(hass: HomeAssistant) -> None:
+    coordinator = _coordinator(hass)
+    assert coordinator.peak_tracker is None
+    history = coordinator._capacity_interval_history_w(
+        NOW + timedelta(minutes=45), timedelta(minutes=15), 4
+    )
+    assert history == []
+
+
 # --- wired into _build() --------------------------------------------------------
 
 
@@ -249,6 +402,55 @@ async def test_build_zeroes_rather_than_pricing_when_not_yet_supported(hass: Hom
 
     assert inputs.demand_charge_rate_per_kw is None
     assert built.payload["capacity_cost_per_kw"] == 0.0
+
+
+async def test_build_sends_capacity_interval_keys_on_a_supported_backend(
+    hass: HomeAssistant,
+) -> None:
+    """End to end, Step 6's regression: _demand()'s 60min measure over the
+    default 15min step reaches EMHASS as N=4, with the still-open interval's
+    elapsed timesteps spread alongside it."""
+    coordinator = _coordinator(hass)
+    coordinator.network_calendar = NetworkCalendar(demand_charge=_demand(window=None))
+    coordinator.backend_version = "0.18.2"
+    # _build() reads dt_util.utcnow() itself rather than taking `now` as a
+    # parameter, so the open interval is anchored off the real clock -- three
+    # elapsed 15min timesteps back from the step boundary at or before it,
+    # the same boundary _build's own floor_to_step(now, step) will land on.
+    floored = floor_to_step(dt_util.utcnow(), timedelta(minutes=15))
+    coordinator.peak_tracker = _StubTracker(
+        floor_kw=3.2,
+        open_interval_start=floored - timedelta(minutes=45),
+        open_interval_kwh=2.4,
+    )
+
+    inputs, built = await coordinator._build(ACTION_MPC)
+
+    assert inputs.capacity_interval_timesteps == 4
+    assert len(inputs.capacity_interval_history_w) == 3
+    assert built.payload["capacity_charge_interval_timesteps"] == 4
+    history = built.payload["capacity_charge_current_interval_history"]
+    assert len(history) == 3
+    step_hours = 15 / 60
+    assert sum(history) * step_hours / 1000 == 2.4
+
+
+async def test_build_omits_capacity_interval_keys_below_the_gate(hass: HomeAssistant) -> None:
+    """0.18.1 has the window mask but not capacity_charge_interval_timesteps
+    yet -- the payload must stay byte-identical to today's on that point,
+    even though current_period_peak and the mask still ride through."""
+    coordinator = _coordinator(hass)
+    coordinator.network_calendar = NetworkCalendar(demand_charge=_demand(window=None))
+    coordinator.backend_version = "0.18.1"
+    coordinator.peak_tracker = _StubTracker(floor_kw=3.2)
+
+    inputs, built = await coordinator._build(ACTION_MPC)
+
+    assert inputs.capacity_interval_timesteps == 1
+    assert built.payload["capacity_cost_per_kw"] == 45.0
+    assert built.payload["current_period_peak"] == 3200
+    assert "capacity_charge_interval_timesteps" not in built.payload
+    assert "capacity_charge_current_interval_history" not in built.payload
 
 
 # --- the windowed hard cap (mechanism 3) --------------------------------------

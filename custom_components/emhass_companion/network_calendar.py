@@ -262,6 +262,15 @@ class DemandMeasure:
             distinct_days=bool(data.get("distinct_days", False)),
         )
 
+    def interval_timesteps(self, step_minutes: int) -> int:
+        """N for capacity_charge_interval_timesteps; 1 when inexact."""
+        interval_seconds = int(self.interval.total_seconds())
+        step_seconds = step_minutes * 60
+        if step_seconds <= 0 or interval_seconds % step_seconds != 0:
+            return 1
+        n = interval_seconds // step_seconds
+        return n if n >= 1 else 1
+
 
 @dataclass(slots=True)
 class DemandCharge:

@@ -17,6 +17,7 @@ import pytest
 from custom_components.emhass_companion.models import Point, Series
 from custom_components.emhass_companion.network_calendar import (
     DateSet,
+    DemandMeasure,
     HolidayCache,
     HourRange,
     NetworkCalendar,
@@ -282,6 +283,26 @@ def test_in_demand_window_respects_the_window():
 def test_unknown_aggregate_raises():
     with pytest.raises(NetworkCalendarError, match="Unknown measure\\.aggregate"):
         NetworkCalendar.from_resolved({"demand_charge": {"measure": {"aggregate": "banana"}}})
+
+
+def test_interval_timesteps_exact_division():
+    measure = DemandMeasure.from_dict({"interval": "60min"})
+    assert measure.interval_timesteps(15) == 4
+
+
+def test_interval_timesteps_same_as_step_is_one():
+    measure = DemandMeasure.from_dict({"interval": "15min"})
+    assert measure.interval_timesteps(15) == 1
+
+
+def test_interval_timesteps_falls_back_to_one_when_inexact():
+    measure = DemandMeasure.from_dict({"interval": "60min"})
+    assert measure.interval_timesteps(45) == 1
+
+
+def test_interval_timesteps_falls_back_to_one_when_step_larger_than_interval():
+    measure = DemandMeasure.from_dict({"interval": "30min"})
+    assert measure.interval_timesteps(60) == 1
 
 
 # --- capacity limit ------------------------------------------------------------

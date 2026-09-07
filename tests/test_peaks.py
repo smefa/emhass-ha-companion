@@ -17,6 +17,7 @@ from custom_components.emhass_companion.peaks import (
     AGGREGATE_MAX,
     AGGREGATE_MEAN_TOP_N,
     Interval,
+    PeakTracker,
     _bucket_start,
     _local_day,
     _local_period,
@@ -275,3 +276,30 @@ def test_days_in_current_period_is_the_local_calendar_month():
     assert days_in_current_period(datetime(2026, 2, 15, 12, 0, tzinfo=UTC)) == 28
     assert days_in_current_period(datetime(2028, 2, 15, 12, 0, tzinfo=UTC)) == 29
     assert days_in_current_period(datetime(2026, 8, 1, 0, 0, tzinfo=UTC)) == 31
+
+
+# -- open_interval_start / open_interval_kwh --------------------------------------
+#
+# Plain read-only wrappers over PeakTracker's own state, no aggregation math
+# involved, so the real constructor -- and the hass fixture it would drag in --
+# is not needed. Same bypass tests/test_surplus.py's _registry() uses.
+
+
+def _tracker(current_start: datetime | None, current_kwh: float) -> PeakTracker:
+    tracker = PeakTracker.__new__(PeakTracker)
+    tracker._current_start = current_start
+    tracker._current_kwh = current_kwh
+    return tracker
+
+
+def test_open_interval_is_none_and_zero_before_the_first_settle():
+    tracker = _tracker(None, 0.0)
+    assert tracker.open_interval_start is None
+    assert tracker.open_interval_kwh == 0.0
+
+
+def test_open_interval_reflects_the_still_open_bucket():
+    start = datetime(2026, 8, 4, 13, 0, tzinfo=UTC)
+    tracker = _tracker(start, 2.5)
+    assert tracker.open_interval_start == start
+    assert tracker.open_interval_kwh == 2.5
