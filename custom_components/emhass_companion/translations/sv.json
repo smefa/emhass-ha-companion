@@ -618,6 +618,9 @@
       },
       "start_asap": {
         "name": "Starta så tidigt som möjligt"
+      },
+      "battery_lockout": {
+        "name": "21. Batterispärr"
       }
     },
     "select": {

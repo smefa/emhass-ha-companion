@@ -1105,6 +1105,90 @@ def test_a_chosen_end_soc_replaces_the_pin_to_start():
     assert payload["soc_final"] == 0.42
 
 
+# --- battery lockout -----------------------------------------------------------
+
+
+def _load(battery_lockout_windows=(), **overrides) -> DeferrableLoad:
+    defaults = {
+        "subentry_id": "l1",
+        "name": "Test load",
+        "nominal_power_w": 1000.0,
+        "operating_hours": 2.0,
+    }
+    return DeferrableLoad(
+        **{**defaults, **overrides}, battery_lockout_windows=battery_lockout_windows
+    )
+
+
+def test_battery_lockout_baseline_stays_a_float_with_no_flagged_load():
+    battery = BatteryConfig(enabled=True, weight_battery_discharge=0.05)
+    payload = build_payload(_inputs(battery=battery, loads=[_load()])).payload
+    assert payload["weight_battery_discharge"] == 0.05
+    assert isinstance(payload["weight_battery_discharge"], float)
+
+
+def test_battery_lockout_omitted_when_battery_disabled():
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    load = _load(battery_lockout_windows=((now, now + HALF_HOUR),))
+    payload = build_payload(_inputs(battery=BatteryConfig(enabled=False), loads=[load])).payload
+    assert "weight_battery_discharge" not in payload
+
+
+def test_battery_lockout_prices_exactly_the_flagged_steps():
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    battery = BatteryConfig(enabled=True, weight_battery_discharge=0.05)
+    load = _load(battery_lockout_windows=((now + HALF_HOUR * 2, now + HALF_HOUR * 4),))
+    payload = build_payload(_inputs(battery=battery, loads=[load])).payload
+    weights = payload["weight_battery_discharge"]
+    assert len(weights) == DAY_STEPS
+    assert weights[:2] == [0.05, 0.05]
+    assert weights[2] == pytest.approx(100.0)
+    assert weights[3] == pytest.approx(100.0)
+    assert all(value == 0.05 for value in weights[4:])
+
+
+def test_battery_lockout_price_derived_from_horizon_buy_price():
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    battery = BatteryConfig(enabled=True)
+    load = _load(battery_lockout_windows=((now, now + HALF_HOUR),))
+    buy_price = _series(now, 24, 6.0)
+    payload = build_payload(_inputs(battery=battery, loads=[load], buy_price=buy_price)).payload
+    assert payload["weight_battery_discharge"][0] == pytest.approx(600.0)
+
+
+def test_battery_lockout_price_floors_with_no_price_series():
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    battery = BatteryConfig(enabled=True)
+    load = _load(battery_lockout_windows=((now, now + HALF_HOUR),))
+    payload = build_payload(_inputs(battery=battery, loads=[load])).payload
+    assert payload["weight_battery_discharge"][0] == pytest.approx(100.0)
+
+
+def test_battery_lockout_unions_across_two_flagged_loads():
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    battery = BatteryConfig(enabled=True, weight_battery_discharge=0.05)
+    load_a = _load(subentry_id="a", battery_lockout_windows=((now, now + HALF_HOUR),))
+    load_b = _load(
+        subentry_id="b",
+        battery_lockout_windows=((now + HALF_HOUR * 5, now + HALF_HOUR * 6),),
+    )
+    payload = build_payload(_inputs(battery=battery, loads=[load_a, load_b])).payload
+    weights = payload["weight_battery_discharge"]
+    assert weights[0] == pytest.approx(100.0)
+    assert weights[5] == pytest.approx(100.0)
+    assert weights[1] == 0.05
+    assert weights[6] == 0.05
+
+
+def test_battery_lockout_array_length_matches_capacity_array_steps_on_dayahead():
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    battery = BatteryConfig(enabled=True)
+    load = _load(battery_lockout_windows=((now, now + HALF_HOUR),))
+    result = build_payload(_inputs(action=ACTION_DAYAHEAD, battery=battery, loads=[load]))
+    # delta_forecast_daily rounds up to 1 whole day at 30-minute resolution.
+    assert len(result.payload["weight_battery_discharge"]) == 48
+
+
 # --- hybrid inverter -----------------------------------------------------------
 
 

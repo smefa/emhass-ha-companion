@@ -618,6 +618,9 @@
       },
       "start_asap": {
         "name": "Start as early as possible"
+      },
+      "battery_lockout": {
+        "name": "21. Battery lockout"
       }
     },
     "select": {

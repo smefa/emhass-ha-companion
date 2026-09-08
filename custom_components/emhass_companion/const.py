@@ -121,6 +121,16 @@ CONF_DISCHARGE_EFFICIENCY: Final = "discharge_efficiency"
 # would ignore. Zero (EMHASS's own default) means cycle freely.
 CONF_WEIGHT_BATTERY_DISCHARGE: Final = "weight_battery_discharge"
 CONF_WEIGHT_BATTERY_CHARGE: Final = "weight_battery_charge"
+# Per-load battery lockout (planning/battery_lockaout_plan.md): the price put on
+# weight_battery_discharge over a flagged load's window, high enough that the
+# optimiser never plans a discharge through it, without ever making the solve
+# infeasible -- a weight is a cost, not a constraint. Derived per run from the
+# horizon's own max buy price rather than fixed, so it scales with currency;
+# the floor covers a missing or all-zero price series. See Test C in the plan
+# for where the real break-even sits against a tariff spread -- the factor
+# leaves roughly 20x headroom over it.
+BATTERY_LOCKOUT_PRICE_FACTOR: Final = 100
+BATTERY_LOCKOUT_PRICE_FLOOR: Final = 100.0
 # Dwell penalties on the *level* rather than the throughput. EMHASS charges
 # cost * (kWh past the threshold) * hours held there, so unlike soc_min/soc_max
 # -- which are hard planning bounds -- these bend the plan without ever making
@@ -566,6 +576,14 @@ ATTR_IDLE_SINCE: Final = "idle_since"
 # is a question asked precisely when the switch is already off.
 ATTR_COMPLETION_REASON: Final = "last_completion_reason"
 ATTR_COMPLETION_AT: Final = "last_completion_at"
+
+# Battery lockout (planning/battery_lockaout_plan.md). Read straight off the
+# runtime -- the priced series itself needs the run's own buy price, which an
+# entity's attrs_fn has no access to, so that half is left to diagnostics and
+# the INFO log line instead (see apply_battery_lockout).
+ATTR_LOCKOUT_HELD_START: Final = "lockout_held_start"
+ATTR_LOCKOUT_HELD_END: Final = "lockout_held_end"
+ATTR_LOCKOUT_RUNNING: Final = "lockout_running"
 
 # How an on-demand run ended.
 #

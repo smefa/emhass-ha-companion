@@ -18,7 +18,12 @@ from typing import Any
 
 from homeassistant.util import dt as dt_util
 
-from .const import ACTION_MPC, DEFAULT_COST_FUN
+from .const import (
+    ACTION_MPC,
+    BATTERY_LOCKOUT_PRICE_FACTOR,
+    BATTERY_LOCKOUT_PRICE_FLOOR,
+    DEFAULT_COST_FUN,
+)
 from .models import (
     BatteryConfig,
     DeferrableLoad,
@@ -513,6 +518,46 @@ def build_capacity_charge_window_mask(
     return [1.0 if in_window(start + step * index) else 0.0 for index in range(count)]
 
 
+def _battery_lockout_weights(
+    inputs: PayloadInputs,
+    grid_start: datetime,
+    horizon_end: datetime,
+    step: timedelta,
+    count: int,
+) -> dict[str, Any]:
+    """Per-timestep ``weight_battery_discharge``, pricing every flagged load's window.
+
+    See planning/battery_lockaout_plan.md. Returns ``{}`` unless the battery is
+    enabled and some load actually has a window to price -- so an install
+    that never uses the feature (or has the battery off) sees the plain
+    scalar weight it always has, byte-identical.
+
+    Every element of a flagged load's ``battery_lockout_windows`` counts
+    independently -- a held window and a live while_running window can be
+    disjoint (see :class:`models.DeferrableLoad`), and this union is a
+    per-timestep OR across all of them, across all loads, never a merged span.
+
+    The price is derived from this run's own buy price rather than fixed: a
+    hardcoded number would be wrong at a different currency scale, and the
+    floor covers a missing or all-zero price series. Windowed to the horizon
+    rather than the whole series, which can run well past it. See Test C in
+    the plan for where the real break-even sits against a tariff spread -- the
+    factor leaves roughly 20x headroom over it.
+    """
+    windows = [window for load in inputs.loads for window in load.battery_lockout_windows]
+    if not inputs.battery.enabled or not windows:
+        return {}
+    horizon_prices = inputs.buy_price.window(grid_start, horizon_end) if inputs.buy_price else None
+    max_buy_price = max(horizon_prices.values, default=0.0) if horizon_prices else 0.0
+    price = max(BATTERY_LOCKOUT_PRICE_FACTOR * max_buy_price, BATTERY_LOCKOUT_PRICE_FLOOR)
+    values = [inputs.battery.weight_battery_discharge] * count
+    for index in range(count):
+        start = grid_start + step * index
+        if any(window_start <= start < window_end for window_start, window_end in windows):
+            values[index] = price
+    return {"weight_battery_discharge": values}
+
+
 def _import_floor_w(inputs: PayloadInputs, horizon_end: datetime) -> float:
     """The lowest import limit that can still serve the baseline house load.
 
@@ -681,6 +726,11 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
 
     # -- settings -------------------------------------------------------------
     payload.update(_battery_settings(inputs.battery))
+    payload.update(
+        _battery_lockout_weights(
+            inputs, floor_to_step(inputs.now, step), horizon_end, step, capacity_array_steps
+        )
+    )
     payload.update(_hybrid_inverter_settings(inputs.hybrid_inverter))
     import_floor = _import_floor_w(inputs, horizon_end)
     import_scalar_w = resolve_grid_limit(

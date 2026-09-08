@@ -598,6 +598,16 @@ class DeferrableLoad:
     while the sun is actually spare" (see :mod:`surplus`). Unlike a deadline
     they are not relaxed when the run no longer fits — running outside them is
     the one thing such a load must never do.
+
+    ``battery_lockout_windows`` is unrelated to all three: it does not bound
+    where *this* load may run, it says which timesteps the *battery* may not
+    discharge through, priced into ``weight_battery_discharge`` rather than
+    into this load's own constraints (see :mod:`payload`'s
+    ``_battery_lockout_weights`` and planning/battery_lockaout_plan.md). Kept
+    as a tuple of up to two windows rather than one merged span: a held window
+    and a live "running right now" window can be disjoint (a manual start well
+    outside a not-yet-released held window), and merging them would price the
+    gap between them too.
     """
 
     subentry_id: str
@@ -610,6 +620,7 @@ class DeferrableLoad:
     deadline_at: datetime | None = None
     start_at: datetime | None = None
     end_at: datetime | None = None
+    battery_lockout_windows: tuple[tuple[datetime, datetime], ...] = ()
     semi_continuous: bool = True
     single_constant: bool = False
     startup_penalty: float = 0.0

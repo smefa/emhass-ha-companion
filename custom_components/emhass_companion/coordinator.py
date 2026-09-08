@@ -1224,6 +1224,12 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             self.loads.apply_surplus(
                 self.data.plan, self.data.load_order, now, config.time_step_minutes
             )
+            # Same lagged pairing, right beside it: latch or release each
+            # flagged load's held battery-lockout window from the same
+            # previous plan, before deferrable_loads() below projects it.
+            self.loads.apply_battery_lockout(
+                self.data.plan, self.data.load_order, now, config.time_step_minutes
+            )
         soc_init = self._read_soc()
         end_soc: EndSocDecision | None = None
         if config.battery.enabled and soc_init is not None:

@@ -135,6 +135,21 @@ def state_to_watts(state: State) -> float | None:
     return value
 
 
+@dataclass(frozen=True, slots=True)
+class BatteryLockout:
+    """A load's held battery-lockout window -- the ``planned_held`` half only.
+
+    The ``while_running`` half needs no state of its own and is computed fresh
+    in :meth:`DeferrableRuntime.to_load`; see
+    planning/battery_lockaout_plan.md for why the two are never merged into
+    one span.
+    """
+
+    start: datetime
+    end: datetime
+    derived_at: datetime
+
+
 @dataclass(slots=True)
 class DeferrableRuntime:
     """One deferrable load's live state."""
@@ -177,6 +192,15 @@ class DeferrableRuntime:
     max_startups: int = 0
     minimum_on_time_minutes: float = 0.0
     minimum_off_time_minutes: float = 0.0
+    # Per-load battery lockout (planning/battery_lockaout_plan.md), entity-owned
+    # like everything else here. Off emits nothing, regardless of whatever a
+    # previous run latched into battery_lockout below.
+    battery_lockout_enabled: bool = False
+    # The held half of the lockout window only -- latched by
+    # DeferrableRegistry.apply_battery_lockout and *not* reset every run, unlike
+    # surplus_budget; see that method's docstring for why. The while_running
+    # half needs no state of its own and is computed fresh in to_load.
+    battery_lockout: BatteryLockout | None = field(default=None, repr=False)
     mode: str = LOAD_MODE_AUTO
     # When Run now was last pressed. Only a backstop for ending a forced run;
     # like ``mode`` itself it does not survive a restart, which already returns
@@ -940,6 +964,7 @@ class DeferrableRuntime:
         nominal_power_w = (
             budget.nominal_w if surplus and not budget.is_empty else self.nominal_power_w
         )
+        operating_hours = budget.hours if surplus else self.operating_hours
 
         return DeferrableLoad(
             subentry_id=self.subentry_id,
@@ -948,7 +973,7 @@ class DeferrableRuntime:
             minimum_power_w=self.minimum_power_w,
             # A surplus load's run time is not a setting; it is however many
             # hours the exported power in the last plan can actually feed.
-            operating_hours=budget.hours if surplus else self.operating_hours,
+            operating_hours=operating_hours,
             hours_from_surplus_budget=surplus,
             earliest_start=self.earliest_start if windowed and not surplus else None,
             latest_end=self.latest_end if windowed and not surplus else None,
@@ -1029,7 +1054,37 @@ class DeferrableRuntime:
                 0 if self.is_thermal or surplus else self.completed_timesteps(now, step_minutes)
             ),
             thermal=self.thermal_config(current_temperature),
+            battery_lockout_windows=self._battery_lockout_windows(
+                now, step_minutes, operating_hours
+            ),
         )
+
+    def _battery_lockout_windows(
+        self, now: datetime, step_minutes: int, operating_hours: float
+    ) -> tuple[tuple[datetime, datetime], ...]:
+        """This load's battery-lockout windows, held plus live.
+
+        Up to two, never merged into one span -- see :class:`BatteryLockout`
+        and planning/battery_lockaout_plan.md. The held half is whatever
+        :meth:`DeferrableRegistry.apply_battery_lockout` last latched; the
+        while_running half needs no plan and no state of its own, so it is
+        computed fresh here from the current instant.
+        """
+        if not self.battery_lockout_enabled:
+            return ()
+        windows: list[tuple[datetime, datetime]] = []
+        if self.battery_lockout is not None:
+            windows.append((self.battery_lockout.start, self.battery_lockout.end))
+        # A thermal load's demand is its comfort band, not an operating-hours
+        # target -- there is no "remaining run time" for this half to measure.
+        if self.is_running and not self.is_thermal:
+            remaining_hours = max(
+                operating_hours - self.elapsed_towards_target(now).total_seconds() / 3600,
+                0.0,
+            )
+            steps = max(1, operating_timesteps(remaining_hours, step_minutes))
+            windows.append((now, now + steps * timedelta(minutes=step_minutes)))
+        return tuple(windows)
 
     # -- change notification --------------------------------------------------
 
@@ -1045,6 +1100,27 @@ class DeferrableRuntime:
     def notify(self) -> None:
         for listener in list(self._listeners):
             listener()
+
+
+def _derive_held_window(
+    plan: Plan, index: int, threshold_w: float, now: datetime, step: timedelta
+) -> BatteryLockout | None:
+    """The span of ``plan`` where this load's column exceeds ``threshold_w``.
+
+    Mirrors ``Executor._scheduled``'s single-row test, widened across the
+    whole plan to find the block's extent rather than just where "now" falls
+    inside it. One step past the last qualifying row, matching
+    ``SurplusBudget.window_end`` -- see ``allocate`` for why the extra step
+    is there.
+    """
+    scheduled = [
+        row.timestamp
+        for row in plan.rows
+        if index < len(row.deferrables) and row.deferrables[index] > threshold_w
+    ]
+    if not scheduled:
+        return None
+    return BatteryLockout(start=scheduled[0], end=scheduled[-1] + step, derived_at=now)
 
 
 class DeferrableRegistry:
@@ -1225,6 +1301,61 @@ class DeferrableRegistry:
         for load in surplus_loads:
             if (budget := budgets.get(load.subentry_id)) is not None:
                 load.surplus_budget = budget
+
+    def apply_battery_lockout(
+        self, plan: Plan | None, load_order: list[str], now: datetime, step_minutes: int
+    ) -> None:
+        """Latch or release each flagged load's held battery-lockout window.
+
+        Called once per run, immediately after :meth:`apply_surplus`, with the
+        *previous* plan and load order -- the same lagged pairing, and for the
+        same reason: the window for *this* request has to come from the
+        answer to the *last* one.
+
+        Unlike ``surplus_budget``, the held window is **not** recomputed every
+        call. Test 0 (planning/battery_lockaout_plan.md) found the unlatched
+        span moves between cycles with nothing external changing; re-deriving
+        it fresh every run would feed that jitter straight back into the next
+        request. Once set it survives until ``now`` reaches its own end --
+        whether or not the load ever actually drew power, since a load that
+        never ran needs the same release or it would stay locked out forever.
+
+        A disabled load's window is dropped outright rather than left to
+        expire on its own, so turning the switch off takes effect immediately.
+        """
+        step = timedelta(minutes=step_minutes)
+        for load in self._loads.values():
+            if not load.battery_lockout_enabled:
+                load.battery_lockout = None
+                continue
+            if load.battery_lockout is not None and now >= load.battery_lockout.end:
+                load.battery_lockout = None
+            if load.battery_lockout is not None or plan is None:
+                continue
+            try:
+                index = load_order.index(load.subentry_id)
+            except ValueError:
+                continue
+            before = load.battery_lockout
+            load.battery_lockout = _derive_held_window(
+                plan, index, load.running_threshold_w, now, step
+            )
+            after = load.battery_lockout
+            # The oscillation detector: whether the held window moves between
+            # runs is the direct answer to "does it move with replan?" (Test 0,
+            # Test D point 3). Only logged on an actual change, not every cycle
+            # the window happens to already be set.
+            changed = after is not None and (
+                before is None or (before.start, before.end) != (after.start, after.end)
+            )
+            if changed:
+                _LOGGER.info(
+                    "%s: battery-lockout held window %s -> %s .. %s",
+                    load.name,
+                    "set" if before is None else "changed",
+                    after.start.isoformat(),
+                    after.end.isoformat(),
+                )
 
     def to_loads(self, now: datetime, step_minutes: int) -> list[DeferrableLoad]:
         return [

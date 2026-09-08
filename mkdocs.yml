@@ -64,6 +64,7 @@ nav:
           - Surplus loads: surplus_loads.md
           - On-demand loads: on_demand_loads.md
           - Load groups: load_groups.md
+          - Battery lockout: battery_lockout.md
           - Request-run service (planned): request_run_service.md
       - Dashboard cards: dashboard_cards.md
       - Lab cards (experimental): lab_cards.md
