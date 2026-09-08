@@ -620,7 +620,7 @@
         "name": "Starta så tidigt som möjligt"
       },
       "battery_lockout": {
-        "name": "21. Batterispärr"
+        "name": "21. Inget batteri för denna last"
       }
     },
     "select": {

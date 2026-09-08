@@ -620,7 +620,7 @@
         "name": "Start as early as possible"
       },
       "battery_lockout": {
-        "name": "21. Battery lockout"
+        "name": "21. No battery for this load"
       }
     },
     "select": {
