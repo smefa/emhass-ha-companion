@@ -20,6 +20,7 @@ from custom_components.emhass_companion.models import (
     HybridInverterConfig,
     Point,
     Series,
+    floor_to_step,
 )
 from custom_components.emhass_companion.payload import (
     PayloadInputs,
@@ -2104,6 +2105,54 @@ def test_a_thermal_load_sends_def_load_config_at_its_own_index():
 
 
 @pytest.mark.usefixtures("stockholm_timezone")
+def test_the_comfort_band_is_built_on_the_floored_timestep_grid():
+    """`def_load_config` is a per-timestep array like every other one here, so
+    it has to be indexed from the same origin.
+
+    EMHASS stamps plan row zero at the grid boundary at or *before* launch --
+    verified against a live 0.18.2 backend, where a run launched at 01:15:33Z
+    produced a first row of 01:15:00Z on a 15-minute step. Building the band
+    from the raw launch instant instead put min_temperatures[i] at
+    ``now + i*step`` while EMHASS reads it at ``floor(now) + i*step``, sliding
+    the comfort window and its setback ramp up to a full timestep late.
+
+    Asserted against the band recomputed on each origin rather than against
+    literal temperatures, so the test says exactly which grid is meant and
+    stays true whatever local timezone the suite runs in.
+    """
+    step_minutes = 30
+    step = timedelta(minutes=step_minutes)
+    horizon_steps = 8
+    # Deliberately mid-timestep, as every real run is.
+    now = datetime(2026, 1, 15, 5, 20, tzinfo=UTC)
+    thermal = ThermalConfig(
+        sense="heat",
+        heating_rate=3.0,
+        comfort_temperature=21.0,
+        setback_temperature=17.0,
+        comfort_start=time(6, 15),
+        comfort_end=time(22, 0),
+        current_temperature=19.0,
+    )
+    payload = build_payload(
+        _inputs(
+            now=now,
+            loads=[_thermal_load(thermal=thermal)],
+            time_step_minutes=step_minutes,
+            horizon_steps=horizon_steps,
+        )
+    ).payload
+    sent = payload["def_load_config"][0]["thermal_config"]["min_temperatures"]
+
+    on_grid, _ = thermal.comfort_band(floor_to_step(now, step), step, horizon_steps)
+    off_grid, _ = thermal.comfort_band(now, step, horizon_steps)
+
+    assert sent == on_grid
+    # The two really do differ here, so the assertion above is load-bearing:
+    # a comfort start a quarter-step off the boundary is what separates them.
+    assert on_grid != off_grid
+
+
 def test_a_disabled_thermal_load_sends_no_temperature_demands():
     """Parked at zero hours *and* stripped of its comfort band: temperature
     targets are exactly the demand a parked load must not carry."""

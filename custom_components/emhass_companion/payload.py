@@ -868,8 +868,17 @@ def _thermal_settings(inputs: PayloadInputs, step: timedelta, load_count: int) -
         if load.thermal is not None and load.wants_to_run
     }
 
+    # Floored onto the timestep grid, like every other per-timestep array in
+    # this payload (maximum_power_from_grid, capacity_charge_window,
+    # weight_battery_discharge). EMHASS stamps plan row zero at the grid
+    # boundary at or before launch -- verified against a live 0.18.2 backend:
+    # a run launched at 01:15:33Z produced a first row of 01:15:00Z on a
+    # 15-minute step. Passing the raw launch instant put min_temperatures[i]
+    # at ``now + i*step`` while EMHASS reads it at ``floor(now) + i*step``,
+    # sliding the whole comfort window and its setback ramp up to a full
+    # timestep late.
     config = build_def_load_config(
-        thermal_by_index, load_count, inputs.now, step, inputs.horizon_steps
+        thermal_by_index, load_count, floor_to_step(inputs.now, step), step, inputs.horizon_steps
     )
     return {} if config is None else {"def_load_config": config}
 
