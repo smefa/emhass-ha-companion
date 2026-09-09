@@ -1232,6 +1232,34 @@ def test_battery_lockout_disabled_load_gets_no_window():
     assert load.battery_lockout is None
 
 
+def test_battery_lockout_window_cleared_for_a_disabled_load():
+    """A load that is switched off is parked out of the optimisation, so a
+    window held over it would price the battery out for a run that cannot
+    happen. Cleared outright, the same as turning the lockout switch off."""
+    load = _load(enabled=False, battery_lockout_enabled=True)
+    registry = _registry(load)
+    plan = _rows_plan(15, 0.0, 2000.0, 2000.0, 0.0)
+
+    registry.apply_battery_lockout(plan, ["abc"], T0, 15)
+
+    assert load.battery_lockout is None
+
+
+def test_battery_lockout_window_already_held_is_dropped_when_the_load_is_disabled():
+    """Disabling takes effect at once rather than at the window's own end --
+    the held window survives replan by design, so nothing else would drop it."""
+    load = _load(battery_lockout_enabled=True)
+    registry = _registry(load)
+    plan = _rows_plan(15, 0.0, 2000.0, 2000.0, 0.0)
+    registry.apply_battery_lockout(plan, ["abc"], T0, 15)
+    assert load.battery_lockout is not None
+
+    load.enabled = False
+    registry.apply_battery_lockout(plan, ["abc"], T0 + timedelta(minutes=15), 15)
+
+    assert load.battery_lockout is None
+
+
 def test_battery_lockout_window_derived_from_plan_deferrable_column():
     load = _load(battery_lockout_enabled=True)
     registry = _registry(load)

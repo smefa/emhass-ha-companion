@@ -1343,12 +1343,18 @@ class DeferrableRegistry:
         whether or not the load ever actually drew power, since a load that
         never ran needs the same release or it would stay locked out forever.
 
-        A disabled load's window is dropped outright rather than left to
-        expire on its own, so turning the switch off takes effect immediately.
+        A window is dropped outright rather than left to expire on its own
+        whenever the load will not be running under it -- either the lockout
+        switch is off or the load itself is disabled -- so both take effect
+        immediately. The disabled case matters for the same reason the switch
+        does: a disabled load is parked out of the optimisation entirely
+        (``wants_to_run`` is False in :meth:`DeferrableRuntime.to_load`), so a
+        window left standing would go on pricing the battery out of serving
+        the house for a load that cannot run under it.
         """
         step = timedelta(minutes=step_minutes)
         for load in self._loads.values():
-            if not load.battery_lockout_enabled:
+            if not load.battery_lockout_enabled or not load.enabled:
                 load.battery_lockout = None
                 continue
             if load.battery_lockout is not None and now >= load.battery_lockout.end:
