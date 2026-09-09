@@ -1712,6 +1712,14 @@ def test_a_currently_running_single_constant_load_is_not_pinned_to_a_future_wind
     assert payload["operating_hours_of_each_deferrable_load"] == [0.0]
     assert payload["operating_timesteps_of_each_deferrable_load"] == [0]
     assert any("asking for 0 hours" in warning for warning in result.warnings)
+    # Zero hours is necessary but not sufficient: Block A's pin is gated on
+    # def_current_state and def_current_power is a hard equality on timestep
+    # 0 whatever the operating requirement, so the load has to be parked
+    # outright rather than merely zeroed.
+    assert payload["def_current_state"] == [False]
+    assert "def_current_power" not in payload
+    assert payload["def_current_operating_timesteps"] == [0]
+    assert payload["set_deferrable_load_single_constant"] == [False]
 
 
 def test_a_currently_running_single_constant_load_keeps_its_hours_when_the_window_covers_now():
@@ -1801,6 +1809,63 @@ def test_a_window_opening_beyond_the_horizon_parks_the_load_instead_of_freeing_i
     assert payload["operating_hours_of_each_deferrable_load"] == [0.0]
     assert payload["operating_timesteps_of_each_deferrable_load"] == [0]
     assert any("will not be scheduled to run this cycle" in warning for warning in result.warnings)
+    # Parked, not merely zeroed -- same reasoning as the single-constant case.
+    assert payload["def_current_state"] == [False]
+    assert "def_current_power" not in payload
+    assert payload["def_current_operating_timesteps"] == [0]
+
+
+def test_a_zero_houred_load_is_parked_as_thoroughly_as_a_disabled_one():
+    """Both routes to "ask for nothing this cycle" must clear the current-state
+    trio, not just the hours.
+
+    `_park` exists because telling EMHASS a load is running, or has already
+    run, while demanding it total zero energy is the contradiction it answers
+    by declaring the *whole problem* infeasible. `_describe` has two branches
+    that reach the same "ask for nothing" conclusion -- a window past the
+    horizon, and a running single-constant load whose window has moved on --
+    and both have to land in the same place, or they reintroduce exactly the
+    t=0 pin that def_current_power and the min-on-time remainder were already
+    closed against.
+    """
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    beyond_horizon = DeferrableLoad(
+        subentry_id="dishwasher",
+        name="Dishwasher",
+        nominal_power_w=1500,
+        operating_hours=2,
+        earliest_start=time(22, 0),
+        latest_end=time(6, 0),
+        current_state=True,
+        current_power_w=1500.0,
+        completed_timesteps=2,
+        minimum_on_time_minutes=60,
+        current_on_timesteps=1,
+    )
+    moved_on = DeferrableLoad(
+        subentry_id="pool",
+        name="Pool",
+        nominal_power_w=850,
+        operating_hours=3,
+        single_constant=True,
+        current_state=True,
+        current_power_w=850.0,
+        completed_timesteps=2,
+        minimum_on_time_minutes=60,
+        current_on_timesteps=1,
+        start_at=now + timedelta(hours=2),
+    )
+    for load in (beyond_horizon, moved_on):
+        payload = build_payload(_inputs(now=now, loads=[load], horizon_steps=4)).payload
+        assert payload["operating_hours_of_each_deferrable_load"] == [0.0], load.name
+        assert payload["def_current_state"] == [False], load.name
+        assert payload["def_current_operating_timesteps"] == [0], load.name
+        assert payload["def_minimum_on_time"] == [0], load.name
+        assert payload["def_current_on_timesteps"] == [0], load.name
+        assert payload["set_deferrable_load_single_constant"] == [False], load.name
+        # Omitted entirely rather than sent as zero: the key is only emitted
+        # when some load actually reports commanded power.
+        assert "def_current_power" not in payload, load.name
 
 
 def test_profile_settings_can_override_defaults():

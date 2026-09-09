@@ -1064,11 +1064,19 @@ def _describe(
     # beyond-horizon window gets clamped to -- so passing hours through here
     # would tell EMHASS the load may start right now, which is exactly what
     # its window (quiet hours, a surplus block, ...) says it may not do yet.
-    # Zeroing the target is the only way to say "not this cycle": the window
-    # comes back around and asks properly once the horizon reaches it.
+    # Saying "not this cycle" is the only way out: the window comes back
+    # around and asks properly once the horizon reaches it.
+    #
+    # Parked through :func:`_park` rather than by zeroing the hours here.
+    # Zero hours alone does *not* stop EMHASS acting on the load: the
+    # current-state trio (def_current_state, def_current_power,
+    # def_current_operating_timesteps) drives pins and force-on blocks that
+    # are read independently of the operating requirement -- see the
+    # single-constant branch below, which is the same trap reached from the
+    # other direction, and _park's own docstring for why a zero-hour load
+    # must never also claim to be running.
     if window.opens_beyond_horizon:
-        quantised = 0.0
-        steps = 0
+        return _park(load)
 
     # A single-constant load that is already running gets *pinned* by EMHASS
     # the moment it has any operating requirement at all: an unbroken block
@@ -1083,14 +1091,20 @@ def _describe(
     # for nothing this cycle avoids the pin entirely and leaves the load free
     # to turn off; the later block gets asked for normally, on its own
     # cycle, once "now" actually reaches it and current_state has caught up.
+    #
+    # Zero hours is necessary but not sufficient, which is why this parks the
+    # load outright. Block A's pin is gated on def_current_state, and
+    # def_current_power is a hard equality on timestep 0 regardless of the
+    # operating requirement (planning/run_now_via_block_b.md) -- so leaving
+    # the current-state trio truthful while asking for nothing is the exact
+    # contradiction _park exists to prevent.
     if load.current_state and load.single_constant and window.start_index > 0:
         warnings.append(
             f"{load.name}: still running from an earlier decision, but its window "
             f"now starts at step {window.start_index}; asking for 0 hours this run "
             f"instead of pinning it to the later block."
         )
-        quantised = 0.0
-        steps = 0
+        return _park(load)
 
     # A floor above the ceiling has no feasible power at all, and EMHASS
     # reports that as an infeasible problem with no hint as to which load
