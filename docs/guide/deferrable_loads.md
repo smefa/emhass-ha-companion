@@ -149,6 +149,9 @@ full detail.
   day. *On spare solar* loads only. It pays for that by claiming a few per cent
   less of the day's surplus. Off by default, and off is usually the better
   setting — see **[Surplus loads](surplus_loads.md)**.
+- **No battery for this load** (switch) — keep the battery from feeding this
+  load specifically, without changing how it serves everything else. Off by
+  default. See **[Battery lockout](../battery_lockout.md)**.
 - **Run now** (button) — force the load on right now, regardless of the
   plan. Not available on *On spare solar* loads, where ignoring the plan
   would mean running off the grid at night; use *Start as early as
