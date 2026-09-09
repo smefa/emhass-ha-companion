@@ -1225,6 +1225,43 @@ def test_battery_lockout_window_derived_from_plan_deferrable_column():
     assert load.battery_lockout.end == T0 + timedelta(minutes=45)
 
 
+def test_battery_lockout_window_covers_one_block_not_the_gap_between_two():
+    """Two disjoint blocks in one column must not collapse into one span.
+
+    A plan routinely schedules a load twice in a horizon -- a pool pump on the
+    morning and the afternoon shoulder. Taking first-start to last-end would
+    price the battery out of the whole idle gap in between, which is the exact
+    error planning/battery_lockaout_plan.md rules out for the held and
+    while_running halves ("never merged into one span"), just reached from
+    inside a single plan column.
+    """
+    load = _load(battery_lockout_enabled=True)
+    registry = _registry(load)
+    # On for two steps, off for four, on again for two.
+    plan = _rows_plan(15, 2000.0, 2000.0, 0.0, 0.0, 0.0, 0.0, 2000.0, 2000.0)
+
+    registry.apply_battery_lockout(plan, ["abc"], T0, 15)
+
+    assert load.battery_lockout is not None
+    assert load.battery_lockout.start == T0
+    # One step past the first block's last row (T0+15) -- not past the
+    # second block's, which would be T0+120.
+    assert load.battery_lockout.end == T0 + timedelta(minutes=30)
+
+
+def test_battery_lockout_window_skips_leading_idle_rows():
+    """The block need not start at row zero; rows before it are just skipped."""
+    load = _load(battery_lockout_enabled=True)
+    registry = _registry(load)
+    plan = _rows_plan(15, 0.0, 0.0, 2000.0, 2000.0, 0.0, 2000.0)
+
+    registry.apply_battery_lockout(plan, ["abc"], T0, 15)
+
+    assert load.battery_lockout is not None
+    assert load.battery_lockout.start == T0 + timedelta(minutes=30)
+    assert load.battery_lockout.end == T0 + timedelta(minutes=60)
+
+
 def test_battery_lockout_load_missing_from_load_order_gets_no_window():
     load = _load(battery_lockout_enabled=True)
     registry = _registry(load)

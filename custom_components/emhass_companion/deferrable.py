@@ -1105,22 +1105,37 @@ class DeferrableRuntime:
 def _derive_held_window(
     plan: Plan, index: int, threshold_w: float, now: datetime, step: timedelta
 ) -> BatteryLockout | None:
-    """The span of ``plan`` where this load's column exceeds ``threshold_w``.
+    """The first contiguous block of ``plan`` where this load's column exceeds
+    ``threshold_w``.
 
-    Mirrors ``Executor._scheduled``'s single-row test, widened across the
-    whole plan to find the block's extent rather than just where "now" falls
-    inside it. One step past the last qualifying row, matching
+    Mirrors ``Executor._scheduled``'s single-row test, widened across
+    consecutive rows to find that block's extent rather than just where "now"
+    falls inside it. One step past the last qualifying row, matching
     ``SurplusBudget.window_end`` -- see ``allocate`` for why the extra step
     is there.
+
+    The *first* block, and only that block -- deliberately not
+    ``min(starts)..max(ends)`` across the whole column. A plan routinely
+    schedules one load in two disjoint blocks (a pool pump on the morning and
+    the afternoon shoulder, say), and collapsing those to one span would price
+    the battery out of the entire idle gap between them. That is the same
+    error planning/battery_lockaout_plan.md rules out for the held and
+    while_running halves -- "never merged into one span" -- just reached from
+    inside a single plan column instead of across the two sources. The later
+    block is not lost: the held window releases once ``now`` reaches its end,
+    and the next derivation picks the block that is then first.
     """
-    scheduled = [
-        row.timestamp
-        for row in plan.rows
-        if index < len(row.deferrables) and row.deferrables[index] > threshold_w
-    ]
-    if not scheduled:
+    block: list[datetime] = []
+    for row in plan.rows:
+        if index < len(row.deferrables) and row.deferrables[index] > threshold_w:
+            block.append(row.timestamp)
+        elif block:
+            # A gap after the block has started ends it. Rows before the
+            # first qualifying one are simply skipped.
+            break
+    if not block:
         return None
-    return BatteryLockout(start=scheduled[0], end=scheduled[-1] + step, derived_at=now)
+    return BatteryLockout(start=block[0], end=block[-1] + step, derived_at=now)
 
 
 class DeferrableRegistry:
