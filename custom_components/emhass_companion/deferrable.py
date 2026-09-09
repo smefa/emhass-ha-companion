@@ -665,7 +665,15 @@ class DeferrableRuntime:
             return
         self.runtime_today += now - self.running_since
         if self.requested_at is not None:
-            self.request_runtime += now - max(self.running_since, self.requested_at)
+            # Clamped for the same reason observe_command's clock is: a span
+            # that closed before the request was armed owes it nothing. Without
+            # this, assume_from_plan replaying a block stamped wholly before
+            # requested_at -- which a cold plan_assumed_until does after a
+            # restart -- subtracts the gap, under-crediting the run so the
+            # auto-disarm fires late.
+            self.request_runtime += max(
+                now - max(self.running_since, self.requested_at), timedelta()
+            )
         self.running_since = None
         self.off_since = now
 

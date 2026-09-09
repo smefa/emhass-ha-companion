@@ -652,6 +652,26 @@ def test_a_run_already_under_way_only_counts_from_the_request():
     assert load.elapsed_since_request(T0 + timedelta(hours=4)) == timedelta(hours=1)
 
 
+def test_a_run_that_finished_before_the_request_does_not_count_against_it():
+    """The mirror of the case above, and the reason _stop clamps.
+
+    A sourceless load replays its own plan, and after a restart
+    plan_assumed_until is cold, so blocks stamped wholly before the request
+    are replayed too. Crediting the negative gap would leave request_runtime
+    below zero and hold the auto-disarm open past the run it already had.
+    """
+    load = _load(recurrence=RECURRENCE_ON_DEMAND, operating_hours=2)
+    load.request(T0)
+    rows = [
+        PlanRow(timestamp=T0 - timedelta(minutes=20), deferrables=[2000.0]),
+        PlanRow(timestamp=T0 - timedelta(minutes=10), deferrables=[0.0]),
+    ]
+    load.assume_from_plan(rows, 0, T0 + timedelta(minutes=15))
+
+    assert load.request_runtime == timedelta()
+    assert load.elapsed_since_request(T0 + timedelta(minutes=15)) == timedelta()
+
+
 def test_an_armed_request_with_no_anchor_falls_back_to_the_day():
     """A request restored from before anchors existed. Per-day accounting is
     the behaviour it was armed under, so it still completes."""
