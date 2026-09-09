@@ -190,6 +190,17 @@ class EmhassData:
     soc_day_range: DayRange | None = None
     last_action: str | None = None
     last_success: datetime | None = None
+    price_source_end: datetime | None = None
+    """How far the buy-price *source* reached this run, before ``buy_price``
+    was trimmed to the horizon.
+
+    The scheduler fires a day-ahead run when the price series gains a new day
+    (``Scheduler._check_price_horizon``), and ``buy_price`` cannot answer that
+    question: it is cut at ``horizon_end`` for publication, so once the source
+    reaches past the horizon its end saturates there and grows only by one MPC
+    interval per run -- never the six hours the trigger looks for. Recording
+    the untrimmed end keeps the two concerns separate: ``buy_price`` describes
+    what the plan covers, this describes what the market has published."""
 
     def deferrable_index(self, subentry_id: str) -> int | None:
         """Position of a load in EMHASS's ``P_deferrable{k}`` numbering."""
@@ -928,6 +939,8 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             end_soc=self._end_soc,
             soc_day_range=self._soc_day_range,
             last_action=action,
+            # Before the trim above, deliberately -- see the field's docstring.
+            price_source_end=inputs.buy_price.end if inputs.buy_price else None,
             # Only a genuinely successful solve counts. "no-run" and infeasible
             # both leave the staleness watchdog tripped, which is what stops an
             # executor from acting on a plan that was never actually produced.
