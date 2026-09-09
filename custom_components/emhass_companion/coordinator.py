@@ -391,9 +391,10 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         the answer was at the *previous* run, however far the plan has since
         moved on.
 
-        That is not merely stale, it is self-sustaining: EMHASS starts its
-        horizon at the next timestep boundary after launch, so at the instant
-        of every run "now" sits before row zero. A load whose power sensor
+        That is not merely stale, it is self-sustaining: EMHASS aligns row
+        zero to the timestep boundary at or before launch, so a freshly
+        published plan already covers "now" and then ages one row per timestep
+        with nothing to trigger a rewrite. A load whose power sensor
         chatters gets dragged back to life by its own registry notifications;
         one driven by a control entity that rarely changes state has nothing
         to nudge it and stays unknown indefinitely.

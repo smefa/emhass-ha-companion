@@ -136,15 +136,24 @@ def surplus_series(plan: Plan, surplus_indices: Sequence[int]) -> Series:
 def seam_carry(previous: Series, incoming: Series) -> Series:
     """The outgoing plan's last row before ``incoming`` picks up.
 
-    EMHASS starts its horizon at the next timestep boundary after launch, so
-    at the moment a plan is published "now" sits *before* row zero and every
-    surplus sensor reading ``value_at(now)`` gets ``None`` until the horizon
-    catches up. That is a gap at every single run, not an edge case, and
-    publishing a zero through it would be worse than publishing nothing: a
-    fabricated "no spare sun" is indistinguishable from a real one, so
-    anything gated on it short-cycles once per optimisation. The outgoing
-    plan did cover that stretch, so its last row is carried across instead --
-    still a real forecast, just from the previous run.
+    Written for a horizon believed to start at the timestep boundary *after*
+    launch, which would leave "now" before row zero at every publication and
+    every surplus sensor reading ``value_at(now)`` returning ``None`` until
+    the horizon caught up. That premise does not hold on EMHASS 0.18.2, which
+    stamps row zero at ``floor(now)`` -- a run launched at 01:15:33Z returned
+    row zero at 01:15:00Z on a 15-minute step -- so row zero already covers
+    "now" and no gap opens.
+
+    Kept regardless, and deliberately: it is inert whenever row zero covers
+    "now", since hold-last then consults the newer row and never reaches the
+    carry. It was added for a symptom actually observed, and retiring it on a
+    single version's evidence would be a behaviour change bought with nothing.
+    Should a backend ever leave that gap open, publishing a zero through it
+    would be worse than publishing nothing: a fabricated "no spare sun" is
+    indistinguishable from a real one, so anything gated on it short-cycles
+    once per optimisation. The outgoing plan did cover that stretch, so its
+    last row is carried across instead -- still a real forecast, just from the
+    previous run.
 
     Exactly one row, and only one predating the new horizon, so the carry can
     neither accumulate across runs nor outlive the seam it bridges: the moment

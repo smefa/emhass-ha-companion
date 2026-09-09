@@ -832,13 +832,19 @@ class Plan:
     def row_at(self, when: datetime) -> PlanRow | None:
         """The row whose interval contains ``when`` (hold-last semantics).
 
-        A moment *just before* the plan starts counts as the first row. EMHASS
-        aligns its horizon to the next timestep boundary after the optimisation
-        is launched, so for the first minutes after every single run "now" sits
-        in front of row zero -- and reporting no plan there would blank every
-        plan-derived sensor on a regular cycle, for a plan that is in fact
-        perfectly fresh. The cost is acting on the first row up to one timestep
-        early, which is a far smaller error than having no answer at all.
+        A moment *just before* the plan starts counts as the first row. That
+        tolerance was written for a horizon believed to begin at the timestep
+        boundary *after* launch, which would put "now" in front of row zero
+        for the first minutes of every run. EMHASS 0.18.2 stamps row zero at
+        ``floor(now)`` instead, so the window does not normally open at all.
+
+        Kept regardless: it costs nothing while row zero already covers "now",
+        and it still answers the case it was written for -- a backend aligning
+        differently, or a plan carried over from a run whose clock ran ahead.
+        Reporting no plan there would blank every plan-derived sensor on a
+        regular cycle, for a plan that is in fact perfectly fresh, and the
+        cost is acting on the first row up to one timestep early, a far
+        smaller error than having no answer at all.
 
         Anything earlier than that really is uncovered and still returns None.
         """
