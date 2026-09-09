@@ -642,7 +642,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
     def _capacity_interval_history_w(
         self, now: datetime, step: timedelta, interval_timesteps: int
     ) -> list[float]:
-        """``capacity_charge_interval_history_w`` for the still-open interval.
+        """``capacity_charge_current_interval_history`` for the still-open interval.
 
         Spreads :attr:`PeakTracker.open_interval_kwh` flat across its ``m``
         elapsed timesteps -- this reproduces the completed-interval average
