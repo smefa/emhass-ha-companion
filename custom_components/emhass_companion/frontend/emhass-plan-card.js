@@ -344,7 +344,10 @@ class EmhassPlanCard extends HTMLElement {
         }, root);
       }
 
-      this._area(root, pv, x, y, COLORS.pv, y(lo));
+      // Baselined at zero, not the panel's floor: solar is never negative, and
+      // filling down to a floor set by grid export or battery charge painted
+      // the whole negative band solar orange.
+      this._area(root, pv, x, y, COLORS.pv, y(0));
       this._line(root, grid, x, y, COLORS.gridIn, 1.5);
       this._line(root, battery, x, y, COLORS.battery, 1.5);
       this._line(root, houseLoad, x, y, COLORS.load, 2);
