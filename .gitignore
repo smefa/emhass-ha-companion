@@ -32,3 +32,7 @@ site/
 
 # Internal planning docs -- not for the public repo.
 planning/
+
+# Stale host sync snapshots (never ship)
+_host_sync/
+
