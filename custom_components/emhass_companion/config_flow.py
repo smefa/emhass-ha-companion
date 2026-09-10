@@ -722,23 +722,28 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_battery(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
+        errors: dict[str, str] = {}
         if user_input is not None:
-            self._options["battery"] = _battery_storage_from_input(user_input)
-            if soc := user_input.get(CONF_SOC_ENTITY):
-                self._options[CONF_SOC_ENTITY] = soc
-            if battery_power := user_input.get(CONF_BATTERY_POWER_ENTITY):
-                self._options[CONF_BATTERY_POWER_ENTITY] = battery_power
-                self._options[CONF_BATTERY_POWER_INVERT] = bool(
-                    user_input.get(CONF_BATTERY_POWER_INVERT)
-                )
-            if pv_live := user_input.get(CONF_PV_ENTITY):
-                self._options[CONF_PV_ENTITY] = pv_live
-            return await self.async_step_inverter()
+            errors = _battery_errors(user_input)
+            if not errors:
+                self._options["battery"] = _battery_storage_from_input(user_input)
+                if soc := user_input.get(CONF_SOC_ENTITY):
+                    self._options[CONF_SOC_ENTITY] = soc
+                if battery_power := user_input.get(CONF_BATTERY_POWER_ENTITY):
+                    self._options[CONF_BATTERY_POWER_ENTITY] = battery_power
+                    self._options[CONF_BATTERY_POWER_INVERT] = bool(
+                        user_input.get(CONF_BATTERY_POWER_INVERT)
+                    )
+                if pv_live := user_input.get(CONF_PV_ENTITY):
+                    self._options[CONF_PV_ENTITY] = pv_live
+                return await self.async_step_inverter()
 
+        defaults = _battery_form_defaults(user_input) if user_input is not None else {}
         return self.async_show_form(
             step_id="battery",
-            data_schema=vol.Schema(battery_schema({})),
-            description_placeholders={"round_trip": _battery_efficiency_note({})},
+            data_schema=vol.Schema(battery_schema(defaults)),
+            description_placeholders={"round_trip": _battery_efficiency_note(defaults)},
+            errors=errors,
         )
 
     async def async_step_inverter(
@@ -1553,6 +1558,38 @@ def _battery_storage_from_input(user_input: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _battery_errors(user_input: dict[str, Any]) -> dict[str, str]:
+    """Reject a hybrid inverter with no AC throughput.
+
+    The toggle defaults on and the watt fields default to 0. Sending that pair
+    to EMHASS caps PV and battery at the AC bus and makes the plan infeasible.
+    The fields are inert when the toggle is off, so 0 is fine then.
+    """
+    if not user_input.get(CONF_HYBRID_INVERTER, True):
+        return {}
+    ac_output = user_input.get(CONF_INVERTER_AC_OUTPUT_MAX) or 0
+    if ac_output <= 0:
+        return {CONF_INVERTER_AC_OUTPUT_MAX: "ac_output_required"}
+    return {}
+
+
+def _battery_form_defaults(user_input: dict[str, Any]) -> dict[str, Any]:
+    """Schema defaults from a submitted battery form.
+
+    ``battery_schema`` expects stored 0-1 fractions for the percent fields, so
+    the form values go through ``_battery_storage_from_input`` first. Entity
+    ids live on the options blob rather than inside ``battery``, so they are
+    copied back on.
+    """
+    return {
+        **_battery_storage_from_input(user_input),
+        CONF_SOC_ENTITY: user_input.get(CONF_SOC_ENTITY) or "",
+        CONF_BATTERY_POWER_ENTITY: user_input.get(CONF_BATTERY_POWER_ENTITY) or "",
+        CONF_BATTERY_POWER_INVERT: bool(user_input.get(CONF_BATTERY_POWER_INVERT)),
+        CONF_PV_ENTITY: user_input.get(CONF_PV_ENTITY) or "",
+    }
+
+
 def _battery_efficiency_note(defaults: dict[str, Any]) -> str:
     """The round trip the four efficiency fields multiply out to.
 
@@ -1611,7 +1648,9 @@ def battery_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
         # off, the fields below are collected but never sent to EMHASS (see
         # payload.py's _hybrid_inverter_settings) -- harmless to show
         # unconditionally, matching how the battery fields above already
-        # behave when "use_battery" is off.
+        # behave when "use_battery" is off. When on, _battery_errors refuses a
+        # 0 W output limit rather than let it reach EMHASS as a zero-capacity
+        # hybrid.
         vol.Required(
             CONF_HYBRID_INVERTER, default=defaults.get(CONF_HYBRID_INVERTER, True)
         ): selector.BooleanSelector(),
@@ -2562,25 +2601,34 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         options = dict(self.config_entry.options)
+        errors: dict[str, str] = {}
         if user_input is not None:
-            options["battery"] = _battery_storage_from_input(user_input)
-            options[CONF_SOC_ENTITY] = user_input.get(CONF_SOC_ENTITY) or None
-            options[CONF_BATTERY_POWER_ENTITY] = user_input.get(CONF_BATTERY_POWER_ENTITY) or None
-            options[CONF_BATTERY_POWER_INVERT] = bool(user_input.get(CONF_BATTERY_POWER_INVERT))
-            options[CONF_PV_ENTITY] = user_input.get(CONF_PV_ENTITY) or None
-            return self.async_create_entry(data=options)
-
-        defaults = {
-            **options.get("battery", {}),
-            CONF_SOC_ENTITY: options.get(CONF_SOC_ENTITY) or "",
-            CONF_BATTERY_POWER_ENTITY: options.get(CONF_BATTERY_POWER_ENTITY) or "",
-            CONF_BATTERY_POWER_INVERT: bool(options.get(CONF_BATTERY_POWER_INVERT)),
-            CONF_PV_ENTITY: options.get(CONF_PV_ENTITY) or "",
-        }
+            errors = _battery_errors(user_input)
+            if not errors:
+                options["battery"] = _battery_storage_from_input(user_input)
+                options[CONF_SOC_ENTITY] = user_input.get(CONF_SOC_ENTITY) or None
+                options[CONF_BATTERY_POWER_ENTITY] = (
+                    user_input.get(CONF_BATTERY_POWER_ENTITY) or None
+                )
+                options[CONF_BATTERY_POWER_INVERT] = bool(
+                    user_input.get(CONF_BATTERY_POWER_INVERT)
+                )
+                options[CONF_PV_ENTITY] = user_input.get(CONF_PV_ENTITY) or None
+                return self.async_create_entry(data=options)
+            defaults = _battery_form_defaults(user_input)
+        else:
+            defaults = {
+                **options.get("battery", {}),
+                CONF_SOC_ENTITY: options.get(CONF_SOC_ENTITY) or "",
+                CONF_BATTERY_POWER_ENTITY: options.get(CONF_BATTERY_POWER_ENTITY) or "",
+                CONF_BATTERY_POWER_INVERT: bool(options.get(CONF_BATTERY_POWER_INVERT)),
+                CONF_PV_ENTITY: options.get(CONF_PV_ENTITY) or "",
+            }
         return self.async_show_form(
             step_id="battery",
             data_schema=vol.Schema(battery_schema(defaults)),
             description_placeholders={"round_trip": _battery_efficiency_note(defaults)},
+            errors=errors,
         )
 
     async def async_step_grid(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:

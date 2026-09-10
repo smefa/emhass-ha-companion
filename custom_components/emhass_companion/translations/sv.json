@@ -204,7 +204,8 @@
     "error": {
       "cannot_connect": "Kunde inte nå EMHASS på den adressen. Kontrollera att det körs och att adress och port stämmer.",
       "unknown_version": "Ansluten, men EMHASS rapporterade ingen version. Det är förmodligen för gammalt.",
-      "version_too_old": "Denna EMHASS är för gammal. Version {min_version} eller senare krävs, eftersom integrationen läser planen via det JSON-API som infördes i den versionen."
+      "version_too_old": "Denna EMHASS är för gammal. Version {min_version} eller senare krävs, eftersom integrationen läser planen via det JSON-API som infördes i den versionen.",
+      "ac_output_required": "En delad växelriktare behöver en positiv AC-uteffektgräns. Noll skulle stoppa både sol och batteri från att nå huset."
     },
     "abort": {
       "single_instance_allowed": "EMHASS Companion är redan konfigurerad.",
@@ -435,6 +436,9 @@
           }
         }
       }
+    },
+    "error": {
+      "ac_output_required": "En delad växelriktare behöver en positiv AC-uteffektgräns. Noll skulle stoppa både sol och batteri från att nå huset."
     }
   },
   "selector": {

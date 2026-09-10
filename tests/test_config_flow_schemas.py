@@ -15,6 +15,7 @@ import voluptuous as vol
 from custom_components.emhass_companion.config_flow import (
     STANDARD_TIME_STEPS,
     UNTESTED_NOTICE,
+    _battery_errors,
     _collect_grid,
     _collect_tariff,
     _default_profile_options,
@@ -32,6 +33,8 @@ from custom_components.emhass_companion.const import (
     CONF_COMPUTE_CURTAILMENT,
     CONF_GRID_EXPORT_LIMIT_ENTITY,
     CONF_GRID_IMPORT_LIMIT_ENTITY,
+    CONF_HYBRID_INVERTER,
+    CONF_INVERTER_AC_OUTPUT_MAX,
     CONF_MULTIPLIER,
     CONF_TIME_STEP,
     LOAD_PROFILE_CREATE_SENTINEL,
@@ -108,6 +111,32 @@ def test_collect_tariff_never_persists_a_none_template():
 
 def test_battery_schema_builds():
     assert vol.Schema(battery_schema({}))
+
+
+def test_hybrid_on_with_zero_ac_output_is_rejected():
+    """The toggle defaults on and the watt field defaults to 0 -- that pair
+    would send EMHASS a zero-capacity hybrid and make the plan infeasible."""
+    assert _battery_errors(
+        {CONF_HYBRID_INVERTER: True, CONF_INVERTER_AC_OUTPUT_MAX: 0}
+    ) == {CONF_INVERTER_AC_OUTPUT_MAX: "ac_output_required"}
+    assert _battery_errors({CONF_HYBRID_INVERTER: True}) == {
+        CONF_INVERTER_AC_OUTPUT_MAX: "ac_output_required"
+    }
+
+
+def test_hybrid_on_with_a_positive_ac_output_is_accepted():
+    assert (
+        _battery_errors({CONF_HYBRID_INVERTER: True, CONF_INVERTER_AC_OUTPUT_MAX: 5000})
+        == {}
+    )
+
+
+def test_hybrid_off_may_leave_ac_output_at_zero():
+    """The watt fields are inert when the toggle is off, so 0 is not a plant."""
+    assert (
+        _battery_errors({CONF_HYBRID_INVERTER: False, CONF_INVERTER_AC_OUTPUT_MAX: 0})
+        == {}
+    )
 
 
 def test_grid_schema_builds():

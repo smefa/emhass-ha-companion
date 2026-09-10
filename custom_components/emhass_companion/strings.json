@@ -204,7 +204,8 @@
     "error": {
       "cannot_connect": "Could not reach EMHASS at that address. Check that it is running and that the address and port are correct.",
       "unknown_version": "Connected, but EMHASS did not report its version. It is probably too old.",
-      "version_too_old": "This EMHASS is too old. Version {min_version} or newer is required, because this integration reads the plan through the JSON API introduced in that release."
+      "version_too_old": "This EMHASS is too old. Version {min_version} or newer is required, because this integration reads the plan through the JSON API introduced in that release.",
+      "ac_output_required": "A shared inverter needs a positive AC output limit. Zero would block PV and the battery from reaching the house."
     },
     "abort": {
       "single_instance_allowed": "EMHASS Companion is already configured.",
@@ -435,6 +436,9 @@
           }
         }
       }
+    },
+    "error": {
+      "ac_output_required": "A shared inverter needs a positive AC output limit. Zero would block PV and the battery from reaching the house."
     }
   },
   "selector": {
