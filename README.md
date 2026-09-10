@@ -75,7 +75,7 @@ See **[docs/setup.md](docs/setup.md)** for the full flow, composing real tariffs
 
 A **deferrable load** is anything whose *timing* the optimiser may choose — a dishwasher, a car charger, a pool pump. Tell it the load needs three hours before morning and it decides which three. A **thermal load** is a variant whose *temperature* is controlled instead — a heat pump, direct electric heating — kept inside a comfort band you set rather than a fixed run time. Each is added under **Settings → Devices & Services → EMHASS Companion**, becomes its own device, and exposes a `binary_sensor.<load>_should_run` to automate against.
 
-See **[docs/deferrable_loads.md](docs/deferrable_loads.md)** and **[docs/thermal_loads.md](docs/thermal_loads.md)** for the entities, on-demand (event-triggered) loads, and calibration advice. There's also **[docs/surplus_loads.md](docs/surplus_loads.md)** for loads that only ever run on spare solar.
+See **[docs/deferrable_loads.md](docs/deferrable_loads.md)** and **[docs/thermal_loads.md](docs/thermal_loads.md)** for the entities, on-demand (event-triggered) loads, and calibration advice. There's also **[docs/surplus_loads.md](docs/surplus_loads.md)** for loads that only ever run on spare solar. It now supports deferrable loads without battery usage.
 
 ## Dashboard cards
 
