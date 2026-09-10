@@ -22,6 +22,8 @@ from .const import (
     ACTION_MPC,
     BATTERY_LOCKOUT_PRICE_FACTOR,
     BATTERY_LOCKOUT_PRICE_FLOOR,
+    BATTERY_LOCKOUT_SELF_CONSUMPTION_BIGM,
+    COST_FUN_SELF_CONSUMPTION,
     DEFAULT_COST_FUN,
 )
 from .models import (
@@ -542,7 +544,12 @@ def _battery_lockout_weights(
     floor covers a missing or all-zero price series. Windowed to the horizon
     rather than the whole series, which can run well past it. See Test C in
     the plan for where the real break-even sits against a tariff spread -- the
-    factor leaves roughly 20x headroom over it.
+    factor leaves roughly 20x headroom over it under profit/cost.
+
+    Under ``self-consumption`` EMHASS's objective multiplies grid import by a
+    hardcoded bigM of 1e3 while applying ``weight_battery_discharge`` without
+    that markup, so the lockout price is scaled by the same bigM or the
+    battery still wins against grid inside the window.
     """
     windows = [window for load in inputs.loads for window in load.battery_lockout_windows]
     if not inputs.battery.enabled or not windows:
@@ -550,6 +557,8 @@ def _battery_lockout_weights(
     horizon_prices = inputs.buy_price.window(grid_start, horizon_end) if inputs.buy_price else None
     max_buy_price = max(horizon_prices.values, default=0.0) if horizon_prices else 0.0
     price = max(BATTERY_LOCKOUT_PRICE_FACTOR * max_buy_price, BATTERY_LOCKOUT_PRICE_FLOOR)
+    if inputs.cost_fun == COST_FUN_SELF_CONSUMPTION:
+        price *= BATTERY_LOCKOUT_SELF_CONSUMPTION_BIGM
     values = [inputs.battery.weight_battery_discharge] * count
     for index in range(count):
         start = grid_start + step * index

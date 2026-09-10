@@ -128,9 +128,16 @@ CONF_WEIGHT_BATTERY_CHARGE: Final = "weight_battery_charge"
 # horizon's own max buy price rather than fixed, so it scales with currency;
 # the floor covers a missing or all-zero price series. See Test C in the plan
 # for where the real break-even sits against a tariff spread -- the factor
-# leaves roughly 20x headroom over it.
+# leaves roughly 20x headroom over it under profit/cost.
+#
+# Under costfun=self-consumption EMHASS multiplies grid-import cost by a
+# hardcoded bigM of 1e3 in its objective, while the discharge weight is applied
+# without that markup. The lockout price is therefore scaled by the same bigM
+# when that costfun is active, otherwise grid stays ~10x cheaper than a bare
+# 100x max-buy lockout and the battery still feeds the flagged load.
 BATTERY_LOCKOUT_PRICE_FACTOR: Final = 100
 BATTERY_LOCKOUT_PRICE_FLOOR: Final = 100.0
+BATTERY_LOCKOUT_SELF_CONSUMPTION_BIGM: Final = 1000.0
 # Dwell penalties on the *level* rather than the throughput. EMHASS charges
 # cost * (kWh past the threshold) * hours held there, so unlike soc_min/soc_max
 # -- which are hard planning bounds -- these bend the plan without ever making

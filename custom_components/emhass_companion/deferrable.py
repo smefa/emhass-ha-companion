@@ -87,10 +87,19 @@ from .const import (
     RECURRENCES,
     SUBENTRY_TYPE_THERMAL,
 )
-from .models import DeferrableLoad, Plan, PlanRow, Series
+from .models import BatteryConfig, DeferrableLoad, HybridInverterConfig, Plan, PlanRow, Series
 from .payload import operating_timesteps
 from .stored_time import parse_stored_time
-from .surplus import SurplusBudget, SurplusSpec, allocate, battery_reserved_series, surplus_series
+from .surplus import (
+    SurplusBudget,
+    SurplusSpec,
+    allocate,
+    battery_reserved_series,
+    current_block,
+    night_cover_reserve_wh,
+    surplus_series,
+    total_energy_wh,
+)
 from .thermal import (
     DEFAULT_COMFORT_END,
     DEFAULT_COMFORT_START,
@@ -1258,7 +1267,15 @@ class DeferrableRegistry:
         return surplus_series(plan, self.surplus_indices(load_order))
 
     def apply_surplus(
-        self, plan: Plan | None, load_order: list[str], now: datetime, step_minutes: int
+        self,
+        plan: Plan | None,
+        load_order: list[str],
+        now: datetime,
+        step_minutes: int,
+        *,
+        battery: BatteryConfig | None = None,
+        hybrid: HybridInverterConfig | None = None,
+        soc_now: float | None = None,
     ) -> None:
         """Re-derive every surplus load's budget from the previous plan.
 
@@ -1320,7 +1337,29 @@ class DeferrableRegistry:
             for load in surplus_loads
             if load.enabled and load.requested
         ]
-        budgets = allocate(series, specs, step, reserved=reserved)
+        # What the battery must keep out of these loads' reach to carry the
+        # house through the night on the far side of this block. Withheld from
+        # the aggregate the loads share, never from the slots themselves --
+        # see allocate's docstring for why that distinction is load-bearing.
+        #
+        # Absent battery config or a readable SOC there is no honest number to
+        # withhold, and ``night_cover_reserve_wh`` returns None for a night it
+        # cannot see. Both mean "no ceiling", which leaves the pre-existing
+        # behaviour exactly as it was rather than guessing.
+        allowance_wh: float | None = None
+        if battery is not None and hybrid is not None and soc_now is not None:
+            reserve_wh = night_cover_reserve_wh(plan, series, battery, hybrid, soc_now, step)
+            if reserve_wh is not None:
+                block_wh = total_energy_wh(current_block(series, step), step)
+                allowance_wh = max(0.0, block_wh - reserve_wh)
+                _LOGGER.debug(
+                    "surplus night cover: block %.0f Wh, reserving %.0f Wh, "
+                    "%.0f Wh left for surplus loads",
+                    block_wh,
+                    reserve_wh,
+                    allowance_wh,
+                )
+        budgets = allocate(series, specs, step, reserved=reserved, allowance_wh=allowance_wh)
         for load in surplus_loads:
             if (budget := budgets.get(load.subentry_id)) is not None:
                 load.surplus_budget = budget
@@ -1335,13 +1374,21 @@ class DeferrableRegistry:
         same reason: the window for *this* request has to come from the
         answer to the *last* one.
 
-        Unlike ``surplus_budget``, the held window is **not** recomputed every
-        call. Test 0 (planning/battery_lockaout_plan.md) found the unlatched
-        span moves between cycles with nothing external changing; re-deriving
-        it fresh every run would feed that jitter straight back into the next
-        request. Once set it survives until ``now`` reaches its own end --
+        Unlike ``surplus_budget``, the held window is **not** recomputed fresh
+        every call. Test 0 (planning/battery_lockaout_plan.md) found the
+        unlatched span moves between cycles with nothing external changing;
+        replacing it every run would feed that jitter straight back into the
+        next request. Once set it survives until ``now`` reaches its own end --
         whether or not the load ever actually drew power, since a load that
         never ran needs the same release or it would stay locked out forever.
+
+        The one allowed mutation while held is a **monotonic end extend**: when
+        the previous plan's first contiguous block still overlaps the latch and
+        runs later than it, the end is pushed out to match. That covers a block
+        that grows across MPC cycles (the car schedule lengthening past the
+        original latch) without chasing a relocated start or collapsing two
+        disjoint blocks into one span. The start never moves, and a
+        non-overlapping later block is ignored until the current latch expires.
 
         A window is dropped outright rather than left to expire on its own
         whenever the load will not be running under it -- either the lockout
@@ -1359,16 +1406,26 @@ class DeferrableRegistry:
                 continue
             if load.battery_lockout is not None and now >= load.battery_lockout.end:
                 load.battery_lockout = None
-            if load.battery_lockout is not None or plan is None:
+            if plan is None:
                 continue
             try:
                 index = load_order.index(load.subentry_id)
             except ValueError:
                 continue
             before = load.battery_lockout
-            load.battery_lockout = _derive_held_window(
+            derived = _derive_held_window(
                 plan, index, load.running_threshold_w, now, step
             )
+            if before is None:
+                load.battery_lockout = derived
+            elif derived is not None:
+                overlaps = derived.start < before.end and derived.end > before.start
+                if overlaps and derived.end > before.end:
+                    load.battery_lockout = BatteryLockout(
+                        start=before.start,
+                        end=derived.end,
+                        derived_at=now,
+                    )
             after = load.battery_lockout
             # The oscillation detector: whether the held window moves between
             # runs is the direct answer to "does it move with replan?" (Test 0,
@@ -1381,7 +1438,7 @@ class DeferrableRegistry:
                 _LOGGER.info(
                     "%s: battery-lockout held window %s -> %s .. %s",
                     load.name,
-                    "set" if before is None else "changed",
+                    "set" if before is None else "extended",
                     after.start.isoformat(),
                     after.end.isoformat(),
                 )

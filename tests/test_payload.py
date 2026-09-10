@@ -1157,12 +1157,44 @@ def test_battery_lockout_price_derived_from_horizon_buy_price():
     assert payload["weight_battery_discharge"][0] == pytest.approx(600.0)
 
 
+def test_battery_lockout_price_scales_for_self_consumption():
+    """EMHASS's self-consumption bigM marks grid up 1000x; lockout must match.
+
+    Without the markup a 100x max-buy lockout still loses ~10:1 to grid and the
+    battery keeps feeding the flagged load — the live failure mode under
+    costfun=self-consumption.
+    """
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    battery = BatteryConfig(enabled=True)
+    load = _load(battery_lockout_windows=((now, now + HALF_HOUR),))
+    buy_price = _series(now, 24, 6.0)
+    payload = build_payload(
+        _inputs(
+            battery=battery,
+            loads=[load],
+            buy_price=buy_price,
+            cost_fun="self-consumption",
+        )
+    ).payload
+    assert payload["weight_battery_discharge"][0] == pytest.approx(600_000.0)
+
+
 def test_battery_lockout_price_floors_with_no_price_series():
     now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
     battery = BatteryConfig(enabled=True)
     load = _load(battery_lockout_windows=((now, now + HALF_HOUR),))
     payload = build_payload(_inputs(battery=battery, loads=[load])).payload
     assert payload["weight_battery_discharge"][0] == pytest.approx(100.0)
+
+
+def test_battery_lockout_self_consumption_floor_also_scales():
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    battery = BatteryConfig(enabled=True)
+    load = _load(battery_lockout_windows=((now, now + HALF_HOUR),))
+    payload = build_payload(
+        _inputs(battery=battery, loads=[load], cost_fun="self-consumption")
+    ).payload
+    assert payload["weight_battery_discharge"][0] == pytest.approx(100_000.0)
 
 
 def test_battery_lockout_unions_across_two_flagged_loads():

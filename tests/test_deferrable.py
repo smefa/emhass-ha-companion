@@ -1321,7 +1321,7 @@ def test_battery_lockout_load_missing_from_load_order_gets_no_window():
 
 
 def test_battery_lockout_held_window_does_not_move_when_the_next_plan_schedules_elsewhere():
-    """Test 0: the unlatched window moves on its own. Held must not."""
+    """Test 0: the unlatched window moves on its own. Held must not chase it."""
     load = _load(battery_lockout_enabled=True)
     registry = _registry(load)
     first = _rows_plan(15, 0.0, 2000.0, 2000.0, 0.0)
@@ -1332,6 +1332,58 @@ def test_battery_lockout_held_window_does_not_move_when_the_next_plan_schedules_
     registry.apply_battery_lockout(later, ["abc"], T0, 15)
 
     assert load.battery_lockout == held_after_first
+
+
+def test_battery_lockout_held_window_extends_when_the_same_block_grows():
+    """A lengthening first block must push the latch end out, not leave a gap.
+
+    Live failure: car stayed scheduled past the original held end while
+    while_running was off, so later steps fell back to the normal discharge
+    weight and the battery fed the car again.
+    """
+    load = _load(battery_lockout_enabled=True)
+    registry = _registry(load)
+    short = _rows_plan(15, 2000.0, 2000.0, 0.0, 0.0, 0.0, 0.0)
+    registry.apply_battery_lockout(short, ["abc"], T0, 15)
+    assert load.battery_lockout is not None
+    assert load.battery_lockout.start == T0
+    assert load.battery_lockout.end == T0 + timedelta(minutes=30)
+
+    longer = _rows_plan(15, 2000.0, 2000.0, 2000.0, 2000.0, 0.0, 0.0)
+    registry.apply_battery_lockout(longer, ["abc"], T0, 15)
+
+    assert load.battery_lockout.start == T0
+    assert load.battery_lockout.end == T0 + timedelta(minutes=60)
+
+
+def test_battery_lockout_held_window_does_not_shrink_when_the_block_shortens():
+    load = _load(battery_lockout_enabled=True)
+    registry = _registry(load)
+    long = _rows_plan(15, 2000.0, 2000.0, 2000.0, 2000.0, 0.0)
+    registry.apply_battery_lockout(long, ["abc"], T0, 15)
+    held_end = load.battery_lockout.end
+
+    short = _rows_plan(15, 2000.0, 2000.0, 0.0, 0.0, 0.0)
+    registry.apply_battery_lockout(short, ["abc"], T0, 15)
+
+    assert load.battery_lockout.start == T0
+    assert load.battery_lockout.end == held_end
+
+
+def test_battery_lockout_held_window_does_not_jump_to_a_later_disjoint_block():
+    """Growing coverage must not collapse the idle gap between two blocks."""
+    load = _load(battery_lockout_enabled=True)
+    registry = _registry(load)
+    morning = _rows_plan(15, 2000.0, 2000.0, 0.0, 0.0, 0.0, 0.0)
+    registry.apply_battery_lockout(morning, ["abc"], T0, 15)
+    held_after_morning = load.battery_lockout
+
+    # Previous plan now only shows the afternoon block -- no overlap with the
+    # morning latch, so the latch must stay put until it expires on its own.
+    afternoon_only = _rows_plan(15, 0.0, 0.0, 0.0, 0.0, 2000.0, 2000.0)
+    registry.apply_battery_lockout(afternoon_only, ["abc"], T0, 15)
+
+    assert load.battery_lockout == held_after_morning
 
 
 def test_battery_lockout_latch_releases_once_now_reaches_its_end():
