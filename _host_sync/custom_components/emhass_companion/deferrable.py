@@ -1413,9 +1413,7 @@ class DeferrableRegistry:
             except ValueError:
                 continue
             before = load.battery_lockout
-            derived = _derive_held_window(
-                plan, index, load.running_threshold_w, now, step
-            )
+            derived = _derive_held_window(plan, index, load.running_threshold_w, now, step)
             if before is None:
                 load.battery_lockout = derived
             elif derived is not None:
