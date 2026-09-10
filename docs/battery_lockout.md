@@ -53,17 +53,29 @@ different loads are both flagged.
 A large price on `weight_battery_discharge`, for exactly the priced steps,
 derived per run as `max(100 × the horizon's own highest buy price, 100.0)` —
 never a fixed number, since that would be wrong at a different currency scale.
+When the hub cost function is **Maximize self-consumption**, that price is
+multiplied by EMHASS's own self-consumption bigM (`1000`): that costfun marks
+grid import up by the same factor while leaving the discharge weight unmarked,
+so without the scale-up the lockout still loses to battery-over-grid inside the
+window. Profit and minimize-cost are unchanged.
+
 This is **weight-only**:
 
 - **Soft.** A cost, not a constraint, so it can never make the solve
   infeasible however large it is. There is real headroom too: against a
-  4.0-currency/kWh price spread the true break-even for *any* discharge sits
-  around 4.4, and this feature's default prices roughly 20× above that.
+  4.0-currency/kWh price spread under profit/cost the true break-even for *any*
+  discharge sits around 4.4, and this feature's default prices roughly 20×
+  above that.
 - **Discharge-only.** The battery may still *charge* through a locked-out
   window — on surplus PV, say — while the flagged load draws from the grid.
   That is the strongest reason to prefer this over an inverter-level lockout
   or `select.emhass_mode` → *Idle*, neither of which can express "charge yes,
   discharge no" for one window.
+
+The held window's start is latched and does not chase replan jitter, but its
+**end may grow** when the previous plan's first contiguous block still overlaps
+the latch and runs later — so a schedule that lengthens across MPC cycles stays
+covered without collapsing two disjoint blocks into one span.
 
 ## What it does not do
 

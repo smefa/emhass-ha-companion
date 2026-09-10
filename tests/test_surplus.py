@@ -12,13 +12,23 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from custom_components.emhass_companion.models import Plan, PlanRow, Point, Series
+from custom_components.emhass_companion.models import (
+    BatteryConfig,
+    HybridInverterConfig,
+    Plan,
+    PlanRow,
+    Point,
+    Series,
+)
 from custom_components.emhass_companion.surplus import (
+    NIGHT_COVER_MARGIN,
     SurplusSpec,
     allocate,
     battery_reserved_series,
     current_block,
     modulation_margin,
+    night_cover_reserve_wh,
+    night_window,
     seam_carry,
     surplus_series,
     total_energy_wh,
@@ -1271,3 +1281,218 @@ def test_seam_carry_bridges_nothing_when_either_side_is_missing():
     "we do not know" and "there is no spare sun" drive different automations."""
     assert not seam_carry(Series.empty(), _at(2, 1500))
     assert not seam_carry(_at(0, 600), Series.empty())
+
+
+# --- the night-cover ceiling --------------------------------------------------
+#
+# The budget's only defence used to be ``battery_reserved_series``, read off the
+# previous plan's ``P_batt`` -- where a battery that charged nothing because a
+# surplus load had already taken the sun looks exactly like one that needed
+# nothing. That reading fed back as a larger budget, which took more sun, which
+# lowered the reading again. These cover the exogenous ceiling that replaces it.
+
+
+def _night_battery(**overrides) -> BatteryConfig:
+    defaults = {
+        "enabled": True,
+        "capacity_wh": 10000.0,
+        "soc_min": 0.0,
+        "soc_max": 1.0,
+        "charge_efficiency": 0.5,
+        "discharge_efficiency": 0.5,
+    }
+    return BatteryConfig(**{**defaults, **overrides})
+
+
+def _day_night_day(load_w: float = 1000.0, batt_w: float | None = None):
+    """Two slots of sun, an hour of dark, then sun again.
+
+    An hour is exactly ``BLOCK_GAP_TOLERANCE``, so the dark stretch ends the
+    block rather than riding through it as a passing cloud would.
+    """
+    surplus = [2000.0, 2000.0, 0.0, 0.0, 0.0, 0.0, 2000.0]
+    rows = [
+        PlanRow(
+            timestamp=START + index * STEP,
+            p_pv=value,
+            p_load=load_w,
+            p_batt=batt_w,
+        )
+        for index, value in enumerate(surplus)
+    ]
+    return Plan(generated_at=START, schema_version="1.0", rows=rows), _series(*surplus)
+
+
+def test_night_window_is_the_dark_after_the_block_not_the_dark_before_it():
+    """Anchored to the block's end, which before dawn is a whole day away.
+
+    Run at 01:00 the block ``allocate`` is allocating is the coming day's, and
+    the night its charge has to cover is on the far side of it. Reading "now
+    until sunrise" instead would reserve for a night nearly over, holding back
+    almost nothing on exactly the cycles that set the day up.
+    """
+    _, series = _day_night_day()
+    start, end = night_window(series, STEP)
+
+    # Sun in slots 0-1, dark from slot 2, sun again at slot 6.
+    assert start == START + 2 * STEP
+    assert end == START + 6 * STEP
+
+
+def test_night_window_has_no_opinion_when_the_horizon_ends_in_daylight():
+    """No night in view is "no opinion", never "no night"."""
+    assert night_window(_series(2000, 2000, 2000), STEP) == (None, None)
+
+
+def test_the_reserve_carries_the_night_through_both_conversions():
+    """Efficiency here is physics, not margin, and is easy to leave out.
+
+    Four dark slots at 1000 W is 1000 Wh the house needs. At 50% out of the
+    battery that is 2000 Wh it must hold, and at 50% back in that is 4000 Wh of
+    surplus to put it there -- four times the night's own figure, before any
+    margin at all.
+    """
+    plan, series = _day_night_day()
+    reserve = night_cover_reserve_wh(
+        plan, series, _night_battery(), HybridInverterConfig(), 0.0, STEP, margin=0.0
+    )
+
+    assert reserve == pytest.approx(4000.0)
+
+
+def test_a_hybrid_pays_the_inverter_on_the_way_out_but_not_on_the_way_in():
+    """PV to battery is DC to DC on a hybrid and never crosses to AC.
+
+    Charging it with ``efficiency_ac_dc`` as well would over-reserve every
+    cycle on exactly the plants this is most likely to run on.
+    """
+    plan, series = _day_night_day()
+    battery = _night_battery(charge_efficiency=1.0, discharge_efficiency=1.0)
+    hybrid = HybridInverterConfig(enabled=True, efficiency_dc_ac=0.5, efficiency_ac_dc=0.5)
+
+    reserve = night_cover_reserve_wh(plan, series, battery, hybrid, 0.0, STEP, margin=0.0)
+
+    # 1000 Wh night / 0.5 out = 2000 Wh required; the charge side is lossless
+    # here, so ac_dc must not appear at all.
+    assert reserve == pytest.approx(2000.0)
+
+
+def test_charge_already_in_the_battery_comes_off_the_reserve():
+    """Without this the reserve never shrinks, and a nearly-full battery goes
+    on starving the loads through the best hours of the afternoon."""
+    plan, series = _day_night_day()
+    reserve = night_cover_reserve_wh(
+        plan, series, _night_battery(), HybridInverterConfig(), 0.1, STEP, margin=0.0
+    )
+
+    # 2000 Wh required, 1000 Wh already stored: 1000 Wh of deficit, doubled by
+    # the 50% charge efficiency.
+    assert reserve == pytest.approx(2000.0)
+
+
+def test_a_battery_that_already_covers_the_night_reserves_nothing():
+    """The property that makes this a stable loop rather than a ratchet: the
+    ceiling lifts itself once the battery has what it needs."""
+    plan, series = _day_night_day()
+    reserve = night_cover_reserve_wh(
+        plan, series, _night_battery(), HybridInverterConfig(), 0.5, STEP
+    )
+
+    assert reserve == 0.0
+
+
+def test_the_margin_rides_on_the_deficit_not_on_the_whole_night():
+    """So it shrinks with the deficit and vanishes with it."""
+    plan, series = _day_night_day()
+    bare = night_cover_reserve_wh(
+        plan, series, _night_battery(), HybridInverterConfig(), 0.0, STEP, margin=0.0
+    )
+    with_margin = night_cover_reserve_wh(
+        plan, series, _night_battery(), HybridInverterConfig(), 0.0, STEP
+    )
+
+    assert with_margin == pytest.approx(bare * (1 + NIGHT_COVER_MARGIN))
+
+
+def test_the_reserve_never_exceeds_what_the_battery_could_take():
+    """Past soc_max the reservation protects nothing and only starves loads."""
+    plan, series = _day_night_day()
+    battery = _night_battery(soc_min=0.9)
+    reserve = night_cover_reserve_wh(
+        plan, series, battery, HybridInverterConfig(), 0.95, STEP, margin=0.0
+    )
+
+    # Deficit alone would ask for 3000 Wh; 5% of headroom at 50% charge
+    # efficiency is 1000 Wh, and that is the ceiling.
+    assert reserve == pytest.approx(1000.0)
+
+
+def test_the_reserve_ignores_what_the_previous_plan_did_with_the_battery():
+    """The whole point. A plan in which the battery charged nothing at all --
+    because a surplus load had already taken every kWh -- must produce exactly
+    the same reserve as one in which it charged freely, or the ratchet is back.
+    """
+    starved, series = _day_night_day(batt_w=0.0)
+    charging, _ = _day_night_day(batt_w=-5000.0)
+    args = (_night_battery(), HybridInverterConfig(), 0.0, STEP)
+
+    assert night_cover_reserve_wh(starved, series, *args) == night_cover_reserve_wh(
+        charging, series, *args
+    )
+
+
+# --- the ceiling reaching allocate --------------------------------------------
+
+
+def test_an_allowance_caps_the_budget_the_block_would_have_allowed():
+    uncapped = allocate(_series(*[800.0] * 8), [_spec()], STEP)
+    capped = allocate(_series(*[800.0] * 8), [_spec()], STEP, allowance_wh=800.0)
+
+    assert uncapped["pool"].energy_wh == pytest.approx(1600.0)
+    assert capped["pool"].energy_wh == pytest.approx(800.0)
+    assert capped["pool"].hours == pytest.approx(1.0)
+
+
+def test_the_allowance_is_shared_not_handed_to_each_load_in_full():
+    """A per-load cap would over-commit by exactly the first load's draw."""
+    specs = [_spec(subentry_id="first"), _spec(subentry_id="second")]
+    budgets = allocate(_series(*[1600.0] * 8), specs, STEP, allowance_wh=2000.0)
+
+    assert budgets["first"].energy_wh == pytest.approx(1600.0)
+    assert budgets["second"].energy_wh == pytest.approx(400.0)
+    total = sum(budget.energy_wh for budget in budgets.values())
+    assert total == pytest.approx(2000.0)
+
+
+def test_a_sub_timestep_remainder_of_the_allowance_buys_nothing():
+    """Unlike the user's own energy cap, which is a goal worth finishing, what
+    is left after the battery's claim is not an ask to be answered -- rounding
+    it up to a whole step would just spend the reserve it was protecting."""
+    specs = [_spec(subentry_id="first"), _spec(subentry_id="second")]
+    budgets = allocate(_series(*[1600.0] * 8), specs, STEP, allowance_wh=1700.0)
+
+    assert budgets["first"].energy_wh == pytest.approx(1600.0)
+    # 100 Wh left is under one 15-minute step at 800 W.
+    assert budgets["second"].energy_wh == 0.0
+    assert budgets["second"].hours == 0.0
+
+
+def test_an_allowance_changes_the_energy_and_nothing_else():
+    """Not which slots qualify, not the window, not the block -- the reason it
+    is an aggregate cap rather than a subtraction from the slots themselves."""
+    uncapped = allocate(_series(*[800.0] * 8), [_spec()], STEP)["pool"]
+    capped = allocate(_series(*[800.0] * 8), [_spec()], STEP, allowance_wh=800.0)["pool"]
+
+    assert capped.window_start == uncapped.window_start
+    assert capped.window_end == uncapped.window_end
+    assert capped.steps == uncapped.steps
+    assert capped.energy_wh < uncapped.energy_wh
+
+
+def test_no_allowance_leaves_the_budget_exactly_as_it_was():
+    """None is "no ceiling", and must not read as a ceiling of zero."""
+    without = allocate(_series(*[800.0] * 8), [_spec()], STEP)
+    explicit_none = allocate(_series(*[800.0] * 8), [_spec()], STEP, allowance_wh=None)
+
+    assert without["pool"].energy_wh == explicit_none["pool"].energy_wh
+    assert without["pool"].energy_wh > 0

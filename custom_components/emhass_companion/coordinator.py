@@ -1230,13 +1230,24 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         # the armed flag apply_surplus below reads back.
         self.loads.check_auto_disarm(now, config.time_step_minutes)
         self._track_never_started_issues()
+        # Read before apply_surplus rather than beside decide_end_soc below:
+        # the night-cover ceiling is sized against how full the battery already
+        # is, so the budget cannot be derived without it. A pure state read
+        # with nothing else riding on where it happens.
+        soc_init = self._read_soc()
         if self.data is not None:
             # Re-derive each surplus load's hours and window from the spare PV
             # the previous plan predicted. Must run *after*
             # assume_from_plan (whose accumulator feeds the energy cap) and
             # before deferrable_loads() below reads the budget back out.
             self.loads.apply_surplus(
-                self.data.plan, self.data.load_order, now, config.time_step_minutes
+                self.data.plan,
+                self.data.load_order,
+                now,
+                config.time_step_minutes,
+                battery=config.battery,
+                hybrid=config.hybrid_inverter,
+                soc_now=soc_init,
             )
             # Same lagged pairing, right beside it: latch or release each
             # flagged load's held battery-lockout window from the same
@@ -1244,7 +1255,6 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             self.loads.apply_battery_lockout(
                 self.data.plan, self.data.load_order, now, config.time_step_minutes
             )
-        soc_init = self._read_soc()
         end_soc: EndSocDecision | None = None
         if config.battery.enabled and soc_init is not None:
             load_for_terminal, load_source = self._load_for_terminal(load)

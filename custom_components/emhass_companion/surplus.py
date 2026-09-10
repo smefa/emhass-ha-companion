@@ -23,7 +23,7 @@ from datetime import datetime, timedelta
 import logging
 import math
 
-from .models import Plan, Point, Series
+from .models import BatteryConfig, HybridInverterConfig, Plan, Point, Series
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -221,6 +221,7 @@ def allocate(
     step: timedelta,
     *,
     reserved: Series | None = None,
+    allowance_wh: float | None = None,
 ) -> dict[str, SurplusBudget]:
     """Share one surplus series between the loads competing for it.
 
@@ -248,7 +249,26 @@ def allocate(
     what the higher-priority surplus loads have left of it. Otherwise the
     battery would be back to gating *when* a surplus load may run, not just
     how much of a claimed slot is left over for it -- the bug
-    ``surplus_series`` exists to avoid (see surplus_loads.md).
+
+
+    ``allowance_wh`` is the total energy every spec here may take between them,
+    from :func:`night_cover_reserve_wh`: the block's credit less what the
+    battery still needs to carry the house through the following night. Spent
+    in priority order, so a high-priority load can exhaust it and leave the
+    next one nothing -- the same arbitration ``remaining`` already performs
+    slot by slot, applied to the aggregate.
+
+    Deliberately an aggregate cap and **not** a per-slot subtraction from
+    ``reserved``. Taking it off each slot would put the battery's claim back
+    inside the qualification test (``available < threshold``), which is exactly
+    what the gross/available/reserved split exists to keep it out of: the
+    battery would once again decide *when* a load may run, and a block whose
+    early slots it had spoken for would read as if the sun had not risen. This
+    changes only *how much* the loads may take in total -- never which slots
+    qualify, never the window, never the block.
+
+    ``None`` means no ceiling -- "the night is not in view", not "the night
+    needs nothing"; see :func:`night_cover_reserve_wh`.
     """
     step_hours = step.total_seconds() / 3600
     if step_hours <= 0:
@@ -279,6 +299,10 @@ def allocate(
         [point.time, point.value, point.value, reserved_at.get(point.time, 0.0)] for point in series
     ]
     budgets: dict[str, SurplusBudget] = {}
+    # Spent down as each spec is served, so two surplus loads cannot each book
+    # the whole remainder -- a per-load cap would over-commit by exactly the
+    # higher-priority load's draw.
+    allowance_remaining = None if allowance_wh is None else max(0.0, allowance_wh)
 
     for spec in specs:
         if spec.nominal_w <= 0:
@@ -434,7 +458,17 @@ def allocate(
             if spec.max_energy_wh is not None and nominal_w > 0
             else None
         )
-        hours = hours_from_block if cap_hours is None else min(hours_from_block, cap_hours)
+        # The night-cover ceiling, shared across every spec and already spent
+        # down by the higher-priority ones. Kept as its own limit rather than
+        # folded into ``cap_hours`` because the two mean different things at
+        # the sub-timestep test below: an energy cap is a goal to finish, this
+        # is a ceiling with nothing to finish.
+        allowance_hours = (
+            allowance_remaining / nominal_w
+            if allowance_remaining is not None and nominal_w > 0
+            else None
+        )
+        hours = min([hours_from_block, *(x for x in (cap_hours, allowance_hours) if x is not None)])
         energy_wh = hours * nominal_w
 
         # Below one timestep, there is no run to ask for.
@@ -462,10 +496,21 @@ def allocate(
         # battery reserved outright -- the sun really was up, there simply was
         # not enough of it left over to be worth a timestep. ``is_empty`` reads
         # off ``hours``, so the load is parked either way.
-        cap_binds = cap_hours is not None and cap_hours < hours_from_block
+        # Only the *user's* cap earns that exemption, and only when it is the
+        # binding one. A night-cover allowance is not a small ask that deserves
+        # answering -- it is what is left after the battery's claim, so a
+        # sub-timestep remainder of it is a step the surplus cannot back, and
+        # rounding it up to a whole one would simply spend the reserve.
+        cap_binds = (
+            cap_hours is not None
+            and cap_hours < hours_from_block
+            and (allowance_hours is None or cap_hours <= allowance_hours)
+        )
         if not cap_binds and 0 < hours < step_hours:
             hours = 0.0
             energy_wh = 0.0
+        if allowance_remaining is not None:
+            allowance_remaining = max(0.0, allowance_remaining - energy_wh)
 
         # "Start as early as possible" narrows the *window* and nothing else.
         # The budget above is already "however much the surplus supports"; all
@@ -580,6 +625,156 @@ def current_block(series: Series, step: timedelta) -> Series:
         started = True
         block.append(point)
     return Series(block)
+
+
+# How much more than the bare arithmetic to hold back for the battery, as a
+# fraction of the charge it still needs. Covers two forecast errors at once --
+# a night that draws more than predicted, and a block that delivers less sun
+# than predicted -- and is deliberately applied to the *deficit* rather than to
+# the night's whole requirement, so it shrinks along with the deficit and
+# vanishes entirely once the battery is already covered.
+#
+# The two ways of being wrong do not cost the same. Reserve too much and a
+# surplus load charges a little less, finishing on grid at whatever its own
+# fallback costs; reserve too little and the battery empties mid-night and the
+# house imports at the peak rate. Biased high for that reason, not centred.
+NIGHT_COVER_MARGIN = 0.15
+
+
+def night_window(series: Series, step: timedelta) -> tuple[datetime | None, datetime | None]:
+    """The dark stretch *after* the block ``allocate`` is allocating.
+
+    Deliberately not "from now until sunrise". When this runs at 01:00 the
+    block ``allocate`` finds is the coming day's, not one in progress, and the
+    night that block's charge has to cover is the one on its far side. Anchored
+    to the block's end for that reason: before dawn both readings differ by a
+    whole day, and reserving for a night that is nearly over would hold back
+    almost nothing on precisely the cycles that set up the day.
+
+    Cut with ``NIGHT_FLOOR_W`` against the *surplus*, not against PV: what
+    matters is when the sun stops covering the house, which is well before it
+    stops shining. ``BLOCK_GAP_TOLERANCE`` keeps a passing cloud from reading
+    as dusk, exactly as in ``current_block``.
+
+    Returns ``(None, None)`` when the horizon ends before the block does, so
+    the night is not in view at all -- the caller must not invent a reserve
+    from that, since guessing high and guessing low are both unbacked. A night
+    the horizon merely *truncates* is returned as far as it is known, which
+    under-states it; that only happens in the small hours, when no surplus load
+    is running anyway, and every later cycle sees more of it.
+    """
+    if step <= timedelta(0):
+        return None, None
+    points = list(series)
+    gap_steps = max(1, int(BLOCK_GAP_TOLERANCE / step))
+    started = False
+    gap_run = 0
+    last_lit: datetime | None = None
+    night_start: datetime | None = None
+    rest: list[Point] = []
+    for index, point in enumerate(points):
+        if point.value < NIGHT_FLOOR_W:
+            if not started:
+                continue
+            gap_run += 1
+            if gap_run >= gap_steps and last_lit is not None:
+                night_start = last_lit + step
+                rest = points[index:]
+                break
+            continue
+        gap_run = 0
+        started = True
+        last_lit = point.time
+    if night_start is None:
+        return None, None
+    # First sun on the other side. Absent one, the horizon stops mid-night and
+    # the night is only known as far as it reaches -- one step past its last
+    # row, which is where that row's own interval ends.
+    for point in rest:
+        if point.value >= NIGHT_FLOOR_W and point.time >= night_start:
+            return night_start, point.time
+    return night_start, (points[-1].time + step if points else night_start)
+
+
+def night_cover_reserve_wh(
+    plan: Plan,
+    series: Series,
+    battery: BatteryConfig,
+    hybrid: HybridInverterConfig,
+    soc_now: float,
+    step: timedelta,
+    *,
+    margin: float = NIGHT_COVER_MARGIN,
+) -> float | None:
+    """Surplus to keep away from the surplus loads so the battery can cover the night.
+
+    The number a surplus load's budget is *capped* against, and the whole
+    reason that cap can be trusted: it is built from the house's own load
+    forecast and the battery's measured SOC, neither of which depends on what
+    any surplus load did last cycle. ``battery_reserved_series`` -- the only
+    thing that used to stand between a surplus load and the battery's share --
+    is read from the previous plan's ``P_batt``, and a battery that charged
+    nothing because a load had already taken the sun is indistinguishable there
+    from one that needed nothing. That reading fed straight back as a larger
+    budget, which took more sun, which lowered the reading again: a ratchet
+    with no restoring force, observed in the field climbing from 0.6 h to 5.1 h
+    over two days while the house battery peaked at 21% and then imported all
+    night. This function is exogenous to that loop by construction.
+
+    Uses the plan's ``p_load`` alone, *not* what the plan scheduled into the
+    night on top of it. Folding a previous plan's deferrable placement back in
+    would rebuild the very feedback path this exists to break, and every load
+    that could legitimately run at night is one the optimiser is free to move.
+
+    Efficiency here is physics, not margin, and is easy to leave out and then
+    wonder why a 15% margin keeps coming up short. Energy has to survive two
+    conversions between spare sun and a covered night, so the surplus needed is
+    roughly 14% more than the night's own kWh before any margin at all.
+
+    Returns ``None`` when the night is not in view (see ``night_window``) --
+    "no opinion", which the caller must treat as "apply no cap", not as zero.
+    """
+    if not battery.enabled or battery.capacity_wh <= 0 or step <= timedelta(0):
+        return None
+    night_start, night_end = night_window(series, step)
+    if night_start is None or night_end is None or night_end <= night_start:
+        return None
+
+    step_hours = step.total_seconds() / 3600
+    night_wh = (
+        sum(
+            row.p_load
+            for row in plan.rows
+            if row.p_load is not None and night_start <= row.timestamp < night_end
+        )
+        * step_hours
+    )
+    if night_wh <= 0:
+        return 0.0
+
+    # Out of the battery and into the house. On a hybrid the battery's DC sits
+    # behind the same inverter the house is fed through, so that conversion is
+    # on this path; a separate battery inverter's own losses are already inside
+    # discharge_efficiency.
+    out = max(0.01, battery.discharge_efficiency)
+    if hybrid.enabled:
+        out *= max(0.01, hybrid.efficiency_dc_ac)
+    # Into the battery. Charge only -- PV to battery is DC to DC on a hybrid
+    # and never crosses to AC, so the inverter's conversion does not apply.
+    into = max(0.01, battery.charge_efficiency)
+
+    required_wh = night_wh / out
+    stored_wh = max(0.0, soc_now - battery.soc_min) * battery.capacity_wh
+    deficit_wh = max(0.0, required_wh - stored_wh)
+    if deficit_wh <= 0:
+        return 0.0
+
+    reserve_wh = (deficit_wh / into) * (1.0 + max(0.0, margin))
+    # Never hold back more sun than the battery could physically take, however
+    # long the night: past soc_max the reservation would be protecting nothing
+    # and would simply starve the loads.
+    headroom_wh = max(0.0, battery.soc_max - soc_now) * battery.capacity_wh / into
+    return min(reserve_wh, headroom_wh)
 
 
 def window_of(
