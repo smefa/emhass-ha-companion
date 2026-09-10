@@ -541,10 +541,11 @@ class HybridInverterConfig:
     the battery -- since each then has its own, independent AC limit and
     nothing is shared. EMHASS's own `inverter_is_hybrid` gates all of this;
     disabled makes the rest inert rather than wrong, so it's safe to collect
-    them from the same form regardless of the toggle.
+    them from the same form regardless of the toggle. Defaults on because
+    almost every home battery install is a hybrid.
     """
 
-    enabled: bool = False
+    enabled: bool = True
     ac_output_max_w: float = 0.0
     ac_input_max_w: float = 0.0
     efficiency_dc_ac: float = DEFAULT_INVERTER_EFFICIENCY
@@ -555,7 +556,7 @@ class HybridInverterConfig:
         data = data or {}
         ac_output_max_w = float(data.get(CONF_INVERTER_AC_OUTPUT_MAX, 0) or 0)
         return cls(
-            enabled=bool(data.get(CONF_HYBRID_INVERTER, False)),
+            enabled=bool(data.get(CONF_HYBRID_INVERTER, True)),
             ac_output_max_w=ac_output_max_w,
             # EMHASS itself falls back to the output limit when no separate
             # input limit is configured (optimization.py's

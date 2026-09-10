@@ -1228,7 +1228,9 @@ def test_battery_lockout_array_length_matches_capacity_array_steps_on_dayahead()
 def test_hybrid_inverter_disabled_sends_only_the_flag():
     """Disabled must still assert the flag -- never leave it to EMHASS's own
     persisted config.json, the same reasoning as the battery flag above."""
-    payload = build_payload(_inputs()).payload
+    payload = build_payload(
+        _inputs(hybrid_inverter=HybridInverterConfig(enabled=False))
+    ).payload
     assert payload["inverter_is_hybrid"] is False
     assert "inverter_ac_output_max" not in payload
 

@@ -1022,7 +1022,7 @@ def _payload(loads, now):
             horizon_steps=48,
             battery=BatteryConfig(),
             grid=GridConfig(),
-            hybrid_inverter=HybridInverterConfig(),
+            hybrid_inverter=HybridInverterConfig(enabled=False),
             loads=loads,
         )
     )
@@ -1354,7 +1354,7 @@ def test_the_reserve_carries_the_night_through_both_conversions():
     """
     plan, series = _day_night_day()
     reserve = night_cover_reserve_wh(
-        plan, series, _night_battery(), HybridInverterConfig(), 0.0, STEP, margin=0.0
+        plan, series, _night_battery(), HybridInverterConfig(enabled=False), 0.0, STEP, margin=0.0
     )
 
     assert reserve == pytest.approx(4000.0)
@@ -1382,7 +1382,7 @@ def test_charge_already_in_the_battery_comes_off_the_reserve():
     on starving the loads through the best hours of the afternoon."""
     plan, series = _day_night_day()
     reserve = night_cover_reserve_wh(
-        plan, series, _night_battery(), HybridInverterConfig(), 0.1, STEP, margin=0.0
+        plan, series, _night_battery(), HybridInverterConfig(enabled=False), 0.1, STEP, margin=0.0
     )
 
     # 2000 Wh required, 1000 Wh already stored: 1000 Wh of deficit, doubled by
@@ -1395,7 +1395,7 @@ def test_a_battery_that_already_covers_the_night_reserves_nothing():
     ceiling lifts itself once the battery has what it needs."""
     plan, series = _day_night_day()
     reserve = night_cover_reserve_wh(
-        plan, series, _night_battery(), HybridInverterConfig(), 0.5, STEP
+        plan, series, _night_battery(), HybridInverterConfig(enabled=False), 0.5, STEP
     )
 
     assert reserve == 0.0
@@ -1405,10 +1405,10 @@ def test_the_margin_rides_on_the_deficit_not_on_the_whole_night():
     """So it shrinks with the deficit and vanishes with it."""
     plan, series = _day_night_day()
     bare = night_cover_reserve_wh(
-        plan, series, _night_battery(), HybridInverterConfig(), 0.0, STEP, margin=0.0
+        plan, series, _night_battery(), HybridInverterConfig(enabled=False), 0.0, STEP, margin=0.0
     )
     with_margin = night_cover_reserve_wh(
-        plan, series, _night_battery(), HybridInverterConfig(), 0.0, STEP
+        plan, series, _night_battery(), HybridInverterConfig(enabled=False), 0.0, STEP
     )
 
     assert with_margin == pytest.approx(bare * (1 + NIGHT_COVER_MARGIN))
@@ -1419,7 +1419,7 @@ def test_the_reserve_never_exceeds_what_the_battery_could_take():
     plan, series = _day_night_day()
     battery = _night_battery(soc_min=0.9)
     reserve = night_cover_reserve_wh(
-        plan, series, battery, HybridInverterConfig(), 0.95, STEP, margin=0.0
+        plan, series, battery, HybridInverterConfig(enabled=False), 0.95, STEP, margin=0.0
     )
 
     # Deficit alone would ask for 3000 Wh; 5% of headroom at 50% charge
@@ -1434,7 +1434,7 @@ def test_the_reserve_ignores_what_the_previous_plan_did_with_the_battery():
     """
     starved, series = _day_night_day(batt_w=0.0)
     charging, _ = _day_night_day(batt_w=-5000.0)
-    args = (_night_battery(), HybridInverterConfig(), 0.0, STEP)
+    args = (_night_battery(), HybridInverterConfig(enabled=False), 0.0, STEP)
 
     assert night_cover_reserve_wh(starved, series, *args) == night_cover_reserve_wh(
         charging, series, *args

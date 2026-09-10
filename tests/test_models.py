@@ -28,9 +28,9 @@ T0 = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
 # --- HybridInverterConfig ------------------------------------------------------
 
 
-def test_hybrid_inverter_config_defaults_to_disabled():
+def test_hybrid_inverter_config_defaults_to_enabled():
     config = HybridInverterConfig.from_dict(None)
-    assert config.enabled is False
+    assert config.enabled is True
     assert config.efficiency_dc_ac == 0.97
     assert config.efficiency_ac_dc == 0.97
 

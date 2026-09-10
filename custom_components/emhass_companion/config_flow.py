@@ -1607,12 +1607,13 @@ def battery_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
             "no_discharge_to_grid", default=defaults.get("no_discharge_to_grid", False)
         ): selector.BooleanSelector(),
         # A hybrid inverter shares one AC-side throughput limit between PV and
-        # battery. Left off, the fields below are collected but never sent to
-        # EMHASS (see payload.py's _hybrid_inverter_settings) -- harmless to
-        # show unconditionally, matching how the battery fields above already
+        # battery. Defaults on (most home battery installs are hybrids); when
+        # off, the fields below are collected but never sent to EMHASS (see
+        # payload.py's _hybrid_inverter_settings) -- harmless to show
+        # unconditionally, matching how the battery fields above already
         # behave when "use_battery" is off.
         vol.Required(
-            CONF_HYBRID_INVERTER, default=defaults.get(CONF_HYBRID_INVERTER, False)
+            CONF_HYBRID_INVERTER, default=defaults.get(CONF_HYBRID_INVERTER, True)
         ): selector.BooleanSelector(),
         vol.Optional(
             CONF_INVERTER_AC_OUTPUT_MAX, default=defaults.get(CONF_INVERTER_AC_OUTPUT_MAX, 0)
