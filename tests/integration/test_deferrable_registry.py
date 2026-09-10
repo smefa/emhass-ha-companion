@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from unittest.mock import AsyncMock
 
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.emhass_companion.api import EmhassClient
 from custom_components.emhass_companion.const import (
+    ACTION_MPC,
     CONF_CONTROL_ENTITY,
     CONF_NOMINAL_POWER,
     CONF_OPERATING_HOURS,
@@ -20,7 +23,8 @@ from custom_components.emhass_companion.const import (
     RECURRENCE_ON_DEMAND,
     SUBENTRY_TYPE_DEFERRABLE,
 )
-from custom_components.emhass_companion.deferrable import DeferrableRegistry
+from custom_components.emhass_companion.coordinator import EmhassCoordinator
+from custom_components.emhass_companion.deferrable import BatteryLockout, DeferrableRegistry
 from custom_components.emhass_companion.models import Plan, PlanRow
 
 POWER_SENSOR = "sensor.dishwasher_power"
@@ -461,3 +465,72 @@ async def test_a_script_control_entity_raises_a_repair(hass: HomeAssistant) -> N
     _report_unusable_control_entities(hass, entry)
 
     assert registry.async_get_issue(DOMAIN, ISSUE_SCRIPT_CONTROL_ENTITY) is None
+
+
+# --- battery lockout ----------------------------------------------------------
+
+
+async def test_battery_lockout_state_survives_a_sync(hass: HomeAssistant) -> None:
+    """Editing a load must not silently reset the switch or its held window,
+    same as any other live-adjusted state -- see test_sync_preserves_live_state."""
+    entry = _entry({"title": "Car charging", "data": {CONF_NOMINAL_POWER: 8000}})
+    entry.add_to_hass(hass)
+
+    registry = DeferrableRegistry(hass, entry)
+    registry.sync()
+    load = registry.all()[0]
+    load.battery_lockout_enabled = True
+    now = dt_util.utcnow()
+    load.battery_lockout = BatteryLockout(
+        start=now, end=now + timedelta(minutes=30), derived_at=now
+    )
+
+    registry.sync()
+
+    assert load.battery_lockout_enabled is True
+    assert load.battery_lockout is not None
+
+
+async def test_flagged_load_battery_lockout_reaches_the_outgoing_payload(
+    hass: HomeAssistant,
+) -> None:
+    """A running, lockout-enabled load's window must reach the payload builder
+    through the same coordinator._build() path every other load setting does."""
+    entry = _entry({"title": "Car charging", "data": {CONF_NOMINAL_POWER: 8000}})
+    entry.add_to_hass(hass)
+
+    registry = DeferrableRegistry(hass, entry)
+    registry.sync()
+    subentry_id = next(iter(entry.subentries))
+    load = registry.get(subentry_id)
+    load.battery_lockout_enabled = True
+    load.running_since = dt_util.utcnow()
+
+    coordinator = EmhassCoordinator(hass, entry, AsyncMock(spec=EmhassClient), registry)
+
+    inputs, _built = await coordinator._build(ACTION_MPC)
+
+    projected = next(load for load in inputs.loads if load.subentry_id == subentry_id)
+    assert projected.battery_lockout_windows != ()
+
+
+async def test_an_unflagged_load_carries_no_battery_lockout_window(
+    hass: HomeAssistant,
+) -> None:
+    """The counterpart to the test above: off by default, every existing
+    install's outgoing payload is unaffected."""
+    entry = _entry({"title": "Car charging", "data": {CONF_NOMINAL_POWER: 8000}})
+    entry.add_to_hass(hass)
+
+    registry = DeferrableRegistry(hass, entry)
+    registry.sync()
+    subentry_id = next(iter(entry.subentries))
+    load = registry.get(subentry_id)
+    load.running_since = dt_util.utcnow()  # running, but the switch is off
+
+    coordinator = EmhassCoordinator(hass, entry, AsyncMock(spec=EmhassClient), registry)
+
+    inputs, _built = await coordinator._build(ACTION_MPC)
+
+    projected = next(load for load in inputs.loads if load.subentry_id == subentry_id)
+    assert projected.battery_lockout_windows == ()

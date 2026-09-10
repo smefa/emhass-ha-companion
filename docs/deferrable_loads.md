@@ -30,6 +30,7 @@ you might change day to day becomes a control on the load's own page:
 | `time.<load>_earliest_start` / `_latest_finish` | The window. May cross midnight |
 | `number.<load>_power_when_running` / `_hours_needed_per_day` | |
 | `number.<load>_minimum_on_time` / `_minimum_off_time` | Protects compressor-driven loads from short-cycling — see below |
+| `switch.<load>_battery_lockout` | Price the battery out of discharging into this load's window — see [battery_lockout.md](battery_lockout.md) |
 | `button.<load>_run_now` | Run this load immediately, regardless of recurrence. Unavailable on a surplus load — see [surplus_loads.md](surplus_loads.md) |
 
 Two distinctions worth knowing, because conflating either causes confusion:
@@ -130,3 +131,9 @@ zero on every solve.
 Two or more loads can share a circuit — a subpanel or fuse limit, or an EV
 charger and an immersion heater that must never run together. See
 [load_groups.md](load_groups.md).
+
+## Battery lockout
+
+`switch.<load>_battery_lockout` prices the battery out of discharging into
+this one load's window, without changing how it serves everything else. Off
+by default. See [battery_lockout.md](battery_lockout.md).

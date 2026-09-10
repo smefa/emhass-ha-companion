@@ -146,12 +146,22 @@ class Scheduler:
 
     @callback
     def _check_price_horizon(self) -> None:
-        """Fire a day-ahead run when the price series gains a new day."""
+        """Fire a day-ahead run when the price series gains a new day.
+
+        Reads ``price_source_end`` -- how far the price *source* reached --
+        rather than ``data.buy_price.end``. The published series is trimmed to
+        the optimisation horizon, so for any source that publishes further
+        ahead than the horizon its end simply sits at the horizon and creeps
+        forward one MPC interval at a time, never the six hours this looks
+        for. That is not an exotic setup: it is every install whose horizon is
+        shorter than a day, and every 48h-publishing market even at the
+        default 24h horizon.
+        """
         data = self.coordinator.data
-        if not data or not data.buy_price:
+        if not data or data.price_source_end is None:
             return
 
-        horizon = data.buy_price.end
+        horizon = data.price_source_end
         previous, self._price_horizon = self._price_horizon, horizon
         if previous is None:
             # First observation only establishes the baseline; the initial

@@ -88,6 +88,7 @@ from .const import (
     SUBENTRY_TYPE_THERMAL,
 )
 from .models import DeferrableLoad, Plan, PlanRow, Series
+from .payload import operating_timesteps
 from .stored_time import parse_stored_time
 from .surplus import SurplusBudget, SurplusSpec, allocate, battery_reserved_series, surplus_series
 from .thermal import (
@@ -134,6 +135,21 @@ def state_to_watts(state: State) -> float | None:
     return value
 
 
+@dataclass(frozen=True, slots=True)
+class BatteryLockout:
+    """A load's held battery-lockout window -- the ``planned_held`` half only.
+
+    The ``while_running`` half needs no state of its own and is computed fresh
+    in :meth:`DeferrableRuntime.to_load`; see
+    planning/battery_lockaout_plan.md for why the two are never merged into
+    one span.
+    """
+
+    start: datetime
+    end: datetime
+    derived_at: datetime
+
+
 @dataclass(slots=True)
 class DeferrableRuntime:
     """One deferrable load's live state."""
@@ -176,6 +192,15 @@ class DeferrableRuntime:
     max_startups: int = 0
     minimum_on_time_minutes: float = 0.0
     minimum_off_time_minutes: float = 0.0
+    # Per-load battery lockout (planning/battery_lockaout_plan.md), entity-owned
+    # like everything else here. Off emits nothing, regardless of whatever a
+    # previous run latched into battery_lockout below.
+    battery_lockout_enabled: bool = False
+    # The held half of the lockout window only -- latched by
+    # DeferrableRegistry.apply_battery_lockout and *not* reset every run, unlike
+    # surplus_budget; see that method's docstring for why. The while_running
+    # half needs no state of its own and is computed fresh in to_load.
+    battery_lockout: BatteryLockout | None = field(default=None, repr=False)
     mode: str = LOAD_MODE_AUTO
     # When Run now was last pressed. Only a backstop for ending a forced run;
     # like ``mode`` itself it does not survive a restart, which already returns
@@ -640,7 +665,15 @@ class DeferrableRuntime:
             return
         self.runtime_today += now - self.running_since
         if self.requested_at is not None:
-            self.request_runtime += now - max(self.running_since, self.requested_at)
+            # Clamped for the same reason observe_command's clock is: a span
+            # that closed before the request was armed owes it nothing. Without
+            # this, assume_from_plan replaying a block stamped wholly before
+            # requested_at -- which a cold plan_assumed_until does after a
+            # restart -- subtracts the gap, under-crediting the run so the
+            # auto-disarm fires late.
+            self.request_runtime += max(
+                now - max(self.running_since, self.requested_at), timedelta()
+            )
         self.running_since = None
         self.off_since = now
 
@@ -853,6 +886,44 @@ class DeferrableRuntime:
             return 0
         return max(0, int((now - self.running_since).total_seconds() / 60 // step_minutes))
 
+    @property
+    def commanded_run(self) -> bool:
+        """Whether the run in progress is one this integration asked for.
+
+        A forced run, or a timestep the plan in force already scheduled --
+        the two cases that cannot feed themselves, argued in :meth:`to_load`.
+        Only these may be pinned into EMHASS's timestep 0.
+        """
+        return self.mode == LOAD_MODE_FORCE_ON or self.plan_scheduled_now
+
+    def reported_on_timesteps(self, now: datetime, step_minutes: int) -> int:
+        """The on-time streak to report as ``def_current_on_timesteps``.
+
+        Truthful for a run we commanded. For one merely *observed*, the streak
+        is reported as already satisfying the minimum on time, because EMHASS
+        reads any shortfall as a force rather than as information: Block B of
+        its optimization.py pins ``max(0, def_minimum_on_time - elapsed)``
+        timesteps ON from t=0 and widens the load's window mask so neither its
+        own hours nor the price can block them.
+
+        With the 15-minute minimum a charger carries by default that is a
+        single slot -- but it is the slot that starts the appliance, and once
+        it lands in the plan the commitment feeds ``plan_scheduled_now`` next
+        cycle and the load latches on at whatever the spot price happens to
+        be. A car that started charging on its own is exactly the case
+        :attr:`current_power_w` already refuses to pin; this is the same
+        refusal at the other door into the same constraint.
+
+        Only the *remainder* is suppressed. ``def_current_state`` stays
+        truthful, so EMHASS still credits the startup rather than charging a
+        penalty for a load that is visibly already running, and every other
+        min-on/min-off constraint is untouched.
+        """
+        elapsed = self.continuous_on_timesteps(now, step_minutes)
+        if self.commanded_run:
+            return elapsed
+        return max(elapsed, operating_timesteps(self.minimum_on_time_minutes / 60, step_minutes))
+
     def continuous_off_timesteps(self, now: datetime, step_minutes: int) -> int:
         """How many whole timesteps this load has been continuously off.
 
@@ -901,6 +972,7 @@ class DeferrableRuntime:
         nominal_power_w = (
             budget.nominal_w if surplus and not budget.is_empty else self.nominal_power_w
         )
+        operating_hours = budget.hours if surplus else self.operating_hours
 
         return DeferrableLoad(
             subentry_id=self.subentry_id,
@@ -909,7 +981,7 @@ class DeferrableRuntime:
             minimum_power_w=self.minimum_power_w,
             # A surplus load's run time is not a setting; it is however many
             # hours the exported power in the last plan can actually feed.
-            operating_hours=budget.hours if surplus else self.operating_hours,
+            operating_hours=operating_hours,
             hours_from_surplus_budget=surplus,
             earliest_start=self.earliest_start if windowed and not surplus else None,
             latest_end=self.latest_end if windowed and not surplus else None,
@@ -930,7 +1002,7 @@ class DeferrableRuntime:
             max_startups=self.max_startups,
             minimum_on_time_minutes=self.minimum_on_time_minutes,
             minimum_off_time_minutes=self.minimum_off_time_minutes,
-            current_on_timesteps=self.continuous_on_timesteps(now, step_minutes),
+            current_on_timesteps=self.reported_on_timesteps(now, step_minutes),
             current_off_timesteps=self.continuous_off_timesteps(now, step_minutes),
             # Enabled/disabled and armed/unarmed are independent gates; both
             # must pass for this load to ask EMHASS for any run time. It is
@@ -943,9 +1015,15 @@ class DeferrableRuntime:
             wants_to_run=self.enabled and self.participates and not (surplus and budget.is_empty),
             # A load that is already running should not be charged a startup
             # penalty again, nor be re-scheduled for work it has done today.
-            # This alone is what credits the startup: EMHASS reads the flag
-            # straight into its own current-state parameter, and neither it nor
-            # current_on_timesteps can pin a timestep.
+            # This is what credits the startup: EMHASS reads the flag straight
+            # into its own current-state parameter.
+            #
+            # It is *not* inert beyond that, whatever an earlier revision of
+            # this comment claimed. The flag is also the gate on EMHASS's
+            # min-on-time remainder, which forces timestep 0 on whenever the
+            # streak reported alongside it falls short of the minimum. That
+            # door is closed in :meth:`reported_on_timesteps`, not here: the
+            # startup credit is worth keeping and only the remainder is not.
             current_state=self.is_running or self.mode == LOAD_MODE_FORCE_ON,
             # Only ever a power this integration is itself commanding, never one
             # it has merely observed. EMHASS turns def_current_power into a hard
@@ -967,11 +1045,7 @@ class DeferrableRuntime:
             # continuing instead of being re-litigated every 15 minutes; a car
             # that started charging on its own satisfies neither, and stays the
             # optimiser's to schedule.
-            current_power_w=(
-                nominal_power_w
-                if self.mode == LOAD_MODE_FORCE_ON or self.plan_scheduled_now
-                else 0.0
-            ),
+            current_power_w=nominal_power_w if self.commanded_run else 0.0,
             # Completed work is measured against an operating-hours target,
             # which a thermal load does not have -- its temperature *is* its
             # state, reported through start_temperature instead.
@@ -988,7 +1062,37 @@ class DeferrableRuntime:
                 0 if self.is_thermal or surplus else self.completed_timesteps(now, step_minutes)
             ),
             thermal=self.thermal_config(current_temperature),
+            battery_lockout_windows=self._battery_lockout_windows(
+                now, step_minutes, operating_hours
+            ),
         )
+
+    def _battery_lockout_windows(
+        self, now: datetime, step_minutes: int, operating_hours: float
+    ) -> tuple[tuple[datetime, datetime], ...]:
+        """This load's battery-lockout windows, held plus live.
+
+        Up to two, never merged into one span -- see :class:`BatteryLockout`
+        and planning/battery_lockaout_plan.md. The held half is whatever
+        :meth:`DeferrableRegistry.apply_battery_lockout` last latched; the
+        while_running half needs no plan and no state of its own, so it is
+        computed fresh here from the current instant.
+        """
+        if not self.battery_lockout_enabled:
+            return ()
+        windows: list[tuple[datetime, datetime]] = []
+        if self.battery_lockout is not None:
+            windows.append((self.battery_lockout.start, self.battery_lockout.end))
+        # A thermal load's demand is its comfort band, not an operating-hours
+        # target -- there is no "remaining run time" for this half to measure.
+        if self.is_running and not self.is_thermal:
+            remaining_hours = max(
+                operating_hours - self.elapsed_towards_target(now).total_seconds() / 3600,
+                0.0,
+            )
+            steps = max(1, operating_timesteps(remaining_hours, step_minutes))
+            windows.append((now, now + steps * timedelta(minutes=step_minutes)))
+        return tuple(windows)
 
     # -- change notification --------------------------------------------------
 
@@ -1004,6 +1108,42 @@ class DeferrableRuntime:
     def notify(self) -> None:
         for listener in list(self._listeners):
             listener()
+
+
+def _derive_held_window(
+    plan: Plan, index: int, threshold_w: float, now: datetime, step: timedelta
+) -> BatteryLockout | None:
+    """The first contiguous block of ``plan`` where this load's column exceeds
+    ``threshold_w``.
+
+    Mirrors ``Executor._scheduled``'s single-row test, widened across
+    consecutive rows to find that block's extent rather than just where "now"
+    falls inside it. One step past the last qualifying row, matching
+    ``SurplusBudget.window_end`` -- see ``allocate`` for why the extra step
+    is there.
+
+    The *first* block, and only that block -- deliberately not
+    ``min(starts)..max(ends)`` across the whole column. A plan routinely
+    schedules one load in two disjoint blocks (a pool pump on the morning and
+    the afternoon shoulder, say), and collapsing those to one span would price
+    the battery out of the entire idle gap between them. That is the same
+    error planning/battery_lockaout_plan.md rules out for the held and
+    while_running halves -- "never merged into one span" -- just reached from
+    inside a single plan column instead of across the two sources. The later
+    block is not lost: the held window releases once ``now`` reaches its end,
+    and the next derivation picks the block that is then first.
+    """
+    block: list[datetime] = []
+    for row in plan.rows:
+        if index < len(row.deferrables) and row.deferrables[index] > threshold_w:
+            block.append(row.timestamp)
+        elif block:
+            # A gap after the block has started ends it. Rows before the
+            # first qualifying one are simply skipped.
+            break
+    if not block:
+        return None
+    return BatteryLockout(start=block[0], end=block[-1] + step, derived_at=now)
 
 
 class DeferrableRegistry:
@@ -1184,6 +1324,67 @@ class DeferrableRegistry:
         for load in surplus_loads:
             if (budget := budgets.get(load.subentry_id)) is not None:
                 load.surplus_budget = budget
+
+    def apply_battery_lockout(
+        self, plan: Plan | None, load_order: list[str], now: datetime, step_minutes: int
+    ) -> None:
+        """Latch or release each flagged load's held battery-lockout window.
+
+        Called once per run, immediately after :meth:`apply_surplus`, with the
+        *previous* plan and load order -- the same lagged pairing, and for the
+        same reason: the window for *this* request has to come from the
+        answer to the *last* one.
+
+        Unlike ``surplus_budget``, the held window is **not** recomputed every
+        call. Test 0 (planning/battery_lockaout_plan.md) found the unlatched
+        span moves between cycles with nothing external changing; re-deriving
+        it fresh every run would feed that jitter straight back into the next
+        request. Once set it survives until ``now`` reaches its own end --
+        whether or not the load ever actually drew power, since a load that
+        never ran needs the same release or it would stay locked out forever.
+
+        A window is dropped outright rather than left to expire on its own
+        whenever the load will not be running under it -- either the lockout
+        switch is off or the load itself is disabled -- so both take effect
+        immediately. The disabled case matters for the same reason the switch
+        does: a disabled load is parked out of the optimisation entirely
+        (``wants_to_run`` is False in :meth:`DeferrableRuntime.to_load`), so a
+        window left standing would go on pricing the battery out of serving
+        the house for a load that cannot run under it.
+        """
+        step = timedelta(minutes=step_minutes)
+        for load in self._loads.values():
+            if not load.battery_lockout_enabled or not load.enabled:
+                load.battery_lockout = None
+                continue
+            if load.battery_lockout is not None and now >= load.battery_lockout.end:
+                load.battery_lockout = None
+            if load.battery_lockout is not None or plan is None:
+                continue
+            try:
+                index = load_order.index(load.subentry_id)
+            except ValueError:
+                continue
+            before = load.battery_lockout
+            load.battery_lockout = _derive_held_window(
+                plan, index, load.running_threshold_w, now, step
+            )
+            after = load.battery_lockout
+            # The oscillation detector: whether the held window moves between
+            # runs is the direct answer to "does it move with replan?" (Test 0,
+            # Test D point 3). Only logged on an actual change, not every cycle
+            # the window happens to already be set.
+            changed = after is not None and (
+                before is None or (before.start, before.end) != (after.start, after.end)
+            )
+            if changed:
+                _LOGGER.info(
+                    "%s: battery-lockout held window %s -> %s .. %s",
+                    load.name,
+                    "set" if before is None else "changed",
+                    after.start.isoformat(),
+                    after.end.isoformat(),
+                )
 
     def to_loads(self, now: datetime, step_minutes: int) -> list[DeferrableLoad]:
         return [

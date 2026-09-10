@@ -42,7 +42,7 @@ Three consequences worth knowing:
 ## Requirements
 
 - Home Assistant 2026.7 or newer
-- **EMHASS 0.17.9 or newer** — this integration reads the optimisation plan through the JSON API introduced in that release, and does not use EMHASS's `publish-data` mechanism at all
+- **EMHASS 0.17.9 or newer** — this integration reads the optimisation plan through the JSON API introduced in that release, and does not use EMHASS's `publish-data` mechanism at all. A network tariff's demand charge needs 0.18.0+ to price at all, 0.18.1+ for a windowed charge, and 0.18.2+ to price it on the tariff's own measurement interval rather than the optimizer timestep.
 
 Nothing else is required. No battery, no solar, no dynamic tariff and no supported inverter are each valid configurations.
 

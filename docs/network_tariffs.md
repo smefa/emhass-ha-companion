@@ -129,7 +129,8 @@ own hours are runtime parameters EMHASS documents as MPC-only:
 |---|---|
 | **< 0.18.0** | Energy bands only; the demand-charge section of the config flow is shown disabled |
 | **0.18.0** | Priced peak **only if the window is unrestricted** (all day, every day). A real window (Göteborg's, Amber's) has no `capacity_charge_window` to restrict it on this release, so pricing it unwindowed would over-shave every hour outside the window — instead, it falls back to the hard cap below |
-| **0.18.1+** (what this add-on ships today) | Full: windowed priced peak on MPC (`capacity_cost_per_kw` + `capacity_charge_window` + `current_period_peak`), the capped array on day-ahead |
+| **0.18.1** | Windowed priced peak on MPC (`capacity_cost_per_kw` + `capacity_charge_window` + `current_period_peak`), the capped array on day-ahead. The floor and peak are still read at the optimizer's own timestep, not the tariff's measurement interval, which biases toward over-shaving on any tariff with a 60-minute (or longer) interval and a shorter EMHASS timestep |
+| **0.18.2+** (what this add-on ships today) | Same as 0.18.1, plus the peak is priced on the tariff's own measurement interval (`capacity_charge_interval_timesteps` + `capacity_charge_current_interval_history`) rather than the optimizer timestep, closing the 0.18.1 over-shaving gap |
 
 The window mask (`capacity_charge_window`) landed on EMHASS's `master` branch
 in August 2026 and reached a release in **0.18.1** (PR #1066) — on that

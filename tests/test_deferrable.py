@@ -26,6 +26,7 @@ from custom_components.emhass_companion.const import (
     RECURRENCE_SURPLUS,
 )
 from custom_components.emhass_companion.deferrable import (
+    BatteryLockout,
     DeferrableRegistry,
     DeferrableRuntime,
     resolve_should_run,
@@ -351,6 +352,48 @@ def test_force_on_pins_the_timestep_it_is_commanding():
     assert projected.current_power_w == 2000.0
 
 
+def test_an_observed_run_does_not_force_the_min_on_remainder():
+    """The other door into EMHASS's timestep-0 force, and the same argument.
+
+    EMHASS pins max(0, def_minimum_on_time - def_current_on_timesteps) steps ON
+    from t=0 and widens the window mask to fit them, so a truthful "just
+    started" streak on a run nobody commanded turns a car that plugged itself
+    in into a scheduled block at whatever the spot price happens to be.
+    Reporting the minimum as already served leaves the remainder at zero.
+    """
+    load = _load(minimum_on_time_minutes=60)
+    load.observe_power(1900, T0)
+
+    projected = load.to_load(T0 + timedelta(minutes=10), 30)
+    assert projected.current_state is True
+    assert projected.current_on_timesteps >= projected.minimum_on_time_minutes / 30
+
+
+def test_a_commanded_run_reports_its_real_on_time_streak():
+    """The remainder is dwell-time protection for a block we chose, and has to
+    keep working: only an *observed* run is refused."""
+    load = _load(minimum_on_time_minutes=60, plan_scheduled_now=True)
+    load.observe_power(1900, T0)
+
+    assert load.to_load(T0 + timedelta(minutes=10), 30).current_on_timesteps == 0
+
+
+def test_force_on_reports_its_real_on_time_streak():
+    load = _load(minimum_on_time_minutes=60, mode=LOAD_MODE_FORCE_ON)
+    load.observe_power(1900, T0)
+
+    assert load.to_load(T0 + timedelta(minutes=10), 30).current_on_timesteps == 0
+
+
+def test_a_long_observed_run_still_reports_the_longer_streak():
+    """The clamp is a floor, not a replacement: a genuine streak past the
+    minimum is still the truth EMHASS should have."""
+    load = _load(minimum_on_time_minutes=30)
+    load.observe_power(1900, T0)
+
+    assert load.to_load(T0 + timedelta(hours=2), 30).current_on_timesteps == 4
+
+
 def test_completed_timesteps_reach_the_payload():
     load = _load()
     load.observe_power(1900, T0)
@@ -607,6 +650,26 @@ def test_a_run_already_under_way_only_counts_from_the_request():
     load.observe_power(1900, T0)
     load.request(T0 + timedelta(hours=3))
     assert load.elapsed_since_request(T0 + timedelta(hours=4)) == timedelta(hours=1)
+
+
+def test_a_run_that_finished_before_the_request_does_not_count_against_it():
+    """The mirror of the case above, and the reason _stop clamps.
+
+    A sourceless load replays its own plan, and after a restart
+    plan_assumed_until is cold, so blocks stamped wholly before the request
+    are replayed too. Crediting the negative gap would leave request_runtime
+    below zero and hold the auto-disarm open past the run it already had.
+    """
+    load = _load(recurrence=RECURRENCE_ON_DEMAND, operating_hours=2)
+    load.request(T0)
+    rows = [
+        PlanRow(timestamp=T0 - timedelta(minutes=20), deferrables=[2000.0]),
+        PlanRow(timestamp=T0 - timedelta(minutes=10), deferrables=[0.0]),
+    ]
+    load.assume_from_plan(rows, 0, T0 + timedelta(minutes=15))
+
+    assert load.request_runtime == timedelta()
+    assert load.elapsed_since_request(T0 + timedelta(minutes=15)) == timedelta()
 
 
 def test_an_armed_request_with_no_anchor_falls_back_to_the_day():
@@ -1138,3 +1201,236 @@ def test_standby_draw_in_the_plan_is_not_a_commitment():
     _registry(load).adopt_plan_commitments(_plan(150.0), ["abc"], T0, stale=False)
 
     assert load.plan_scheduled_now is False
+
+
+# --- battery lockout ---------------------------------------------------------
+#
+# apply_battery_lockout manages only the held (planned_held) half; the
+# while_running half is computed live in to_load and tested separately below.
+
+
+def _rows_plan(step_minutes: int, *rows: float) -> Plan:
+    """A plan whose ``deferrables[0]`` follows ``rows``, one value per timestep."""
+    step = timedelta(minutes=step_minutes)
+    return Plan(
+        generated_at=T0,
+        schema_version="1.0",
+        rows=[
+            PlanRow(timestamp=T0 + step * index, deferrables=(value,))
+            for index, value in enumerate(rows)
+        ],
+    )
+
+
+def test_battery_lockout_disabled_load_gets_no_window():
+    load = _load(battery_lockout_enabled=False)
+    registry = _registry(load)
+    plan = _rows_plan(15, 0.0, 2000.0, 2000.0, 0.0)
+
+    registry.apply_battery_lockout(plan, ["abc"], T0, 15)
+
+    assert load.battery_lockout is None
+
+
+def test_battery_lockout_window_cleared_for_a_disabled_load():
+    """A load that is switched off is parked out of the optimisation, so a
+    window held over it would price the battery out for a run that cannot
+    happen. Cleared outright, the same as turning the lockout switch off."""
+    load = _load(enabled=False, battery_lockout_enabled=True)
+    registry = _registry(load)
+    plan = _rows_plan(15, 0.0, 2000.0, 2000.0, 0.0)
+
+    registry.apply_battery_lockout(plan, ["abc"], T0, 15)
+
+    assert load.battery_lockout is None
+
+
+def test_battery_lockout_window_already_held_is_dropped_when_the_load_is_disabled():
+    """Disabling takes effect at once rather than at the window's own end --
+    the held window survives replan by design, so nothing else would drop it."""
+    load = _load(battery_lockout_enabled=True)
+    registry = _registry(load)
+    plan = _rows_plan(15, 0.0, 2000.0, 2000.0, 0.0)
+    registry.apply_battery_lockout(plan, ["abc"], T0, 15)
+    assert load.battery_lockout is not None
+
+    load.enabled = False
+    registry.apply_battery_lockout(plan, ["abc"], T0 + timedelta(minutes=15), 15)
+
+    assert load.battery_lockout is None
+
+
+def test_battery_lockout_window_derived_from_plan_deferrable_column():
+    load = _load(battery_lockout_enabled=True)
+    registry = _registry(load)
+    plan = _rows_plan(15, 0.0, 2000.0, 2000.0, 0.0)
+
+    registry.apply_battery_lockout(plan, ["abc"], T0, 15)
+
+    assert load.battery_lockout is not None
+    assert load.battery_lockout.start == T0 + timedelta(minutes=15)
+    # One step past the last qualifying row, matching SurplusBudget.window_end.
+    assert load.battery_lockout.end == T0 + timedelta(minutes=45)
+
+
+def test_battery_lockout_window_covers_one_block_not_the_gap_between_two():
+    """Two disjoint blocks in one column must not collapse into one span.
+
+    A plan routinely schedules a load twice in a horizon -- a pool pump on the
+    morning and the afternoon shoulder. Taking first-start to last-end would
+    price the battery out of the whole idle gap in between, which is the exact
+    error planning/battery_lockaout_plan.md rules out for the held and
+    while_running halves ("never merged into one span"), just reached from
+    inside a single plan column.
+    """
+    load = _load(battery_lockout_enabled=True)
+    registry = _registry(load)
+    # On for two steps, off for four, on again for two.
+    plan = _rows_plan(15, 2000.0, 2000.0, 0.0, 0.0, 0.0, 0.0, 2000.0, 2000.0)
+
+    registry.apply_battery_lockout(plan, ["abc"], T0, 15)
+
+    assert load.battery_lockout is not None
+    assert load.battery_lockout.start == T0
+    # One step past the first block's last row (T0+15) -- not past the
+    # second block's, which would be T0+120.
+    assert load.battery_lockout.end == T0 + timedelta(minutes=30)
+
+
+def test_battery_lockout_window_skips_leading_idle_rows():
+    """The block need not start at row zero; rows before it are just skipped."""
+    load = _load(battery_lockout_enabled=True)
+    registry = _registry(load)
+    plan = _rows_plan(15, 0.0, 0.0, 2000.0, 2000.0, 0.0, 2000.0)
+
+    registry.apply_battery_lockout(plan, ["abc"], T0, 15)
+
+    assert load.battery_lockout is not None
+    assert load.battery_lockout.start == T0 + timedelta(minutes=30)
+    assert load.battery_lockout.end == T0 + timedelta(minutes=60)
+
+
+def test_battery_lockout_load_missing_from_load_order_gets_no_window():
+    load = _load(battery_lockout_enabled=True)
+    registry = _registry(load)
+    plan = _rows_plan(15, 2000.0)
+
+    registry.apply_battery_lockout(plan, ["other"], T0, 15)
+
+    assert load.battery_lockout is None
+
+
+def test_battery_lockout_held_window_does_not_move_when_the_next_plan_schedules_elsewhere():
+    """Test 0: the unlatched window moves on its own. Held must not."""
+    load = _load(battery_lockout_enabled=True)
+    registry = _registry(load)
+    first = _rows_plan(15, 0.0, 2000.0, 2000.0, 0.0)
+    registry.apply_battery_lockout(first, ["abc"], T0, 15)
+    held_after_first = load.battery_lockout
+
+    later = _rows_plan(15, 2000.0, 2000.0, 0.0, 0.0)
+    registry.apply_battery_lockout(later, ["abc"], T0, 15)
+
+    assert load.battery_lockout == held_after_first
+
+
+def test_battery_lockout_latch_releases_once_now_reaches_its_end():
+    load = _load(battery_lockout_enabled=True)
+    registry = _registry(load)
+    plan = _rows_plan(15, 2000.0, 0.0)
+    registry.apply_battery_lockout(plan, ["abc"], T0, 15)
+    end = load.battery_lockout.end
+
+    # A later run with nothing scheduled: release must not immediately
+    # re-derive a fresh window from a plan that no longer asks for anything.
+    empty_plan = _rows_plan(15, 0.0, 0.0)
+    registry.apply_battery_lockout(empty_plan, ["abc"], end, 15)
+
+    assert load.battery_lockout is None
+
+
+def test_battery_lockout_turning_the_switch_off_drops_the_held_window_immediately():
+    load = _load(battery_lockout_enabled=True)
+    registry = _registry(load)
+    plan = _rows_plan(15, 0.0, 2000.0, 2000.0, 0.0)
+    registry.apply_battery_lockout(plan, ["abc"], T0, 15)
+    assert load.battery_lockout is not None
+
+    load.battery_lockout_enabled = False
+    registry.apply_battery_lockout(plan, ["abc"], T0, 15)
+
+    assert load.battery_lockout is None
+
+
+# --- battery lockout: windows fed to to_load ---------------------------------
+
+
+def test_battery_lockout_windows_empty_when_disabled():
+    load = _load(battery_lockout_enabled=False)
+    load.running_since = T0
+    assert load.to_load(T0, STEP).battery_lockout_windows == ()
+
+
+def test_battery_lockout_windows_held_only_when_not_running():
+    load = _load(battery_lockout_enabled=True)
+    load.battery_lockout = BatteryLockout(start=T0, end=T0 + timedelta(minutes=30), derived_at=T0)
+    windows = load.to_load(T0, STEP).battery_lockout_windows
+    assert windows == ((T0, T0 + timedelta(minutes=30)),)
+
+
+def test_battery_lockout_windows_while_running_only_with_no_held_window():
+    load = _load(battery_lockout_enabled=True, operating_hours=1.0)
+    load.running_since = T0
+
+    windows = load.to_load(T0, STEP).battery_lockout_windows
+
+    assert len(windows) == 1
+    start, end = windows[0]
+    assert start == T0
+    assert end == T0 + timedelta(hours=1)
+
+
+def test_battery_lockout_windows_are_kept_separate_when_disjoint():
+    """A manual start well outside a not-yet-released held window must price
+    only the two real spans, never the gap between them."""
+    load = _load(battery_lockout_enabled=True, operating_hours=1.0)
+    held_start = T0 + timedelta(hours=6)
+    held_end = T0 + timedelta(hours=6, minutes=30)
+    load.battery_lockout = BatteryLockout(start=held_start, end=held_end, derived_at=T0)
+    load.running_since = T0
+
+    windows = load.to_load(T0, STEP).battery_lockout_windows
+
+    assert len(windows) == 2
+    assert (held_start, held_end) in windows
+    assert (T0, T0 + timedelta(hours=1)) in windows
+    # Never collapsed into one span covering the gap between them.
+    assert not any(start == held_start and end == T0 + timedelta(hours=1) for start, end in windows)
+
+
+def test_battery_lockout_while_running_window_is_floored_at_one_step():
+    load = _load(
+        battery_lockout_enabled=True,
+        recurrence=RECURRENCE_ON_DEMAND,
+        operating_hours=1.0,
+    )
+    load.running_since = T0
+    load.request(T0)
+    load.command_runtime = timedelta(hours=1)  # already fully served
+
+    windows = load.to_load(T0, STEP).battery_lockout_windows
+
+    assert len(windows) == 1
+    start, end = windows[0]
+    assert end - start == timedelta(minutes=STEP)
+
+
+def test_battery_lockout_while_running_excludes_thermal_loads():
+    load = _load(
+        subentry_id="heater",
+        load_type=LOAD_TYPE_THERMAL,
+        battery_lockout_enabled=True,
+    )
+    load.running_since = T0
+
+    assert load.to_load(T0, STEP).battery_lockout_windows == ()

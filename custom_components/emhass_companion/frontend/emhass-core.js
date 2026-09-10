@@ -304,6 +304,43 @@ function recordedSeries(result, entityId, invert) {
 }
 
 /**
+ * A light centred moving average over a stepped series, to take the edge off
+ * sensor jitter without erasing its shape.
+ *
+ * A median-of-3 pass runs first, since that is what actually kills a lone
+ * spike -- a mean would just blend it in and leave a smaller bump either
+ * side. The window that follows is sized by time rather than sample count,
+ * because the recorder's points land irregularly.
+ */
+function smoothSeries(points, windowMs) {
+  if (points.length < 3) return points;
+  const median = points.map((point, i) => {
+    if (i === 0 || i === points.length - 1) return point;
+    const neighbours = [points[i - 1].v, point.v, points[i + 1].v].sort((a, b) => a - b);
+    return { t: point.t, v: neighbours[1] };
+  });
+  return median.map((point, i) => {
+    let sum = 0;
+    let n = 0;
+    for (let j = i; j >= 0 && point.t - median[j].t <= windowMs / 2; j--) {
+      sum += median[j].v;
+      n++;
+    }
+    for (let j = i + 1; j < median.length && median[j].t - point.t <= windowMs / 2; j++) {
+      sum += median[j].v;
+      n++;
+    }
+    return { t: point.t, v: sum / n };
+  });
+}
+
+// Power lanes get smoothed -- an inverter or meter reports with real jitter
+// that a chart has no business drawing as a spike. Price and charge-level
+// series are left alone: a price is a literal step, not a noisy reading, and
+// smoothing it would draw a ramp the tariff never had.
+const SMOOTHED_HISTORY = ["pv", "load", "grid", "battery"];
+
+/**
  * What a set of entities actually did, from the recorder, cached on the card.
  *
  * The plan is no use behind the present: an MPC run starts at the timestep it
@@ -351,7 +388,8 @@ function readHistory(card, hass, wanted, invert, span, now) {
       .then((result) => {
         const points = {};
         for (const name of names) {
-          points[name] = recordedSeries(result, wanted[name], invert.indexOf(name) !== -1);
+          const raw = recordedSeries(result, wanted[name], invert.indexOf(name) !== -1);
+          points[name] = SMOOTHED_HISTORY.indexOf(name) !== -1 ? smoothSeries(raw, 15 * 60000) : raw;
         }
         card._historyPoints = points;
         card.refresh();

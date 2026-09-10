@@ -20,6 +20,7 @@ from custom_components.emhass_companion.models import (
     HybridInverterConfig,
     Point,
     Series,
+    floor_to_step,
 )
 from custom_components.emhass_companion.payload import (
     PayloadInputs,
@@ -762,6 +763,101 @@ def test_build_capacity_charge_window_mask_aligns_like_load_cost_forecast():
     assert mask == [0.0, 0.0, 1.0, 1.0, 0.0, 0.0]
 
 
+# --- capacity_charge_interval_timesteps / _current_interval_history (Step 6) --
+
+
+def test_capacity_interval_keys_sent_on_mpc_when_timesteps_greater_than_one():
+    """The regression the feature exists for: a 60min tariff over a 15min
+    step reaches EMHASS as N=4, alongside the spread history."""
+    payload = build_payload(
+        _inputs(
+            network_demand_charge_configured=True,
+            demand_charge_rate_per_kw=45.0,
+            capacity_interval_timesteps=4,
+            capacity_interval_history_w=[600.0, 600.0, 600.0],
+        )
+    ).payload
+    assert payload["capacity_charge_interval_timesteps"] == 4
+    assert payload["capacity_charge_current_interval_history"] == [600, 600, 600]
+
+
+def test_capacity_interval_history_values_are_rounded_to_whole_watts():
+    payload = build_payload(
+        _inputs(
+            network_demand_charge_configured=True,
+            demand_charge_rate_per_kw=45.0,
+            capacity_interval_timesteps=4,
+            capacity_interval_history_w=[599.6, 600.4],
+        )
+    ).payload
+    assert payload["capacity_charge_current_interval_history"] == [600, 600]
+
+
+def test_capacity_interval_history_defaults_to_empty_list():
+    """m == 0 (solving exactly at an interval boundary) -- None must not
+    reach EMHASS as null."""
+    payload = build_payload(
+        _inputs(
+            network_demand_charge_configured=True,
+            demand_charge_rate_per_kw=45.0,
+            capacity_interval_timesteps=4,
+        )
+    ).payload
+    assert payload["capacity_charge_current_interval_history"] == []
+
+
+def test_capacity_interval_keys_omitted_when_timesteps_is_one():
+    """N=1 is both the pre-0.18.2 default and an inexact-division fallback --
+    either way the payload must stay byte-identical to today's: no interval
+    keys at all, not even zero/empty ones."""
+    payload = build_payload(
+        _inputs(
+            network_demand_charge_configured=True,
+            demand_charge_rate_per_kw=45.0,
+            capacity_interval_history_w=[600.0],  # must be ignored at N=1
+        )
+    ).payload
+    assert "capacity_charge_interval_timesteps" not in payload
+    assert "capacity_charge_current_interval_history" not in payload
+
+
+def test_capacity_interval_keys_omitted_on_dayahead():
+    """capacity_charge_interval_timesteps is a structural optim_conf key --
+    sending it on the branch that already zeroes capacity_cost_per_kw would
+    flip EMHASS's OptimizationCacheKey for no effect."""
+    payload = build_payload(
+        _inputs(
+            action=ACTION_DAYAHEAD,
+            network_demand_charge_configured=True,
+            demand_charge_rate_per_kw=45.0,
+            capacity_interval_timesteps=4,
+            capacity_interval_history_w=[600.0, 600.0, 600.0],
+        )
+    ).payload
+    assert "capacity_charge_interval_timesteps" not in payload
+    assert "capacity_charge_current_interval_history" not in payload
+
+
+def test_window_mask_is_constant_across_every_completed_interval_span():
+    """At N>1 EMHASS bills a whole interval at once, so a window boundary
+    falling mid-interval is unrepresentable -- a profile's window must stay
+    aligned to the tariff's own measurement interval, which build_payload
+    itself cannot enforce but must not silently corrupt either. With an
+    hour-aligned window over a 15min step (N=4, one interval per hour), every
+    4-element span is either all-in or all-out."""
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    mask = build_capacity_charge_window_mask(
+        in_window=lambda when: when.hour == 11,
+        start=now,
+        step=timedelta(minutes=15),
+        count=8,  # two hours = two interval spans
+    )
+    interval_timesteps = 4
+    for start in range(0, len(mask), interval_timesteps):
+        span = mask[start : start + interval_timesteps]
+        assert len(set(span)) == 1, f"span {span} straddles an interval boundary"
+
+
 def test_compute_curtailment_is_sent_when_configured():
     """EMHASS produces no P_PV_curtailment column without it, so the plan-driven
     branch of decide_curtailment depends on this reaching the run."""
@@ -1008,6 +1104,90 @@ def test_a_chosen_end_soc_replaces_the_pin_to_start():
     payload = build_payload(_inputs(battery=battery, soc_init=0.098, soc_final=0.42)).payload
     assert payload["soc_init"] == 0.098
     assert payload["soc_final"] == 0.42
+
+
+# --- battery lockout -----------------------------------------------------------
+
+
+def _load(battery_lockout_windows=(), **overrides) -> DeferrableLoad:
+    defaults = {
+        "subentry_id": "l1",
+        "name": "Test load",
+        "nominal_power_w": 1000.0,
+        "operating_hours": 2.0,
+    }
+    return DeferrableLoad(
+        **{**defaults, **overrides}, battery_lockout_windows=battery_lockout_windows
+    )
+
+
+def test_battery_lockout_baseline_stays_a_float_with_no_flagged_load():
+    battery = BatteryConfig(enabled=True, weight_battery_discharge=0.05)
+    payload = build_payload(_inputs(battery=battery, loads=[_load()])).payload
+    assert payload["weight_battery_discharge"] == 0.05
+    assert isinstance(payload["weight_battery_discharge"], float)
+
+
+def test_battery_lockout_omitted_when_battery_disabled():
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    load = _load(battery_lockout_windows=((now, now + HALF_HOUR),))
+    payload = build_payload(_inputs(battery=BatteryConfig(enabled=False), loads=[load])).payload
+    assert "weight_battery_discharge" not in payload
+
+
+def test_battery_lockout_prices_exactly_the_flagged_steps():
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    battery = BatteryConfig(enabled=True, weight_battery_discharge=0.05)
+    load = _load(battery_lockout_windows=((now + HALF_HOUR * 2, now + HALF_HOUR * 4),))
+    payload = build_payload(_inputs(battery=battery, loads=[load])).payload
+    weights = payload["weight_battery_discharge"]
+    assert len(weights) == DAY_STEPS
+    assert weights[:2] == [0.05, 0.05]
+    assert weights[2] == pytest.approx(100.0)
+    assert weights[3] == pytest.approx(100.0)
+    assert all(value == 0.05 for value in weights[4:])
+
+
+def test_battery_lockout_price_derived_from_horizon_buy_price():
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    battery = BatteryConfig(enabled=True)
+    load = _load(battery_lockout_windows=((now, now + HALF_HOUR),))
+    buy_price = _series(now, 24, 6.0)
+    payload = build_payload(_inputs(battery=battery, loads=[load], buy_price=buy_price)).payload
+    assert payload["weight_battery_discharge"][0] == pytest.approx(600.0)
+
+
+def test_battery_lockout_price_floors_with_no_price_series():
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    battery = BatteryConfig(enabled=True)
+    load = _load(battery_lockout_windows=((now, now + HALF_HOUR),))
+    payload = build_payload(_inputs(battery=battery, loads=[load])).payload
+    assert payload["weight_battery_discharge"][0] == pytest.approx(100.0)
+
+
+def test_battery_lockout_unions_across_two_flagged_loads():
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    battery = BatteryConfig(enabled=True, weight_battery_discharge=0.05)
+    load_a = _load(subentry_id="a", battery_lockout_windows=((now, now + HALF_HOUR),))
+    load_b = _load(
+        subentry_id="b",
+        battery_lockout_windows=((now + HALF_HOUR * 5, now + HALF_HOUR * 6),),
+    )
+    payload = build_payload(_inputs(battery=battery, loads=[load_a, load_b])).payload
+    weights = payload["weight_battery_discharge"]
+    assert weights[0] == pytest.approx(100.0)
+    assert weights[5] == pytest.approx(100.0)
+    assert weights[1] == 0.05
+    assert weights[6] == 0.05
+
+
+def test_battery_lockout_array_length_matches_capacity_array_steps_on_dayahead():
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    battery = BatteryConfig(enabled=True)
+    load = _load(battery_lockout_windows=((now, now + HALF_HOUR),))
+    result = build_payload(_inputs(action=ACTION_DAYAHEAD, battery=battery, loads=[load]))
+    # delta_forecast_daily rounds up to 1 whole day at 30-minute resolution.
+    assert len(result.payload["weight_battery_discharge"]) == 48
 
 
 # --- hybrid inverter -----------------------------------------------------------
@@ -1533,6 +1713,14 @@ def test_a_currently_running_single_constant_load_is_not_pinned_to_a_future_wind
     assert payload["operating_hours_of_each_deferrable_load"] == [0.0]
     assert payload["operating_timesteps_of_each_deferrable_load"] == [0]
     assert any("asking for 0 hours" in warning for warning in result.warnings)
+    # Zero hours is necessary but not sufficient: Block A's pin is gated on
+    # def_current_state and def_current_power is a hard equality on timestep
+    # 0 whatever the operating requirement, so the load has to be parked
+    # outright rather than merely zeroed.
+    assert payload["def_current_state"] == [False]
+    assert "def_current_power" not in payload
+    assert payload["def_current_operating_timesteps"] == [0]
+    assert payload["set_deferrable_load_single_constant"] == [False]
 
 
 def test_a_currently_running_single_constant_load_keeps_its_hours_when_the_window_covers_now():
@@ -1622,6 +1810,63 @@ def test_a_window_opening_beyond_the_horizon_parks_the_load_instead_of_freeing_i
     assert payload["operating_hours_of_each_deferrable_load"] == [0.0]
     assert payload["operating_timesteps_of_each_deferrable_load"] == [0]
     assert any("will not be scheduled to run this cycle" in warning for warning in result.warnings)
+    # Parked, not merely zeroed -- same reasoning as the single-constant case.
+    assert payload["def_current_state"] == [False]
+    assert "def_current_power" not in payload
+    assert payload["def_current_operating_timesteps"] == [0]
+
+
+def test_a_zero_houred_load_is_parked_as_thoroughly_as_a_disabled_one():
+    """Both routes to "ask for nothing this cycle" must clear the current-state
+    trio, not just the hours.
+
+    `_park` exists because telling EMHASS a load is running, or has already
+    run, while demanding it total zero energy is the contradiction it answers
+    by declaring the *whole problem* infeasible. `_describe` has two branches
+    that reach the same "ask for nothing" conclusion -- a window past the
+    horizon, and a running single-constant load whose window has moved on --
+    and both have to land in the same place, or they reintroduce exactly the
+    t=0 pin that def_current_power and the min-on-time remainder were already
+    closed against.
+    """
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    beyond_horizon = DeferrableLoad(
+        subentry_id="dishwasher",
+        name="Dishwasher",
+        nominal_power_w=1500,
+        operating_hours=2,
+        earliest_start=time(22, 0),
+        latest_end=time(6, 0),
+        current_state=True,
+        current_power_w=1500.0,
+        completed_timesteps=2,
+        minimum_on_time_minutes=60,
+        current_on_timesteps=1,
+    )
+    moved_on = DeferrableLoad(
+        subentry_id="pool",
+        name="Pool",
+        nominal_power_w=850,
+        operating_hours=3,
+        single_constant=True,
+        current_state=True,
+        current_power_w=850.0,
+        completed_timesteps=2,
+        minimum_on_time_minutes=60,
+        current_on_timesteps=1,
+        start_at=now + timedelta(hours=2),
+    )
+    for load in (beyond_horizon, moved_on):
+        payload = build_payload(_inputs(now=now, loads=[load], horizon_steps=4)).payload
+        assert payload["operating_hours_of_each_deferrable_load"] == [0.0], load.name
+        assert payload["def_current_state"] == [False], load.name
+        assert payload["def_current_operating_timesteps"] == [0], load.name
+        assert payload["def_minimum_on_time"] == [0], load.name
+        assert payload["def_current_on_timesteps"] == [0], load.name
+        assert payload["set_deferrable_load_single_constant"] == [False], load.name
+        # Omitted entirely rather than sent as zero: the key is only emitted
+        # when some load actually reports commanded power.
+        assert "def_current_power" not in payload, load.name
 
 
 def test_profile_settings_can_override_defaults():
@@ -1860,6 +2105,54 @@ def test_a_thermal_load_sends_def_load_config_at_its_own_index():
 
 
 @pytest.mark.usefixtures("stockholm_timezone")
+def test_the_comfort_band_is_built_on_the_floored_timestep_grid():
+    """`def_load_config` is a per-timestep array like every other one here, so
+    it has to be indexed from the same origin.
+
+    EMHASS stamps plan row zero at the grid boundary at or *before* launch --
+    verified against a live 0.18.2 backend, where a run launched at 01:15:33Z
+    produced a first row of 01:15:00Z on a 15-minute step. Building the band
+    from the raw launch instant instead put min_temperatures[i] at
+    ``now + i*step`` while EMHASS reads it at ``floor(now) + i*step``, sliding
+    the comfort window and its setback ramp up to a full timestep late.
+
+    Asserted against the band recomputed on each origin rather than against
+    literal temperatures, so the test says exactly which grid is meant and
+    stays true whatever local timezone the suite runs in.
+    """
+    step_minutes = 30
+    step = timedelta(minutes=step_minutes)
+    horizon_steps = 8
+    # Deliberately mid-timestep, as every real run is.
+    now = datetime(2026, 1, 15, 5, 20, tzinfo=UTC)
+    thermal = ThermalConfig(
+        sense="heat",
+        heating_rate=3.0,
+        comfort_temperature=21.0,
+        setback_temperature=17.0,
+        comfort_start=time(6, 15),
+        comfort_end=time(22, 0),
+        current_temperature=19.0,
+    )
+    payload = build_payload(
+        _inputs(
+            now=now,
+            loads=[_thermal_load(thermal=thermal)],
+            time_step_minutes=step_minutes,
+            horizon_steps=horizon_steps,
+        )
+    ).payload
+    sent = payload["def_load_config"][0]["thermal_config"]["min_temperatures"]
+
+    on_grid, _ = thermal.comfort_band(floor_to_step(now, step), step, horizon_steps)
+    off_grid, _ = thermal.comfort_band(now, step, horizon_steps)
+
+    assert sent == on_grid
+    # The two really do differ here, so the assertion above is load-bearing:
+    # a comfort start a quarter-step off the boundary is what separates them.
+    assert on_grid != off_grid
+
+
 def test_a_disabled_thermal_load_sends_no_temperature_demands():
     """Parked at zero hours *and* stripped of its comfort band: temperature
     targets are exactly the demand a parked load must not carry."""

@@ -21,6 +21,9 @@ from .const import (
     ATTR_COMPLETION_REASON,
     ATTR_DEADLINE_AT,
     ATTR_IDLE_SINCE,
+    ATTR_LOCKOUT_HELD_END,
+    ATTR_LOCKOUT_HELD_START,
+    ATTR_LOCKOUT_RUNNING,
     ATTR_REQUEST_RUNTIME_SECONDS,
     ATTR_REQUESTED_AT,
     ATTR_SEEN_RUNNING,
@@ -74,6 +77,23 @@ def _set_single_constant(load: DeferrableRuntime, value: bool) -> None:
 
 def _set_start_asap(load: DeferrableRuntime, value: bool) -> None:
     load.start_asap = value
+
+
+def _set_battery_lockout(load: DeferrableRuntime, value: bool) -> None:
+    load.battery_lockout_enabled = value
+    if not value:
+        # Takes effect immediately rather than on the held window's own
+        # release -- see DeferrableRegistry.apply_battery_lockout.
+        load.battery_lockout = None
+
+
+def _battery_lockout_attrs(load: DeferrableRuntime) -> dict[str, Any]:
+    held = load.battery_lockout
+    return {
+        ATTR_LOCKOUT_HELD_START: held.start.isoformat() if held else None,
+        ATTR_LOCKOUT_HELD_END: held.end.isoformat() if held else None,
+        ATTR_LOCKOUT_RUNNING: load.battery_lockout_enabled and load.is_running,
+    }
 
 
 def _set_requested(load: DeferrableRuntime, value: bool) -> None:
@@ -193,6 +213,20 @@ LOAD_SWITCHES: tuple[LoadSwitchDescription, ...] = (
         # "One unbroken block" is a constraint on a run-time target, which a
         # thermal load does not have.
         applies_fn=lambda load: not load.is_thermal,
+    ),
+    # See planning/battery_lockaout_plan.md. Prices weight_battery_discharge
+    # high over this load's held-plan and while-running windows so the
+    # optimiser plans around discharging into it -- soft, so it can never make
+    # the solve infeasible, and discharge-only, so the battery may still take
+    # surplus PV while this load draws from the grid.
+    LoadSwitchDescription(
+        key="battery_lockout",
+        translation_key="battery_lockout",
+        entity_category=EntityCategory.CONFIG,
+        get_fn=lambda load: load.battery_lockout_enabled,
+        set_fn=_set_battery_lockout,
+        default=False,
+        attrs_fn=_battery_lockout_attrs,
     ),
     # Not a config switch: arming a load is a day-to-day action, not a
     # setup-time setting, so it belongs with the load's primary entities

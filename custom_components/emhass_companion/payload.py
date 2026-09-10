@@ -18,7 +18,12 @@ from typing import Any
 
 from homeassistant.util import dt as dt_util
 
-from .const import ACTION_MPC, DEFAULT_COST_FUN
+from .const import (
+    ACTION_MPC,
+    BATTERY_LOCKOUT_PRICE_FACTOR,
+    BATTERY_LOCKOUT_PRICE_FLOOR,
+    DEFAULT_COST_FUN,
+)
 from .models import (
     BatteryConfig,
     DeferrableLoad,
@@ -360,6 +365,16 @@ class PayloadInputs:
     current_period_peak_w: float | None = None
     """``PeakTracker.floor_kw`` in watts, MPC only -- see
     docs/network_tariffs_plan.md, "The incurred-peak floor"."""
+    capacity_interval_timesteps: int = 1
+    """N for ``capacity_charge_interval_timesteps`` -- the tariff's own
+    measurement interval in optimizer timesteps, from
+    ``DemandChargePricing.interval_timesteps``. Sent only when > 1; see
+    planning/capacity_interval_plan.md."""
+    capacity_interval_history_w: list[float] | None = None
+    """``capacity_charge_current_interval_history`` -- the still-open
+    interval's elapsed timesteps in watts, oldest to newest, from
+    ``EmhassCoordinator._capacity_interval_history_w``. Only meaningful
+    alongside :attr:`capacity_interval_timesteps` > 1."""
     capacity_limit_w: float | None = None
     """An explicit ``capacity_limit:`` block's ceiling
     (``subscribed_kw - headroom_kw``, in watts). None when the profile
@@ -501,6 +516,46 @@ def build_capacity_charge_window_mask(
     exists to prevent.
     """
     return [1.0 if in_window(start + step * index) else 0.0 for index in range(count)]
+
+
+def _battery_lockout_weights(
+    inputs: PayloadInputs,
+    grid_start: datetime,
+    horizon_end: datetime,
+    step: timedelta,
+    count: int,
+) -> dict[str, Any]:
+    """Per-timestep ``weight_battery_discharge``, pricing every flagged load's window.
+
+    See planning/battery_lockaout_plan.md. Returns ``{}`` unless the battery is
+    enabled and some load actually has a window to price -- so an install
+    that never uses the feature (or has the battery off) sees the plain
+    scalar weight it always has, byte-identical.
+
+    Every element of a flagged load's ``battery_lockout_windows`` counts
+    independently -- a held window and a live while_running window can be
+    disjoint (see :class:`models.DeferrableLoad`), and this union is a
+    per-timestep OR across all of them, across all loads, never a merged span.
+
+    The price is derived from this run's own buy price rather than fixed: a
+    hardcoded number would be wrong at a different currency scale, and the
+    floor covers a missing or all-zero price series. Windowed to the horizon
+    rather than the whole series, which can run well past it. See Test C in
+    the plan for where the real break-even sits against a tariff spread -- the
+    factor leaves roughly 20x headroom over it.
+    """
+    windows = [window for load in inputs.loads for window in load.battery_lockout_windows]
+    if not inputs.battery.enabled or not windows:
+        return {}
+    horizon_prices = inputs.buy_price.window(grid_start, horizon_end) if inputs.buy_price else None
+    max_buy_price = max(horizon_prices.values, default=0.0) if horizon_prices else 0.0
+    price = max(BATTERY_LOCKOUT_PRICE_FACTOR * max_buy_price, BATTERY_LOCKOUT_PRICE_FLOOR)
+    values = [inputs.battery.weight_battery_discharge] * count
+    for index in range(count):
+        start = grid_start + step * index
+        if any(window_start <= start < window_end for window_start, window_end in windows):
+            values[index] = price
+    return {"weight_battery_discharge": values}
 
 
 def _import_floor_w(inputs: PayloadInputs, horizon_end: datetime) -> float:
@@ -671,6 +726,11 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
 
     # -- settings -------------------------------------------------------------
     payload.update(_battery_settings(inputs.battery))
+    payload.update(
+        _battery_lockout_weights(
+            inputs, floor_to_step(inputs.now, step), horizon_end, step, capacity_array_steps
+        )
+    )
     payload.update(_hybrid_inverter_settings(inputs.hybrid_inverter))
     import_floor = _import_floor_w(inputs, horizon_end)
     import_scalar_w = resolve_grid_limit(
@@ -747,6 +807,11 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
                     step=step,
                     count=inputs.horizon_steps,
                 )
+            if inputs.capacity_interval_timesteps > 1:
+                payload["capacity_charge_interval_timesteps"] = inputs.capacity_interval_timesteps
+                payload["capacity_charge_current_interval_history"] = [
+                    round(w) for w in (inputs.capacity_interval_history_w or [])
+                ]
         else:
             # Day-ahead, or the peak cannot be safely priced yet (see
             # coordinator.demand_charge_pricing): zero rather than the stale
@@ -803,8 +868,17 @@ def _thermal_settings(inputs: PayloadInputs, step: timedelta, load_count: int) -
         if load.thermal is not None and load.wants_to_run
     }
 
+    # Floored onto the timestep grid, like every other per-timestep array in
+    # this payload (maximum_power_from_grid, capacity_charge_window,
+    # weight_battery_discharge). EMHASS stamps plan row zero at the grid
+    # boundary at or before launch -- verified against a live 0.18.2 backend:
+    # a run launched at 01:15:33Z produced a first row of 01:15:00Z on a
+    # 15-minute step. Passing the raw launch instant put min_temperatures[i]
+    # at ``now + i*step`` while EMHASS reads it at ``floor(now) + i*step``,
+    # sliding the whole comfort window and its setback ramp up to a full
+    # timestep late.
     config = build_def_load_config(
-        thermal_by_index, load_count, inputs.now, step, inputs.horizon_steps
+        thermal_by_index, load_count, floor_to_step(inputs.now, step), step, inputs.horizon_steps
     )
     return {} if config is None else {"def_load_config": config}
 
@@ -999,11 +1073,19 @@ def _describe(
     # beyond-horizon window gets clamped to -- so passing hours through here
     # would tell EMHASS the load may start right now, which is exactly what
     # its window (quiet hours, a surplus block, ...) says it may not do yet.
-    # Zeroing the target is the only way to say "not this cycle": the window
-    # comes back around and asks properly once the horizon reaches it.
+    # Saying "not this cycle" is the only way out: the window comes back
+    # around and asks properly once the horizon reaches it.
+    #
+    # Parked through :func:`_park` rather than by zeroing the hours here.
+    # Zero hours alone does *not* stop EMHASS acting on the load: the
+    # current-state trio (def_current_state, def_current_power,
+    # def_current_operating_timesteps) drives pins and force-on blocks that
+    # are read independently of the operating requirement -- see the
+    # single-constant branch below, which is the same trap reached from the
+    # other direction, and _park's own docstring for why a zero-hour load
+    # must never also claim to be running.
     if window.opens_beyond_horizon:
-        quantised = 0.0
-        steps = 0
+        return _park(load)
 
     # A single-constant load that is already running gets *pinned* by EMHASS
     # the moment it has any operating requirement at all: an unbroken block
@@ -1018,14 +1100,20 @@ def _describe(
     # for nothing this cycle avoids the pin entirely and leaves the load free
     # to turn off; the later block gets asked for normally, on its own
     # cycle, once "now" actually reaches it and current_state has caught up.
+    #
+    # Zero hours is necessary but not sufficient, which is why this parks the
+    # load outright. Block A's pin is gated on def_current_state, and
+    # def_current_power is a hard equality on timestep 0 regardless of the
+    # operating requirement (planning/run_now_via_block_b.md) -- so leaving
+    # the current-state trio truthful while asking for nothing is the exact
+    # contradiction _park exists to prevent.
     if load.current_state and load.single_constant and window.start_index > 0:
         warnings.append(
             f"{load.name}: still running from an earlier decision, but its window "
             f"now starts at step {window.start_index}; asking for 0 hours this run "
             f"instead of pinning it to the later block."
         )
-        quantised = 0.0
-        steps = 0
+        return _park(load)
 
     # A floor above the ceiling has no feasible power at all, and EMHASS
     # reports that as an infeasible problem with no hint as to which load
