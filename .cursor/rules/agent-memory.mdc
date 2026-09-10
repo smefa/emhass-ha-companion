@@ -1,0 +1,16 @@
+---
+description: Load private shared agent memory (.agents/memory) for Cursor and Claude Code
+alwaysApply: true
+---
+
+# Shared agent memory (private)
+
+At session start, and whenever HA host access / deploy / live EMHASS surfaces matter:
+
+1. Read `.agents/memory/MEMORY.md` if present
+2. Open linked notes that apply
+
+`.agents/` is gitignored — local only, never commit. Treat it as the single
+source of truth for operational memory shared with Claude Code.
+
+See `AGENTS.md` / `CLAUDE.md` for the same contract.

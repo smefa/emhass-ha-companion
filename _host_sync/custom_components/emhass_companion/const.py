@@ -1,0 +1,999 @@
+"""Constants for the EMHASS Companion integration."""
+
+from __future__ import annotations
+
+from datetime import timedelta
+from typing import Final
+
+DOMAIN: Final = "emhass_companion"
+
+# --- EMHASS backend contract -------------------------------------------------
+
+# Minimum EMHASS version. 0.17.9 introduced GET /api/v1/plan, /api/v1/last-run and
+# /healthz, which this integration depends on: we read the plan as JSON instead of
+# using EMHASS's publish-data machinery. Below this, there is no supported path.
+MIN_EMHASS_VERSION: Final = "0.17.9"
+
+# We pin to major 1 of the plan output schema (docs/plan_output_schema.md). A major
+# bump means a column was renamed/removed or a unit/sign convention changed, so
+# continuing to parse would silently produce wrong numbers.
+SUPPORTED_PLAN_SCHEMA_MAJOR: Final = 1
+
+DEFAULT_PORT: Final = 5000
+# Deliberately not "localhost": that only ever reaches Home Assistant's own
+# container, never a sibling add-on's, so it is a default that cannot work and
+# fails with a connection error that says nothing about why. This placeholder
+# is prefilled only when add-on discovery finds nothing (_async_addon_url in
+# config_flow.py), and names the one thing the user has to supply.
+DEFAULT_URL: Final = f"http://changetoEMHASSip:{DEFAULT_PORT}"
+# The add-on has no official listing, so it is only ever installed from a
+# third-party repository -- Supervisor always prefixes its slug with a hash of
+# that repository's URL (e.g. "5b918bf2_emhass"), never the bare "emhass".
+# The hash isn't knowable in advance, so the add-on is found by its name
+# instead of a hardcoded slug; see `_async_addon_url` in config_flow.py.
+ADDON_NAME: Final = "EMHASS"
+
+ENDPOINT_HEALTHZ: Final = "/healthz"
+ENDPOINT_PLAN: Final = "/api/v1/plan"
+ENDPOINT_LAST_RUN: Final = "/api/v1/last-run"
+ENDPOINT_GET_CONFIG: Final = "/get-config"
+ENDPOINT_SET_CONFIG: Final = "/set-config"
+ENDPOINT_ACTION: Final = "/action/{action}"
+
+ACTION_DAYAHEAD: Final = "dayahead-optim"
+ACTION_MPC: Final = "naive-mpc-optim"
+ACTION_PERFECT: Final = "perfect-optim"
+ACTION_FORECAST_FIT: Final = "forecast-model-fit"
+
+# EMHASS config.json keys that must stay consistent with each other and with
+# what a run actually asks for. `var_model` (optim_conf) is a separate,
+# independently-persisted copy of the load sensor from `retrieve_hass_conf`'s
+# `sensor_power_load_no_var_loads` -- EMHASS's own `_get_ml_param()` falls back
+# to whichever `var_model` is currently on disk regardless of a per-request
+# `sensor_power_load_no_var_loads` override, so the two must be pushed together.
+EMHASS_CONF_SENSOR_LOAD: Final = "sensor_power_load_no_var_loads"
+EMHASS_CONF_VAR_MODEL: Final = "var_model"
+EMHASS_CONF_NUM_LAGS: Final = "num_lags"
+EMHASS_CONF_LOAD_FORECAST_METHOD: Final = "load_forecast_method"
+# Same wire name EMHASS's own runtime parameter uses (see payload.py); a
+# mismatch between this persisted value and what a run actually sends is a
+# hard crash inside EMHASS's skforecast layer, not a soft error.
+EMHASS_CONF_TIME_STEP: Final = "optimization_time_step"
+LOAD_FORECAST_METHOD_MLFORECASTER: Final = "mlforecaster"
+LOAD_FORECAST_METHOD_TYPICAL: Final = "typical"
+LOAD_FORECAST_METHOD_LIST: Final = "list"
+
+# Minimum days of recorder history EMHASS's own forecast-model-fit requires --
+# utils.py forces `historic_days_to_retrieve` up to this floor itself and
+# warns below it ("this could cause an error with the fit"). Checked
+# proactively before ever auto-triggering a fit, so a freshly created "Create
+# a house load sensor" entity (no history of its own yet) is never handed a
+# guaranteed-failing request.
+ML_MIN_HISTORY_DAYS: Final = 9
+
+# How far back to pull real history when building the bootstrap load series --
+# long enough that repeating "the same time a day ago" (Series.
+# extended_with_previous_day) has a real point to copy across a horizon of
+# up to two days.
+LOAD_BOOTSTRAP_LOOKBACK: Final = timedelta(hours=48)
+
+# --- Config entry keys -------------------------------------------------------
+
+CONF_URL: Final = "url"
+CONF_USE_ADDON: Final = "use_addon"
+
+CONF_TIME_STEP: Final = "optimization_time_step"
+CONF_MPC_INTERVAL: Final = "mpc_interval_minutes"
+CONF_HORIZON_HOURS: Final = "horizon_hours"
+CONF_DAYAHEAD_FALLBACK_TIME: Final = "dayahead_fallback_time"
+
+CONF_PROFILE: Final = "profile"
+CONF_PROFILE_OPTIONS: Final = "profile_options"
+CONF_PRICE: Final = "price"
+CONF_PV: Final = "pv"
+CONF_LOAD: Final = "load"
+CONF_INVERTER: Final = "inverter"
+CONF_TEMPERATURE: Final = "temperature"
+CONF_NETWORK: Final = "network"
+
+CONF_TARIFF: Final = "tariff"
+CONF_BUY: Final = "buy"
+CONF_SELL: Final = "sell"
+CONF_MODE: Final = "mode"
+CONF_MULTIPLIER: Final = "multiplier"
+CONF_ADDER: Final = "adder"
+CONF_TEMPLATE: Final = "template"
+
+CONF_BATTERY: Final = "battery"
+CONF_USE_BATTERY: Final = "use_battery"
+CONF_CAPACITY_WH: Final = "capacity_wh"
+CONF_CHARGE_POWER_MAX: Final = "charge_power_max_w"
+CONF_DISCHARGE_POWER_MAX: Final = "discharge_power_max_w"
+CONF_SOC_MIN: Final = "soc_min"
+CONF_SOC_MAX: Final = "soc_max"
+CONF_SOC_TARGET: Final = "soc_target"
+CONF_CHARGE_EFFICIENCY: Final = "charge_efficiency"
+CONF_DISCHARGE_EFFICIENCY: Final = "discharge_efficiency"
+# Cycle-cost penalties, sent as EMHASS's `weight_battery_discharge` /
+# `weight_battery_charge`. Currency per kWh of battery throughput, in the same
+# currency as the tariff prices: EMHASS subtracts weight * energy from the
+# objective it maximises, so they buy back the wear a purely price-driven plan
+# would ignore. Zero (EMHASS's own default) means cycle freely.
+CONF_WEIGHT_BATTERY_DISCHARGE: Final = "weight_battery_discharge"
+CONF_WEIGHT_BATTERY_CHARGE: Final = "weight_battery_charge"
+# Per-load battery lockout (planning/battery_lockaout_plan.md): the price put on
+# weight_battery_discharge over a flagged load's window, high enough that the
+# optimiser never plans a discharge through it, without ever making the solve
+# infeasible -- a weight is a cost, not a constraint. Derived per run from the
+# horizon's own max buy price rather than fixed, so it scales with currency;
+# the floor covers a missing or all-zero price series. See Test C in the plan
+# for where the real break-even sits against a tariff spread -- the factor
+# leaves roughly 20x headroom over it under profit/cost.
+#
+# Under costfun=self-consumption EMHASS multiplies grid-import cost by a
+# hardcoded bigM of 1e3 in its objective, while the discharge weight is applied
+# without that markup. The lockout price is therefore scaled by the same bigM
+# when that costfun is active, otherwise grid stays ~10x cheaper than a bare
+# 100x max-buy lockout and the battery still feeds the flagged load.
+BATTERY_LOCKOUT_PRICE_FACTOR: Final = 100
+BATTERY_LOCKOUT_PRICE_FLOOR: Final = 100.0
+BATTERY_LOCKOUT_SELF_CONSUMPTION_BIGM: Final = 1000.0
+# Dwell penalties on the *level* rather than the throughput. EMHASS charges
+# cost * (kWh past the threshold) * hours held there, so unlike soc_min/soc_max
+# -- which are hard planning bounds -- these bend the plan without ever making
+# it infeasible. Deficit discourages sitting low (keeps a reserve), surplus
+# discourages sitting full (calendar ageing). A cost of zero disables its half
+# outright: EMHASS skips building the constraint unless cost and threshold are
+# both above zero.
+CONF_BATTERY_SOC_DEFICIT_THRESHOLD: Final = "battery_soc_deficit_threshold"
+CONF_BATTERY_SOC_DEFICIT_COST: Final = "battery_soc_deficit_cost"
+CONF_BATTERY_SOC_SURPLUS_THRESHOLD: Final = "battery_soc_surplus_threshold"
+CONF_BATTERY_SOC_SURPLUS_COST: Final = "battery_soc_surplus_cost"
+# C-rate penalty: a quadratic cost on battery power magnitude, so half power
+# costs a quarter as much and the plan spreads a charge out rather than
+# slamming it into the cheapest hour. `segments` is the piecewise-linear
+# discretisation of that curve -- a solver knob, not a battery property, and
+# EMHASS gates the whole thing on stress_cost > 0 and a non-zero power limit.
+CONF_BATTERY_STRESS_COST: Final = "battery_stress_cost"
+CONF_BATTERY_STRESS_SEGMENTS: Final = "battery_stress_segments"
+# How the end-of-horizon SOC target (EMHASS's `soc_final`) is chosen. Optimized
+# computes it each run from the forecast tails past the horizon (terminal.py);
+# same_as_start pins it to the live SOC (the pre-0.9 behaviour); fixed_50
+# always asks for the soc_target slider's value (the value key is unchanged
+# for backwards compatibility with stored config entries, even though the
+# behaviour and label moved off a hardcoded 50%). See docs/end_soc_plan.md.
+CONF_END_SOC_MODE: Final = "end_soc_mode"
+END_SOC_OPTIMIZED: Final = "optimized"
+END_SOC_SAME_AS_START: Final = "same_as_start"
+END_SOC_FIXED_50: Final = "fixed_50"
+END_SOC_MODES: Final = (END_SOC_OPTIMIZED, END_SOC_SAME_AS_START, END_SOC_FIXED_50)
+
+# A hybrid inverter shares one AC-side throughput limit between PV and
+# battery; a "two separate inverters" plant has no such shared cap. Lives
+# alongside the battery fields (same form) since it is meaningless without one.
+CONF_HYBRID_INVERTER: Final = "hybrid_inverter"
+CONF_INVERTER_AC_OUTPUT_MAX: Final = "inverter_ac_output_max_w"
+CONF_INVERTER_AC_INPUT_MAX: Final = "inverter_ac_input_max_w"
+CONF_INVERTER_EFFICIENCY_DC_AC: Final = "inverter_efficiency_dc_ac"
+CONF_INVERTER_EFFICIENCY_AC_DC: Final = "inverter_efficiency_ac_dc"
+
+CONF_GRID_IMPORT_MAX: Final = "grid_import_max_w"
+CONF_GRID_EXPORT_MAX: Final = "grid_export_max_w"
+# Optional sensors that override the two static limits above at run time, for a
+# connection whose usable limit is not a constant: an unbalanced three-phase
+# service (where the binding constraint is the worst phase's fuse, not the sum),
+# a dynamic-capacity or load-balancing system, a DSO curtailment order. Only
+# ever allowed to *lower* the static number, which stays as the physical
+# ceiling and as the fallback whenever the sensor cannot be read -- see
+# payload.resolve_grid_limit.
+CONF_GRID_IMPORT_LIMIT_ENTITY: Final = "grid_import_limit_entity"
+CONF_GRID_EXPORT_LIMIT_ENTITY: Final = "grid_export_limit_entity"
+# Demand (capacity) charge on the single highest import power over the horizon,
+# in currency per kW. A grid setting, not a battery one: EMHASS prices it off
+# `peak_import`, which exists whether or not a battery does -- deferrable loads
+# can shave a peak on their own. Kept out of _battery_settings for exactly that
+# reason, since that helper returns early when the battery is switched off.
+CONF_CAPACITY_COST_PER_KW: Final = "capacity_cost_per_kw"
+# EMHASS's own PV curtailment. A `plant_conf` parameter on its side, listed in
+# its associations.csv, so it can be set per run through runtimeparams rather
+# than only in the add-on's stored configuration. Turning it on is what makes
+# the optimiser produce the `P_PV_curtailment` column that
+# strategy.decide_curtailment's primary rule reads -- without it that rule can
+# never fire, whatever the inverter profile supports.
+CONF_COMPUTE_CURTAILMENT: Final = "compute_curtailment"
+
+CONF_SOC_ENTITY: Final = "soc_entity"
+# The battery's own power sensor. Nothing in the optimisation needs it --
+# EMHASS *plans* battery power rather than measuring it -- so this is asked
+# for on behalf of the dashboard cards, which were each collecting it
+# separately, under two different option names and with the sign convention
+# declared once per card. Declared here it is answered once, and every card
+# that draws measured battery power draws it the same way round.
+CONF_BATTERY_POWER_ENTITY: Final = "battery_power_entity"
+# Whether that sensor is positive while charging. EMHASS's convention is the
+# opposite (positive is discharge), and there is no way to tell from the
+# sensor itself: guessing wrong labels a charging battery as discharging.
+CONF_BATTERY_POWER_INVERT: Final = "battery_power_invert"
+CONF_LOAD_ENTITY: Final = "load_entity"
+# The live PV power reading blended into the first naive-mpc-optim forecast
+# step (payload.build_payload), weighted by number.MixBetaNumber. No PV
+# profile exposes a raw current-power sensor on its own -- they are all
+# forecast sources -- so this is asked for separately.
+CONF_PV_ENTITY: Final = "pv_entity"
+# The whole-house sensor picked in the "Create a house load sensor" step. Set
+# only when that flow was used; its presence is what tells EmhassConfig to
+# resolve the auto-created net-load sensor's entity id into the load/sensor
+# profile's `entity` option rather than trusting whatever is stored there.
+CONF_HOUSE_LOAD_TOTAL_ENTITY: Final = "house_load_total_entity"
+
+# Cost tracking (metering.py, savings.py). The meters the *realised* cost and
+# savings are settled from -- entirely separate from the forecast sources
+# above, which describe what EMHASS should plan against rather than what the
+# house actually did. Held in their own options blob because the whole feature
+# is optional: an entry with none of these set simply has no savings sensors.
+CONF_METERING: Final = "metering"
+CONF_METERING_ENABLED: Final = "metering_enabled"
+# The five meters, which are deliberately exactly the Energy dashboard's own
+# grid, solar and battery sources -- so they can be resolved from it, and so
+# the override form has a shape the user has already seen once.
+#
+# Stored *resolved*, never left to be looked up again at runtime: the whole
+# point of asking is that the answer stops moving when the user later
+# reorganises their Energy dashboard.
+CONF_GRID_IMPORT_ENERGY_ENTITY: Final = "grid_import_energy_entity"
+CONF_GRID_EXPORT_ENERGY_ENTITY: Final = "grid_export_energy_entity"
+CONF_PV_ENERGY_ENTITY: Final = "pv_energy_entity"
+CONF_BATTERY_CHARGE_ENERGY_ENTITY: Final = "battery_charge_energy_entity"
+CONF_BATTERY_DISCHARGE_ENERGY_ENTITY: Final = "battery_discharge_energy_entity"
+
+# Deferrable load subentry keys
+CONF_NAME: Final = "name"
+CONF_NOMINAL_POWER: Final = "nominal_power_w"
+# Floor on the power a load may draw while it is on, sent as EMHASS's
+# `minimum_power_of_deferrable_loads`. Only bites when the load is *not*
+# semi-continuous: semi-cont pins the power to `nominal * binary`, leaving
+# nothing for a floor to constrain.
+CONF_MINIMUM_POWER: Final = "minimum_power_w"
+CONF_OPERATING_HOURS: Final = "operating_hours"
+CONF_EARLIEST_START: Final = "earliest_start"
+CONF_LATEST_END: Final = "latest_end"
+CONF_SEMI_CONTINUOUS: Final = "semi_continuous"
+CONF_SINGLE_CONSTANT: Final = "single_constant"
+CONF_STARTUP_PENALTY: Final = "startup_penalty"
+# Hard cap on how many times a load may be switched on across the horizon,
+# sent as EMHASS's `set_deferrable_max_startups`. 0 means no cap; unlike the
+# startup penalty this is a constraint, not a cost, so a too-low value makes
+# the requested run time unreachable rather than merely expensive.
+CONF_MAX_STARTUPS: Final = "max_startups"
+# Minimum dwell time once a load switches on/off, protecting compressor-driven
+# loads (heat pumps, freezers) from short-cycling. Minutes in config/UI, sent
+# to EMHASS as timesteps (`def_minimum_on_time`/`def_minimum_off_time`). 0
+# means no minimum.
+CONF_MINIMUM_ON_TIME: Final = "minimum_on_time_minutes"
+CONF_MINIMUM_OFF_TIME: Final = "minimum_off_time_minutes"
+# Optional: the load's own running sensor -- a numeric power sensor or a plain
+# on/off binary_sensor, both read by deferrable.state_to_power. Without one
+# (and no control entity either) the optimiser has no way to observe the load
+# at all; see DeferrableRuntime.assume_from_plan for what happens instead. The
+# key stays "power_sensor" for backwards compatibility with existing subentries
+# even though it now accepts a binary_sensor too.
+CONF_POWER_SENSOR: Final = "power_sensor"
+CONF_USE_TIME_WINDOW: Final = "use_time_window"
+# Optional: what the executor switches to actually run the load. Without it the
+# load is advisory only and the user automates on should_run themselves.
+CONF_CONTROL_ENTITY: Final = "control_entity"
+# What a control entity is allowed to be. Two requirements, and a script meets
+# neither: the executor switches it *off* again when the plan says so, and its
+# state doubles as the running signal when there is no power sensor. A script's
+# state is "on" only for as long as it is executing, so a short script reads
+# "off" immediately -- it would be re-fired on every apply for the whole
+# scheduled window, never observed as running, and script.turn_off would cancel
+# the script rather than stop the appliance. Scripts were offered here in
+# earlier versions; ISSUE_SCRIPT_CONTROL_ENTITY tells anyone who took the offer.
+CONTROL_ENTITY_DOMAINS: Final = ("switch", "input_boolean")
+
+# Surplus loads. The margin a timestep's surplus must clear *above* the load's
+# own draw before it counts towards the budget. Its whole job is to absorb PV
+# forecast error: a slot counted at exactly the load's power imports the moment
+# the forecast comes in light. It also opens a band -- between the load's power
+# and the load's power plus this -- of slots that do not add to the budget but
+# are still safe to run through, which is what lets a startup penalty produce
+# one unbroken run without a hard contiguity constraint.
+CONF_SURPLUS_HEADROOM: Final = "surplus_headroom_w"
+# A total, not a rate: "put this much in and stop". 0 means no cap, and the
+# load runs on whatever surplus exists until its request is turned off.
+CONF_ENERGY_NEEDED: Final = "energy_needed_kwh"
+# Which surplus load gets first claim on a shared series -- lower runs first,
+# ties broken by name. Only meaningful with two or more surplus loads; a
+# single one has nothing to compete with.
+CONF_SURPLUS_PRIORITY: Final = "surplus_priority"
+# What makes the load want to run; see RECURRENCES below. Asked first when
+# adding a load, because it decides which of the other fields even apply.
+CONF_RECURRENCE: Final = "recurrence"
+
+# Thermal deferrable loads
+CONF_LOAD_TYPE: Final = "load_type"
+LOAD_TYPE_STANDARD: Final = "standard"
+LOAD_TYPE_THERMAL: Final = "thermal"
+LOAD_TYPES: Final = (LOAD_TYPE_STANDARD, LOAD_TYPE_THERMAL)
+CONF_TEMPERATURE_SENSOR: Final = "temperature_sensor"
+CONF_SENSE: Final = "sense"
+CONF_HEATING_RATE: Final = "heating_rate"
+CONF_COOLING_CONSTANT: Final = "cooling_constant"
+CONF_THERMAL_INERTIA: Final = "thermal_inertia"
+CONF_COMFORT_TEMPERATURE: Final = "comfort_temperature"
+CONF_SETBACK_TEMPERATURE: Final = "setback_temperature"
+CONF_MAX_TEMPERATURE: Final = "max_temperature"
+CONF_COMFORT_START: Final = "comfort_start"
+CONF_COMFORT_END: Final = "comfort_end"
+
+SUBENTRY_TYPE_DEFERRABLE: Final = "deferrable_load"
+# A separate subentry type, not a field on the deferrable one: each type gets
+# its own "Add ..." button in the integrations UI, and what a load *is* --
+# run-time-driven or temperature-driven -- is fixed at creation, exactly the
+# property a subentry type is meant to carry.
+SUBENTRY_TYPE_THERMAL: Final = "thermal_load"
+LOAD_SUBENTRY_TYPES: Final = (SUBENTRY_TYPE_DEFERRABLE, SUBENTRY_TYPE_THERMAL)
+# A load group is not itself a load: it expresses a relationship between
+# existing deferrable-load subentries (a shared power budget or mutual
+# exclusion), so it is deliberately excluded from LOAD_SUBENTRY_TYPES above --
+# the registry and entity-platform filters that iterate that tuple should
+# never try to treat a group as a load.
+SUBENTRY_TYPE_LOAD_GROUP: Final = "load_group"
+CONF_GROUP_LOAD_IDS: Final = "load_subentry_ids"
+CONF_GROUP_MAX_POWER: Final = "max_power_w"
+CONF_GROUP_MUTUAL_EXCLUSION: Final = "mutual_exclusion"
+
+# --- Defaults ----------------------------------------------------------------
+
+# 15 minutes matches the resolution European markets now settle at, and is what
+# the price profiles deliver. EMHASS's own default is 30, which halves the
+# problem size but averages away exactly the intra-hour spread a battery earns
+# on; 30 stays available in the picker for anyone who wants the smaller LP.
+DEFAULT_TIME_STEP: Final = 15
+DEFAULT_MPC_INTERVAL: Final = 15
+DEFAULT_HORIZON_HOURS: Final = 24
+DEFAULT_DAYAHEAD_FALLBACK_TIME: Final = "13:30:00"
+
+DEFAULT_SOC_MIN: Final = 0.05
+DEFAULT_SOC_MAX: Final = 0.95
+# Under the default Optimized end-SOC mode this is only the reserve floor the
+# plan may never end below, not a level to aim for, so it wants to be low: a
+# high floor quietly blocks profitable evening discharge. 20% sits well above
+# the 5% soc_min and leaves a usable backup buffer.
+DEFAULT_SOC_TARGET: Final = 0.20
+DEFAULT_END_SOC_MODE: Final = END_SOC_OPTIMIZED
+DEFAULT_CHARGE_EFFICIENCY: Final = 0.95
+DEFAULT_DISCHARGE_EFFICIENCY: Final = 0.95
+# EMHASS's own default is zero on both, which plays the price spread for any
+# profit at all -- including cycles worth less than the wear they cost. A
+# discharge weight of 0.02 currency/kWh is roughly the throughput cost of a
+# mid-range home battery, so a round trip has to clear about that spread before
+# the plan bothers. Charging is left free: it is already paid for at the import
+# price, and pricing the same cycle twice would double-count the wear.
+DEFAULT_WEIGHT_BATTERY_DISCHARGE: Final = 0.02
+DEFAULT_WEIGHT_BATTERY_CHARGE: Final = 0.0
+# Unlike soc_min, these bend the plan instead of bounding it, so they can never
+# make a problem infeasible. The deficit pair is shipped live (cost above zero):
+# it charges 0.05 per kWh-hour held below 10%, which keeps the plan off the
+# soc_min floor without forbidding a deep discharge that genuinely pays. The
+# surplus pair stays inert -- cost zero means EMHASS skips building the
+# constraint entirely, and its threshold is only a pre-filled band. Stored as
+# 0-1 fractions, like every other SOC field.
+DEFAULT_BATTERY_SOC_DEFICIT_THRESHOLD: Final = 0.10
+DEFAULT_BATTERY_SOC_DEFICIT_COST: Final = 0.05
+DEFAULT_BATTERY_SOC_SURPLUS_THRESHOLD: Final = 0.90
+DEFAULT_BATTERY_SOC_SURPLUS_COST: Final = 0.0
+DEFAULT_BATTERY_STRESS_COST: Final = 0.0
+# 10 piecewise-linear pieces per quadratic curve. More tracks the curve closer
+# at the cost of two extra solver constraints each; EMHASS's own default.
+DEFAULT_BATTERY_STRESS_SEGMENTS: Final = 10
+# Ramp cap on (dis)charge power between timesteps, as a fraction of the
+# battery's own power max -- EMHASS's own defaults, inert until
+# set_battery_dynamic turns the constraint on.
+DEFAULT_BATTERY_DYNAMIC_MAX: Final = 0.9
+DEFAULT_BATTERY_DYNAMIC_MIN: Final = -0.9
+# EMHASS's own default is 1.0 -- a lossless converter, which no real inverter
+# is. 0.97 is typical of a modern hybrid in both directions; assuming no loss
+# makes the plan expect more out of every charge than the hardware delivers.
+DEFAULT_INVERTER_EFFICIENCY: Final = 0.97
+DEFAULT_GRID_IMPORT_MAX: Final = 9000
+DEFAULT_GRID_EXPORT_MAX: Final = 9000
+# Zero is a true no-op in EMHASS: the peak_import variable is only created when
+# this is above zero, so an untouched config solves exactly the same problem.
+DEFAULT_CAPACITY_COST_PER_KW: Final = 0.0
+
+# Executor
+DEFAULT_POWER_DEADBAND_W: Final = 100
+STALE_PLAN_FACTOR: Final = 2
+
+# --- Source health -----------------------------------------------------------
+
+# The states that mean "this entity is not telling us anything". The empty
+# string is in here because a state object can exist with no value at all
+# during a restore, which is as unreadable as the two named ones.
+UNREADABLE_STATES: Final = ("unknown", "unavailable", "")
+# How long a source entity must stay unreadable before health.SourceHealth
+# calls it a fault. Long enough to ride out the things that fix themselves --
+# a Modbus inverter dropping and re-establishing its TCP connection, a cloud
+# integration re-authenticating, an add-on restart -- and short enough that a
+# genuinely dead source is reported within one optimisation cycle or two
+# rather than at the end of the day. Counted from the later of "the reading
+# went" and "Home Assistant finished starting", so it is also what covers a
+# source whose integration is slow to load.
+SOURCE_BLIND_GRACE: Final = timedelta(minutes=15)
+
+# Self-consumption classification (strategy.decide_battery): "does the plan
+# want any grid exchange at all", read straight from the plan's own P_grid
+# column. Not the same question as soc_min/soc_max -- those are planning
+# limits, this is a real-time mode choice.
+DEFAULT_SELF_CONSUME_THRESHOLD_W: Final = 300
+# Once in self-consumption, P_grid must clear threshold * this factor before
+# forcing resumes -- damps boundary chatter a single static threshold would
+# let through on every recalculation.
+SELF_CONSUME_EXIT_FACTOR: Final = 2.0
+
+# What the form offers for EMHASS's own curtailment, matching EMHASS's own
+# default. Distinct from "not configured" (None), which is what an entry saved
+# before this setting existed carries: that sends nothing and leaves whatever
+# the add-on has stored alone, rather than silently switching it off.
+DEFAULT_COMPUTE_CURTAILMENT: Final = False
+
+# Surplus loads
+DEFAULT_SURPLUS_HEADROOM_W: Final = 300
+# 0 for every load until someone sets otherwise, so allocation falls back to
+# the existing name order -- adding this feature changes nothing by default.
+DEFAULT_SURPLUS_PRIORITY: Final = 0
+# Reporting only: the level the hub's surplus binary sensor and its start/end
+# timestamps describe. Deliberately *not* what any load budgets against -- that
+# threshold is the load's own power plus its own headroom, because "is there
+# enough sun for the pool" and "is there enough sun for the car" are different
+# questions with different answers.
+DEFAULT_SURPLUS_THRESHOLD_W: Final = 500
+# Weight given to the live PV/load reading when blended into the first
+# naive-mpc-optim forecast step (payload.build_payload). 0.5 matches EMHASS's
+# own default for the same blend (Forecast.get_mix_forecast).
+DEFAULT_MIX_BETA: Final = 0.5
+
+# --- Modes -------------------------------------------------------------------
+
+MODE_AUTO: Final = "auto"
+MODE_SELF_CONSUME: Final = "self_consume"
+MODE_FORCE_CHARGE: Final = "force_charge"
+MODE_FORCE_DISCHARGE: Final = "force_discharge"
+MODE_IDLE: Final = "idle"
+
+# What the optimiser can decide, and therefore what a profile has to implement
+# and what the battery_action sensor can report.
+BATTERY_ACTIONS: Final = (
+    MODE_SELF_CONSUME,
+    MODE_FORCE_CHARGE,
+    MODE_FORCE_DISCHARGE,
+    MODE_IDLE,
+)
+
+# What a *person* can ask for, which is deliberately not the same list. These
+# used to be `(MODE_AUTO, *BATTERY_ACTIONS)`, which conflated the optimiser's
+# output vocabulary with the manual override's input vocabulary. The three here
+# are steady states -- each one is safe to sit in indefinitely. Force
+# charge/discharge are not: a manual mode suspends the optimiser and holds
+# until it is changed back (executor._decide), so selecting one pinned the
+# battery at charge_power_max_w forever, with no SOC guard and no deadline.
+# Worse, that field is optional and defaults to 0 (models.BatteryConfig), so on
+# an install that never set it the mode silently commanded 0 W while the
+# decision sensor still read "force_charge". A bounded force belongs in a
+# service taking both a power and a duration, not in a select that can express
+# neither.
+SYSTEM_MODES: Final = (MODE_AUTO, MODE_SELF_CONSUME, MODE_IDLE)
+
+# --- Cost function -------------------------------------------------------------
+# EMHASS's own optimisation.py objective-function branches; sent verbatim as
+# the "costfun" runtime parameter (payload.build_payload), so these must match
+# its literal strings exactly, hyphen included.
+
+COST_FUN_PROFIT: Final = "profit"
+COST_FUN_COST: Final = "cost"
+COST_FUN_SELF_CONSUMPTION: Final = "self-consumption"
+COST_FUNS: Final = (COST_FUN_PROFIT, COST_FUN_COST, COST_FUN_SELF_CONSUMPTION)
+DEFAULT_COST_FUN: Final = COST_FUN_PROFIT
+
+# --- Inverter actions --------------------------------------------------------
+#
+# The four battery actions above are what a plan resolves to. These are the
+# lifecycle and side-channel actions around them. A profile defines only the
+# ones its hardware has: the set of actions it defines *is* its capability
+# list, which is why there is no separate `capabilities:` block to keep in sync.
+
+# Run once before the first forced command of a session. This is where an
+# inverter that gates remote control behind a mode -- SolarEdge's "Remote
+# Control", Victron's "External control", Sigenergy's remote_ems_enable --
+# opens that gate.
+ACTION_PREPARE: Final = "prepare"
+
+# How control is handed back. Distinct from `self_consume` because for some
+# inverters giving control back means undoing `prepare` as well, and because
+# `restore` must run on paths where no plan exists at all (shutdown, unload).
+# Falls back to `self_consume` when a profile does not define it.
+ACTION_RESTORE: Final = "restore"
+
+# PV curtailment, driven by the plan's own P_PV_curtailment column rather than
+# by the battery decision -- the two are independent.
+ACTION_CURTAIL: Final = "curtail"
+ACTION_UNCURTAIL: Final = "uncurtail"
+
+# Grid charging is separately permissioned on most hybrids (Growatt's
+# allow_grid_charge, Deye's grid_charge_enabled, SolarEdge's ac_charge_policy).
+# EMHASS knows nothing about it, so a plan can schedule a grid charge the
+# inverter will silently refuse unless the gate is asserted first.
+ACTION_ALLOW_GRID_CHARGE: Final = "allow_grid_charge"
+ACTION_BLOCK_GRID_CHARGE: Final = "block_grid_charge"
+
+INVERTER_ACTIONS: Final = (
+    *BATTERY_ACTIONS,
+    ACTION_PREPARE,
+    ACTION_RESTORE,
+    ACTION_CURTAIL,
+    ACTION_UNCURTAIL,
+    ACTION_ALLOW_GRID_CHARGE,
+    ACTION_BLOCK_GRID_CHARGE,
+)
+
+LOAD_MODE_AUTO: Final = "auto"
+LOAD_MODE_FORCE_ON: Final = "force_on"
+
+# A daily load wants its operating_hours every day, same as today's only
+# behaviour. An on-demand load wants nothing until armed -- see
+# DeferrableRuntime.requested and docs/on_demand_loads.md.
+#
+# A surplus load is armed the same way, but asks for no fixed run time at all:
+# its hours and its window are derived from the exported power the last plan
+# predicted (see surplus.py), so it takes whatever the optimiser can spare and
+# nothing more. Its operating hours, time window and deadline are all derived
+# rather than configured, and the entities backing them report unavailable.
+RECURRENCE_DAILY: Final = "daily"
+RECURRENCE_ON_DEMAND: Final = "on_demand"
+RECURRENCE_SURPLUS: Final = "surplus"
+RECURRENCES: Final = (RECURRENCE_DAILY, RECURRENCE_ON_DEMAND, RECURRENCE_SURPLUS)
+
+# Attributes of the Requested switch. requested_at is the instant a deadline
+# counts from, and is carried here rather than in an entity of its own so the
+# whole request -- flag plus anchor -- is restored as one unit. request_runtime
+# is the progress made towards operating_hours since that anchor -- without it
+# surviving a restart too, a request that already ran its full target (or any
+# part of it) forgets that progress and reverts to looking freshly armed, with
+# requested_at still the original, now stale, anchor (issue: "deferrable not
+# updating run time").
+ATTR_REQUESTED_AT: Final = "requested_at"
+ATTR_DEADLINE_AT: Final = "deadline_at"
+ATTR_REQUEST_RUNTIME_SECONDS: Final = "request_runtime_seconds"
+
+# The rest of one on-demand run's state, carried on the same switch and for the
+# same reason: the run has to survive a restart as one unit. command_runtime is
+# the clock the run is judged against (see DeferrableRuntime.elapsed_commanded),
+# seen_running latches the first watt actually drawn, and idle_since is how long
+# the load has read idle while being told to run. Losing any of the three to a
+# restart restarts the judgement: an appliance that finished just before one
+# would wait a fresh idle window to be noticed, and one that never started would
+# look like it had merely not started *yet*.
+ATTR_COMMAND_RUNTIME_SECONDS: Final = "command_runtime_seconds"
+ATTR_SEEN_RUNNING: Final = "seen_running"
+ATTR_IDLE_SINCE: Final = "idle_since"
+# Why the last run ended, and when. Deliberately outlives the request itself --
+# cancel() clears the flag, the anchor and the progress, and "why did it stop"
+# is a question asked precisely when the switch is already off.
+ATTR_COMPLETION_REASON: Final = "last_completion_reason"
+ATTR_COMPLETION_AT: Final = "last_completion_at"
+
+# Battery lockout (planning/battery_lockaout_plan.md). Read straight off the
+# runtime -- the priced series itself needs the run's own buy price, which an
+# entity's attrs_fn has no access to, so that half is left to diagnostics and
+# the INFO log line instead (see apply_battery_lockout).
+ATTR_LOCKOUT_HELD_START: Final = "lockout_held_start"
+ATTR_LOCKOUT_HELD_END: Final = "lockout_held_end"
+ATTR_LOCKOUT_RUNNING: Final = "lockout_running"
+
+# How an on-demand run ended.
+#
+# The distinction that matters is COMPLETED vs CUT_SHORT: both mean the run had
+# its full operating_hours, but the first ended with the appliance idle and the
+# second had power taken away from an appliance still drawing it -- the signal
+# that operating_hours is set shorter than the program actually needs.
+#
+# FINISHED_EARLY is the normal ending for a metered load, and the only one that
+# needs no configuration to be right. An unmetered load can only ever reach
+# COMPLETED: with no meter, "still drawing" and "finished" are the same reading.
+COMPLETION_FINISHED_EARLY: Final = "finished_early"
+COMPLETION_COMPLETED: Final = "completed"
+COMPLETION_CUT_SHORT: Final = "cut_short"
+COMPLETION_NEVER_STARTED: Final = "never_started"
+COMPLETION_CANCELLED: Final = "cancelled"
+
+# What counts as "the appliance is off" for completion, and for how long.
+#
+# Deliberately *not* running_threshold_w. That one answers "is this load doing
+# meaningful work" and errs towards ignoring a marginal draw; this one answers
+# "has it finished" and must err the other way, because a false yes takes power
+# from a live appliance. A dishwasher passes through 70-80 W between phases and
+# can spend twenty minutes drying at 30 W -- all of it under a 110 W running
+# threshold, none of it finished. So the default is "essentially off" instead,
+# the same floor a standby draw already fails to clear.
+#
+# 0 minutes means one optimisation timestep, the same "0 is the sensible
+# default" convention run_within_hours and max_startups already use.
+DEFAULT_IDLE_POWER_W: Final = 10.0
+DEFAULT_IDLE_MINUTES: Final = 0.0
+
+# --- Profiles ----------------------------------------------------------------
+
+PROFILE_KIND_PRICE: Final = "price"
+PROFILE_KIND_PV: Final = "pv"
+PROFILE_KIND_LOAD: Final = "load"
+PROFILE_KIND_INVERTER: Final = "inverter"
+# Outdoor temperature, needed only once a thermal deferrable load exists.
+PROFILE_KIND_TEMPERATURE: Final = "temperature"
+# Network/grid-operator tariff structure: time-differentiated energy bands and
+# demand (capacity) charges, layered on top of the supplier-side price a
+# `price` profile already composes. See docs/network_tariffs_plan.md. Neither
+# a source (it fetches nothing) nor an emhass-settings profile (it delegates
+# nothing) -- see `_validate_network` in profiles/schema.py.
+PROFILE_KIND_NETWORK: Final = "network"
+PROFILE_KINDS: Final = (
+    PROFILE_KIND_PRICE,
+    PROFILE_KIND_PV,
+    PROFILE_KIND_LOAD,
+    PROFILE_KIND_TEMPERATURE,
+    PROFILE_KIND_INVERTER,
+    PROFILE_KIND_NETWORK,
+)
+# Built-in profile keys are f"{kind}/{filename stem}" (profiles/__init__.py).
+# The "House load sensor" profile is the one load profile with a live
+# load-power sensor of its own (profiles/builtin/load/sensor.yaml) --
+# coordinator._read_load_live reads it directly rather than asking for a
+# second, separate live-load entity.
+PROFILE_KEY_LOAD_SENSOR: Final = "load/sensor"
+
+# Not a real profile: a config-flow-only choice offered alongside the load
+# profiles that instead walks through creating one (picking a whole-house
+# sensor, then auto-configuring PROFILE_KEY_LOAD_SENSOR against a sensor this
+# integration creates and keeps net of every deferrable/thermal load). Kept
+# out of profiles/builtin entirely since nothing about it is declarative.
+LOAD_PROFILE_CREATE_SENTINEL: Final = "__create__"
+
+# Explicit display order for the load-profile picker. available_profiles()
+# otherwise returns profiles in the alphabetical file-load order from
+# profiles/__init__.py (emhass_native, forecast_entity, sensor), which buries
+# "point me at a sensor" -- the option most users with a whole-house meter
+# want -- under two others. Renaming the underlying files would change their
+# profile keys and break every existing config entry, so the reorder happens
+# here instead. Any profile not listed (a user-authored one) sorts after
+# these, in whatever order it was loaded.
+LOAD_PROFILE_ORDER: Final = (
+    LOAD_PROFILE_CREATE_SENTINEL,
+    PROFILE_KEY_LOAD_SENSOR,
+    "load/emhass_native",
+    "load/forecast_entity",
+)
+
+# Same idea for the price and PV pickers: Nord Pool and Solcast are the
+# integrations most users in EMHASS's core markets (Nordics/Europe) already
+# have, so they lead the list instead of sorting alphabetically behind
+# ENTSO-E/fixed-tariff/Tibber or forecast.solar/generic-attribute. Anything
+# not listed here sorts after these, in load order, same as LOAD_PROFILE_ORDER.
+PRICE_PROFILE_ORDER: Final = (
+    "price/nordpool_core",
+    "price/nordpool_custom",
+)
+PV_PROFILE_ORDER: Final = ("pv/solcast",)
+
+# The inverter picker is a plain alphabetical list of hardware -- the user
+# knows what is bolted to their wall, so there is nothing to rank. The one
+# exception is the universal script fallback, which is pinned to the bottom:
+# it is what you reach for having failed to find your own inverter above it,
+# and alphabetical order would otherwise bury it between two brands.
+INVERTER_FALLBACK_PROFILE: Final = "inverter/generic_script"
+
+# The temperature picker: a Home Assistant weather entity is the option most
+# users with a weather integration already have, followed by the generic
+# attribute escape hatch, with EMHASS's own Open-Meteo fetch last since it
+# only works while the solar forecast is also Open-Meteo. Alphabetical
+# file-load order would otherwise put Open-Meteo first.
+TEMPERATURE_PROFILE_ORDER: Final = (
+    "temperature/weather_entity",
+    "temperature/generic_attribute",
+    "temperature/emhass_native",
+)
+
+# Unique-id suffix for the sensor created by the "Create a house load sensor"
+# flow (full unique_id is f"{entry.entry_id}_{NET_HOUSE_LOAD_KEY}"). Shared
+# between sensor.py (creates the entity) and configuration.py (resolves its
+# entity id back out of the registry) so the two can never drift apart.
+NET_HOUSE_LOAD_KEY: Final = "net_house_load"
+
+# --- Network tariffs -----------------------------------------------------------
+
+NETWORK_TARIFF_BAND_KEY: Final = "network_tariff_band"
+PERIOD_PEAK_KEY: Final = "period_peak"
+PEAK_HEADROOM_KEY: Final = "peak_headroom"
+DEMAND_CHARGE_RATE_KEY: Final = "demand_charge_rate"
+
+# The EMHASS release ``current_period_peak`` shipped in -- see
+# docs/network_tariffs_plan.md's version-gating table. Below this, a network
+# profile's demand charge is left unpriced; energy bands still apply.
+MIN_EMHASS_VERSION_DEMAND_CHARGE: Final = "0.18.0"
+
+# The EMHASS release ``capacity_charge_window`` shipped in (PR #1066) -- see
+# docs/network_tariffs_plan.md's "The window mask". Below this a windowed
+# demand charge cannot be masked, so it is only priced when its own window is
+# unrestricted; otherwise it falls back to the array ceiling.
+MIN_EMHASS_VERSION_DEMAND_WINDOW: Final = "0.18.1"
+
+# The EMHASS release ``capacity_charge_interval_timesteps`` shipped in (#540)
+# -- see planning/capacity_interval_plan.md. Below this, the peak/floor
+# comparison is read at the optimizer timestep instead of the tariff's own
+# measurement interval, biasing toward over-shaving.
+MIN_EMHASS_VERSION_CAPACITY_INTERVAL: Final = "0.18.2"
+
+# --- Cost and savings ---------------------------------------------------------
+#
+# Sensor keys for the savings feature. Grouped here rather than left inline in
+# sensor.py because the config flow needs to name them too, when it explains
+# which sensors an incomplete meter setup will and will not produce.
+SAVINGS_KEY_COST_TODAY: Final = "energy_cost_today"
+SAVINGS_KEY_SAVINGS_TODAY: Final = "savings_today"
+SAVINGS_KEY_SOLAR_TODAY: Final = "solar_savings_today"
+SAVINGS_KEY_BATTERY_TODAY: Final = "battery_savings_today"
+SAVINGS_KEY_FORECAST_COST: Final = "forecast_cost_24h"
+SAVINGS_KEY_FORECAST_SAVINGS: Final = "forecast_savings_24h"
+
+# The forecast sensors' window. A day, because that is the question people
+# actually ask ("what will tonight cost me"), and because a horizon shorter
+# than this is reported as the hours it did cover rather than extrapolated.
+SAVINGS_FORECAST_HOURS: Final = 24
+
+# --- EMHASS-standard entity names --------------------------------------------
+#
+# Off by default. Turned on, the plan sensors below take the entity ids EMHASS
+# publishes the same quantities under, so a dashboard, template sensor or
+# third-party integration written against a bare EMHASS install keeps working
+# when the Companion takes over the optimisation.
+#
+# Deliberately limited to the quantities whose EMHASS name is a fixed string.
+# The per-load ones are P_deferrable{k}, numbered by load order
+# (DeferrableRegistry.index_of, which sorts by name) -- but an entity id is
+# assigned once and never moves on its own, so renaming or adding a load would
+# leave sensor.p_deferrable0 pointing at a different appliance for good, with
+# nothing to warn the user. A wrong number on a silent sensor is worse than no
+# sensor, so those are left out.
+CONF_EMHASS_STANDARD_NAMES: Final = "emhass_standard_names"
+# The entity ids these sensors had before the option was first switched on.
+# Kept so that switching it off restores exactly what the user had, rather than
+# whatever Home Assistant would generate today -- a friendly name or a
+# translation may have changed in between, and silently landing on a third id
+# would break their dashboards a second time.
+CONF_ENTITY_IDS_BEFORE_STANDARD: Final = "entity_ids_before_standard_names"
+
+# Sensor key (EmhassSensorDescription.key, which is also the tail of the
+# unique_id) -> the object id EMHASS uses. Mirrors the default_passed_dict in
+# EMHASS's utils.py:build_params.
+EMHASS_STANDARD_OBJECT_IDS: Final[dict[str, str]] = {
+    "pv_forecast": "p_pv_forecast",
+    "load_forecast": "p_load_forecast",
+    "grid_forecast": "p_grid_forecast",
+    "battery_power": "p_batt_forecast",
+    "battery_soc": "soc_batt_forecast",
+    # Conditional on the EMHASS side too, so these two often have no sensor to
+    # rename -- a key with no registered entity is simply skipped.
+    "pv_curtailment": "p_pv_curtailment",
+    "hybrid_inverter": "p_hybrid_inverter",
+    "optimization_status": "optim_status",
+    "plan_cost": "total_cost_fun_value",
+    "buy_price": "unit_load_cost",
+    "sell_price": "unit_prod_price",
+}
+
+# Matching the entity id alone is not enough for a consumer that reads the
+# forward-looking series: EMHASS carries it under a different attribute name
+# per quantity, and in a different shape from this integration's own
+# ``forecast`` -- a list of {"date": <iso>, "<object_id>": "<value>"}, values
+# as strings, starting at the current timestep rather than at the plan's start
+# (EMHASS retrieve_hass.get_attr_data_dict). With the option on, that shape is
+# published *alongside* ``forecast``; the native attribute stays because the
+# dashboard cards read it.
+EMHASS_STANDARD_SERIES_ATTRIBUTES: Final[dict[str, str]] = {
+    "pv_forecast": "forecasts",
+    "load_forecast": "forecasts",
+    "grid_forecast": "forecasts",
+    "pv_curtailment": "forecasts",
+    "hybrid_inverter": "forecasts",
+    "battery_power": "battery_scheduled_power",
+    "battery_soc": "battery_scheduled_soc",
+    "buy_price": "unit_load_cost_forecasts",
+    "sell_price": "unit_prod_price_forecasts",
+}
+# EMHASS rounds prices to four decimals and everything else to two.
+EMHASS_STANDARD_SERIES_DECIMALS: Final[dict[str, int]] = {
+    "buy_price": 4,
+    "sell_price": 4,
+}
+DEFAULT_STANDARD_SERIES_DECIMALS: Final = 2
+
+# The profile schema is a public API for contributors and for users writing local
+# profiles. Bump only with a documented migration.
+#
+# 2 adds the inverter `control:` block -- command semantics (unit, sign,
+# lifetime) that the executor needs in order to decide *when* to write.
+# Version 1 inverter profiles keep loading and are given the defaults in
+# DEFAULT_CONTROL below, which describe exactly the behaviour they had before.
+PROFILE_SCHEMA_VERSION: Final = 2
+
+# --- Inverter control semantics ----------------------------------------------
+#
+# The archetype does not change what the engine does -- every profile still
+# resolves to a list of service calls. It exists so that a profile can be
+# reviewed against the model it claims to implement, and so the config flow can
+# explain the shape to a user. Behaviour comes from `lifetime` and the unit
+# fields below, which are orthogonal to it.
+
+# One signed number carries magnitude and direction (SolaX remotecontrol_active_power,
+# Sigenergy active_power_fixed_adjustment).
+ARCHETYPE_SIGNED_POWER: Final = "signed_power"
+# Direction from a select, magnitude from a number (Sungrow, SolarEdge, GoodWe, Fox ESS).
+ARCHETYPE_MODE_AND_MAGNITUDE: Final = "mode_and_magnitude"
+# A service call carrying power *and* a lifetime (Huawei forcible_charge).
+ARCHETYPE_COMMAND_WITH_DURATION: Final = "command_with_duration"
+# The write is a grid target, not a battery one (Victron ESS AcPowerSetPoint).
+ARCHETYPE_GRID_SETPOINT: Final = "grid_setpoint"
+# Rewrite a time-of-use slot; no session concept at all (Deye Prog1-6, Growatt SPH).
+ARCHETYPE_TOU_REWRITE: Final = "tou_rewrite"
+CONTROL_ARCHETYPES: Final = (
+    ARCHETYPE_SIGNED_POWER,
+    ARCHETYPE_MODE_AND_MAGNITUDE,
+    ARCHETYPE_COMMAND_WITH_DURATION,
+    ARCHETYPE_GRID_SETPOINT,
+    ARCHETYPE_TOU_REWRITE,
+)
+
+# What the number an action writes actually means. Getting this wrong is a 100x
+# error delivered to somebody's inverter, which is why it is declared once per
+# profile rather than open-coded in every action template.
+POWER_UNIT_W: Final = "w"
+POWER_UNIT_KW: Final = "kw"
+# Percent of rated power (GoodWe eco_mode_power, most Growatt families).
+POWER_UNIT_PERCENT: Final = "percent_of_rated"
+# Percent in hundredths, 0-10000 (Fronius SunSpec InWRte/OutWRte).
+POWER_UNIT_PERCENT_HUNDREDTHS: Final = "percent_hundredths"
+POWER_UNITS: Final = (
+    POWER_UNIT_W,
+    POWER_UNIT_KW,
+    POWER_UNIT_PERCENT,
+    POWER_UNIT_PERCENT_HUNDREDTHS,
+)
+PERCENT_UNITS: Final = (POWER_UNIT_PERCENT, POWER_UNIT_PERCENT_HUNDREDTHS)
+
+# What a `curtail`/`uncurtail` write actually targets. The mechanisms are
+# physically different -- an export limit still lets PV serve load and
+# battery, a zero-export switch does not distinguish -- and only the profile
+# knows which one its hardware has.
+CURTAIL_MODE_EXPORT_LIMIT: Final = "export_limit"
+CURTAIL_MODE_ZERO_EXPORT_SWITCH: Final = "zero_export_switch"
+CURTAIL_MODES: Final = (CURTAIL_MODE_EXPORT_LIMIT, CURTAIL_MODE_ZERO_EXPORT_SWITCH)
+
+# How long a command survives without being re-sent.
+#
+# Registers that hold their value until changed. The deadband is safe here, and
+# `restore` is mandatory -- nothing else will ever put the inverter back.
+LIFETIME_PERSISTENT: Final = "persistent"
+# The command carries its own duration and the inverter reverts when it elapses
+# (Huawei forcible_charge). Must be re-issued before it expires.
+LIFETIME_EXPIRES: Final = "expires"
+# A countdown the controller is expected to keep reloading (Fox ESS timeout_set,
+# SolaX remotecontrol_duration, Victron's implicit ESS revert).
+LIFETIME_WATCHDOG: Final = "watchdog"
+CONTROL_LIFETIMES: Final = (LIFETIME_PERSISTENT, LIFETIME_EXPIRES, LIFETIME_WATCHDOG)
+
+# Re-issue an expiring command once this fraction of its life has passed. Half
+# gives a full command's worth of margin against a slow bus or a missed cycle.
+COMMAND_REFRESH_FRACTION: Final = 0.5
+DEFAULT_COMMAND_DURATION_MIN: Final = 30
+
+# Applied to every version 1 inverter profile, and as the floor under a version 2
+# `control:` block. These values describe what the executor did before this
+# block existed, so an unmigrated profile behaves exactly as it always did.
+DEFAULT_CONTROL: Final = {
+    "archetype": ARCHETYPE_MODE_AND_MAGNITUDE,
+    "power_unit": POWER_UNIT_W,
+    "signed": False,
+    "invert_sign": False,
+    "charge_boost": 1.0,
+    "round_to": 1,
+    "lifetime": LIFETIME_PERSISTENT,
+    "duration_min": DEFAULT_COMMAND_DURATION_MIN,
+    "deadband_w": DEFAULT_POWER_DEADBAND_W,
+    "min_write_interval_s": 0,
+    "restore_required": True,
+    "curtail_mode": CURTAIL_MODE_EXPORT_LIMIT,
+    "curtail_unit": POWER_UNIT_W,
+}
+
+# Deliberately only three. Anything a declarative source cannot express belongs in
+# a `template` source rather than in a fourth keyword -- that is the line that
+# keeps this engine from turning into a poor programming language.
+SOURCE_TYPE_ATTRIBUTES: Final = "attributes"
+SOURCE_TYPE_SERVICE: Final = "service"
+SOURCE_TYPE_TEMPLATE: Final = "template"
+SOURCE_TYPES: Final = (
+    SOURCE_TYPE_ATTRIBUTES,
+    SOURCE_TYPE_SERVICE,
+    SOURCE_TYPE_TEMPLATE,
+)
+
+UNIT_WATTS: Final = "watts"
+UNIT_CURRENCY_PER_KWH: Final = "currency_per_kwh"
+UNIT_CELSIUS: Final = "celsius"
+
+# User-supplied profiles live outside the integration directory so that HACS
+# updates cannot delete them.
+USER_PROFILE_DIR: Final = "emhass_companion/profiles"
+BUILTIN_PROFILE_DIR: Final = "profiles/builtin"
+
+# --- Issues ------------------------------------------------------------------
+
+ISSUE_EMHASS_VERSION: Final = "emhass_version_unsupported"
+ISSUE_PLAN_SCHEMA: Final = "plan_schema_unsupported"
+ISSUE_BAD_PROFILE: Final = "invalid_profile"
+# Suffixed with the load's subentry_id: one issue per thermal load, not one
+# for the whole integration, since the fix is load-specific (its own rates or
+# schedule) and other loads are unaffected.
+ISSUE_THERMAL_UNREACHABLE: Final = "thermal_comfort_unreachable"
+# Whole-integration issue, not per-load: EMHASS reports infeasibility for the
+# problem as a whole, with no hint at which load caused it.
+ISSUE_OPTIMIZATION_INFEASIBLE: Final = "optimization_infeasible"
+# A run that errored outright (EMHASS unreachable, rejected the request, or
+# raised internally) rather than merely failing to find a feasible plan.
+ISSUE_RUN_FAILED: Final = "run_failed"
+# End SOC's Optimized mode has little or no PV forecast past the horizon, but
+# the selected Solcast profile could provide one more day by adding its day-3
+# sensor. A nudge with a one-click fix, not an error -- the heuristic already
+# degrades safely by assuming zero PV where the forecast ends.
+ISSUE_PV_TAIL_SHORT: Final = "pv_tail_short"
+# The load profile wants mlforecaster but it has not been confirmed trained
+# for the currently configured sensor yet -- runs carry a load series built
+# from the sensor's own recorded history meanwhile. Clears once an auto- or
+# button-triggered fit against that sensor succeeds.
+ISSUE_ML_FORECASTER_NOT_READY: Final = "ml_forecaster_not_ready"
+# One or more loads still point their control entity at a script, from when the
+# form accepted one. The load is left uncontrolled until the user picks a
+# switch, which is better than firing the script over and over; see
+# CONTROL_ENTITY_DOMAINS for why.
+ISSUE_SCRIPT_CONTROL_ENTITY: Final = "script_control_entity"
+# A stored time of day would not parse -- a hand-edited .storage, a restored
+# backup, a schema change. The value falls back to its default rather than
+# taking setup down with a traceback, so the user has to be told which field
+# was ignored and what it now reads as.
+ISSUE_BAD_STORED_TIME: Final = "bad_stored_time"
+# Suffixed with the load's subentry_id, like ISSUE_THERMAL_UNREACHABLE: an
+# on-demand load was given its whole run and never drew a watt. Per-load because
+# only that appliance is affected and only its owner can fix it -- a dishwasher
+# that needs its own start button pressed, a plug that does not resume the
+# program on power-up, a breaker left off. An error rather than a warning: the
+# user asked for a run, the run did not happen, and nothing else will say so.
+ISSUE_LOAD_NEVER_STARTED: Final = "load_never_started"
+# Entities this integration reads from have stopped reporting for longer than
+# SOURCE_BLIND_GRACE. Whole-integration rather than per-entity: they normally
+# go together (one Modbus connection, one cloud API, one dead inverter), and a
+# repair per sensor would bury the one fact that matters under thirty copies
+# of it. An error rather than a warning when a critical reading is among them,
+# because control stands down at that point -- see health.critical_entities.
+ISSUE_SOURCES_BLIND: Final = "sources_blind"
+# The EMHASS-standard entity ids the user asked for are already taken, almost
+# always by EMHASS's own publish-data writing them. Renaming into an occupied
+# id is refused by the entity registry, so the affected sensors keep their
+# Companion ids and the user is told which ones and why -- silently leaving
+# half the option unapplied would look like it simply did not work.
+ISSUE_STANDARD_NAMES_TAKEN: Final = "standard_names_taken"
+
+# Solcast's day sensors are named today / tomorrow / day_3..day_7 -- "tomorrow"
+# *is* day 2, there is no forecast_day_2. Day 3 is the first sensor past the
+# profile's old today+tomorrow default.
+PROFILE_KEY_PV_SOLCAST: Final = "pv/solcast"
+SOLCAST_DAY3_ENTITY: Final = "sensor.solcast_pv_forecast_forecast_day_3"

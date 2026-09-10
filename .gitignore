@@ -27,5 +27,8 @@ site/
 # project content, must never be committed.
 .claude/
 
+# Agent memory (Cursor + Claude Code) -- local only, never public.
+.agents/
+
 # Internal planning docs -- not for the public repo.
 planning/
