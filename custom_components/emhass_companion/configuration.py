@@ -138,6 +138,15 @@ class EmhassConfig:
         house_load_total_entity = options.get(CONF_HOUSE_LOAD_TOTAL_ENTITY)
         if house_load_total_entity and load.key == PROFILE_KEY_LOAD_SENSOR:
             _resolve_net_house_load_entity(hass, entry, load)
+        battery = BatteryConfig.from_dict(options.get("battery"))
+        # Hybrid defaults on in its own model (most battery installs are
+        # hybrids), but a shared inverter throughput cap is meaningless
+        # without a battery to share it with -- keep it off until battery is.
+        hybrid_inverter = (
+            HybridInverterConfig.from_dict(options.get("battery"))
+            if battery.enabled
+            else HybridInverterConfig(enabled=False)
+        )
         return cls(
             url=entry.data[CONF_URL],
             time_step_minutes=int(options.get(CONF_TIME_STEP, DEFAULT_TIME_STEP)),
@@ -151,12 +160,9 @@ class EmhassConfig:
             temperature=ProfileSelection.from_dict(options.get(CONF_TEMPERATURE)),
             network=ProfileSelection.from_dict(options.get(CONF_NETWORK)),
             tariff=Tariff.from_dict(options.get("tariff")),
-            battery=BatteryConfig.from_dict(options.get("battery")),
+            battery=battery,
             grid=GridConfig.from_dict(options.get("grid")),
-            # Collected from the same form/options blob as battery -- a
-            # shared inverter throughput cap is meaningless without a battery
-            # to share it with.
-            hybrid_inverter=HybridInverterConfig.from_dict(options.get("battery")),
+            hybrid_inverter=hybrid_inverter,
             soc_entity=options.get(CONF_SOC_ENTITY),
             battery_power_entity=options.get(CONF_BATTERY_POWER_ENTITY),
             battery_power_invert=bool(options.get(CONF_BATTERY_POWER_INVERT)),
