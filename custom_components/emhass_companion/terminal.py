@@ -847,7 +847,10 @@ def _supply_ladder(tail: _Tail, horizon: list[_HorizonSlot]) -> list[_Rung]:
     rungs = [
         _Rung(
             (slot.price + battery.weight_battery_charge) / charge,
-            min(battery.charge_power_max_w, max(0.0, tail.grid.import_max_w - slot.load_w))
+            min(
+                battery.charge_power_at_soc(tail.soc_init),
+                max(0.0, tail.grid.import_max_w - slot.load_w),
+            )
             * tail.step_hours
             * charge,
         )
@@ -1536,12 +1539,9 @@ def _annotate_reach(decision: EndSocDecision, tail: _Tail) -> None:
     if hours <= 0:
         return
     capacity = tail.battery.capacity_wh
-    reach_up = tail.battery.charge_power_max_w * hours / capacity
+    reach_up_hours = tail.battery.hours_to_charge(tail.soc_init, decision.soc)
     reach_down = tail.battery.discharge_power_max_w * hours / capacity
-    if (
-        decision.soc > tail.soc_init + reach_up + 1e-6
-        or decision.soc < tail.soc_init - reach_down - 1e-6
-    ):
+    if reach_up_hours > hours + 1e-6 or decision.soc < tail.soc_init - reach_down - 1e-6:
         decision.details["unreachable"] = True
 
 

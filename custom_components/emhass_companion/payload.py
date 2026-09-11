@@ -402,6 +402,10 @@ class PayloadInputs:
     docs/network_tariffs_plan.md, "The window mask". Builds
     ``capacity_charge_window``, MPC only, same restriction as
     ``current_period_peak``."""
+    send_charge_power_derating: bool = True
+    """Whether this backend accepts ``battery_charge_power_derating``
+    (EMHASS 0.18.3+). The table still lives on :attr:`battery`; this only
+    gates sending it. Unknown/older backends keep the flat charge-power max."""
 
 
 @dataclass(slots=True)
@@ -734,7 +738,9 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
             payload["soc_final"] = payload["soc_init"]
 
     # -- settings -------------------------------------------------------------
-    payload.update(_battery_settings(inputs.battery))
+    payload.update(
+        _battery_settings(inputs.battery, send_derating=inputs.send_charge_power_derating)
+    )
     payload.update(
         _battery_lockout_weights(
             inputs, floor_to_step(inputs.now, step), horizon_end, step, capacity_array_steps
@@ -892,10 +898,10 @@ def _thermal_settings(inputs: PayloadInputs, step: timedelta, load_count: int) -
     return {} if config is None else {"def_load_config": config}
 
 
-def _battery_settings(battery: BatteryConfig) -> dict[str, Any]:
+def _battery_settings(battery: BatteryConfig, *, send_derating: bool = True) -> dict[str, Any]:
     if not battery.enabled:
         return {"set_use_battery": False}
-    return {
+    settings: dict[str, Any] = {
         "set_use_battery": True,
         "battery_nominal_energy_capacity": battery.capacity_wh,
         "battery_charge_power_max": battery.charge_power_max_w,
@@ -927,6 +933,14 @@ def _battery_settings(battery: BatteryConfig) -> dict[str, Any]:
         "battery_stress_cost": battery.stress_cost,
         "battery_stress_segments": battery.stress_segments,
     }
+    # Empty is EMHASS's own default (flat charge-power max). Omit rather than
+    # send [] so an older backend never sees an unknown plant_conf key, and so
+    # a table stored against a 0.18.2 add-on stays inert until it is upgraded.
+    if send_derating and battery.charge_power_derating:
+        settings["battery_charge_power_derating"] = [
+            [round(soc, 4), round(fraction, 4)] for soc, fraction in battery.charge_power_derating
+        ]
+    return settings
 
 
 def _hybrid_inverter_settings(hybrid: HybridInverterConfig) -> dict[str, Any]:

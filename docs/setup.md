@@ -90,6 +90,7 @@ the optimiser plans around PV, load and price alone.
 | That sensor is positive when charging | Which way round it counts. EMHASS's own convention is the opposite — positive is discharge — and getting it wrong labels a charging battery as discharging |
 | Usable capacity | In Wh |
 | Maximum charge / discharge power | The battery's own limits |
+| Charge slower as the battery fills | Optional SOC taper: from this charge level, charge at most this % of max. Empty keeps the flat maximum. Needs EMHASS 0.18.3+ |
 | Minimum / maximum charge level | The optimiser will not plan the battery outside this range |
 | Target charge level | Where the optimiser aims to leave the battery at the end of the horizon. What it means depends on End SOC below |
 | End SOC | How that end-of-horizon level is chosen. See below |

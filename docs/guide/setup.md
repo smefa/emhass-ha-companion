@@ -206,6 +206,12 @@ this screen is then ignored.
 - **Usable capacity** — in Wh.
 - **Maximum charge power** / **Maximum discharge power** — the battery's own
   limits, in W.
+- **Charge slower as the battery fills** — optional. A BMS often lowers the
+  allowed charge current as the battery fills, so a plan that assumes full
+  power the whole way starts too late. Each row is "from this charge level,
+  charge at most this percent of Maximum charge power" — for example 50% →
+  84%, 70% → 42%, 90% → 23%. Leave empty to keep the flat maximum. Needs
+  EMHASS 0.18.3 or newer; on an older add-on the table is kept but not sent.
 - **Shared inverter (hybrid)** — on if PV and the battery share one
   inverter's AC-side limit (most home systems). Off if they're two separate
   inverters.

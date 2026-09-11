@@ -109,6 +109,11 @@ CONF_USE_BATTERY: Final = "use_battery"
 CONF_CAPACITY_WH: Final = "capacity_wh"
 CONF_CHARGE_POWER_MAX: Final = "charge_power_max_w"
 CONF_DISCHARGE_POWER_MAX: Final = "discharge_power_max_w"
+# Optional SOC-dependent charge-power ceiling, sent as EMHASS's
+# `battery_charge_power_derating` (v0.18.3+, PR #1107). Stored as
+# [[soc_threshold, fraction_of_max], ...] with both values in 0-1; empty
+# keeps the flat `charge_power_max_w` ceiling. The form shows percent rows.
+CONF_CHARGE_POWER_DERATING: Final = "charge_power_derating"
 CONF_SOC_MIN: Final = "soc_min"
 CONF_SOC_MAX: Final = "soc_max"
 CONF_SOC_TARGET: Final = "soc_target"
@@ -732,6 +737,12 @@ MIN_EMHASS_VERSION_DEMAND_WINDOW: Final = "0.18.1"
 # comparison is read at the optimizer timestep instead of the tariff's own
 # measurement interval, biasing toward over-shaving.
 MIN_EMHASS_VERSION_CAPACITY_INTERVAL: Final = "0.18.2"
+
+# The EMHASS release ``battery_charge_power_derating`` shipped in (PR #1107).
+# Below this the table is stored but not sent -- an older backend would ignore
+# or reject an unknown plant_conf key, and the flat charge-power max still
+# applies.
+MIN_EMHASS_VERSION_CHARGE_DERATING: Final = "0.18.3"
 
 # --- Cost and savings ---------------------------------------------------------
 #

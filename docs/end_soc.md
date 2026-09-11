@@ -60,7 +60,7 @@ horizon's end, as a percentage.
 | `sale_blocked` | Present when it didn't, with which reason (no sell price / prices unpublished / no spread) |
 | `reserve` | The floor used (your Target charge level setting) |
 | `clamped_by` | Which bound actually set the value: nothing bit / `profitable_sale` / `reserve` / `range` / `hysteresis` |
-| `unreachable` | Present and `true` when the target likely exceeds what charge/discharge power can deliver within the horizon — EMHASS will aim for it and fall short, softly |
+| `unreachable` | Present and `true` when the target likely exceeds what charge/discharge power can deliver within the horizon — including the SOC charge taper, if one is configured — EMHASS will aim for it and fall short, softly |
 | `price_tail` | `known` / `assumed from today` |
 | `load_tail` | `own forecast` / `borrowed from last plan` |
 | `fallback` | Present with the cause when the heuristic couldn't run at all |

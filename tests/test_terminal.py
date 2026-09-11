@@ -229,6 +229,31 @@ def test_an_unreachable_target_is_annotated_not_clamped(active):
     assert decision.details["unreachable"] is True
 
 
+def test_a_charge_taper_can_make_an_otherwise_reachable_target_unreachable(active):
+    """Flat 5 kW would fill 10 kWh in two hours; above 15% SOC the table
+    allows only 50 W, which cannot climb from 0.10 to the 0.50 cover in 24 h."""
+    active(TEST_NIGHT_COVER)
+    prices = [1.0] * 12 + [2.0] * 14 + [1.0] + [2.0] * 21
+    reachable = _decide(
+        buy_price=_series(prices),
+        soc_init=0.10,
+        battery=_battery(charge_power_max_w=5_000),
+    )
+    assert reachable.soc == pytest.approx(0.50)
+    assert "unreachable" not in reachable.details
+
+    tapered = _decide(
+        buy_price=_series(prices),
+        soc_init=0.10,
+        battery=_battery(
+            charge_power_max_w=5_000,
+            charge_power_derating=((0.15, 0.01),),
+        ),
+    )
+    assert tapered.soc == pytest.approx(0.50)
+    assert tapered.details["unreachable"] is True
+
+
 def test_hysteresis_holds_the_previous_target_against_jitter(active):
     active(TEST_NIGHT_COVER)
     prices = [1.0] * 12 + [2.0] * 14 + [1.0] + [2.0] * 21

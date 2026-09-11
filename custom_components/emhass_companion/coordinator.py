@@ -50,6 +50,7 @@ from .const import (
     LOAD_FORECAST_METHOD_MLFORECASTER,
     LOAD_FORECAST_METHOD_TYPICAL,
     MIN_EMHASS_VERSION_CAPACITY_INTERVAL,
+    MIN_EMHASS_VERSION_CHARGE_DERATING,
     MIN_EMHASS_VERSION_DEMAND_CHARGE,
     MIN_EMHASS_VERSION_DEMAND_WINDOW,
     ML_MIN_HISTORY_DAYS,
@@ -1392,6 +1393,10 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             demand_fallback_ceiling_w=demand_fallback_ceiling_w,
             demand_window=demand_window,
             demand_charge_window=demand_charge_window,
+            send_charge_power_derating=(
+                self.backend_version is not None
+                and version_at_least(self.backend_version, MIN_EMHASS_VERSION_CHARGE_DERATING)
+            ),
         )
         built = build_payload(inputs)
         if network_warnings:

@@ -227,6 +227,64 @@ def test_soc_comfort_thresholds_convert_from_percent_on_the_form_path():
     assert config.soc_surplus_cost == 0.03
 
 
+def test_battery_charge_derating_defaults_to_empty():
+    config = BatteryConfig.from_dict({"use_battery": True})
+    assert config.charge_power_derating == ()
+    assert config.charge_power_at_soc(0.9) == config.charge_power_max_w
+
+
+def test_battery_charge_derating_is_read_from_stored_pairs():
+    config = BatteryConfig.from_dict(
+        {
+            "use_battery": True,
+            "charge_power_max_w": 10000,
+            "charge_power_derating": [[0.5, 0.84], [0.7, 0.42], [0.9, 0.23]],
+        }
+    )
+    assert config.charge_power_derating == ((0.5, 0.84), (0.7, 0.42), (0.9, 0.23))
+    assert config.charge_power_at_soc(0.49) == 10000
+    assert config.charge_power_at_soc(0.5) == 8400
+    assert config.charge_power_at_soc(0.7) == 4200
+    assert config.charge_power_at_soc(0.9) == 2300
+
+
+def test_battery_charge_derating_survives_the_form_round_trip():
+    stored = _battery_storage_from_input(
+        {
+            "use_battery": True,
+            "charge_power_derating": [
+                {"soc_pct": 50, "charge_pct": 84},
+                {"soc_pct": 70, "charge_pct": 42},
+                {"soc_pct": 90, "charge_pct": 23},
+            ],
+        }
+    )
+    assert stored["charge_power_derating"] == [[0.5, 0.84], [0.7, 0.42], [0.9, 0.23]]
+    config = BatteryConfig.from_dict(stored)
+    assert config.charge_power_derating == ((0.5, 0.84), (0.7, 0.42), (0.9, 0.23))
+
+
+def test_a_misordered_derating_table_is_dropped():
+    config = BatteryConfig.from_dict(
+        {"use_battery": True, "charge_power_derating": [[0.7, 0.42], [0.5, 0.84]]}
+    )
+    assert config.charge_power_derating == ()
+
+
+def test_hours_to_charge_walks_the_derating_bands():
+    config = BatteryConfig(
+        enabled=True,
+        capacity_wh=10_000,
+        charge_power_max_w=10_000,
+        charge_power_derating=((0.5, 0.84), (0.7, 0.42), (0.9, 0.23)),
+    )
+    # 0.15→0.5 at 10 kW, 0.5→0.7 at 8.4 kW, 0.7→0.9 at 4.2 kW, 0.9→0.95 at 2.3 kW.
+    assert config.hours_to_charge(0.15, 0.95) == pytest.approx(
+        0.35 + 0.2 / 0.84 + 0.2 / 0.42 + 0.05 / 0.23
+    )
+    assert config.hours_to_charge(0.4, 0.4) == 0.0
+
+
 def test_grid_capacity_charge_defaults_to_zero():
     assert GridConfig.from_dict({}).capacity_cost_per_kw == 0.0
 

@@ -94,6 +94,7 @@
           "capacity_wh": "Användbar kapacitet",
           "charge_power_max_w": "Maximal laddeffekt",
           "discharge_power_max_w": "Maximal urladdningseffekt",
+          "charge_power_derating": "Ladda långsammare när batteriet fylls",
           "no_discharge_to_grid": "Blockera export till elnätet",
           "hybrid_inverter": "Delad växelriktare (hybrid)",
           "inverter_ac_output_max_w": "Maximal AC-uteffekt (urladdning/export)",
@@ -126,6 +127,7 @@
           "battery_dynamic_min": "Max laddningsramp"
         },
         "data_description": {
+          "charge_power_derating": "Valfritt. Ett BMS sänker ofta tillåten laddström när batteriet fylls, så en plan som räknar med full effekt hela vägen startar för sent och missar målet. Varje rad är \"från denna laddningsnivå, ladda med högst denna procent av Maximal laddeffekt\". Lämna tomt för att behålla den platta maxeffekten. Kräver EMHASS 0.18.3 eller nyare; på ett äldre tillägg sparas tabellen men skickas inte.",
           "hybrid_inverter": "På om solpanelerna och batteriet delar en och samma växelriktares AC-effektgräns, vilket gäller de flesta hembatterisystem. Av om det är två separata växelriktare med varsin gräns.",
           "no_discharge_to_grid": "På hindrar batteriet från att ladda ur mot export -- det förser fortfarande huset med el, men säljer aldrig. EMHASS eget standardvärde är på, vilket tyst utesluter arbitrage även när en plan annars skulle tjäna på en prisspik, så detta levereras avstängt. Solöverskott exporteras ändå normalt oavsett detta -- det gäller bara batteriet.",
           "soc_min": "Optimeringen planerar aldrig batteriet under denna nivå.",
@@ -205,7 +207,8 @@
       "cannot_connect": "Kunde inte nå EMHASS på den adressen. Kontrollera att det körs och att adress och port stämmer.",
       "unknown_version": "Ansluten, men EMHASS rapporterade ingen version. Det är förmodligen för gammalt.",
       "version_too_old": "Denna EMHASS är för gammal. Version {min_version} eller senare krävs, eftersom integrationen läser planen via det JSON-API som infördes i den versionen.",
-      "ac_output_required": "En delad växelriktare behöver en positiv AC-uteffektgräns. Noll skulle stoppa både sol och batteri från att nå huset."
+      "ac_output_required": "En delad växelriktare behöver en positiv AC-uteffektgräns. Noll skulle stoppa både sol och batteri från att nå huset.",
+      "derating_not_ascending": "Raderna för laddavtrappning måste ha strikt stigande laddningsnivåer, var och en mellan 1 och 99 %, med en laddeffekt på 1–100 % av max."
     },
     "abort": {
       "single_instance_allowed": "EMHASS Companion är redan konfigurerad.",
@@ -270,6 +273,7 @@
           "capacity_wh": "Användbar kapacitet",
           "charge_power_max_w": "Maximal laddeffekt",
           "discharge_power_max_w": "Maximal urladdningseffekt",
+          "charge_power_derating": "Ladda långsammare när batteriet fylls",
           "no_discharge_to_grid": "Blockera export till elnätet",
           "hybrid_inverter": "Delad växelriktare (hybrid)",
           "inverter_ac_output_max_w": "Maximal AC-uteffekt (urladdning/export)",
@@ -302,6 +306,7 @@
           "battery_dynamic_min": "Max laddningsramp"
         },
         "data_description": {
+          "charge_power_derating": "Valfritt. Ett BMS sänker ofta tillåten laddström när batteriet fylls, så en plan som räknar med full effekt hela vägen startar för sent och missar målet. Varje rad är \"från denna laddningsnivå, ladda med högst denna procent av Maximal laddeffekt\". Lämna tomt för att behålla den platta maxeffekten. Kräver EMHASS 0.18.3 eller nyare; på ett äldre tillägg sparas tabellen men skickas inte.",
           "hybrid_inverter": "På om solpanelerna och batteriet delar en och samma växelriktares AC-effektgräns, vilket gäller de flesta hembatterisystem. Av om det är två separata växelriktare med varsin gräns.",
           "no_discharge_to_grid": "På hindrar batteriet från att ladda ur mot export -- det förser fortfarande huset med el, men säljer aldrig. EMHASS eget standardvärde är på, vilket tyst utesluter arbitrage även när en plan annars skulle tjäna på en prisspik, så detta levereras avstängt. Solöverskott exporteras ändå normalt oavsett detta -- det gäller bara batteriet.",
           "self_consume_threshold_w": "När planens näteffekt ligger inom detta antal watt från noll lämnas batteriet till växelriktarens egen egenanvändningsläge istället för planens tvingade laddning/urladdning -- även en stor planerad laddning eller urladdning åsidosätts, eftersom egenanvändning följer verklig sol- och lastdata bättre än en prognos vid små obalanser. När läget väl har lämnats över måste näteffekten överstiga dubbla detta värde innan planen kan tvinga batteriet igen, så att läget inte växlar fram och tillbaka vid varje omräkning. Inte samma sak som laddningsnivåerna ovan, som bara begränsar vad optimeringen får planera mellan.",
@@ -438,7 +443,8 @@
       }
     },
     "error": {
-      "ac_output_required": "En delad växelriktare behöver en positiv AC-uteffektgräns. Noll skulle stoppa både sol och batteri från att nå huset."
+      "ac_output_required": "En delad växelriktare behöver en positiv AC-uteffektgräns. Noll skulle stoppa både sol och batteri från att nå huset.",
+      "derating_not_ascending": "Raderna för laddavtrappning måste ha strikt stigande laddningsnivåer, var och en mellan 1 och 99 %, med en laddeffekt på 1–100 % av max."
     }
   },
   "selector": {

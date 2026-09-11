@@ -562,6 +562,39 @@ def test_battery_new_grid_flags_ride_through_to_emhass():
     assert payload["battery_dynamic_min"] == -0.3
 
 
+def test_battery_charge_derating_is_sent_when_configured():
+    battery = BatteryConfig(
+        enabled=True,
+        capacity_wh=25600,
+        charge_power_max_w=10000,
+        charge_power_derating=((0.5, 0.84), (0.7, 0.42), (0.9, 0.23)),
+    )
+    payload = build_payload(_inputs(battery=battery, soc_init=0.098)).payload
+    assert payload["battery_charge_power_derating"] == [
+        [0.5, 0.84],
+        [0.7, 0.42],
+        [0.9, 0.23],
+    ]
+
+
+def test_battery_charge_derating_is_omitted_when_empty():
+    battery = BatteryConfig(enabled=True, capacity_wh=25600)
+    payload = build_payload(_inputs(battery=battery, soc_init=0.098)).payload
+    assert "battery_charge_power_derating" not in payload
+
+
+def test_battery_charge_derating_is_omitted_on_an_old_backend():
+    battery = BatteryConfig(
+        enabled=True,
+        capacity_wh=25600,
+        charge_power_derating=((0.5, 0.84),),
+    )
+    payload = build_payload(
+        _inputs(battery=battery, soc_init=0.098, send_charge_power_derating=False)
+    ).payload
+    assert "battery_charge_power_derating" not in payload
+
+
 def test_battery_cycle_costs_default_to_priced_discharge():
     """The shipped discharge weight has to reach EMHASS, or a round trip is
     planned as if the wear it causes were free."""
@@ -1228,9 +1261,7 @@ def test_battery_lockout_array_length_matches_capacity_array_steps_on_dayahead()
 def test_hybrid_inverter_disabled_sends_only_the_flag():
     """Disabled must still assert the flag -- never leave it to EMHASS's own
     persisted config.json, the same reasoning as the battery flag above."""
-    payload = build_payload(
-        _inputs(hybrid_inverter=HybridInverterConfig(enabled=False))
-    ).payload
+    payload = build_payload(_inputs(hybrid_inverter=HybridInverterConfig(enabled=False))).payload
     assert payload["inverter_is_hybrid"] is False
     assert "inverter_ac_output_max" not in payload
 

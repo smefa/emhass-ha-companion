@@ -12,6 +12,7 @@ from bisect import bisect_right
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, time, timedelta
+from itertools import pairwise
 import math
 from typing import Any, Self
 
@@ -23,6 +24,7 @@ from .const import (
     CONF_BATTERY_STRESS_COST,
     CONF_BATTERY_STRESS_SEGMENTS,
     CONF_CAPACITY_COST_PER_KW,
+    CONF_CHARGE_POWER_DERATING,
     CONF_COMPUTE_CURTAILMENT,
     CONF_END_SOC_MODE,
     CONF_GRID_EXPORT_LIMIT_ENTITY,
@@ -374,6 +376,48 @@ class Series:
 # --- Configuration models ----------------------------------------------------
 
 
+def parse_charge_power_derating(raw: Any) -> tuple[tuple[float, float], ...]:
+    """Normalise a charge-taper table to ``((soc, fraction), ...)``.
+
+    Accepts the stored ``[[soc, fraction], ...]`` form (both 0-1) and the
+    config-flow's percent rows (``{soc_pct, charge_pct}``). Matches EMHASS:
+    any malformed row or a non-ascending SOC sequence drops the whole table
+    rather than silently reordering it, because a misordered table would
+    raise the ceiling and behave like no table at all.
+    """
+    if not raw:
+        return ()
+    try:
+        items = list(raw)
+    except TypeError:
+        return ()
+    pairs: list[tuple[float, float]] = []
+    for item in items:
+        if isinstance(item, dict):
+            soc_raw = item.get("soc_pct", item.get("soc"))
+            frac_raw = item.get("charge_pct", item.get("fraction"))
+            if soc_raw is None or frac_raw is None:
+                return ()
+            soc = float(soc_raw)
+            frac = float(frac_raw)
+            if soc > 1:
+                soc /= 100
+            if frac > 1:
+                frac /= 100
+        else:
+            if not isinstance(item, (list, tuple)) or len(item) != 2:
+                return ()
+            soc = float(item[0])
+            frac = float(item[1])
+        if not 0 < soc < 1 or not 0 < frac <= 1:
+            return ()
+        pairs.append((soc, frac))
+    for previous, current in pairwise(pairs):
+        if current[0] <= previous[0]:
+            return ()
+    return tuple(pairs)
+
+
 @dataclass(slots=True)
 class BatteryConfig:
     """Battery parameters, sent with every optimisation request."""
@@ -382,6 +426,10 @@ class BatteryConfig:
     capacity_wh: float = 0.0
     charge_power_max_w: float = 0.0
     discharge_power_max_w: float = 0.0
+    charge_power_derating: tuple[tuple[float, float], ...] = ()
+    """SOC-dependent charge-power ceiling, as ``(soc_threshold, fraction)``
+    pairs ascending by SOC. Empty keeps the flat ``charge_power_max_w``.
+    Sent as ``battery_charge_power_derating`` on EMHASS 0.18.3+."""
     soc_min: float = DEFAULT_SOC_MIN
     soc_max: float = DEFAULT_SOC_MAX
     soc_target: float = DEFAULT_SOC_TARGET
@@ -437,6 +485,45 @@ class BatteryConfig:
     dynamic_enabled is on; EMHASS's own defaults (0.9 / -0.9) ride along inert
     otherwise."""
 
+    def charge_power_at_soc(self, soc: float) -> float:
+        """Charge-power ceiling in watts at ``soc`` (0-1).
+
+        Below the first threshold the flat maximum applies; at or above a
+        threshold the matching fraction of ``charge_power_max_w`` is used.
+        Same rule EMHASS applies to the SOC a timestep starts at.
+        """
+        cap = self.charge_power_max_w
+        for threshold, fraction in self.charge_power_derating:
+            if soc < threshold:
+                break
+            cap = self.charge_power_max_w * fraction
+        return cap
+
+    def hours_to_charge(self, from_soc: float, to_soc: float) -> float:
+        """Hours of charging to move from ``from_soc`` to ``to_soc``.
+
+        Walks the derating bands so a taper is not treated as flat max power
+        the whole way. ``math.inf`` when the battery cannot take charge.
+        """
+        if to_soc <= from_soc:
+            return 0.0
+        if self.capacity_wh <= 0:
+            return math.inf
+        boundaries = [from_soc]
+        boundaries.extend(
+            threshold
+            for threshold, _fraction in self.charge_power_derating
+            if from_soc < threshold < to_soc
+        )
+        boundaries.append(to_soc)
+        hours = 0.0
+        for start, end in pairwise(boundaries):
+            power = self.charge_power_at_soc(start)
+            if power <= 0:
+                return math.inf
+            hours += (end - start) * self.capacity_wh / power
+        return hours
+
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> BatteryConfig:
         data = data or {}
@@ -445,6 +532,7 @@ class BatteryConfig:
             capacity_wh=float(data.get("capacity_wh", 0) or 0),
             charge_power_max_w=float(data.get("charge_power_max_w", 0) or 0),
             discharge_power_max_w=float(data.get("discharge_power_max_w", 0) or 0),
+            charge_power_derating=parse_charge_power_derating(data.get(CONF_CHARGE_POWER_DERATING)),
             soc_min=float(data.get("soc_min", DEFAULT_SOC_MIN)),
             soc_max=float(data.get("soc_max", DEFAULT_SOC_MAX)),
             soc_target=float(data.get("soc_target", DEFAULT_SOC_TARGET)),

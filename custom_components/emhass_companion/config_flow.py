@@ -9,6 +9,7 @@ substance of that answer.
 
 from __future__ import annotations
 
+from itertools import pairwise
 import logging
 from typing import Any, Final
 
@@ -42,6 +43,7 @@ from .const import (
     CONF_BATTERY_STRESS_SEGMENTS,
     CONF_CAPACITY_COST_PER_KW,
     CONF_CHARGE_EFFICIENCY,
+    CONF_CHARGE_POWER_DERATING,
     CONF_COMFORT_END,
     CONF_COMFORT_START,
     CONF_COMFORT_TEMPERATURE,
@@ -165,6 +167,7 @@ from .const import (
     TEMPERATURE_PROFILE_ORDER,
 )
 from .metering import async_energy_dashboard_defaults
+from .models import parse_charge_power_derating
 from .naming import async_taken_standard_ids
 from .profiles import (
     Profile,
@@ -1531,6 +1534,51 @@ _SOC_PERCENT_FIELDS = (
 )
 
 
+def _derating_form_rows(stored: Any) -> list[dict[str, int]]:
+    """Stored ``[[soc, fraction], ...]`` as the form's percent rows.
+
+    Form rows already in ``{soc_pct, charge_pct}`` shape (the error-redisplay
+    path) are passed through so a rejected table is not wiped.
+    """
+    if isinstance(stored, list) and stored and isinstance(stored[0], dict):
+        return stored
+    pairs = parse_charge_power_derating(stored)
+    return [
+        {"soc_pct": round(soc * 100), "charge_pct": round(fraction * 100)}
+        for soc, fraction in pairs
+    ]
+
+
+def _derating_storage_from_form(rows: Any) -> list[list[float]]:
+    """Form percent rows as the stored ``[[soc, fraction], ...]`` table.
+
+    Raises ``ValueError`` when a filled row is incomplete, out of range, or
+    SOC is not strictly ascending -- the same faults EMHASS would drop the
+    table for, surfaced here so the form can name the field.
+    """
+    if not rows:
+        return []
+    pairs: list[list[float]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ValueError("malformed")
+        soc_raw = row.get("soc_pct")
+        charge_raw = row.get("charge_pct")
+        if soc_raw in (None, "") and charge_raw in (None, ""):
+            continue
+        if soc_raw in (None, "") or charge_raw in (None, ""):
+            raise ValueError("incomplete")
+        soc = float(soc_raw) / 100
+        fraction = float(charge_raw) / 100
+        if not 0 < soc < 1 or not 0 < fraction <= 1:
+            raise ValueError("range")
+        pairs.append([soc, fraction])
+    for previous, current in pairwise(pairs):
+        if current[0] <= previous[0]:
+            raise ValueError("order")
+    return pairs
+
+
 def _battery_storage_from_input(user_input: dict[str, Any]) -> dict[str, Any]:
     """The battery step's form values, as stored in options (and sent to EMHASS).
 
@@ -1551,26 +1599,37 @@ def _battery_storage_from_input(user_input: dict[str, Any]) -> dict[str, Any]:
             CONF_BATTERY_POWER_ENTITY,
             CONF_BATTERY_POWER_INVERT,
             CONF_PV_ENTITY,
+            CONF_CHARGE_POWER_DERATING,
         )
     }
     if "battery_dynamic_min" in result:
         result["battery_dynamic_min"] = -result["battery_dynamic_min"] / 100
+    try:
+        derating = _derating_storage_from_form(user_input.get(CONF_CHARGE_POWER_DERATING))
+    except (TypeError, ValueError):
+        derating = []
+    if derating:
+        result[CONF_CHARGE_POWER_DERATING] = derating
     return result
 
 
 def _battery_errors(user_input: dict[str, Any]) -> dict[str, str]:
-    """Reject a hybrid inverter with no AC throughput.
+    """Reject a hybrid inverter with no AC throughput, or a bad charge taper.
 
     The toggle defaults on and the watt fields default to 0. Sending that pair
     to EMHASS caps PV and battery at the AC bus and makes the plan infeasible.
     The fields are inert when the toggle is off, so 0 is fine then.
     """
-    if not user_input.get(CONF_HYBRID_INVERTER, True):
-        return {}
-    ac_output = user_input.get(CONF_INVERTER_AC_OUTPUT_MAX) or 0
-    if ac_output <= 0:
-        return {CONF_INVERTER_AC_OUTPUT_MAX: "ac_output_required"}
-    return {}
+    errors: dict[str, str] = {}
+    if user_input.get(CONF_HYBRID_INVERTER, True):
+        ac_output = user_input.get(CONF_INVERTER_AC_OUTPUT_MAX) or 0
+        if ac_output <= 0:
+            errors[CONF_INVERTER_AC_OUTPUT_MAX] = "ac_output_required"
+    try:
+        _derating_storage_from_form(user_input.get(CONF_CHARGE_POWER_DERATING))
+    except (TypeError, ValueError):
+        errors[CONF_CHARGE_POWER_DERATING] = "derating_not_ascending"
+    return errors
 
 
 def _battery_form_defaults(user_input: dict[str, Any]) -> dict[str, Any]:
@@ -1587,6 +1646,9 @@ def _battery_form_defaults(user_input: dict[str, Any]) -> dict[str, Any]:
         CONF_BATTERY_POWER_ENTITY: user_input.get(CONF_BATTERY_POWER_ENTITY) or "",
         CONF_BATTERY_POWER_INVERT: bool(user_input.get(CONF_BATTERY_POWER_INVERT)),
         CONF_PV_ENTITY: user_input.get(CONF_PV_ENTITY) or "",
+        # Keep the submitted rows, even if they failed validation -- converting
+        # through storage would drop a misordered table and wipe the form.
+        CONF_CHARGE_POWER_DERATING: user_input.get(CONF_CHARGE_POWER_DERATING) or [],
     }
 
 
@@ -1635,6 +1697,48 @@ def battery_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
             selector.NumberSelectorConfig(
                 min=0, max=100000, step=100, unit_of_measurement="W", mode="box"
             )
+        ),
+        # SOC-dependent charge ceiling (EMHASS 0.18.3+). Repeating rows of
+        # "from this SOC, charge at most this % of max". Empty is the
+        # default and keeps the flat maximum above. Stored as 0-1 pairs;
+        # see _derating_storage_from_form.
+        vol.Optional(
+            CONF_CHARGE_POWER_DERATING,
+            default=_derating_form_rows(defaults.get(CONF_CHARGE_POWER_DERATING)),
+        ): selector.selector(
+            {
+                "object": {
+                    "multiple": True,
+                    "fields": {
+                        "soc_pct": {
+                            "required": True,
+                            "label": "From this charge level",
+                            "selector": {
+                                "number": {
+                                    "min": 1,
+                                    "max": 99,
+                                    "step": 1,
+                                    "unit_of_measurement": "%",
+                                    "mode": "box",
+                                }
+                            },
+                        },
+                        "charge_pct": {
+                            "required": True,
+                            "label": "Charge at most",
+                            "selector": {
+                                "number": {
+                                    "min": 1,
+                                    "max": 100,
+                                    "step": 1,
+                                    "unit_of_measurement": "%",
+                                    "mode": "box",
+                                }
+                            },
+                        },
+                    },
+                }
+            }
         ),
         # EMHASS's own default is True, which silently blocks the battery from
         # ever selling -- even a plan that would otherwise discharge into a
@@ -2610,9 +2714,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
                 options[CONF_BATTERY_POWER_ENTITY] = (
                     user_input.get(CONF_BATTERY_POWER_ENTITY) or None
                 )
-                options[CONF_BATTERY_POWER_INVERT] = bool(
-                    user_input.get(CONF_BATTERY_POWER_INVERT)
-                )
+                options[CONF_BATTERY_POWER_INVERT] = bool(user_input.get(CONF_BATTERY_POWER_INVERT))
                 options[CONF_PV_ENTITY] = user_input.get(CONF_PV_ENTITY) or None
                 return self.async_create_entry(data=options)
             defaults = _battery_form_defaults(user_input)

@@ -30,6 +30,7 @@ from custom_components.emhass_companion.config_flow import (
 )
 from custom_components.emhass_companion.const import (
     CONF_CAPACITY_COST_PER_KW,
+    CONF_CHARGE_POWER_DERATING,
     CONF_COMPUTE_CURTAILMENT,
     CONF_GRID_EXPORT_LIMIT_ENTITY,
     CONF_GRID_IMPORT_LIMIT_ENTITY,
@@ -116,27 +117,43 @@ def test_battery_schema_builds():
 def test_hybrid_on_with_zero_ac_output_is_rejected():
     """The toggle defaults on and the watt field defaults to 0 -- that pair
     would send EMHASS a zero-capacity hybrid and make the plan infeasible."""
-    assert _battery_errors(
-        {CONF_HYBRID_INVERTER: True, CONF_INVERTER_AC_OUTPUT_MAX: 0}
-    ) == {CONF_INVERTER_AC_OUTPUT_MAX: "ac_output_required"}
+    assert _battery_errors({CONF_HYBRID_INVERTER: True, CONF_INVERTER_AC_OUTPUT_MAX: 0}) == {
+        CONF_INVERTER_AC_OUTPUT_MAX: "ac_output_required"
+    }
     assert _battery_errors({CONF_HYBRID_INVERTER: True}) == {
         CONF_INVERTER_AC_OUTPUT_MAX: "ac_output_required"
     }
 
 
 def test_hybrid_on_with_a_positive_ac_output_is_accepted():
-    assert (
-        _battery_errors({CONF_HYBRID_INVERTER: True, CONF_INVERTER_AC_OUTPUT_MAX: 5000})
-        == {}
-    )
+    assert _battery_errors({CONF_HYBRID_INVERTER: True, CONF_INVERTER_AC_OUTPUT_MAX: 5000}) == {}
 
 
 def test_hybrid_off_may_leave_ac_output_at_zero():
     """The watt fields are inert when the toggle is off, so 0 is not a plant."""
-    assert (
-        _battery_errors({CONF_HYBRID_INVERTER: False, CONF_INVERTER_AC_OUTPUT_MAX: 0})
-        == {}
+    assert _battery_errors({CONF_HYBRID_INVERTER: False, CONF_INVERTER_AC_OUTPUT_MAX: 0}) == {}
+
+
+def test_battery_schema_builds_with_a_derating_table():
+    assert vol.Schema(
+        battery_schema({CONF_CHARGE_POWER_DERATING: [[0.5, 0.84], [0.7, 0.42], [0.9, 0.23]]})
     )
+
+
+def test_a_misordered_derating_table_is_rejected_on_the_form():
+    assert _battery_errors(
+        {
+            CONF_HYBRID_INVERTER: False,
+            CONF_CHARGE_POWER_DERATING: [
+                {"soc_pct": 70, "charge_pct": 42},
+                {"soc_pct": 50, "charge_pct": 84},
+            ],
+        }
+    ) == {CONF_CHARGE_POWER_DERATING: "derating_not_ascending"}
+
+
+def test_an_empty_derating_table_is_accepted():
+    assert _battery_errors({CONF_HYBRID_INVERTER: False, CONF_CHARGE_POWER_DERATING: []}) == {}
 
 
 def test_grid_schema_builds():
