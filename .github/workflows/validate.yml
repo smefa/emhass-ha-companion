@@ -36,9 +36,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Version comes from [dependency-groups].dev in pyproject.toml (not latest).
       - uses: astral-sh/ruff-action@v3
         with:
+          version-file: pyproject.toml
           args: check --output-format=github
       - uses: astral-sh/ruff-action@v3
         with:
+          version-file: pyproject.toml
           args: format --check
