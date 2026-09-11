@@ -170,17 +170,15 @@ class DemandChargePricing:
 
     @property
     def component_count(self) -> int:
-        return len(self.components) if self.components else (1 if self.sheet_rate is not None else 0)
+        return (
+            len(self.components) if self.components else (1 if self.sheet_rate is not None else 0)
+        )
 
     @property
     def effective_rates(self) -> list[float] | None:
         """K effective rates when every component is priced; else None."""
         if not self.components:
-            return (
-                [self.effective_rate_per_kw]
-                if self.effective_rate_per_kw is not None
-                else None
-            )
+            return [self.effective_rate_per_kw] if self.effective_rate_per_kw is not None else None
         rates = [c.effective_rate_per_kw for c in self.components]
         if any(rate is None for rate in rates):
             return None
@@ -1397,12 +1395,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         trackers = self.peak_trackers or (
             [self.peak_tracker] if self.peak_tracker is not None else []
         )
-        if (
-            demand_pricing is not None
-            and rates is not None
-            and action == ACTION_MPC
-            and trackers
-        ):
+        if demand_pricing is not None and rates is not None and action == ACTION_MPC and trackers:
             # Watts, matching every other power figure this integration sends
             # -- current_period_peak is MPC-only in EMHASS (see
             # docs/network_tariffs_plan.md, "Day-ahead versus MPC"), so a
@@ -1442,9 +1435,9 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         capacity_limit_window: Callable[[datetime], bool] | None = None
         demand_fallback_ceiling_w: float | None = None
         demand_window: Callable[[datetime], bool] | None = None
-        demand_charge_window: Callable[[datetime], bool] | list[Callable[[datetime], bool]] | None = (
-            None
-        )
+        demand_charge_window: (
+            Callable[[datetime], bool] | list[Callable[[datetime], bool]] | None
+        ) = None
         array_capable = self.backend_version is not None and version_at_least(
             self.backend_version, MIN_EMHASS_VERSION_DEMAND_CHARGE
         )
@@ -1528,9 +1521,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             extra_settings=settings,
             network_demand_charge_configured=demand_pricing is not None,
             demand_charge_rate_per_kw=(
-                rates
-                if rates is not None and len(rates) > 1
-                else (rates[0] if rates else None)
+                rates if rates is not None and len(rates) > 1 else (rates[0] if rates else None)
             ),
             current_period_peak_w=current_period_peak_w,
             capacity_interval_timesteps=capacity_interval_timesteps,

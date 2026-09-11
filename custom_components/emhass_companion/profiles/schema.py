@@ -291,12 +291,7 @@ def _validate_network(document: dict[str, Any]) -> dict[str, Any]:
     plural = document.get("demand_charges")
     if singular and plural:
         raise vol.Invalid("Define either 'demand_charge' or 'demand_charges', not both")
-    if not (
-        document.get("energy_bands")
-        or singular
-        or plural
-        or document.get("capacity_limit")
-    ):
+    if not (document.get("energy_bands") or singular or plural or document.get("capacity_limit")):
         raise vol.Invalid(
             "'network' profile must define at least one of 'energy_bands', "
             "'demand_charge', 'demand_charges' or 'capacity_limit'; it currently "

@@ -400,9 +400,9 @@ class PayloadInputs:
     """Predicate for the demand charge's own window, consulted only when
     :attr:`demand_fallback_ceiling_w` is in effect. For K>1 this is the
     union of every component window."""
-    demand_charge_window: (
-        Callable[[datetime], bool] | list[Callable[[datetime], bool]] | None
-    ) = None
+    demand_charge_window: Callable[[datetime], bool] | list[Callable[[datetime], bool]] | None = (
+        None
+    )
     """Predicate for the demand charge's own window, consulted only when the
     peak *is* being priced (:attr:`demand_charge_rate_per_kw` is set) and the
     coordinator has already confirmed the backend can mask it -- see
@@ -870,7 +870,8 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
                     if single and isinstance(single[0], list):
                         single = single[0]  # type: ignore[assignment]
                     payload["capacity_charge_current_interval_history"] = [
-                        round(w) for w in (single or [])  # type: ignore[union-attr]
+                        round(w)
+                        for w in (single or [])  # type: ignore[union-attr]
                     ]
                 else:
                     histories: list[list[float]]

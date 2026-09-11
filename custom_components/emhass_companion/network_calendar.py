@@ -367,9 +367,7 @@ def _parse_demand_charges(
     singular = resolved.get("demand_charge") or {}
     plural = resolved.get("demand_charges") or []
     if singular and plural:
-        raise NetworkCalendarError(
-            "Define either demand_charge or demand_charges, not both"
-        )
+        raise NetworkCalendarError("Define either demand_charge or demand_charges, not both")
     if singular:
         if not isinstance(singular, dict):
             raise NetworkCalendarError(f"demand_charge must be a mapping, got {singular!r}")
@@ -410,9 +408,7 @@ def _parse_demand_charges(
                 )
         names = [charge.name for charge in charges]
         if len(set(names)) != len(names):
-            raise NetworkCalendarError(
-                f"demand_charges names must be unique, got {names!r}"
-            )
+            raise NetworkCalendarError(f"demand_charges names must be unique, got {names!r}")
 
     by_name = {charge.name: charge for charge in charges if charge.name}
     for index, invert_name in invert_refs:
@@ -622,9 +618,7 @@ class NetworkCalendar:
         first = demand_charges[0] if demand_charges else None
         capacity_raw = resolved.get("capacity_limit") or {}
         capacity_limit = (
-            CapacityLimit.from_dict(
-                capacity_raw, calendars, first.window if first else None
-            )
+            CapacityLimit.from_dict(capacity_raw, calendars, first.window if first else None)
             if capacity_raw
             else None
         )
@@ -718,9 +712,7 @@ class NetworkCalendar:
 
     # -- demand charge window (consumed by peaks.py via the coordinator) -------
 
-    def in_demand_window(
-        self, when: datetime, holidays: HolidayCache, *, index: int = 0
-    ) -> bool:
+    def in_demand_window(self, when: datetime, holidays: HolidayCache, *, index: int = 0) -> bool:
         """Whether ``when`` falls inside a demand-charge window.
 
         ``index`` selects the component (default 0 = K=1 / first of K).
@@ -738,9 +730,7 @@ class NetworkCalendar:
         if demand.window is None:
             return True
         local_when = dt_util.as_local(when)
-        return demand.window.matches(
-            local_when, is_holiday=holidays.get(local_when.date())
-        )
+        return demand.window.matches(local_when, is_holiday=holidays.get(local_when.date()))
 
     def in_any_demand_window(self, when: datetime, holidays: HolidayCache) -> bool:
         """Union of every component window -- the over-protect fallback shape."""
