@@ -290,6 +290,7 @@ def resolve_network(
         "calendar": render(hass, profile.calendar, variables),
         "energy_bands": render(hass, profile.energy_bands, variables),
         "demand_charge": render(hass, profile.demand_charge, variables),
+        "demand_charges": render(hass, profile.demand_charges, variables),
         "capacity_limit": render(hass, profile.capacity_limit, variables),
     }
 

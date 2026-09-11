@@ -1,0 +1,93 @@
+name: Dala Energi (effekttaxa)
+kind: network
+version: 1
+description: >-
+  Dala Energi's dual-peak demand charge: two independent mean-of-top-3 peaks
+  every month (höglast weekday days, låglast everything else), plus a flat
+  transmission energy fee.
+notes: >-
+  Two invoice lines every month — summer only equalizes the *rates*
+  (höglast sommar = låglast); the peaks stay independent. A 12 kW weekday-day
+  peak plus a 10 kW night peak in July is billed as both, not one combined
+  peak. Rates change; defaults are the household sheet from 2026-01-01
+  including VAT — check them against your own invoice.
+
+  Needs EMHASS 0.18.3+ for multi-component demand charges. Set "Time
+  resolution" (Setup) to 60 minutes while this profile is active — the
+  demand intervals are hourly. Official Swedish red days only (no Christmas
+  Eve / New Year's Eve extras unless your contract says otherwise).
+
+  If your price source already includes network fees, set its tariff mode to
+  "already includes costs" rather than stacking the transmission band twice.
+
+detect:
+  always: true
+
+options:
+  overforing_ore:
+    name: Transmission energy fee
+    description: öre/kWh flat överföring (inkl. moms).
+    default: 9.0
+    selector: { number: { min: 0, max: 500, step: any, mode: box } }
+  hoglast_vinter_kr:
+    name: Höglast demand charge (winter)
+    description: >-
+      kr/kW/month on the mean of the three highest hourly peaks inside the
+      weekday 07:00-19:00 window, Nov-Mar (inkl. moms).
+    default: 105.0
+    selector: { number: { min: 0, max: 2000, step: any, mode: box } }
+  hoglast_sommar_kr:
+    name: Höglast demand charge (summer)
+    description: >-
+      kr/kW/month for the same höglast window in Apr-Oct. Usually equals
+      låglast; peaks stay independent.
+    default: 35.0
+    selector: { number: { min: 0, max: 2000, step: any, mode: box } }
+  laglast_kr:
+    name: Låglast demand charge
+    description: >-
+      kr/kW/month on the mean of the three highest hourly peaks outside the
+      höglast window (nights, weekends, red days), all year (inkl. moms).
+    default: 35.0
+    selector: { number: { min: 0, max: 2000, step: any, mode: box } }
+  workday_entity:
+    name: Workday sensor
+    description: >-
+      A binary_sensor from the Workday integration, configured for Sweden with
+      weekends and holidays excluded. Supplies the red-day calendar the
+      höglast window is excluded on.
+    selector: { entity: { integration: workday, domain: binary_sensor } }
+
+calendar:
+  business_day:
+    weekdays: [mon, tue, wed, thu, fri]
+    exclude_holidays: true
+    holiday_entity: "{{ options.workday_entity }}"
+
+energy_bands:
+  - name: överföring
+    buy: { adder: "{{ options.overforing_ore / 100 }}" }
+
+demand_charges:
+  - name: höglast
+    rate_per_kw: "{{ options.hoglast_vinter_kr if now().month in [11, 12, 1, 2, 3] else options.hoglast_sommar_kr }}"
+    rate_basis: month
+    window:
+      days: business_day
+      hours: "07:00-19:00"
+    measure:
+      interval: 60min
+      aggregate: mean_top_n
+      n: 3
+      distinct_days: true
+    period: month
+  - name: låglast
+    rate_per_kw: "{{ options.laglast_kr }}"
+    rate_basis: month
+    window: { invert: höglast }
+    measure:
+      interval: 60min
+      aggregate: mean_top_n
+      n: 3
+      distinct_days: true
+    period: month

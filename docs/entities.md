@@ -22,7 +22,7 @@
 | `sensor.*_battery_action` | What the executor did or would do, and why — see [Handing over control](handing_over_control.md) |
 | `sensor.*_last_request_to_emhass` | The exact payload of the last optimisation request. Diagnostic, disabled by default — see [Troubleshooting](troubleshooting.md) |
 | `sensor.*_network_tariff_band` | The active energy band's name, with the adder and next change in its attributes. Only if you configured a network tariff — see [Network tariffs](network_tariffs.md) |
-| `sensor.*_demand_charge_rate` | The effective `capacity_cost_per_kw` a network tariff's demand charge prices out to right now, diagnostic. Only with a network tariff configured |
+| `sensor.*_demand_charge_rate` | The effective `capacity_cost_per_kw` a network tariff's demand charge prices out to right now, diagnostic. Only with a network tariff configured. With multi-component tariffs (EMHASS 0.18.3+), the native value is component 0; other components appear under a `components` attribute |
 | `sensor.*_period_peak` | The demand-charge aggregate incurred so far this billing period. Only if the network tariff defines a demand charge |
 | `sensor.*_peak_headroom` | How much more can be drawn before a new billing-period peak is set. Same condition as above |
 | `number.*_peak_target` | The manual fallback ceiling used while a windowed demand charge can't yet be priced directly. Same condition as above |

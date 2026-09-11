@@ -52,6 +52,7 @@ from .const import (
     MIN_EMHASS_VERSION_CAPACITY_INTERVAL,
     MIN_EMHASS_VERSION_CHARGE_DERATING,
     MIN_EMHASS_VERSION_DEMAND_CHARGE,
+    MIN_EMHASS_VERSION_DEMAND_COMPONENTS,
     MIN_EMHASS_VERSION_DEMAND_WINDOW,
     ML_MIN_HISTORY_DAYS,
     MODE_AUTO,
@@ -128,30 +129,74 @@ _NO_LIST_RETRY_COOLDOWN = timedelta(hours=1)
 
 
 @dataclass(slots=True)
+class DemandChargeComponentPricing:
+    """One demand-charge component's priced rate (or why it isn't priced)."""
+
+    name: str | None
+    sheet_rate: float | None
+    rate_basis: str
+    aggregate: str
+    n: int
+    effective_rate_per_kw: float | None = None
+    windowed: bool = False
+    interval_timesteps: int = 1
+    reason: str | None = None
+
+
+@dataclass(slots=True)
 class DemandChargePricing:
     """What a network profile's demand charge prices out to right now, and
-    why not when it doesn't. See ``EmhassCoordinator.demand_charge_pricing``."""
+    why not when it doesn't. See ``EmhassCoordinator.demand_charge_pricing``.
+
+    For K=1 the top-level fields mirror component 0 (existing sensors /
+    payload). For K>1, :attr:`components` holds every component and the
+    top-level fields still mirror component 0 for singular entity values.
+    """
 
     sheet_rate: float | None
     rate_basis: str
     aggregate: str
     n: int
     effective_rate_per_kw: float | None = None
-    """The rate to actually send as ``capacity_cost_per_kw``. None means the
-    demand charge is not being priced right now -- see ``reason``."""
+    """The rate to actually send as ``capacity_cost_per_kw`` for K=1, or
+    component 0's rate when K>1. None means no component is being priced
+    right now -- see ``reason``."""
     windowed: bool = False
-    """Whether the priced peak needs ``capacity_charge_window`` alongside it --
-    true when the demand charge's own window is restricted (not all-day) and
-    the backend is new enough to mask it. False for an all-day window (no
-    mask needed) and, of course, whenever ``effective_rate_per_kw`` is None."""
+    """Whether component 0 needs ``capacity_charge_window`` alongside it."""
     interval_timesteps: int = 1
-    """N for ``capacity_charge_interval_timesteps`` -- the tariff's own
-    measurement interval expressed in optimizer timesteps, from
-    ``DemandMeasure.interval_timesteps``. Stays 1 (today's behaviour, no new
-    key sent) on a backend older than ``MIN_EMHASS_VERSION_CAPACITY_INTERVAL``
-    -- narrowing this gate never blocks pricing, so unlike the two gates above
-    it carries no ``reason``. See planning/capacity_interval_plan.md."""
+    """N for component 0's ``capacity_charge_interval_timesteps``."""
     reason: str | None = None
+    components: list[DemandChargeComponentPricing] = field(default_factory=list)
+
+    @property
+    def component_count(self) -> int:
+        return len(self.components) if self.components else (1 if self.sheet_rate is not None else 0)
+
+    @property
+    def effective_rates(self) -> list[float] | None:
+        """K effective rates when every component is priced; else None."""
+        if not self.components:
+            return (
+                [self.effective_rate_per_kw]
+                if self.effective_rate_per_kw is not None
+                else None
+            )
+        rates = [c.effective_rate_per_kw for c in self.components]
+        if any(rate is None for rate in rates):
+            return None
+        return [float(rate) for rate in rates]  # type: ignore[arg-type]
+
+    @property
+    def interval_timesteps_list(self) -> list[int]:
+        if self.components:
+            return [c.interval_timesteps for c in self.components]
+        return [self.interval_timesteps]
+
+    @property
+    def any_windowed(self) -> bool:
+        if self.components:
+            return any(c.windowed for c in self.components)
+        return self.windowed
 
 
 @dataclass(slots=True)
@@ -260,10 +305,11 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         # setup (unit tests), in which case the demand charge gate below is
         # conservative and treats it as unsupported.
         self.backend_version: str | None = None
-        # Set once, right after __init__.async_setup_entry builds it (may be
-        # None -- see _build_peak_tracker). Held here, not just on
-        # EmhassRuntimeData, because demand_charge_pricing needs the tracker's
-        # current floor on every MPC run.
+        # Set once, right after __init__.async_setup_entry builds them (may be
+        # empty -- see _build_peak_trackers). Held here, not just on
+        # EmhassRuntimeData, because demand_charge_pricing / _build need each
+        # tracker's floor on every MPC run. peak_tracker aliases [0].
+        self.peak_trackers: list[PeakTracker] = []
         self.peak_tracker: PeakTracker | None = None
 
         # Owned by the control switch and the mode select. Held here rather than
@@ -569,79 +615,139 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         charge right now, and why -- shared by ``_build`` (what is actually
         sent) and the rate diagnostic sensor (what a user is told).
 
-        None when no network profile with a ``demand_charge`` is selected at
+        None when no network profile with a demand charge is selected at
         all. Otherwise always returns a result, with ``effective_rate_per_kw``
         left None and ``reason`` explaining why whenever the peak cannot be
         safely priced yet -- see docs/network_tariffs_plan.md's
-        "Version gating" table. The two gates, in order:
+        "Version gating" table. Gates, in order:
 
-        * The backend must be new enough for ``current_period_peak`` --
-          without it, pricing a peak has no memory of what has already been
-          incurred this period, and every run would fight to hold the whole
-          horizon under a level that may already be moot.
-        * A *restricted* window (not all-day) additionally needs
-          ``capacity_charge_window`` to avoid over-shaving every hour outside
-          it, which needs a further-gated backend version
-          (``MIN_EMHASS_VERSION_DEMAND_WINDOW``). An all-day window needs no
-          mask, so it is exempted from this second gate entirely.
+        * K>1 additionally needs ``MIN_EMHASS_VERSION_DEMAND_COMPONENTS``.
+        * The backend must be new enough for ``current_period_peak``.
+        * A *restricted* window additionally needs
+          ``capacity_charge_window`` (``MIN_EMHASS_VERSION_DEMAND_WINDOW``).
         """
         calendar = self.network_calendar
-        if calendar is None or calendar.demand_charge is None:
+        if calendar is None or not calendar.demand_charges:
             return None
-        demand = calendar.demand_charge
+        charges = calendar.demand_charges
+        k = len(charges)
+
+        def _component_base(demand) -> DemandChargeComponentPricing:
+            return DemandChargeComponentPricing(
+                name=demand.name,
+                sheet_rate=demand.rate_per_kw,
+                rate_basis=demand.rate_basis,
+                aggregate=demand.measure.aggregate,
+                n=demand.measure.n,
+            )
+
+        components = [_component_base(demand) for demand in charges]
+        first = charges[0]
         base = DemandChargePricing(
-            sheet_rate=demand.rate_per_kw,
-            rate_basis=demand.rate_basis,
-            aggregate=demand.measure.aggregate,
-            n=demand.measure.n,
+            sheet_rate=first.rate_per_kw,
+            rate_basis=first.rate_basis,
+            aggregate=first.measure.aggregate,
+            n=first.measure.n,
+            components=components,
         )
-        if demand.rate_per_kw is None:
-            return replace(base, reason="No demand charge rate configured on this profile.")
+
+        if any(demand.rate_per_kw is None for demand in charges):
+            reason = "No demand charge rate configured on this profile."
+            return replace(
+                base,
+                reason=reason,
+                components=[replace(c, reason=reason) for c in components],
+            )
+
+        if k > 1 and (
+            self.backend_version is None
+            or not version_at_least(self.backend_version, MIN_EMHASS_VERSION_DEMAND_COMPONENTS)
+        ):
+            reason = (
+                f"Needs EMHASS {MIN_EMHASS_VERSION_DEMAND_COMPONENTS}+ for "
+                f"{k} demand-charge components; this add-on reports "
+                f"{self.backend_version or 'an unknown version'}."
+            )
+            return replace(
+                base,
+                reason=reason,
+                components=[replace(c, reason=reason) for c in components],
+            )
+
         if self.backend_version is None or not version_at_least(
             self.backend_version, MIN_EMHASS_VERSION_DEMAND_CHARGE
         ):
-            return replace(
-                base,
-                reason=(
-                    f"Needs EMHASS {MIN_EMHASS_VERSION_DEMAND_CHARGE}+; this add-on reports "
-                    f"{self.backend_version or 'an unknown version'}."
-                ),
+            reason = (
+                f"Needs EMHASS {MIN_EMHASS_VERSION_DEMAND_CHARGE}+; this add-on reports "
+                f"{self.backend_version or 'an unknown version'}."
             )
-        windowed = demand.window is not None and not demand.window.is_unrestricted
-        if windowed and (
-            self.backend_version is None
-            or not version_at_least(self.backend_version, MIN_EMHASS_VERSION_DEMAND_WINDOW)
-        ):
             return replace(
                 base,
-                reason=(
+                reason=reason,
+                components=[replace(c, reason=reason) for c in components],
+            )
+
+        priced: list[DemandChargeComponentPricing] = []
+        shared_reason: str | None = None
+        for demand in charges:
+            windowed = demand.window is not None and not demand.window.is_unrestricted
+            if windowed and (
+                self.backend_version is None
+                or not version_at_least(self.backend_version, MIN_EMHASS_VERSION_DEMAND_WINDOW)
+            ):
+                shared_reason = (
                     "This EMHASS release cannot restrict the demand charge to the tariff's own "
                     "window, and pricing it unwindowed would over-shave every hour outside it. "
                     f"Needs EMHASS {MIN_EMHASS_VERSION_DEMAND_WINDOW}+; this add-on reports "
                     f"{self.backend_version or 'an unknown version'}."
-                ),
+                )
+                break
+            assert demand.rate_per_kw is not None
+            rate = effective_rate_per_kw(
+                rate_per_kw=demand.rate_per_kw,
+                rate_basis=demand.rate_basis,
+                aggregate=demand.measure.aggregate,
+                n=demand.measure.n,
+                days_in_period=days_in_current_period(now),
             )
-        rate = effective_rate_per_kw(
-            rate_per_kw=demand.rate_per_kw,
-            rate_basis=demand.rate_basis,
-            aggregate=demand.measure.aggregate,
-            n=demand.measure.n,
-            days_in_period=days_in_current_period(now),
-        )
-        interval_timesteps = 1
-        if self.backend_version is not None and version_at_least(
-            self.backend_version, MIN_EMHASS_VERSION_CAPACITY_INTERVAL
-        ):
-            interval_timesteps = demand.measure.interval_timesteps(self.config.time_step_minutes)
+            interval_timesteps = 1
+            if self.backend_version is not None and version_at_least(
+                self.backend_version, MIN_EMHASS_VERSION_CAPACITY_INTERVAL
+            ):
+                interval_timesteps = demand.measure.interval_timesteps(
+                    self.config.time_step_minutes
+                )
+            priced.append(
+                replace(
+                    _component_base(demand),
+                    effective_rate_per_kw=rate,
+                    windowed=windowed,
+                    interval_timesteps=interval_timesteps,
+                )
+            )
+
+        if shared_reason is not None:
+            return replace(
+                base,
+                reason=shared_reason,
+                components=[replace(c, reason=shared_reason) for c in components],
+            )
+
+        first_priced = priced[0]
         return replace(
             base,
-            effective_rate_per_kw=rate,
-            windowed=windowed,
-            interval_timesteps=interval_timesteps,
+            effective_rate_per_kw=first_priced.effective_rate_per_kw,
+            windowed=first_priced.windowed,
+            interval_timesteps=first_priced.interval_timesteps,
+            components=priced,
         )
 
     def _capacity_interval_history_w(
-        self, now: datetime, step: timedelta, interval_timesteps: int
+        self,
+        now: datetime,
+        step: timedelta,
+        interval_timesteps: int,
+        peak_tracker: PeakTracker | None = None,
     ) -> list[float]:
         """``capacity_charge_current_interval_history`` for the still-open interval.
 
@@ -658,9 +764,10 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         safe fallback -- an over-length vector would make it reject the whole
         payload instead.
         """
-        if interval_timesteps <= 1 or self.peak_tracker is None:
+        tracker = peak_tracker if peak_tracker is not None else self.peak_tracker
+        if interval_timesteps <= 1 or tracker is None:
             return []
-        start = self.peak_tracker.open_interval_start
+        start = tracker.open_interval_start
         if start is None:
             _LOGGER.debug("Capacity interval history: no open interval settled yet")
             return []
@@ -675,7 +782,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         if m == 0:
             return []
         step_hours = step.total_seconds() / 3600
-        entry_w = self.peak_tracker.open_interval_kwh * 1000 / (m * step_hours)
+        entry_w = tracker.open_interval_kwh * 1000 / (m * step_hours)
         return [entry_w] * m
 
     async def async_load_ml_state(self) -> None:
@@ -1281,23 +1388,48 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         self._end_soc = end_soc
 
         demand_pricing = self.demand_charge_pricing(now)
-        current_period_peak_w = None
-        capacity_interval_timesteps = demand_pricing.interval_timesteps if demand_pricing else 1
-        capacity_interval_history_w: list[float] | None = None
+        current_period_peak_w: float | list[float] | None = None
+        capacity_interval_timesteps: int | list[int] = (
+            demand_pricing.interval_timesteps if demand_pricing else 1
+        )
+        capacity_interval_history_w: list[float] | list[list[float]] | None = None
+        rates = demand_pricing.effective_rates if demand_pricing else None
+        trackers = self.peak_trackers or (
+            [self.peak_tracker] if self.peak_tracker is not None else []
+        )
         if (
             demand_pricing is not None
-            and demand_pricing.effective_rate_per_kw is not None
+            and rates is not None
             and action == ACTION_MPC
-            and self.peak_tracker is not None
+            and trackers
         ):
             # Watts, matching every other power figure this integration sends
             # -- current_period_peak is MPC-only in EMHASS (see
             # docs/network_tariffs_plan.md, "Day-ahead versus MPC"), so a
             # day-ahead run gets no floor and no memory either way.
-            current_period_peak_w = self.peak_tracker.floor_kw * 1000
-            capacity_interval_history_w = self._capacity_interval_history_w(
-                now, step, capacity_interval_timesteps
-            )
+            peaks_w = [tracker.floor_kw * 1000 for tracker in trackers[: len(rates)]]
+            # Pad / truncate to K if trackers and rates somehow diverge.
+            while len(peaks_w) < len(rates):
+                peaks_w.append(0.0)
+            peaks_w = peaks_w[: len(rates)]
+            ns = demand_pricing.interval_timesteps_list
+            histories = [
+                self._capacity_interval_history_w(
+                    now,
+                    step,
+                    ns[i] if i < len(ns) else 1,
+                    trackers[i] if i < len(trackers) else None,
+                )
+                for i in range(len(rates))
+            ]
+            if len(rates) == 1:
+                current_period_peak_w = peaks_w[0]
+                capacity_interval_timesteps = ns[0] if ns else 1
+                capacity_interval_history_w = histories[0]
+            else:
+                current_period_peak_w = peaks_w
+                capacity_interval_timesteps = ns[0] if ns and len(set(ns)) == 1 else ns
+                capacity_interval_history_w = histories
 
         # Mechanism 3 (docs/network_tariffs_plan.md): the windowed hard cap.
         # Gated on the same version as the priced peak -- maximum_power_from_grid
@@ -1310,7 +1442,9 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         capacity_limit_window: Callable[[datetime], bool] | None = None
         demand_fallback_ceiling_w: float | None = None
         demand_window: Callable[[datetime], bool] | None = None
-        demand_charge_window: Callable[[datetime], bool] | None = None
+        demand_charge_window: Callable[[datetime], bool] | list[Callable[[datetime], bool]] | None = (
+            None
+        )
         array_capable = self.backend_version is not None and version_at_least(
             self.backend_version, MIN_EMHASS_VERSION_DEMAND_CHARGE
         )
@@ -1331,31 +1465,42 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
                 and demand_pricing.sheet_rate is not None
                 and demand_pricing.effective_rate_per_kw is None
                 and self.peak_target_kw is not None
-                and calendar.demand_charge is not None
+                and calendar.demand_charges
             ):
                 # The peak cannot be safely priced right now (old backend, or
                 # a real window this backend cannot mask) but a rate is
                 # configured, so a windowed demand charge is still enforced --
                 # as a ceiling instead of a price. See number.PeakTargetNumber.
+                # For K>1 the fallback window is the union of every component.
                 demand_fallback_ceiling_w = self.peak_target_kw * 1000
 
                 def demand_window(when: datetime) -> bool:
-                    return calendar.in_demand_window(when, self.holiday_cache)
+                    return calendar.in_any_demand_window(when, self.holiday_cache)
 
             if (
                 demand_pricing is not None
-                and demand_pricing.windowed
-                and demand_pricing.effective_rate_per_kw is not None
-                and calendar.demand_charge is not None
+                and rates is not None
+                and demand_pricing.any_windowed
+                and calendar.demand_charges
             ):
-                # The peak *is* being priced, and its own window is
-                # restricted, so the mask must go with it -- see "The window
-                # mask" in docs/network_tariffs_plan.md. demand_pricing
-                # already confirmed the backend supports it before setting
-                # windowed=True.
+                # The peak *is* being priced, and at least one component window
+                # is restricted, so the mask must go with it -- see "The window
+                # mask" in docs/network_tariffs_plan.md. demand_pricing already
+                # confirmed the backend supports it before setting windowed.
+                if len(calendar.demand_charges) == 1:
 
-                def demand_charge_window(when: datetime) -> bool:
-                    return calendar.in_demand_window(when, self.holiday_cache)
+                    def demand_charge_window(when: datetime) -> bool:
+                        return calendar.in_demand_window(when, self.holiday_cache)
+
+                else:
+                    demand_charge_window = [
+                        (
+                            lambda when, *, _i=index: calendar.in_demand_window(
+                                when, self.holiday_cache, index=_i
+                            )
+                        )
+                        for index in range(len(calendar.demand_charges))
+                    ]
 
         inputs = PayloadInputs(
             action=action,
@@ -1383,7 +1528,9 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             extra_settings=settings,
             network_demand_charge_configured=demand_pricing is not None,
             demand_charge_rate_per_kw=(
-                demand_pricing.effective_rate_per_kw if demand_pricing else None
+                rates
+                if rates is not None and len(rates) > 1
+                else (rates[0] if rates else None)
             ),
             current_period_peak_w=current_period_peak_w,
             capacity_interval_timesteps=capacity_interval_timesteps,

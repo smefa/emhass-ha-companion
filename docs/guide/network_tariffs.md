@@ -88,7 +88,9 @@ New sensors appear on the integration's hub device:
     step rather than your tariff's own measurement window, which nudges the
     plan to shave a bit harder than the bill actually requires. **EMHASS
     0.18.2 or newer** closes that gap — the peak is priced on the same
-    measurement interval your tariff bills on — see
+    measurement interval your tariff bills on. **0.18.3+** unlocks
+    multi-component demand charges (two independently billed peaks, as on
+    Dala Energi); mean-of-top-3 stays one component — see
     [Network tariffs, "Version gating"](../network_tariffs.md#version-gating)
     for the full picture.
 

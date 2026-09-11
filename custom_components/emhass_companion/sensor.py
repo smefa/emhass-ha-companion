@@ -1131,7 +1131,7 @@ class DemandChargeRateSensor(EmhassEntity, SensorEntity):
         pricing = self._pricing
         if pricing is None:
             return None
-        return {
+        attributes: dict[str, Any] = {
             "sheet_rate": pricing.sheet_rate,
             "rate_basis": pricing.rate_basis,
             "aggregate": pricing.aggregate,
@@ -1140,6 +1140,25 @@ class DemandChargeRateSensor(EmhassEntity, SensorEntity):
             "masked": pricing.windowed,
             "reason": pricing.reason,
         }
+        if len(pricing.components) > 1:
+            attributes["components"] = [
+                {
+                    "name": component.name,
+                    "sheet_rate": component.sheet_rate,
+                    "effective_rate": (
+                        round(component.effective_rate_per_kw, 4)
+                        if component.effective_rate_per_kw is not None
+                        else None
+                    ),
+                    "rate_basis": component.rate_basis,
+                    "aggregate": component.aggregate,
+                    "n": component.n,
+                    "windowed": component.windowed,
+                    "reason": component.reason,
+                }
+                for component in pricing.components
+            ]
+        return attributes
 
 
 class PeakSensorBase(EmhassEntity, SensorEntity):
@@ -1162,7 +1181,9 @@ class PeakSensorBase(EmhassEntity, SensorEntity):
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
-        self.async_on_remove(self.peak_tracker.async_add_listener(self.async_write_ha_state))
+        trackers = self.coordinator.peak_trackers or [self.peak_tracker]
+        for tracker in trackers:
+            self.async_on_remove(tracker.async_add_listener(self.async_write_ha_state))
 
 
 class PeriodPeakSensor(PeakSensorBase):
@@ -1180,7 +1201,7 @@ class PeriodPeakSensor(PeakSensorBase):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         tracker = self.peak_tracker
-        return {
+        attributes: dict[str, Any] = {
             "period": tracker.period_key,
             "days_remaining": tracker.days_remaining,
             "floor_kw": round(tracker.floor_kw, 3),
@@ -1193,6 +1214,30 @@ class PeriodPeakSensor(PeakSensorBase):
                 for interval in tracker.contributing_intervals
             ],
         }
+        trackers = self.coordinator.peak_trackers
+        calendar = self.coordinator.network_calendar
+        if len(trackers) > 1 and calendar is not None:
+            attributes["components"] = [
+                {
+                    "name": (
+                        calendar.demand_charges[i].name
+                        if i < len(calendar.demand_charges)
+                        else None
+                    ),
+                    "aggregate_kw": round(component.current_aggregate_kw, 3),
+                    "floor_kw": round(component.floor_kw, 3),
+                    "contributing_intervals": [
+                        {
+                            "start": dt_util.as_local(interval.start).isoformat(),
+                            "local_day": interval.local_day,
+                            "kw": round(interval.kw, 3),
+                        }
+                        for interval in component.contributing_intervals
+                    ],
+                }
+                for i, component in enumerate(trackers)
+            ]
+        return attributes
 
 
 class PeakHeadroomSensor(PeakSensorBase):
@@ -1207,6 +1252,10 @@ class PeakHeadroomSensor(PeakSensorBase):
     ``now``, the same figure ``grid_forecast`` already publishes. That lags a
     real load spike by up to an MPC interval, which is an approximation worth
     stating rather than a claim of real-time accuracy.
+
+    For K>1 the native value is the **minimum** headroom among components
+    whose window contains now -- at night Dala's constraint is låglast, not
+    höglast.
     """
 
     _attr_translation_key = PEAK_HEADROOM_KEY
@@ -1233,7 +1282,45 @@ class PeakHeadroomSensor(PeakSensorBase):
         draw_kw = self._current_draw_kw
         if draw_kw is None:
             return None
-        return round(self.peak_tracker.headroom_kw(draw_kw), 3)
+        trackers = self.coordinator.peak_trackers
+        calendar = self.coordinator.network_calendar
+        if len(trackers) <= 1 or calendar is None:
+            return round(self.peak_tracker.headroom_kw(draw_kw), 3)
+        now = dt_util.utcnow()
+        in_window = [
+            tracker.headroom_kw(draw_kw)
+            for index, tracker in enumerate(trackers)
+            if calendar.in_demand_window(now, self.coordinator.holiday_cache, index=index)
+        ]
+        if not in_window:
+            # Outside every window: no demand charge bites right now.
+            return None
+        return round(min(in_window), 3)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        draw_kw = self._current_draw_kw
+        trackers = self.coordinator.peak_trackers
+        calendar = self.coordinator.network_calendar
+        if draw_kw is None or len(trackers) <= 1 or calendar is None:
+            return None
+        now = dt_util.utcnow()
+        return {
+            "components": [
+                {
+                    "name": (
+                        calendar.demand_charges[i].name
+                        if i < len(calendar.demand_charges)
+                        else None
+                    ),
+                    "in_window": calendar.in_demand_window(
+                        now, self.coordinator.holiday_cache, index=i
+                    ),
+                    "headroom_kw": round(tracker.headroom_kw(draw_kw), 3),
+                }
+                for i, tracker in enumerate(trackers)
+            ]
+        }
 
 
 # --- Cost and savings ---------------------------------------------------------

@@ -160,6 +160,11 @@ class Window:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any], calendars: dict[str, DateSet]) -> Window:
+        if "invert" in data:
+            raise NetworkCalendarError(
+                "window.invert cannot be parsed in isolation; resolve demand "
+                "charges through NetworkCalendar.from_resolved"
+            )
         months_raw = data.get("months")
         months = None
         if months_raw not in (None, ""):
@@ -199,6 +204,30 @@ class Window:
         priced correctly, since EMHASS's unmasked epigraph *is* that window.
         """
         return self.months is None and self.days is None and self.hours is None
+
+
+@dataclass(slots=True)
+class InvertWindow:
+    """Match exactly when another demand-charge window does not.
+
+    Used for complementary dual-peak tariffs (Dala Energi's låglast = not
+    höglast) so nights, weekends and red days do not need an OR of hour
+    ranges. Never unrestricted -- by construction it excludes whatever the
+    source window covers.
+    """
+
+    source: Window
+    source_name: str
+
+    def matches(self, local_when: datetime, *, is_holiday: bool) -> bool:
+        return not self.source.matches(local_when, is_holiday=is_holiday)
+
+    @property
+    def is_unrestricted(self) -> bool:
+        return False
+
+
+DemandWindow = Window | InvertWindow
 
 
 # --- energy bands ---------------------------------------------------------------
@@ -274,28 +303,148 @@ class DemandMeasure:
 
 @dataclass(slots=True)
 class DemandCharge:
-    window: Window | None
+    window: DemandWindow | None
     measure: DemandMeasure
     period: str
     rate_per_kw: float | None
     rate_basis: str
+    name: str | None = None
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any], calendars: dict[str, DateSet]) -> DemandCharge:
+    def from_dict(
+        cls,
+        data: dict[str, Any],
+        calendars: dict[str, DateSet],
+        *,
+        resolve_invert: bool = True,
+    ) -> DemandCharge:
+        """Parse one charge.
+
+        ``resolve_invert=False`` leaves ``window: {invert: ...}`` as a
+        placeholder ``None`` so :func:`_parse_demand_charges` can wire the
+        named source after every charge exists. Callers that only ever parse
+        a singular ``demand_charge:`` keep the default and reject invert.
+        """
         window_raw = data.get("window")
-        window = Window.from_dict(window_raw, calendars) if window_raw else None
+        window: DemandWindow | None
+        if isinstance(window_raw, dict) and "invert" in window_raw:
+            if resolve_invert:
+                raise NetworkCalendarError(
+                    f"window.invert {window_raw.get('invert')!r} needs a named "
+                    "demand_charges list to resolve against"
+                )
+            window = None
+        elif window_raw:
+            window = Window.from_dict(window_raw, calendars)
+        else:
+            window = None
         rate_raw = data.get("rate_per_kw")
         try:
             rate = float(rate_raw) if rate_raw not in (None, "") else None
         except (TypeError, ValueError) as err:
             raise NetworkCalendarError(f"Invalid demand_charge.rate_per_kw {rate_raw!r}") from err
+        name_raw = data.get("name")
+        name = str(name_raw).strip() if name_raw not in (None, "") else None
         return cls(
             window=window,
             measure=DemandMeasure.from_dict(data.get("measure") or {}),
             period=str(data.get("period") or "month"),
             rate_per_kw=rate,
             rate_basis=str(data.get("rate_basis") or "month"),
+            name=name or None,
         )
+
+
+def _parse_demand_charges(
+    resolved: dict[str, Any], calendars: dict[str, DateSet]
+) -> list[DemandCharge]:
+    """Build the demand-charge list from singular or plural YAML.
+
+    Singular ``demand_charge:`` stays the K=1 form. ``demand_charges:`` is the
+    multi-component form. Defining both is an error. Invert windows are
+    resolved after every charge has a name.
+    """
+    singular = resolved.get("demand_charge") or {}
+    plural = resolved.get("demand_charges") or []
+    if singular and plural:
+        raise NetworkCalendarError(
+            "Define either demand_charge or demand_charges, not both"
+        )
+    if singular:
+        if not isinstance(singular, dict):
+            raise NetworkCalendarError(f"demand_charge must be a mapping, got {singular!r}")
+        return [DemandCharge.from_dict(singular, calendars)]
+    if not plural:
+        return []
+    if not isinstance(plural, list):
+        raise NetworkCalendarError(f"demand_charges must be a list, got {plural!r}")
+
+    charges: list[DemandCharge] = []
+    invert_refs: list[tuple[int, str]] = []
+    for index, raw in enumerate(plural):
+        if not isinstance(raw, dict):
+            raise NetworkCalendarError(f"demand_charges[{index}] must be a mapping, got {raw!r}")
+        window_raw = raw.get("window")
+        if isinstance(window_raw, dict) and "invert" in window_raw:
+            invert_name = str(window_raw.get("invert") or "").strip()
+            if not invert_name:
+                raise NetworkCalendarError(
+                    f"demand_charges[{index}].window.invert needs the other charge's name"
+                )
+            if len(window_raw) > 1:
+                raise NetworkCalendarError(
+                    f"demand_charges[{index}].window.invert cannot combine with "
+                    "months/days/hours on the same window"
+                )
+            invert_refs.append((index, invert_name))
+            charges.append(DemandCharge.from_dict(raw, calendars, resolve_invert=False))
+        else:
+            charges.append(DemandCharge.from_dict(raw, calendars))
+
+    if len(charges) > 1:
+        for index, charge in enumerate(charges):
+            if not charge.name:
+                raise NetworkCalendarError(
+                    f"demand_charges[{index}] needs a name when more than one "
+                    "demand charge is defined"
+                )
+        names = [charge.name for charge in charges]
+        if len(set(names)) != len(names):
+            raise NetworkCalendarError(
+                f"demand_charges names must be unique, got {names!r}"
+            )
+
+    by_name = {charge.name: charge for charge in charges if charge.name}
+    for index, invert_name in invert_refs:
+        source = by_name.get(invert_name)
+        if source is None:
+            raise NetworkCalendarError(
+                f"demand_charges[{index}].window.invert references unknown "
+                f"charge {invert_name!r}; defined: "
+                f"{', '.join(sorted(by_name)) or '(none)'}"
+            )
+        if source.window is None:
+            raise NetworkCalendarError(
+                f"demand_charges[{index}].window.invert {invert_name!r} cannot "
+                "invert a charge with no window of its own"
+            )
+        if isinstance(source.window, InvertWindow):
+            raise NetworkCalendarError(
+                f"demand_charges[{index}].window.invert {invert_name!r} cannot "
+                "invert another invert window"
+            )
+        resolved = DemandCharge(
+            window=InvertWindow(source=source.window, source_name=invert_name),
+            measure=charges[index].measure,
+            period=charges[index].period,
+            rate_per_kw=charges[index].rate_per_kw,
+            rate_basis=charges[index].rate_basis,
+            name=charges[index].name,
+        )
+        charges[index] = resolved
+        if resolved.name:
+            by_name[resolved.name] = resolved
+    return charges
 
 
 # --- capacity limit (consulted by payload.py) --------------------------------
@@ -311,11 +460,12 @@ class CapacityLimit:
     *sets* the number worth protecting. The two are allowed to share a window
     -- ``window: same_as_demand_charge`` -- because a subscribed tier is
     usually the same high-load period the demand charge bills against, but
-    nothing requires it.
+    nothing requires it. With multi-component demand charges the shared
+    window is always the **first** component's.
     """
 
     subscribed_kw: float | None
-    window: Window | None
+    window: DemandWindow | None
     headroom_kw: float
 
     @classmethod
@@ -323,7 +473,7 @@ class CapacityLimit:
         cls,
         data: dict[str, Any],
         calendars: dict[str, DateSet],
-        demand_window: Window | None,
+        demand_window: DemandWindow | None,
     ) -> CapacityLimit:
         if not isinstance(data, dict):
             raise NetworkCalendarError(f"capacity_limit must be a mapping, got {data!r}")
@@ -447,8 +597,18 @@ class NetworkCalendar:
 
     calendars: dict[str, DateSet] = field(default_factory=dict)
     bands: list[Band] = field(default_factory=list)
-    demand_charge: DemandCharge | None = None
+    demand_charges: list[DemandCharge] = field(default_factory=list)
     capacity_limit: CapacityLimit | None = None
+
+    @property
+    def demand_charge(self) -> DemandCharge | None:
+        """First demand charge, or None.
+
+        Kept as the K=1 alias so ``capacity_limit: same_as_demand_charge`` and
+        existing callers keep reading a single block. Multi-component profiles
+        bind that alias to component 0.
+        """
+        return self.demand_charges[0] if self.demand_charges else None
 
     @classmethod
     def from_resolved(cls, resolved: dict[str, Any]) -> NetworkCalendar:
@@ -458,12 +618,12 @@ class NetworkCalendar:
             for key, value in (resolved.get("calendar") or {}).items()
         }
         bands = _parse_bands(resolved.get("energy_bands") or [], calendars)
-        demand_raw = resolved.get("demand_charge") or {}
-        demand_charge = DemandCharge.from_dict(demand_raw, calendars) if demand_raw else None
+        demand_charges = _parse_demand_charges(resolved, calendars)
+        first = demand_charges[0] if demand_charges else None
         capacity_raw = resolved.get("capacity_limit") or {}
         capacity_limit = (
             CapacityLimit.from_dict(
-                capacity_raw, calendars, demand_charge.window if demand_charge else None
+                capacity_raw, calendars, first.window if first else None
             )
             if capacity_raw
             else None
@@ -471,7 +631,7 @@ class NetworkCalendar:
         return cls(
             calendars=calendars,
             bands=bands,
-            demand_charge=demand_charge,
+            demand_charges=demand_charges,
             capacity_limit=capacity_limit,
         )
 
@@ -558,19 +718,37 @@ class NetworkCalendar:
 
     # -- demand charge window (consumed by peaks.py via the coordinator) -------
 
-    def in_demand_window(self, when: datetime, holidays: HolidayCache) -> bool:
-        """Whether ``when`` falls inside the configured demand-charge window.
+    def in_demand_window(
+        self, when: datetime, holidays: HolidayCache, *, index: int = 0
+    ) -> bool:
+        """Whether ``when`` falls inside a demand-charge window.
 
-        ``True`` with no ``demand_charge:`` block at all -- a profile with no
+        ``index`` selects the component (default 0 = K=1 / first of K).
+        ``True`` with no demand-charge block at all -- a profile with no
         demand charge has nothing to window, and a caller asking anyway (an
         energy-bands-only profile) should see every timestep count rather than
         none, which is the "no restriction configured" reading of an absent
         window everywhere else in this schema.
         """
-        if self.demand_charge is None or self.demand_charge.window is None:
+        if not self.demand_charges:
             return True
-        return self.demand_charge.window.matches(
-            dt_util.as_local(when), is_holiday=holidays.get(dt_util.as_local(when).date())
+        if index < 0 or index >= len(self.demand_charges):
+            raise IndexError(f"demand charge index {index} out of range")
+        demand = self.demand_charges[index]
+        if demand.window is None:
+            return True
+        local_when = dt_util.as_local(when)
+        return demand.window.matches(
+            local_when, is_holiday=holidays.get(local_when.date())
+        )
+
+    def in_any_demand_window(self, when: datetime, holidays: HolidayCache) -> bool:
+        """Union of every component window -- the over-protect fallback shape."""
+        if not self.demand_charges:
+            return True
+        return any(
+            self.in_demand_window(when, holidays, index=index)
+            for index in range(len(self.demand_charges))
         )
 
     def in_capacity_window(self, when: datetime, holidays: HolidayCache) -> bool:

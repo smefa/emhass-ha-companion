@@ -738,6 +738,11 @@ MIN_EMHASS_VERSION_DEMAND_WINDOW: Final = "0.18.1"
 # measurement interval, biasing toward over-shaving.
 MIN_EMHASS_VERSION_CAPACITY_INTERVAL: Final = "0.18.2"
 
+# The EMHASS release multi-component ``capacity_cost_per_kw`` lists shipped in
+# (PR #1108). Below this, K>1 profiles cannot be priced as lists; Companion
+# falls back to the hard-cap union of every component window.
+MIN_EMHASS_VERSION_DEMAND_COMPONENTS: Final = "0.18.3"
+
 # The EMHASS release ``battery_charge_power_derating`` shipped in (PR #1107).
 # Below this the table is stored but not sent -- an older backend would ignore
 # or reject an unknown plant_conf key, and the flat charge-power max still

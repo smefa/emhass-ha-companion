@@ -871,6 +871,72 @@ def test_capacity_interval_keys_omitted_on_dayahead():
     assert "capacity_charge_current_interval_history" not in payload
 
 
+def test_k2_demand_charges_send_list_shaped_runtime_keys():
+    """EMHASS 0.18.3 multi-component: only a list of two or more rates
+    selects K>1. Every runtime key must be length K (or a shared scalar N)."""
+    now = datetime(2026, 1, 14, 10, 0, tzinfo=UTC)
+
+    def hoglast(when: datetime) -> bool:
+        local = when.astimezone().replace(tzinfo=None) if when.tzinfo else when
+        return 7 <= local.hour < 19 and local.weekday() < 5
+
+    def laglast(when: datetime) -> bool:
+        return not hoglast(when)
+
+    payload = build_payload(
+        _inputs(
+            now=now,
+            network_demand_charge_configured=True,
+            demand_charge_rate_per_kw=[35.0, 11.6667],
+            current_period_peak_w=[6000.0, 4000.0],
+            demand_charge_window=[hoglast, laglast],
+            capacity_interval_timesteps=4,
+            capacity_interval_history_w=[[500.0], []],
+            horizon_steps=8,
+            time_step_minutes=15,
+        )
+    ).payload
+    assert payload["capacity_cost_per_kw"] == [35.0, 11.6667]
+    assert payload["current_period_peak"] == [6000, 4000]
+    assert isinstance(payload["capacity_charge_window"], list)
+    assert len(payload["capacity_charge_window"]) == 2
+    assert len(payload["capacity_charge_window"][0]) == 8
+    assert payload["capacity_charge_interval_timesteps"] == 4
+    assert payload["capacity_charge_current_interval_history"] == [[500], []]
+
+
+def test_k1_still_sends_scalars_not_single_element_lists():
+    """Even on a backend that accepts lists, Companion keeps K=1 byte-identical."""
+    payload = build_payload(
+        _inputs(
+            network_demand_charge_configured=True,
+            demand_charge_rate_per_kw=45.0,
+            current_period_peak_w=3200.0,
+            capacity_interval_timesteps=4,
+            capacity_interval_history_w=[600.0, 600.0],
+        )
+    ).payload
+    assert payload["capacity_cost_per_kw"] == 45.0
+    assert payload["current_period_peak"] == 3200
+    assert payload["capacity_charge_interval_timesteps"] == 4
+    assert payload["capacity_charge_current_interval_history"] == [600, 600]
+    assert not isinstance(payload["capacity_cost_per_kw"], list)
+
+
+def test_k2_mixed_interval_n_sends_list_of_n():
+    payload = build_payload(
+        _inputs(
+            network_demand_charge_configured=True,
+            demand_charge_rate_per_kw=[35.0, 11.6667],
+            current_period_peak_w=[0.0, 0.0],
+            capacity_interval_timesteps=[4, 2],
+            capacity_interval_history_w=[[100.0], [200.0]],
+        )
+    ).payload
+    assert payload["capacity_charge_interval_timesteps"] == [4, 2]
+    assert payload["capacity_charge_current_interval_history"] == [[100], [200]]
+
+
 def test_window_mask_is_constant_across_every_completed_interval_span():
     """At N>1 EMHASS bills a whole interval at once, so a window boundary
     falling mid-interval is unrepresentable -- a profile's window must stay

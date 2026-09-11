@@ -25,6 +25,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
+from homeassistant.util import slugify
 
 from .api import EmhassClient, EmhassError
 from .const import (
@@ -84,6 +85,7 @@ class EmhassRuntimeData:
         log_handler: LogRingHandler,
         tracker: SavingsTracker,
         peak_tracker: PeakTracker | None,
+        peak_trackers: list[PeakTracker] | None = None,
     ) -> None:
         self.coordinator = coordinator
         self.scheduler = scheduler
@@ -92,9 +94,10 @@ class EmhassRuntimeData:
         self.log_handler = log_handler
         self.tracker = tracker
         # None unless a network profile with a demand_charge is selected and a
-        # grid-import meter is configured -- see _build_peak_tracker. Nothing
-        # here yet acts on it; sensor.py is the only reader.
+        # grid-import meter is configured -- see _build_peak_trackers. Alias
+        # of peak_trackers[0] when K>=1.
         self.peak_tracker = peak_tracker
+        self.peak_trackers = list(peak_trackers or ([peak_tracker] if peak_tracker else []))
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bool:
@@ -179,16 +182,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
     )
     await tracker.async_load()
 
-    # None on most entries -- see _build_peak_tracker. Loaded the same way as
+    # Empty on most entries -- see _build_peak_trackers. Loaded the same way as
     # the savings tracker, before the platforms are forwarded, so the period
     # and peak sensors read a restored record on their very first render.
-    peak_tracker = _build_peak_tracker(hass, entry, coordinator)
+    peak_trackers = _build_peak_trackers(hass, entry, coordinator)
+    peak_tracker = peak_trackers[0] if peak_trackers else None
+    coordinator.peak_trackers = peak_trackers
     coordinator.peak_tracker = peak_tracker
-    if peak_tracker is not None:
-        await peak_tracker.async_load()
+    for tracker_item in peak_trackers:
+        await tracker_item.async_load()
 
     entry.runtime_data = EmhassRuntimeData(
-        coordinator, scheduler, loads, executor, log_handler, tracker, peak_tracker
+        coordinator, scheduler, loads, executor, log_handler, tracker, peak_tracker, peak_trackers
     )
 
     # Entities are created before the first optimisation so that a failed or
@@ -203,8 +208,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
     # see the first settle rather than waiting a whole publish interval for
     # the second.
     tracker.async_start()
-    if peak_tracker is not None:
-        peak_tracker.async_start()
+    for peak in peak_trackers:
+        peak.async_start()
 
     entry.async_on_unload(scheduler.async_stop)
     entry.async_on_unload(loads.async_stop)
@@ -215,8 +220,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
     # the entry is torn down; the ledger is otherwise up to two minutes behind
     # (see metering._SAVE_DELAY) and a reload would lose that much of the day.
     entry.async_on_unload(tracker.async_shutdown)
-    if peak_tracker is not None:
-        entry.async_on_unload(peak_tracker.async_shutdown)
+    for peak in peak_trackers:
+        entry.async_on_unload(peak.async_shutdown)
 
     async def _async_restore_on_unload() -> None:
         await executor.async_restore("integration unloaded")
@@ -431,36 +436,64 @@ def _report_profile_errors(hass: HomeAssistant, coordinator: EmhassCoordinator) 
     )
 
 
-def _build_peak_tracker(
+def _peak_store_key(entry_id: str, index: int, name: str | None) -> str:
+    """Store key for demand-charge component ``index``.
+
+    Component 0 keeps the historical ``{DOMAIN}_{entry_id}_peaks`` key so a
+    Göteborg/Amber household's period history survives. Later components get
+    a name slug suffix.
+    """
+    if index == 0:
+        return f"{DOMAIN}_{entry_id}_peaks"
+    slug = slugify(name or f"component_{index}") or f"component_{index}"
+    return f"{DOMAIN}_{entry_id}_peaks_{slug}"
+
+
+def _build_peak_trackers(
     hass: HomeAssistant, entry: EmhassConfigEntry, coordinator: EmhassCoordinator
-) -> PeakTracker | None:
-    """Build the demand-charge peak tracker, or None if there is nothing to track.
+) -> list[PeakTracker]:
+    """Build one peak tracker per demand-charge component, or an empty list.
 
     Two things have to be true: the selected network profile actually defines
-    a ``demand_charge`` (most don't -- energy bands alone need no tracker at
-    all), and a grid-import meter is configured for it to watch. The second
-    reuses whatever the savings feature already asks for
-    (``metering.build_meters``) rather than a second entity picker, but through
-    its own :class:`~.metering.Meter` instance -- sharing the savings
-    tracker's would advance its baseline twice for every real energy delta.
+    at least one demand charge (most don't -- energy bands alone need no
+    tracker at all), and a grid-import meter is configured for it to watch.
+    Each component gets its own :class:`~.metering.Meter` instance -- sharing
+    ``take()`` across trackers (or with the savings tracker) would
+    double-count every real energy delta.
     """
     calendar = coordinator.network_calendar
-    if calendar is None or calendar.demand_charge is None:
-        return None
-    meters = build_meters(coordinator.config, entry.options)
-    if meters.grid_import is None:
-        return None
-    demand = calendar.demand_charge
-    return PeakTracker(
-        hass,
-        entry,
-        meters.grid_import,
-        interval=demand.measure.interval,
-        aggregate=demand.measure.aggregate,
-        top_n=demand.measure.n,
-        distinct_days=demand.measure.distinct_days,
-        in_window=lambda when: (
-            coordinator.network_calendar is not None
-            and coordinator.network_calendar.in_demand_window(when, coordinator.holiday_cache)
-        ),
-    )
+    if calendar is None or not calendar.demand_charges:
+        return []
+    probe = build_meters(coordinator.config, entry.options)
+    if probe.grid_import is None:
+        return []
+
+    trackers: list[PeakTracker] = []
+    for index, demand in enumerate(calendar.demand_charges):
+        # Fresh Meter per component: each has its own baseline in its store.
+        component_meters = build_meters(coordinator.config, entry.options)
+        assert component_meters.grid_import is not None
+        component_index = index
+
+        def _in_window(when, *, _index: int = component_index) -> bool:
+            return (
+                coordinator.network_calendar is not None
+                and coordinator.network_calendar.in_demand_window(
+                    when, coordinator.holiday_cache, index=_index
+                )
+            )
+
+        trackers.append(
+            PeakTracker(
+                hass,
+                entry,
+                component_meters.grid_import,
+                interval=demand.measure.interval,
+                aggregate=demand.measure.aggregate,
+                top_n=demand.measure.n,
+                distinct_days=demand.measure.distinct_days,
+                in_window=_in_window,
+                store_key=_peak_store_key(entry.entry_id, index, demand.name),
+            )
+        )
+    return trackers

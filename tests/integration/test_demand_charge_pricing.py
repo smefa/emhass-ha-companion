@@ -85,7 +85,7 @@ async def test_none_with_a_network_profile_that_has_no_demand_charge(hass: HomeA
 async def test_unconfigured_rate_gives_a_reason_and_no_price(hass: HomeAssistant) -> None:
     coordinator = _coordinator(hass)
     coordinator.network_calendar = NetworkCalendar(
-        demand_charge=_demand(window=None, rate_per_kw=None)
+        demand_charges=[_demand(window=None, rate_per_kw=None)]
     )
     coordinator.backend_version = "0.19.0"
     pricing = coordinator.demand_charge_pricing(NOW)
@@ -96,7 +96,7 @@ async def test_unconfigured_rate_gives_a_reason_and_no_price(hass: HomeAssistant
 
 async def test_old_backend_gives_a_reason_and_no_price(hass: HomeAssistant) -> None:
     coordinator = _coordinator(hass)
-    coordinator.network_calendar = NetworkCalendar(demand_charge=_demand(window=None))
+    coordinator.network_calendar = NetworkCalendar(demand_charges=[_demand(window=None)])
     coordinator.backend_version = "0.17.9"
     pricing = coordinator.demand_charge_pricing(NOW)
     assert pricing.effective_rate_per_kw is None
@@ -105,7 +105,7 @@ async def test_old_backend_gives_a_reason_and_no_price(hass: HomeAssistant) -> N
 
 async def test_unknown_backend_version_is_treated_as_unsupported(hass: HomeAssistant) -> None:
     coordinator = _coordinator(hass)
-    coordinator.network_calendar = NetworkCalendar(demand_charge=_demand(window=None))
+    coordinator.network_calendar = NetworkCalendar(demand_charges=[_demand(window=None)])
     coordinator.backend_version = None
     pricing = coordinator.demand_charge_pricing(NOW)
     assert pricing.effective_rate_per_kw is None
@@ -118,7 +118,7 @@ async def test_windowed_demand_charge_gives_a_reason_on_a_backend_with_no_mask(
     yet -- pricing it unmasked would over-shave every hour outside it."""
     coordinator = _coordinator(hass)
     window = Window.from_dict({"hours": "07:00-20:00"}, {})
-    coordinator.network_calendar = NetworkCalendar(demand_charge=_demand(window=window))
+    coordinator.network_calendar = NetworkCalendar(demand_charges=[_demand(window=window)])
     coordinator.backend_version = "0.18.0"
     pricing = coordinator.demand_charge_pricing(NOW)
     assert pricing.effective_rate_per_kw is None
@@ -127,7 +127,7 @@ async def test_windowed_demand_charge_gives_a_reason_on_a_backend_with_no_mask(
 
 async def test_all_day_window_prices_on_a_supported_backend(hass: HomeAssistant) -> None:
     coordinator = _coordinator(hass)
-    coordinator.network_calendar = NetworkCalendar(demand_charge=_demand(window=None))
+    coordinator.network_calendar = NetworkCalendar(demand_charges=[_demand(window=None)])
     coordinator.backend_version = "0.18.0"
     pricing = coordinator.demand_charge_pricing(NOW)
     # rate_basis=month, aggregate=mean_top_n, n=3: 135 / 3 = 45, independent
@@ -141,7 +141,7 @@ async def test_all_day_window_never_sets_windowed_even_on_a_masking_backend(
     hass: HomeAssistant,
 ) -> None:
     coordinator = _coordinator(hass)
-    coordinator.network_calendar = NetworkCalendar(demand_charge=_demand(window=None))
+    coordinator.network_calendar = NetworkCalendar(demand_charges=[_demand(window=None)])
     coordinator.backend_version = "0.18.1"
     pricing = coordinator.demand_charge_pricing(NOW)
     assert pricing.effective_rate_per_kw == 45.0
@@ -155,7 +155,7 @@ async def test_windowed_demand_charge_prices_on_a_backend_with_the_mask(
     window no longer needs the reason/fallback path -- it prices, masked."""
     coordinator = _coordinator(hass)
     window = Window.from_dict({"hours": "07:00-20:00"}, {})
-    coordinator.network_calendar = NetworkCalendar(demand_charge=_demand(window=window))
+    coordinator.network_calendar = NetworkCalendar(demand_charges=[_demand(window=window)])
     coordinator.backend_version = "0.18.1"
     pricing = coordinator.demand_charge_pricing(NOW)
     assert pricing.effective_rate_per_kw == 45.0
@@ -168,7 +168,7 @@ async def test_windowed_demand_charge_still_refused_just_below_the_mask_version(
 ) -> None:
     coordinator = _coordinator(hass)
     window = Window.from_dict({"hours": "07:00-20:00"}, {})
-    coordinator.network_calendar = NetworkCalendar(demand_charge=_demand(window=window))
+    coordinator.network_calendar = NetworkCalendar(demand_charges=[_demand(window=window)])
     coordinator.backend_version = "0.18.0"
     pricing = coordinator.demand_charge_pricing(NOW)
     assert pricing.effective_rate_per_kw is None
@@ -184,7 +184,7 @@ async def test_interval_timesteps_stays_one_below_the_capacity_interval_gate(
     """0.18.1 has the window mask but not capacity_charge_interval_timesteps
     yet -- narrowing this gate must not disturb the two gates above it."""
     coordinator = _coordinator(hass)
-    coordinator.network_calendar = NetworkCalendar(demand_charge=_demand(window=None))
+    coordinator.network_calendar = NetworkCalendar(demand_charges=[_demand(window=None)])
     coordinator.backend_version = "0.18.1"
     pricing = coordinator.demand_charge_pricing(NOW)
     assert pricing.effective_rate_per_kw == 45.0  # unaffected: this gate never blocks pricing
@@ -196,7 +196,7 @@ async def test_interval_timesteps_stays_one_on_unknown_backend_version(
     hass: HomeAssistant,
 ) -> None:
     coordinator = _coordinator(hass)
-    coordinator.network_calendar = NetworkCalendar(demand_charge=_demand(window=None))
+    coordinator.network_calendar = NetworkCalendar(demand_charges=[_demand(window=None)])
     coordinator.backend_version = None
     pricing = coordinator.demand_charge_pricing(NOW)
     assert pricing.interval_timesteps == 1
@@ -206,7 +206,7 @@ async def test_interval_timesteps_computed_on_a_supported_backend(hass: HomeAssi
     """_demand()'s 60min measure over the default 15min timestep -- the
     regression the feature exists for."""
     coordinator = _coordinator(hass)
-    coordinator.network_calendar = NetworkCalendar(demand_charge=_demand(window=None))
+    coordinator.network_calendar = NetworkCalendar(demand_charges=[_demand(window=None)])
     coordinator.backend_version = "0.18.2"
     pricing = coordinator.demand_charge_pricing(NOW)
     assert pricing.interval_timesteps == 4
@@ -223,7 +223,7 @@ async def test_interval_timesteps_falls_back_to_one_when_inexact(hass: HomeAssis
         rate_per_kw=135.0,
         rate_basis="month",
     )
-    coordinator.network_calendar = NetworkCalendar(demand_charge=demand)
+    coordinator.network_calendar = NetworkCalendar(demand_charges=[demand])
     coordinator.backend_version = "0.18.2"
     pricing = coordinator.demand_charge_pricing(NOW)
     assert pricing.interval_timesteps == 1  # 40 / 15 does not divide exactly
@@ -333,7 +333,7 @@ async def test_capacity_interval_history_empty_without_a_peak_tracker(hass: Home
 
 async def test_build_sends_the_priced_peak_and_the_floor_on_mpc(hass: HomeAssistant) -> None:
     coordinator = _coordinator(hass)
-    coordinator.network_calendar = NetworkCalendar(demand_charge=_demand(window=None))
+    coordinator.network_calendar = NetworkCalendar(demand_charges=[_demand(window=None)])
     coordinator.backend_version = "0.18.0"
     coordinator.peak_tracker = _StubTracker(floor_kw=3.2)
 
@@ -356,7 +356,7 @@ async def test_build_sends_the_priced_peak_with_a_mask_on_a_masking_backend(
     down)."""
     coordinator = _coordinator(hass)
     window = Window.from_dict({"hours": "07:00-20:00"}, {})
-    coordinator.network_calendar = NetworkCalendar(demand_charge=_demand(window=window))
+    coordinator.network_calendar = NetworkCalendar(demand_charges=[_demand(window=window)])
     coordinator.backend_version = "0.18.1"
     coordinator.peak_tracker = _StubTracker(floor_kw=3.2)
 
@@ -379,7 +379,7 @@ async def test_build_omits_the_mask_on_dayahead_even_on_a_masking_backend(
     the whole priced-peak mechanism first, so there is nothing to mask."""
     coordinator = _coordinator(hass)
     window = Window.from_dict({"hours": "07:00-20:00"}, {})
-    coordinator.network_calendar = NetworkCalendar(demand_charge=_demand(window=window))
+    coordinator.network_calendar = NetworkCalendar(demand_charges=[_demand(window=window)])
     coordinator.backend_version = "0.18.1"
 
     _inputs, built = await coordinator._build(ACTION_DAYAHEAD)
@@ -390,7 +390,7 @@ async def test_build_omits_the_mask_on_dayahead_even_on_a_masking_backend(
 
 async def test_build_zeroes_the_priced_peak_on_dayahead(hass: HomeAssistant) -> None:
     coordinator = _coordinator(hass)
-    coordinator.network_calendar = NetworkCalendar(demand_charge=_demand(window=None))
+    coordinator.network_calendar = NetworkCalendar(demand_charges=[_demand(window=None)])
     coordinator.backend_version = "0.18.0"
     coordinator.peak_tracker = _StubTracker(floor_kw=3.2)
 
@@ -405,7 +405,7 @@ async def test_build_zeroes_the_priced_peak_on_dayahead(hass: HomeAssistant) -> 
 
 async def test_build_zeroes_rather_than_pricing_when_not_yet_supported(hass: HomeAssistant) -> None:
     coordinator = _coordinator(hass)
-    coordinator.network_calendar = NetworkCalendar(demand_charge=_demand(window=None))
+    coordinator.network_calendar = NetworkCalendar(demand_charges=[_demand(window=None)])
     coordinator.backend_version = "0.17.9"
 
     inputs, built = await coordinator._build(ACTION_MPC)
@@ -421,7 +421,7 @@ async def test_build_sends_capacity_interval_keys_on_a_supported_backend(
     default 15min step reaches EMHASS as N=4, with the still-open interval's
     elapsed timesteps spread alongside it."""
     coordinator = _coordinator(hass)
-    coordinator.network_calendar = NetworkCalendar(demand_charge=_demand(window=None))
+    coordinator.network_calendar = NetworkCalendar(demand_charges=[_demand(window=None)])
     coordinator.backend_version = "0.18.2"
     # _build() reads dt_util.utcnow() itself rather than taking `now` as a
     # parameter, so the open interval is anchored off the real clock -- three
@@ -450,7 +450,7 @@ async def test_build_omits_capacity_interval_keys_below_the_gate(hass: HomeAssis
     yet -- the payload must stay byte-identical to today's on that point,
     even though current_period_peak and the mask still ride through."""
     coordinator = _coordinator(hass)
-    coordinator.network_calendar = NetworkCalendar(demand_charge=_demand(window=None))
+    coordinator.network_calendar = NetworkCalendar(demand_charges=[_demand(window=None)])
     coordinator.backend_version = "0.18.1"
     coordinator.peak_tracker = _StubTracker(floor_kw=3.2)
 
@@ -476,7 +476,7 @@ async def test_build_sends_the_fallback_ceiling_when_the_window_cannot_be_priced
     describes."""
     coordinator = _coordinator(hass)
     window = Window.from_dict({"hours": "07:00-20:00"}, {})
-    coordinator.network_calendar = NetworkCalendar(demand_charge=_demand(window=window))
+    coordinator.network_calendar = NetworkCalendar(demand_charges=[_demand(window=window)])
     coordinator.backend_version = "0.18.0"
     coordinator.peak_target_kw = 3.2
 
@@ -493,7 +493,7 @@ async def test_fallback_ceiling_is_not_sent_without_a_peak_target(hass: HomeAssi
     entity has never been added) -- nothing to fall back to."""
     coordinator = _coordinator(hass)
     window = Window.from_dict({"hours": "07:00-20:00"}, {})
-    coordinator.network_calendar = NetworkCalendar(demand_charge=_demand(window=window))
+    coordinator.network_calendar = NetworkCalendar(demand_charges=[_demand(window=window)])
     coordinator.backend_version = "0.18.0"
 
     inputs, built = await coordinator._build(ACTION_MPC)
@@ -511,7 +511,7 @@ async def test_fallback_ceiling_does_not_apply_below_the_min_emhass_version(
     _prepare_power_limit_array), so nothing is sent below that version."""
     coordinator = _coordinator(hass)
     window = Window.from_dict({"hours": "07:00-20:00"}, {})
-    coordinator.network_calendar = NetworkCalendar(demand_charge=_demand(window=window))
+    coordinator.network_calendar = NetworkCalendar(demand_charges=[_demand(window=window)])
     coordinator.backend_version = "0.17.9"
     coordinator.peak_target_kw = 3.2
 
@@ -525,7 +525,7 @@ async def test_fallback_ceiling_is_inert_once_the_peak_is_priced(hass: HomeAssis
     """An all-day window prices cleanly (see test_all_day_window_prices_on_a_
     supported_backend above); the fallback ceiling must not also kick in."""
     coordinator = _coordinator(hass)
-    coordinator.network_calendar = NetworkCalendar(demand_charge=_demand(window=None))
+    coordinator.network_calendar = NetworkCalendar(demand_charges=[_demand(window=None)])
     coordinator.backend_version = "0.18.0"
     coordinator.peak_target_kw = 3.2
 

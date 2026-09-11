@@ -416,3 +416,139 @@ def test_next_change_none_for_a_single_unconditional_band():
 def test_next_change_none_with_no_bands():
     calendar = NetworkCalendar.from_resolved({**GOTEBORG_RESOLVED, "energy_bands": []})
     assert calendar.next_change(_local(2026, 1, 1, 12, 0), HolidayCache()) is None
+
+
+# --- multi-component demand charges ------------------------------------------
+
+DALA_RESOLVED = {
+    "calendar": {
+        "business_day": {
+            "weekdays": ["mon", "tue", "wed", "thu", "fri"],
+            "exclude_holidays": True,
+            "holiday_entity": "binary_sensor.workday_sensor",
+        },
+    },
+    "energy_bands": [{"name": "överföring", "buy": {"adder": 0.09}}],
+    "demand_charges": [
+        {
+            "name": "höglast",
+            "rate_per_kw": 105.0,
+            "rate_basis": "month",
+            "window": {"days": "business_day", "hours": "07:00-19:00"},
+            "measure": {
+                "interval": "60min",
+                "aggregate": "mean_top_n",
+                "n": 3,
+                "distinct_days": True,
+            },
+            "period": "month",
+        },
+        {
+            "name": "låglast",
+            "rate_per_kw": 35.0,
+            "rate_basis": "month",
+            "window": {"invert": "höglast"},
+            "measure": {
+                "interval": "60min",
+                "aggregate": "mean_top_n",
+                "n": 3,
+                "distinct_days": True,
+            },
+            "period": "month",
+        },
+    ],
+}
+
+
+def test_demand_charges_list_parses_two_named_components():
+    calendar = NetworkCalendar.from_resolved(DALA_RESOLVED)
+    assert len(calendar.demand_charges) == 2
+    assert calendar.demand_charge is calendar.demand_charges[0]
+    assert calendar.demand_charges[0].name == "höglast"
+    assert calendar.demand_charges[1].name == "låglast"
+
+
+def test_singular_and_plural_demand_charge_rejected_together():
+    with pytest.raises(NetworkCalendarError, match="not both"):
+        NetworkCalendar.from_resolved(
+            {
+                **GOTEBORG_RESOLVED,
+                "demand_charges": [
+                    {"name": "a", "rate_per_kw": 1, "measure": {"aggregate": "max"}},
+                    {"name": "b", "rate_per_kw": 1, "measure": {"aggregate": "max"}},
+                ],
+            }
+        )
+
+
+def test_invert_window_is_complement_of_named_charge():
+    calendar = NetworkCalendar.from_resolved(DALA_RESOLVED)
+    holidays = HolidayCache()
+    # Wednesday 10:00 winter — höglast
+    day = _local(2026, 1, 14, 10, 0)
+    assert calendar.in_demand_window(day, holidays, index=0)
+    assert not calendar.in_demand_window(day, holidays, index=1)
+    # Wednesday 22:00 — låglast
+    night = _local(2026, 1, 14, 22, 0)
+    assert not calendar.in_demand_window(night, holidays, index=0)
+    assert calendar.in_demand_window(night, holidays, index=1)
+    # Saturday 10:00 — låglast
+    saturday = _local(2026, 1, 17, 10, 0)
+    assert not calendar.in_demand_window(saturday, holidays, index=0)
+    assert calendar.in_demand_window(saturday, holidays, index=1)
+
+
+def test_invert_window_is_never_unrestricted():
+    calendar = NetworkCalendar.from_resolved(DALA_RESOLVED)
+    assert calendar.demand_charges[1].window is not None
+    assert calendar.demand_charges[1].window.is_unrestricted is False
+
+
+def test_same_as_demand_charge_binds_to_first_component():
+    resolved = {**DALA_RESOLVED, "capacity_limit": {"subscribed_kw": 16}}
+    calendar = NetworkCalendar.from_resolved(resolved)
+    holidays = HolidayCache()
+    day = _local(2026, 1, 14, 10, 0)
+    night = _local(2026, 1, 14, 22, 0)
+    assert calendar.in_capacity_window(day, holidays)
+    assert not calendar.in_capacity_window(night, holidays)
+
+
+def test_k_greater_than_1_requires_names():
+    with pytest.raises(NetworkCalendarError, match="needs a name"):
+        NetworkCalendar.from_resolved(
+            {
+                "demand_charges": [
+                    {"rate_per_kw": 1, "measure": {"aggregate": "max"}},
+                    {"rate_per_kw": 1, "measure": {"aggregate": "max"}},
+                ]
+            }
+        )
+
+
+def test_invert_of_invert_is_rejected():
+    with pytest.raises(NetworkCalendarError, match="cannot invert another invert"):
+        NetworkCalendar.from_resolved(
+            {
+                "demand_charges": [
+                    {
+                        "name": "a",
+                        "rate_per_kw": 1,
+                        "window": {"hours": "07:00-19:00"},
+                        "measure": {"aggregate": "max"},
+                    },
+                    {
+                        "name": "b",
+                        "rate_per_kw": 1,
+                        "window": {"invert": "a"},
+                        "measure": {"aggregate": "max"},
+                    },
+                    {
+                        "name": "c",
+                        "rate_per_kw": 1,
+                        "window": {"invert": "b"},
+                        "measure": {"aggregate": "max"},
+                    },
+                ]
+            }
+        )

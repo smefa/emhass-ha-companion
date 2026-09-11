@@ -359,24 +359,28 @@ class PayloadInputs:
     windowed tariff on a backend without the window mask still zeroes
     ``capacity_cost_per_kw`` here rather than falling back to the unrelated
     manual number (see coordinator.demand_charge_pricing)."""
-    demand_charge_rate_per_kw: float | None = None
+    demand_charge_rate_per_kw: float | list[float] | None = None
     """The effective ``capacity_cost_per_kw`` -- already converted from the
     tariff sheet's rate by ``peaks.effective_rate_per_kw`` -- or None when the
     network profile's demand charge cannot be safely priced right now
-    (backend too old, or a real window on a backend with no window mask)."""
-    current_period_peak_w: float | None = None
+    (backend too old, or a real window on a backend with no window mask).
+    A list of two or more rates selects EMHASS K>1 (0.18.3+); a scalar (or
+    single-element list) stays K=1."""
+    current_period_peak_w: float | list[float] | None = None
     """``PeakTracker.floor_kw`` in watts, MPC only -- see
-    docs/network_tariffs_plan.md, "The incurred-peak floor"."""
-    capacity_interval_timesteps: int = 1
+    docs/network_tariffs_plan.md, "The incurred-peak floor". List of K when
+    multi-component."""
+    capacity_interval_timesteps: int | list[int] = 1
     """N for ``capacity_charge_interval_timesteps`` -- the tariff's own
     measurement interval in optimizer timesteps, from
     ``DemandChargePricing.interval_timesteps``. Sent only when > 1; see
-    planning/capacity_interval_plan.md."""
-    capacity_interval_history_w: list[float] | None = None
+    planning/capacity_interval_plan.md. List of K when components differ."""
+    capacity_interval_history_w: list[float] | list[list[float]] | None = None
     """``capacity_charge_current_interval_history`` -- the still-open
     interval's elapsed timesteps in watts, oldest to newest, from
     ``EmhassCoordinator._capacity_interval_history_w``. Only meaningful
-    alongside :attr:`capacity_interval_timesteps` > 1."""
+    alongside :attr:`capacity_interval_timesteps` > 1. List-of-lists when
+    K>1."""
     capacity_limit_w: float | None = None
     """An explicit ``capacity_limit:`` block's ceiling
     (``subscribed_kw - headroom_kw``, in watts). None when the profile
@@ -394,14 +398,17 @@ class PayloadInputs:
     charge enforced as a ceiling rather than a price."""
     demand_window: Callable[[datetime], bool] | None = None
     """Predicate for the demand charge's own window, consulted only when
-    :attr:`demand_fallback_ceiling_w` is in effect."""
-    demand_charge_window: Callable[[datetime], bool] | None = None
+    :attr:`demand_fallback_ceiling_w` is in effect. For K>1 this is the
+    union of every component window."""
+    demand_charge_window: (
+        Callable[[datetime], bool] | list[Callable[[datetime], bool]] | None
+    ) = None
     """Predicate for the demand charge's own window, consulted only when the
     peak *is* being priced (:attr:`demand_charge_rate_per_kw` is set) and the
     coordinator has already confirmed the backend can mask it -- see
     docs/network_tariffs_plan.md, "The window mask". Builds
     ``capacity_charge_window``, MPC only, same restriction as
-    ``current_period_peak``."""
+    ``current_period_peak``. List of K predicates when multi-component."""
     send_charge_power_derating: bool = True
     """Whether this backend accepts ``battery_charge_power_derating``
     (EMHASS 0.18.3+). The table still lives on :attr:`battery`; this only
@@ -812,21 +819,71 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
     # naive-mpc-optim.
     if inputs.network_demand_charge_configured:
         if inputs.action == ACTION_MPC and inputs.demand_charge_rate_per_kw is not None:
-            payload["capacity_cost_per_kw"] = round(inputs.demand_charge_rate_per_kw, 4)
+            rates = inputs.demand_charge_rate_per_kw
+            rate_list = rates if isinstance(rates, list) else [rates]
+            k = len(rate_list)
+            if k == 1:
+                payload["capacity_cost_per_kw"] = round(rate_list[0], 4)
+            else:
+                payload["capacity_cost_per_kw"] = [round(rate, 4) for rate in rate_list]
+
             if inputs.current_period_peak_w is not None:
-                payload["current_period_peak"] = round(inputs.current_period_peak_w)
+                peaks = inputs.current_period_peak_w
+                if isinstance(peaks, list):
+                    payload["current_period_peak"] = [round(peak) for peak in peaks]
+                else:
+                    payload["current_period_peak"] = round(peaks)
+
             if inputs.demand_charge_window is not None:
-                payload["capacity_charge_window"] = build_capacity_charge_window_mask(
-                    in_window=inputs.demand_charge_window,
-                    start=floor_to_step(inputs.now, step),
-                    step=step,
-                    count=inputs.horizon_steps,
-                )
-            if inputs.capacity_interval_timesteps > 1:
-                payload["capacity_charge_interval_timesteps"] = inputs.capacity_interval_timesteps
-                payload["capacity_charge_current_interval_history"] = [
-                    round(w) for w in (inputs.capacity_interval_history_w or [])
-                ]
+                windows = inputs.demand_charge_window
+                start = floor_to_step(inputs.now, step)
+                if isinstance(windows, list):
+                    payload["capacity_charge_window"] = [
+                        build_capacity_charge_window_mask(
+                            in_window=predicate,
+                            start=start,
+                            step=step,
+                            count=inputs.horizon_steps,
+                        )
+                        for predicate in windows
+                    ]
+                else:
+                    payload["capacity_charge_window"] = build_capacity_charge_window_mask(
+                        in_window=windows,
+                        start=start,
+                        step=step,
+                        count=inputs.horizon_steps,
+                    )
+
+            ns = inputs.capacity_interval_timesteps
+            n_list = ns if isinstance(ns, list) else [ns]
+            if any(n > 1 for n in n_list):
+                if len(n_list) == 1 or len(set(n_list)) == 1:
+                    payload["capacity_charge_interval_timesteps"] = n_list[0]
+                else:
+                    payload["capacity_charge_interval_timesteps"] = list(n_list)
+                history = inputs.capacity_interval_history_w
+                if k == 1:
+                    single = history if isinstance(history, list) else []
+                    # Distinguish list[float] from list[list[float]]: K=1
+                    # history is flat watts.
+                    if single and isinstance(single[0], list):
+                        single = single[0]  # type: ignore[assignment]
+                    payload["capacity_charge_current_interval_history"] = [
+                        round(w) for w in (single or [])  # type: ignore[union-attr]
+                    ]
+                else:
+                    histories: list[list[float]]
+                    if history and isinstance(history[0], list):
+                        histories = history  # type: ignore[assignment]
+                    else:
+                        histories = [[] for _ in range(k)]
+                    while len(histories) < k:
+                        histories.append([])
+                    payload["capacity_charge_current_interval_history"] = [
+                        [round(w) for w in (histories[i] if i < len(histories) else [])]
+                        for i in range(k)
+                    ]
         else:
             # Day-ahead, or the peak cannot be safely priced yet (see
             # coordinator.demand_charge_pricing): zero rather than the stale

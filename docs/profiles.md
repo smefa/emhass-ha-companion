@@ -218,9 +218,15 @@ A fourth structural shape, alongside a source profile (`source`/`emhass`) and
 an `inverter` profile (`sensors`/`limits`/`actions`): a `network` profile
 fetches nothing and delegates nothing. It describes a grid operator's
 tariff calendar instead — time-of-day energy fees and a demand (capacity)
-charge — as at least one of `energy_bands`, `demand_charge` or
-`capacity_limit`. A profile defining none of the three is rejected the same
-way a source profile with neither `source` nor `emhass` is.
+charge — as at least one of `energy_bands`, `demand_charge`,
+`demand_charges` or `capacity_limit`. A profile defining none of those is
+rejected the same way a source profile with neither `source` nor `emhass` is.
+
+Singular `demand_charge:` is the K=1 form (Göteborg, Amber). Dual-peak
+tariffs use `demand_charges:` (a list); do **not** model mean-of-top-3 as
+K=3 — that is still one component priced as `rate / n`. Needs EMHASS
+0.18.3+. Complementary windows can use `window: {invert: <other name>}`.
+Defining both `demand_charge` and `demand_charges` is rejected.
 
 ```yaml
 name: Example network operator

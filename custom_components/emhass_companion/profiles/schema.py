@@ -287,14 +287,20 @@ def _validate_network(document: dict[str, Any]) -> dict[str, Any]:
     at the point each profile is actually resolved -- the same split
     ``emhass:`` settings already use via ``resolve_settings``.
     """
+    singular = document.get("demand_charge")
+    plural = document.get("demand_charges")
+    if singular and plural:
+        raise vol.Invalid("Define either 'demand_charge' or 'demand_charges', not both")
     if not (
         document.get("energy_bands")
-        or document.get("demand_charge")
+        or singular
+        or plural
         or document.get("capacity_limit")
     ):
         raise vol.Invalid(
             "'network' profile must define at least one of 'energy_bands', "
-            "'demand_charge' or 'capacity_limit'; it currently contributes nothing"
+            "'demand_charge', 'demand_charges' or 'capacity_limit'; it currently "
+            "contributes nothing"
         )
     return document
 
@@ -377,6 +383,9 @@ PROFILE_SCHEMA = vol.All(
                 vol.All(cv.ensure_list, [dict])
             ),
             vol.Optional("demand_charge", default={}): _empty_block(dict),
+            vol.Optional("demand_charges", default=[]): _empty_list_block(
+                vol.All(cv.ensure_list, [dict])
+            ),
             vol.Optional("capacity_limit", default={}): _empty_block(dict),
         }
     ),
@@ -498,6 +507,10 @@ class Profile:
     @property
     def demand_charge(self) -> dict[str, Any]:
         return self.document.get("demand_charge", {})
+
+    @property
+    def demand_charges(self) -> list[dict[str, Any]]:
+        return self.document.get("demand_charges", [])
 
     @property
     def capacity_limit(self) -> dict[str, Any]:

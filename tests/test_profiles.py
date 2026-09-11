@@ -91,7 +91,7 @@ def test_network_profile_with_no_blocks_is_rejected():
     A network profile has neither ``source`` nor ``emhass``, so it cannot hit
     the check above at all -- it needs its own, in different language, or a
     profile that forgot every one of ``energy_bands``/``demand_charge``/
-    ``capacity_limit`` would pass validation and silently do nothing.
+    ``demand_charges``/``capacity_limit`` would pass validation and silently do nothing.
     """
     with pytest.raises(ProfileError, match="contributes nothing"):
         validate_document({"name": "X", "kind": "network", "version": 1})

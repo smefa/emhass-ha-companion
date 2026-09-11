@@ -347,6 +347,7 @@ class PeakTracker:
         top_n: int,
         distinct_days: bool,
         in_window: Callable[[datetime], bool],
+        store_key: str | None = None,
     ) -> None:
         if aggregate not in AGGREGATES:
             raise ValueError(f"Unknown peak aggregate mode: {aggregate!r}")
@@ -367,8 +368,11 @@ class PeakTracker:
         self._current_start: datetime | None = None
         self._current_kwh: float = 0.0
 
+        # Component 0 keeps the historical key so Göteborg/Amber period
+        # history survives a multi-component upgrade; later components get
+        # a suffix. Callers that omit store_key keep the legacy name.
         self._store: Store[dict[str, Any]] = Store(
-            hass, _STORE_VERSION, f"{DOMAIN}_{entry.entry_id}_peaks"
+            hass, _STORE_VERSION, store_key or f"{DOMAIN}_{entry.entry_id}_peaks"
         )
         self._listeners: list[CALLBACK_TYPE] = []
         self._unsubs: list[CALLBACK_TYPE] = []
