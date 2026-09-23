@@ -656,6 +656,13 @@ def night_window(series: Series, step: timedelta) -> tuple[datetime | None, date
     stops shining. ``BLOCK_GAP_TOLERANCE`` keeps a passing cloud from reading
     as dusk, exactly as in ``current_block``.
 
+    Night ends at the start of the *last* daylight stretch after that dusk,
+    not the first slot that clears the floor again. A one-hour late-afternoon
+    dip followed by a weak surplus blip is not tomorrow morning; treating it
+    as sunrise made :func:`night_cover_reserve_wh` see a one-hour night, return
+    zero, and hand the whole day's block to the surplus loads. Same "last
+    forecast block" rule as the End SOC night cover, for the same reason.
+
     Returns ``(None, None)`` when the horizon ends before the block does, so
     the night is not in view at all -- the caller must not invent a reserve
     from that, since guessing high and guessing low are both unbacked. A night
@@ -687,12 +694,27 @@ def night_window(series: Series, step: timedelta) -> tuple[datetime | None, date
         last_lit = point.time
     if night_start is None:
         return None, None
-    # First sun on the other side. Absent one, the horizon stops mid-night and
-    # the night is only known as far as it reaches -- one step past its last
-    # row, which is where that row's own interval ends.
+    # Every sunrise after dusk, then keep the last. A brief post-dusk blip is
+    # a day-start too; the real morning after the overnight dark overwrites it.
+    # Absent any sunrise the horizon stops mid-night and the night is only
+    # known as far as it reaches -- one step past its last row.
+    day_starts: list[datetime] = []
+    in_day = False
+    gap_run = 0
     for point in rest:
-        if point.value >= NIGHT_FLOOR_W and point.time >= night_start:
-            return night_start, point.time
+        if point.value >= NIGHT_FLOOR_W:
+            if not in_day:
+                day_starts.append(point.time)
+                in_day = True
+            gap_run = 0
+            continue
+        if not in_day:
+            continue
+        gap_run += 1
+        if gap_run >= gap_steps:
+            in_day = False
+    if day_starts:
+        return night_start, day_starts[-1]
     return night_start, (points[-1].time + step if points else night_start)
 
 

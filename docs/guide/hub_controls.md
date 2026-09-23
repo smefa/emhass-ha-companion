@@ -80,8 +80,8 @@ are built and how to check one that looks wrong.
   next 24 hours: planned import spend minus planned export income, in your
   Home Assistant currency. Negative on a day the house is paid more than it
   spends. It re-prices the plan on every meter tick, using the same prices
-  EMHASS optimised against, and its `hourly_cost` attribute breaks the total
-  down per clock hour.
+  EMHASS optimised against, and its `hourly_cost` / `hourly_savings`
+  attributes break the totals down per clock hour.
 - **Forecast savings next 24 h** — the same window, against the same house
   with no solar and no battery. On both sensors, `covers_full_window` says
   whether the plan really reaches 24 hours ahead; when it doesn't, they report

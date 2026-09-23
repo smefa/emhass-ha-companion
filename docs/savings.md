@@ -76,8 +76,10 @@ and `unit_prod_price` — the prices EMHASS actually optimised against.
 
 If your horizon is shorter than 24 hours, they report what the plan *does*
 cover rather than extrapolating; `hours_covered` and `covers_full_window` say
-so. The `hourly_cost` attribute carries the cost hour by hour, for a card to
-draw.
+so. The `hourly_cost` and `hourly_savings` attributes carry the cost and the
+saving against a no-solar-no-battery baseline hour by hour, for a card to
+draw. Savings here omit the storage-carry term, which is a window-level
+adjustment rather than something that belongs to one hour.
 
 ## Entities
 

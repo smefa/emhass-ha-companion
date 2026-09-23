@@ -1478,10 +1478,16 @@ def _forecast_attributes(forecast: Forecast) -> dict[str, Any]:
         "export_kwh": _round(forecast.export_kwh),
         "solar_kwh": _round(forecast.pv_kwh),
         "house_load_kwh": _round(forecast.load_kwh),
-        # Planned cost per clock hour. A single total cannot show *why* a night
-        # is expensive; this is the shape a card draws.
+        # Planned cost and savings per clock hour. A single total cannot show
+        # *why* a night is expensive or which hours the solar/battery earned
+        # their keep; this is the shape a card draws.
         "hourly_cost": [
-            {"time": when.isoformat(), "value": round(value, 3)} for when, value in forecast.hourly
+            {"time": when.isoformat(), "value": round(cost, 3)}
+            for when, cost, _savings in forecast.hourly
+        ],
+        "hourly_savings": [
+            {"time": when.isoformat(), "value": round(savings, 3)}
+            for when, _cost, savings in forecast.hourly
         ],
     }
 

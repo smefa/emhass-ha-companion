@@ -1339,6 +1339,58 @@ def test_night_window_is_the_dark_after_the_block_not_the_dark_before_it():
     assert end == START + 6 * STEP
 
 
+def test_night_window_skips_a_post_dusk_blip_for_the_real_morning():
+    """A late-afternoon surplus scrap is not tomorrow's sunrise.
+
+    Field: a one-hour dip after the day block, two weak surplus slots, then
+    the real overnight dark and morning sun. Ending night at the blip made
+    ``night_cover_reserve_wh`` see ~1 kWh of night against a half-full
+    battery, return zero, and leave the surplus loads the whole day's block.
+    """
+    # Day, 1 h gap (= BLOCK_GAP_TOLERANCE), two-slot blip, real night, morning.
+    values = (
+        [2000.0] * 4  # day
+        + [0.0] * 4  # dusk gap
+        + [120.0, 120.0]  # blip -- clears NIGHT_FLOOR_W, not a morning
+        + [0.0] * 8  # overnight
+        + [2000.0] * 4  # real morning
+    )
+    series = _series(*values)
+    start, end = night_window(series, STEP)
+
+    assert start == START + 4 * STEP
+    # Last sunrise, not the blip at slot 8.
+    assert end == START + 18 * STEP
+    # And that longer night is what the reserve is sized against: the blip
+    # path would have seen 1 h of load and reserved nothing at SOC 0.3.
+    plan_rows = [
+        PlanRow(
+            timestamp=START + index * STEP,
+            p_pv=value,
+            p_load=1000.0,
+        )
+        for index, value in enumerate(values)
+    ]
+    plan = Plan(generated_at=START, schema_version="1.0", rows=plan_rows)
+    blip_end = START + 8 * STEP
+    blip_night_wh = 1000.0 * ((blip_end - start).total_seconds() / 3600)
+    real_night_wh = 1000.0 * ((end - start).total_seconds() / 3600)
+    assert blip_night_wh == pytest.approx(1000.0)
+    assert real_night_wh == pytest.approx(3500.0)
+    battery = _night_battery(
+        capacity_wh=23500.0, charge_efficiency=0.95, discharge_efficiency=0.95
+    )
+    hybrid = HybridInverterConfig(enabled=False)
+    # At 5% SOC a 1 h blip-night is already covered by what's in the battery,
+    # so the old first-sunrise end reserved nothing. The real overnight is not.
+    soc_now = 0.05
+    reserve = night_cover_reserve_wh(plan, series, battery, hybrid, soc_now, STEP, margin=0.0)
+    assert reserve is not None and reserve > 0.0
+    # Same inputs with the blip as night_end would have reserved nothing:
+    # required ≈ 1000/0.95 Wh, stored = 0.05 * 23500 = 1175 Wh.
+    assert (soc_now * battery.capacity_wh) > (blip_night_wh / battery.discharge_efficiency)
+
+
 def test_night_window_has_no_opinion_when_the_horizon_ends_in_daylight():
     """No night in view is "no opinion", never "no night"."""
     assert night_window(_series(2000, 2000, 2000), STEP) == (None, None)

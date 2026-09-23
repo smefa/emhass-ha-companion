@@ -46,7 +46,9 @@ const COLORS = {
   gridIn: "var(--energy-grid-consumption-color, #488fc2)",
   gridOut: "var(--energy-grid-return-color, #8353d1)",
   battery: "var(--energy-battery-out-color, #4db6ac)",
-  soc: "var(--energy-battery-in-color, #f06292)",
+  // Not the energy dashboard's battery-in pink: that line is drawn on top of
+  // the red and green prices, and pink disappears into them.
+  soc: "#1e88e5",
   buy: "var(--error-color, #db4437)",
   sell: "var(--success-color, #43a047)",
   grid: "var(--divider-color, #e0e0e0)",

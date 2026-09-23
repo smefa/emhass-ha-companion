@@ -210,7 +210,14 @@ class EmhassPlanCard extends HTMLElement {
     const pv = mergeHistory(past.pv, planned("sensor.pv_forecast"));
     const load = mergeHistory(past.load, planned("sensor.load_forecast"));
     const grid = mergeHistory(past.grid, planned("sensor.grid_forecast"));
-    const battery = mergeHistory(past.battery, planned("sensor.battery_power"));
+    // The plan stores battery power positive while discharging. Drawn the other
+    // way up, so a charge sits above the zero line and a discharge below it.
+    // History was already brought into the plan's convention, so one flip
+    // turns the whole line over together.
+    const battery = mergeHistory(past.battery, planned("sensor.battery_power")).map((point) => ({
+      t: point.t,
+      v: -point.v,
+    }));
     const soc = mergeHistory(past.soc, planned("sensor.battery_soc"));
     const buy = mergeHistory(past.buy, planned("sensor.buy_price"));
     const sell = mergeHistory(past.sell, planned("sensor.sell_price"));
@@ -313,9 +320,12 @@ class EmhassPlanCard extends HTMLElement {
     // A rolling window, not the data's own extent: the price series alone
     // reaches back to last midnight, and eleven hours of spent morning squeeze
     // the part of the plan that can still be changed into a third of the card.
-    // The end is still the data's, since that is the horizon.
     const lists = [data.pv, data.load, data.grid, data.buy, ...data.loads.map((l) => l.points)];
-    const t1 = Math.max(timeExtent(lists)[1], data.now);
+    // A price sample is the start of its interval. The window has to include
+    // that interval, or the last hour is a point with no width.
+    let t1 = Math.max(timeExtent(lists)[1], data.now);
+    for (const points of [data.buy, data.sell]) t1 = Math.max(t1, this._seriesEnd(points));
+    for (const load of data.loads) t1 = Math.max(t1, this._seriesEnd(load.points));
     const t0 = Math.min(data.now - this._historyMs(), t1 - 60000);
     const x = (t) => padL + ((t - t0) / (t1 - t0 || 1)) * (width - padL - padR);
     // Trimmed to the window rather than left to run off the edge, so a series
@@ -346,7 +356,9 @@ class EmhassPlanCard extends HTMLElement {
 
       // Baselined at zero, not the panel's floor: solar is never negative, and
       // filling down to a floor set by grid export or battery charge painted
-      // the whole negative band solar orange.
+      // the whole negative band solar orange. A curve rather than a staircase:
+      // these four are read as shapes, and a hard step at every timestep made
+      // the panel look broken.
       this._area(root, pv, x, y, COLORS.pv, y(0));
       this._line(root, grid, x, y, COLORS.gridIn, 1.5);
       this._line(root, battery, x, y, COLORS.battery, 1.5);
@@ -363,8 +375,10 @@ class EmhassPlanCard extends HTMLElement {
         const [cLo, cHi] = extent([buy, sell]);
         const yP = (v) => top + priceH - ((v - cLo) / (cHi - cLo || 1)) * priceH;
         this._axis(root, padL, width - padR, top, priceH, [cLo, cHi], (v) => v.toFixed(2));
-        this._line(root, buy, x, yP, COLORS.buy, 1.5);
-        this._line(root, sell, x, yP, COLORS.sell, 1.5);
+        // Held flat for the interval. A price does not ramp between hours, and
+        // a slope here is a tariff the house was never charged.
+        this._line(root, sell, x, yP, COLORS.sell, 1.5, null, true);
+        this._line(root, buy, x, yP, COLORS.buy, 1.5, null, true);
       }
 
       const soc = clip(data.soc);
@@ -448,24 +462,115 @@ class EmhassPlanCard extends HTMLElement {
     }
   }
 
-  _path(points, x, y) {
-    return points.map((p, i) => `${i ? "L" : "M"}${x(p.t)},${y(p.v)}`).join("");
+  /**
+   * How long the last sample stays in force.
+   *
+   * The tail gap, not the first: clipping a window moves the opening point
+   * onto the edge, and that fragment is shorter than a real interval.
+   */
+  _interval(points) {
+    for (let i = points.length - 1; i > 0; i--) {
+      const span = points[i].t - points[i - 1].t;
+      if (span > 0 && span <= 6 * 3600000) return span;
+    }
+    return 1800000;
   }
 
-  _line(root, points, x, y, color, width, dash) {
-    if (points.length < 2) return;
+  _seriesEnd(points) {
+    if (!points.length) return -Infinity;
+    return points[points.length - 1].t + this._interval(points);
+  }
+
+  /**
+   * A monotone cubic through the samples.
+   *
+   * Straight segments keep every corner of a 30-minute plan, which reads as
+   * jitter. The tangents are limited so the curve cannot overshoot a sample:
+   * a spline that does would draw solar below zero between two positive hours.
+   */
+  _curvePath(points, xOf, yOf) {
+    const px = [];
+    for (let i = 0; i < points.length; i++) {
+      const X = xOf(points[i].t);
+      const Y = yOf(points[i].v);
+      const last = px.length ? px[px.length - 1] : null;
+      if (last && X - last.x < 0.01) {
+        last.y = Y;
+        continue;
+      }
+      px.push({ x: X, y: Y });
+    }
+    const n = px.length;
+    if (!n) return "";
+    if (n < 3) {
+      return px.map((p, i) => `${i ? "L" : "M"}${p.x},${p.y}`).join("");
+    }
+    const dx = [];
+    const slope = [];
+    for (let i = 0; i < n - 1; i++) {
+      dx[i] = px[i + 1].x - px[i].x;
+      slope[i] = (px[i + 1].y - px[i].y) / dx[i];
+    }
+    const tangent = new Array(n);
+    tangent[0] = slope[0];
+    tangent[n - 1] = slope[n - 2];
+    for (let i = 1; i < n - 1; i++) {
+      tangent[i] = slope[i - 1] * slope[i] <= 0 ? 0 : (slope[i - 1] + slope[i]) / 2;
+    }
+    for (let i = 0; i < n - 1; i++) {
+      if (slope[i] === 0) {
+        tangent[i] = 0;
+        tangent[i + 1] = 0;
+        continue;
+      }
+      const a = tangent[i] / slope[i];
+      const b = tangent[i + 1] / slope[i];
+      const sized = a * a + b * b;
+      if (sized > 9) {
+        const scale = 3 / Math.sqrt(sized);
+        tangent[i] = scale * a * slope[i];
+        tangent[i + 1] = scale * b * slope[i];
+      }
+    }
+    let d = `M${px[0].x},${px[0].y}`;
+    for (let i = 0; i < n - 1; i++) {
+      const span = dx[i] / 3;
+      d +=
+        `C${px[i].x + span},${px[i].y + tangent[i] * span} ` +
+        `${px[i + 1].x - span},${px[i + 1].y - tangent[i + 1] * span} ` +
+        `${px[i + 1].x},${px[i + 1].y}`;
+    }
+    return d;
+  }
+
+  /** Held flat until the next sample, then a vertical step. One interval wide at the end. */
+  _stepPath(points, x, y) {
+    const hold = this._interval(points);
+    let d = "";
+    for (let i = 0; i < points.length; i++) {
+      const left = points[i].t;
+      const right = i + 1 < points.length ? points[i + 1].t : left + hold;
+      const yy = y(points[i].v);
+      d += `${i ? "L" : "M"}${x(left)},${yy}L${x(right)},${yy}`;
+    }
+    return d;
+  }
+
+  _line(root, points, x, y, color, width, dash, stepped) {
+    if (stepped ? !points.length : points.length < 2) return;
     svg("path", {
-      d: this._path(points, x, y),
+      d: stepped ? this._stepPath(points, x, y) : this._curvePath(points, x, y),
       fill: "none", stroke: color, "stroke-width": width,
       "stroke-dasharray": dash || null,
-      "stroke-linejoin": "round",
+      "stroke-linejoin": stepped ? "miter" : "round",
+      "vector-effect": "non-scaling-stroke",
     }, root);
   }
 
   _area(root, points, x, y, color, baseline) {
     if (points.length < 2) return;
     const d =
-      this._path(points, x, y) +
+      this._curvePath(points, x, y) +
       `L${x(points[points.length - 1].t)},${baseline}` +
       `L${x(points[0].t)},${baseline}Z`;
     svg("path", { d, fill: color, "fill-opacity": 0.25, stroke: "none" }, root);
@@ -510,7 +615,7 @@ const PLAN_HELPERS = {
   battery_entity:
     "Left empty, the Companion's own battery power sensor is used, and the plan's figure if it has none. Set here only to draw this card from a different meter.",
   invert_battery:
-    "Only read when a sensor is named above; the Companion carries its own convention. The chart draws positive as discharge, which is the plan's convention.",
+    "Only read when a sensor is named above; the Companion carries its own convention. The chart draws positive as charge.",
 };
 for (const section of PLAN_SECTIONS) {
   PLAN_LABELS[section[0]] = section[1];
@@ -582,6 +687,7 @@ class EmhassPlanCardEditor extends CardEditor {
   clean(config) {
     cleanSections(config, PLAN_SECTIONS);
     if (!config.title) delete config.title;
+    delete config.chart;
     for (const key of PLAN_ENTITY_OPTIONS) {
       if (!config[key]) delete config[key];
     }

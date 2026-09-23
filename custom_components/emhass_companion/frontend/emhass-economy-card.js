@@ -73,6 +73,7 @@ function economyView(hass, hub) {
       cost: forecastCostState,
       savings: forecastSavingsState,
       hourly: Array.isArray(forecastAttrs.hourly_cost) ? forecastAttrs.hourly_cost : [],
+      hourlySavings: Array.isArray(forecastAttrs.hourly_savings) ? forecastAttrs.hourly_savings : [],
       unit: forecastCostState && forecastCostState.attributes ? forecastCostState.attributes.unit_of_measurement : null,
     },
     entities: {
@@ -122,56 +123,132 @@ function renderBreakdown(ui, breakdown) {
 
 /* -------------------------------------------------------------- hourly bars */
 
+/** Whole units on the axis. The gutter is too narrow for decimals. */
+function formatAxisValue(value) {
+  if (!Number.isFinite(value)) return "–";
+  const rounded = Math.round(value);
+  return rounded === 0 ? "0" : String(rounded);
+}
+
 /**
- * One bar per forecast hour, above or below a zero line -- an hour that nets
- * income (selling more than it buys) reads the same colour as a savings
- * figure everywhere else on the card, not as a second kind of cost.
+ * Axis text in HTML, the bars in the SVG.
+ *
+ * The plot uses a 1000-wide viewBox with preserveAspectRatio off so the bars
+ * stretch to the card. That same stretch turns a font sized in viewBox units
+ * into a sliver a few pixels wide, which is why the hour and month labels
+ * were hard to read. HTML is in real pixels, so it stays readable.
  */
-function hourlyBars(points, hass, unit) {
-  const height = 64;
-  const totalH = height + 14;
-  const root = svg("svg", { viewBox: `0 0 1000 ${totalH}`, preserveAspectRatio: "none", role: "img" });
-  root.style.height = `${totalH}px`;
-  if (points.length < 1) return root;
+function mountChart(plot, yMax, yMin, ticks) {
+  const frame = tag("div", "chart-frame");
+  const yAxis = tag("div", "y-axis", frame);
+  tag("span", "y-max", yAxis, formatAxisValue(yMax));
+  tag("span", "y-min", yAxis, formatAxisValue(yMin));
+  const plotWrap = tag("div", "plot", frame);
+  plotWrap.appendChild(plot);
+  if (!ticks.length) return frame;
+  const xAxis = tag("div", "x-axis", frame);
+  for (const tick of ticks) {
+    const label = tag("span", "x-tick", xAxis, tick.text);
+    label.style.left = `${tick.pct}%`;
+    if (tick.pct <= 8) label.classList.add("start");
+    else if (tick.pct >= 92) label.classList.add("end");
+  }
+  return frame;
+}
+
+/**
+ * One pair of bars per forecast hour, around a zero line -- balance on the
+ * left (cost below, income above), savings on the right (what that hour
+ * avoided against a no-solar-no-battery house).
+ *
+ * The side labels are that shared scale: the largest amount drawn upward, and
+ * the largest drawn downward. Earn and savings used to share --emh-ok, so the
+ * two greens in one slot could not be told apart.
+ */
+function hourlyBars(costPoints, savingsPoints, hass, unit) {
+  const byTime = new Map();
+  for (const point of costPoints) {
+    if (!Number.isFinite(point.t) || !Number.isFinite(point.v)) continue;
+    byTime.set(point.t, { t: point.t, cost: point.v, savings: 0 });
+  }
+  for (const point of savingsPoints) {
+    if (!Number.isFinite(point.t) || !Number.isFinite(point.v)) continue;
+    const existing = byTime.get(point.t);
+    if (existing) existing.savings = point.v;
+    else byTime.set(point.t, { t: point.t, cost: 0, savings: point.v });
+  }
+  const points = [...byTime.values()].sort((a, b) => a.t - b.t);
+  if (points.length < 1) {
+    const empty = svg("svg", { viewBox: "0 0 1000 64", preserveAspectRatio: "none", role: "img" });
+    empty.style.height = "64px";
+    return empty;
+  }
+
+  // Below zero is a cost or a negative saving. With neither, that half is
+  // empty, so it collapses to a baseline and the upward half stays the size
+  // it has today. Any downward value restores the current split.
+  const downMax = Math.max(0, ...points.map((p) => Math.max(p.cost, -p.savings)));
+  const hasDown = downMax > 0;
+  const above = 32;
+  const below = hasDown ? 32 : 4;
+  const height = above + below;
+  const zero = above;
+  const maxUp = Math.max(0.001, ...points.map((p) => Math.max(-p.cost, p.savings, 0)));
+  const maxAbs = hasDown ? Math.max(maxUp, downMax) : maxUp;
+  const scale = (above - 4) / maxAbs;
+
+  const root = svg("svg", { viewBox: `0 0 1000 ${height}`, preserveAspectRatio: "none", role: "img" });
+  root.style.height = `${height}px`;
 
   const stepMs = points.length > 1 ? points[1].t - points[0].t : 3600000;
   const t0 = points[0].t;
   const t1 = points[points.length - 1].t + stepMs;
   const x = (t) => ((t - t0) / (t1 - t0 || 1)) * 1000;
-  const zero = height / 2;
-  const maxAbs = Math.max(...points.map((p) => Math.abs(p.v)), 0.001);
-  const scale = (zero - 4) / maxAbs;
 
   const hour = 3600000;
   const step = (t1 - t0) / hour > 18 ? 6 * hour : 3 * hour;
   const first = Math.ceil(t0 / step) * step;
+  const ticks = [];
   for (let t = first; t < t1; t += step) {
     svg("line", {
       x1: x(t), x2: x(t), y1: 0, y2: height,
       stroke: "var(--emh-hairline)", "stroke-width": 1, "stroke-dasharray": "2 2",
     }, root);
-    svg("text", {
-      x: x(t), y: totalH - 2, fill: "var(--emh-dim)", "font-size": 10, "text-anchor": "middle",
-    }, root).textContent = formatHour(t, hass);
+    ticks.push({ pct: (x(t) / 1000) * 100, text: formatHour(t, hass) });
   }
   svg("line", { x1: 0, x2: 1000, y1: zero, y2: zero, stroke: "var(--emh-hairline)", "stroke-width": 1 }, root);
 
-  const barW = Math.max((1000 / points.length) * 0.6, 2);
+  const slotW = 1000 / points.length;
+  const barW = Math.max(slotW * 0.28, 2);
+  const unitText = unit ? ` ${unit}` : "";
+
   for (const point of points) {
-    if (!Number.isFinite(point.v)) continue;
     const cx = x(point.t) + (x(point.t + stepMs) - x(point.t)) / 2;
-    const barH = Math.abs(point.v) * scale;
-    const bar = svg("rect", {
-      x: cx - barW / 2,
-      y: point.v >= 0 ? zero - barH : zero,
+    const span = `${formatTime(point.t, hass)} – ${formatTime(point.t + stepMs, hass)}`;
+
+    const costH = Math.abs(point.cost) * scale;
+    const costBar = svg("rect", {
+      x: cx - barW - 1,
+      y: point.cost >= 0 ? zero : zero - costH,
       width: barW,
-      height: Math.max(barH, 1),
+      height: Math.max(costH, Number.isFinite(point.cost) ? 1 : 0),
       rx: 2,
-      fill: point.v === 0 ? "var(--emh-dim)" : point.v > 0 ? "var(--emh-bad)" : "var(--emh-ok)",
-      "fill-opacity": 0.85,
+      fill: point.cost === 0 ? "var(--emh-dim)" : point.cost > 0 ? "var(--emh-bad)" : "var(--emh-earn)",
+      "fill-opacity": 0.95,
     }, root);
-    const unitText = unit ? ` ${unit}` : "";
-    bar.title = `${formatTime(point.t, hass)} – ${formatTime(point.t + stepMs, hass)}: ${point.v.toFixed(2)}${unitText}`;
+    costBar.title = `${span}: balance ${point.cost.toFixed(2)}${unitText}`;
+
+    const saveH = Math.abs(point.savings) * scale;
+    const saveBar = svg("rect", {
+      x: cx + 1,
+      y: point.savings >= 0 ? zero - saveH : zero,
+      width: barW,
+      height: Math.max(saveH, Number.isFinite(point.savings) ? 1 : 0),
+      rx: 2,
+      fill: point.savings === 0 ? "var(--emh-dim)" : point.savings > 0 ? "var(--emh-save)" : "var(--emh-bad)",
+      "fill-opacity": 0.95,
+    }, root);
+    saveBar.title = `${span}: savings ${point.savings.toFixed(2)}${unitText}`;
   }
 
   const now = Date.now();
@@ -181,7 +258,7 @@ function hourlyBars(points, hass, unit) {
       stroke: "var(--primary-text-color)", "stroke-width": 2,
     }, root);
   }
-  return root;
+  return mountChart(root, maxAbs, hasDown ? -maxAbs : 0, ticks);
 }
 
 /* --------------------------------------------------------------- trend bars */
@@ -259,9 +336,8 @@ function readStatistics(card, hass, ids, now) {
 
 function monthlyBars(costPoints, savingsPoints, hass, unit) {
   const height = 78;
-  const totalH = height + 16;
-  const root = svg("svg", { viewBox: `0 0 1000 ${totalH}`, preserveAspectRatio: "none", role: "img" });
-  root.style.height = `${totalH}px`;
+  const root = svg("svg", { viewBox: `0 0 1000 ${height}`, preserveAspectRatio: "none", role: "img" });
+  root.style.height = `${height}px`;
   const months = costPoints.length >= savingsPoints.length ? costPoints : savingsPoints;
   if (!months.length) return root;
 
@@ -274,28 +350,40 @@ function monthlyBars(costPoints, savingsPoints, hass, unit) {
   svg("line", { x1: 0, x2: 1000, y1: height, y2: height, stroke: "var(--emh-hairline)", "stroke-width": 1 }, root);
 
   const unitText = unit ? ` ${unit}` : "";
+  const ticks = [];
+  // Short month names at a readable size collide once a year of them is squeezed
+  // onto a phone. Every other month still places the ones that remain.
+  const stride = months.length > 8 ? 2 : 1;
   for (let i = 0; i < months.length; i++) {
     const cx = slot * i + slot / 2;
     const cost = costPoints[i] ? costPoints[i].v : 0;
     const savings = savingsPoints[i] ? savingsPoints[i].v : 0;
     const costH = cost * scale;
     const savingsH = savings * scale;
-    const monthLabel = new Date(months[i].t).toLocaleDateString(language, { month: "short", year: "numeric" });
+    const when = new Date(months[i].t);
+    const monthLabel = when.toLocaleDateString(language, { month: "short", year: "numeric" });
     const costBar = svg("rect", {
       x: cx - barW - 1, y: height - costH, width: barW, height: Math.max(costH, 1),
-      rx: 2, fill: "var(--emh-bad)", "fill-opacity": 0.85,
+      rx: 2, fill: "var(--emh-bad)", "fill-opacity": 0.95,
     }, root);
     costBar.title = `${monthLabel} balance: ${cost.toFixed(2)}${unitText}`;
     const savingsBar = svg("rect", {
       x: cx + 1, y: height - savingsH, width: barW, height: Math.max(savingsH, 1),
-      rx: 2, fill: "var(--emh-ok)", "fill-opacity": 0.85,
+      rx: 2, fill: "var(--emh-save)", "fill-opacity": 0.95,
     }, root);
     savingsBar.title = `${monthLabel} savings: ${savings.toFixed(2)}${unitText}`;
-    svg("text", {
-      x: cx, y: totalH - 2, fill: "var(--emh-dim)", "font-size": 9, "text-anchor": "middle",
-    }, root).textContent = new Date(months[i].t).toLocaleDateString(language, { month: "short" });
+    // The last month is always named. Drop the tick beside it, or "Nov" and
+    // "Dec" land on neighbouring slots and overlap at this size.
+    const last = i === months.length - 1;
+    const besideLast = stride > 1 && i === months.length - 2 && (months.length - 1) % stride !== 0;
+    if ((i % stride === 0 && !besideLast) || last) {
+      ticks.push({
+        pct: (cx / 1000) * 100,
+        text: when.toLocaleDateString(language, { month: "short" }),
+      });
+    }
   }
-  return root;
+  return mountChart(root, maxV, 0, ticks);
 }
 
 /**
@@ -429,7 +517,13 @@ class EmhassEconomyCard extends LiveCard {
       ui.forecastSavingsTile.addEventListener("click", () => moreInfo(this, ui.forecastSavingsEntity));
       ui.hourlyWrap = tag("div", "chart-wrap", pad);
       ui.hourlyWrap.title =
-        "Planned grid balance by hour. Above the line costs money, below the line earns it; grey means no grid activity.";
+        "Planned grid balance and savings by hour. Left bar is balance (below costs, above earns); right bar is what that hour saves against a no-solar-no-battery house.";
+      ui.hourlyLegend = tag("div", "legend", pad);
+      ui.hourlyLegendCost = tag("span", "chip balance", ui.hourlyLegend, "Balance");
+      ui.hourlyLegendSavings = tag("span", "chip savings", ui.hourlyLegend, "Savings");
+      ui.hourlyLegendCost.title = "Net grid spend that hour -- below the line costs money, above it earns.";
+      ui.hourlyLegendSavings.title =
+        "What that hour saves against buying every kWh from the grid with no solar and no battery.";
     }
 
     if (layout.trend) {
@@ -493,12 +587,16 @@ class EmhassEconomyCard extends LiveCard {
       ui.forecastSavingsEntity = view.entities.forecastSavings;
       ui.forecastSavingsTile.set(formatMoney(view.forecast.savings));
 
-      const points = view.forecast.hourly
+      const costPoints = view.forecast.hourly
+        .map((p) => ({ t: Date.parse(p.time), v: Number(p.value) }))
+        .filter((p) => Number.isFinite(p.t) && Number.isFinite(p.v))
+        .sort((a, b) => a.t - b.t);
+      const savingsPoints = view.forecast.hourlySavings
         .map((p) => ({ t: Date.parse(p.time), v: Number(p.value) }))
         .filter((p) => Number.isFinite(p.t) && Number.isFinite(p.v))
         .sort((a, b) => a.t - b.t);
       ui.hourlyWrap.textContent = "";
-      ui.hourlyWrap.appendChild(hourlyBars(points, hass, view.forecast.unit));
+      ui.hourlyWrap.appendChild(hourlyBars(costPoints, savingsPoints, hass, view.forecast.unit));
     }
 
     if (layout.trend) {
@@ -519,6 +617,13 @@ class EmhassEconomyCard extends LiveCard {
 
 EmhassEconomyCard.ticks = false;
 EmhassEconomyCard.css = `
+  :host {
+    /* Lime for balance when the hour earns. Savings keeps the theme green.
+       A nearby green shade still read as the same bar at this width. */
+    --emh-earn: #cddc39;
+    --emh-save: var(--emh-ok);
+  }
+
   .section { font-size: .7rem; text-transform: uppercase; letter-spacing: .05em;
              color: var(--emh-dim); margin: 16px 0 8px 0; }
   .section:first-child { margin-top: 0; }
@@ -542,8 +647,28 @@ EmhassEconomyCard.css = `
   .chip::before { content: ""; width: 8px; height: 8px; border-radius: 2px; background: currentColor; }
   .chip.solar { color: var(--emh-solar); }
   .chip.battery { color: var(--emh-battery); }
+  .chip.balance { color: var(--primary-text-color); }
+  .chip.balance::before {
+    height: 10px;
+    background: linear-gradient(to bottom, var(--emh-earn) 0 4px, transparent 4px 6px, var(--emh-bad) 6px 10px);
+  }
+  .chip.savings { color: var(--emh-save); }
 
   .chart-wrap { margin-top: 4px; }
+  .chart-frame { display: grid; grid-template-columns: auto minmax(0, 1fr);
+                 column-gap: 8px; align-items: stretch; }
+  .y-axis { grid-column: 1; grid-row: 1; display: flex; flex-direction: column;
+            justify-content: space-between; align-items: flex-end;
+            font-size: .68rem; line-height: 1; font-variant-numeric: tabular-nums;
+            color: var(--primary-text-color); }
+  .plot { grid-column: 2; grid-row: 1; min-width: 0; }
+  .x-axis { grid-column: 2; grid-row: 2; position: relative; height: 1rem;
+            margin-top: 2px; }
+  .x-tick { position: absolute; top: 0; transform: translateX(-50%);
+            font-size: .68rem; line-height: 1rem; white-space: nowrap;
+            font-variant-numeric: tabular-nums; color: var(--primary-text-color); }
+  .x-tick.start { transform: none; }
+  .x-tick.end { transform: translateX(-100%); }
 `;
 
 /* ---------------------------------------------------- economy visual editor */
@@ -553,7 +678,7 @@ const ECONOMY_SECTIONS = [
   ["show_breakdown", "Savings breakdown", "Solar vs. battery share of today's savings"],
   ["show_battery_detail", "Battery detail", "Average charge/discharge price, round-trip loss and self-sufficiency"],
   ["show_checking", "Checking the numbers", "Unpriced energy and balance residual, for auditing the day's total"],
-  ["show_forecast", "Next 24h forecast", "Forecast balance and savings, and the planned balance hour by hour"],
+  ["show_forecast", "Next 24h forecast", "Forecast balance and savings, and the planned balance and savings hour by hour"],
   ["show_trend", "Monthly trend", "Balance vs. savings, month by month, over the last year"],
 ];
 

@@ -369,6 +369,15 @@ def test_forecast_prices_the_plan_in_all_three_worlds():
     assert forecast.solar_savings == pytest.approx(
         forecast.grid_only_cost - forecast.solar_only_cost
     )
+    # Hour one imports everything -- no saving. Hour two covers load and
+    # exports surplus, so the house avoids buying 1 kWh and is paid for 2 kWh.
+    assert len(forecast.hourly) == 2
+    assert forecast.hourly[0][0] == START
+    assert forecast.hourly[0][1] == pytest.approx(2.0 * BUY)
+    assert forecast.hourly[0][2] == pytest.approx(0.0)
+    assert forecast.hourly[1][0] == START + timedelta(hours=1)
+    assert forecast.hourly[1][1] == pytest.approx(-2.0 * SELL)
+    assert forecast.hourly[1][2] == pytest.approx(1.0 * BUY + 2.0 * SELL)
 
 
 def test_forecast_counts_deferrable_loads_against_the_baseline():

@@ -484,9 +484,14 @@ class Forecast:
     export_kwh: float
     pv_kwh: float
     load_kwh: float
-    hourly: list[tuple[datetime, float]] = field(default_factory=list)
-    """Planned net cost per clock hour, for a card to draw. The shape a user
-    needs to see *why* a day is expensive, which a single total cannot show."""
+    hourly: list[tuple[datetime, float, float]] = field(default_factory=list)
+    """Planned net cost and savings per clock hour, for a card to draw.
+
+    Each entry is ``(hour, actual_cost, savings)`` where savings is
+    ``grid_only − actual`` for that hour. Storage carry is a window-level
+    term and is not allocated across hours, so the savings column sums to
+    ``total_savings − storage_carry``, not to ``total_savings`` itself.
+    """
 
     @property
     def solar_savings(self) -> float:
@@ -542,7 +547,9 @@ def forecast_costs(
     buy_hours = buy_weighted = 0.0
     covered = timedelta()
     rows = 0
-    hourly: dict[datetime, float] = {}
+    # Per clock hour: (actual_cost, savings). Savings is grid_only − actual;
+    # carry is applied once at the window end, not here.
+    hourly: dict[datetime, list[float]] = {}
     soc_last: float | None = None
 
     for row in plan.rows:
@@ -596,7 +603,9 @@ def forecast_costs(
         buy_hours += hours
 
         hour = overlap_start.replace(minute=0, second=0, microsecond=0)
-        hourly[hour] = hourly.get(hour, 0.0) + costs.actual
+        bucket = hourly.setdefault(hour, [0.0, 0.0])
+        bucket[0] += costs.actual
+        bucket[1] += costs.grid_only - costs.actual
 
         covered += overlap_end - overlap_start
         rows += 1
@@ -629,7 +638,7 @@ def forecast_costs(
         export_kwh=export_kwh,
         pv_kwh=pv_kwh,
         load_kwh=load_kwh,
-        hourly=sorted(hourly.items()),
+        hourly=sorted((when, cost, save) for when, (cost, save) in hourly.items()),
     )
 
 

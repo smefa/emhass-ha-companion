@@ -9,6 +9,7 @@ venv/
 .github/agents/
 htmlcov/
 dist/
+docs/plan/
 build/
 *.egg-info/
 
@@ -35,4 +36,8 @@ planning/
 
 # Stale host sync snapshots (never ship)
 _host_sync/
+
+# Local frontend preview harnesses (never ship)
+_preview_*.html
+**/_preview-*.html
 
