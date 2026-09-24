@@ -488,9 +488,9 @@ class Forecast:
     """Planned net cost and savings per clock hour, for a card to draw.
 
     Each entry is ``(hour, actual_cost, savings)`` where savings is
-    ``grid_only − actual`` for that hour. Storage carry is a window-level
+    ``grid_only - actual`` for that hour. Storage carry is a window-level
     term and is not allocated across hours, so the savings column sums to
-    ``total_savings − storage_carry``, not to ``total_savings`` itself.
+    ``total_savings - storage_carry``, not to ``total_savings`` itself.
     """
 
     @property
@@ -547,7 +547,7 @@ def forecast_costs(
     buy_hours = buy_weighted = 0.0
     covered = timedelta()
     rows = 0
-    # Per clock hour: (actual_cost, savings). Savings is grid_only − actual;
+    # Per clock hour: (actual_cost, savings). Savings is grid_only - actual;
     # carry is applied once at the window end, not here.
     hourly: dict[datetime, list[float]] = {}
     soc_last: float | None = None
