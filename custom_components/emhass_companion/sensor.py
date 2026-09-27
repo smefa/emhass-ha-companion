@@ -207,12 +207,11 @@ def _end_soc_attributes(data: EmhassData) -> dict[str, Any]:
 def _soc_day_range_attributes(data: EmhassData) -> dict[str, Any]:
     """Today's planned SOC low/high, latched on the coordinator -- see DayRange.
 
-    Read directly rather than recomputed here: the card used to derive this
-    itself from the raw forecast series, which only ever looks forward from
-    whichever run produced it, so a dashboard reloaded after today's peak had
-    already passed could never see it. Latching on the coordinator instead of
-    in the card means every session reads the same answer regardless of when
-    it happened to be open.
+    The published figures are the more extreme of the level the plan already
+    reached today and the level the current plan still has ahead today. A
+    forward-only reading of the forecast drops the morning peak once the
+    optimiser moves past it, and keeping every forecast ever issued keeps a
+    peak the plan has since revised away.
     """
     day_range = data.soc_day_range
     if day_range is None:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 import logging
@@ -12,6 +12,7 @@ from typing import Any
 from homeassistant.components.recorder import get_instance, history
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import Event, EventStateChangedData, HomeAssistant, State, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.event import async_track_state_change_event, async_track_time_interval
 from homeassistant.helpers.storage import Store
@@ -107,6 +108,7 @@ _LOGGER = logging.getLogger(__name__)
 # that recorder history crossing ML_MIN_HISTORY_DAYS is noticed the same day.
 _ML_FIT_RETRY_COOLDOWN = timedelta(hours=1)
 _ML_STORE_VERSION = 1
+_SOC_DAY_STORE_VERSION = 1
 
 # How long the coordinator keeps building the load forecast itself after a run
 # that left that job to EMHASS failed.
@@ -199,22 +201,118 @@ class DemandChargePricing:
 
 @dataclass(slots=True)
 class DayRange:
-    """A running min/max latched across today's local calendar day.
+    """Today's planned SOC low and high.
 
-    The SOC forecast a plan carries is forward-looking from whichever run
-    produced it (EMHASS.retrieve_hass.get_attr_data_dict starts at the current
-    timestep, not at the plan's start), so today's actual peak or dip drops out
-    of the raw series the moment a later run's horizon moves past it -- not
-    just once "now" does. Latching the extremes as each run is seen, on the
-    coordinator rather than in a dashboard card, keeps them correct across
-    every browser tab and page reload for the rest of the day: a client-side
-    latch (tried twice, see the frontend git history) only ever sees what its
-    own session happened to be open for.
+    The number on the status card is the more extreme of two readings, not a
+    forecast that once looked likely:
+
+    * **Past** — plan rows whose time has already arrived, latched so a later
+      run (whose series no longer looks back at them) cannot forget a peak or
+      a trough the day already reached.
+    * **Future** — the current series, for the rest of today only. These are
+      recomputed every run. A peak the optimiser has since revised away must
+      not keep winning just because an earlier plan mentioned it.
+
+    ``low`` / ``high`` are that published answer. ``past_low`` / ``past_high``
+    are only the latched half; tomorrow's rows are in neither.
     """
 
     day: date
+    past_low: Point | None = None
+    past_high: Point | None = None
     low: Point | None = None
     high: Point | None = None
+
+
+def _more_extreme(current: Point | None, point: Point, *, high: bool) -> Point:
+    """The tighter of the two, keeping ``current`` when the values tie."""
+    if current is None:
+        return point
+    if high:
+        return point if point.value > current.value else current
+    return point if point.value < current.value else current
+
+
+def soc_percent_from_state(state: State) -> float | None:
+    """A planned-SOC sensor state as a percentage, or None when it is not one."""
+    try:
+        return float(state.state)
+    except (TypeError, ValueError):
+        return None
+
+
+def recorded_soc_points(states: Iterable[State], now: datetime) -> list[Point]:
+    """Planned-SOC samples already in force today, from recorder states.
+
+    A state still in force at local midnight has ``last_changed`` yesterday.
+    It counts, timestamped at midnight, because that was the level the day
+    opened on. Anything after ``now`` is not history.
+    """
+    start = dt_util.start_of_local_day(dt_util.as_local(now))
+    now_utc = dt_util.as_utc(now)
+    points: list[Point] = []
+    for state in states:
+        value = soc_percent_from_state(state)
+        if value is None:
+            continue
+        when = state.last_changed
+        if when < start:
+            when = start
+        if when > now_utc:
+            continue
+        points.append(Point(dt_util.as_utc(when), value))
+    return points
+
+
+def latch_past_soc(day_range: DayRange, points: Iterable[Point]) -> None:
+    """Fold already-elapsed samples into the past latch. Does not publish."""
+    for point in points:
+        day_range.past_low = _more_extreme(day_range.past_low, point, high=False)
+        day_range.past_high = _more_extreme(day_range.past_high, point, high=True)
+
+
+def publish_soc_day_range(day_range: DayRange, series: Series, now: datetime) -> None:
+    """Publish today's low/high from the past latch and this series.
+
+    Rows at or before ``now`` join the past latch: the next run drops them.
+    Later rows today count toward this answer only, so a revised forecast
+    does not leave a peak or a trough behind. Rows outside the local day,
+    including tomorrow's, are ignored.
+    """
+    start = dt_util.start_of_local_day(dt_util.as_local(now))
+    end = start + timedelta(days=1)
+    now_utc = dt_util.as_utc(now)
+    low = day_range.past_low
+    high = day_range.past_high
+    for point in series:
+        if point.time < start or point.time >= end:
+            continue
+        if point.time <= now_utc:
+            day_range.past_low = _more_extreme(day_range.past_low, point, high=False)
+            day_range.past_high = _more_extreme(day_range.past_high, point, high=True)
+        low = _more_extreme(low, point, high=False)
+        high = _more_extreme(high, point, high=True)
+    day_range.low = low
+    day_range.high = high
+
+
+def _point_to_json(point: Point | None) -> dict[str, Any] | None:
+    if point is None:
+        return None
+    return {"time": point.time.isoformat(), "value": point.value}
+
+
+def _point_from_json(raw: Any) -> Point | None:
+    if not isinstance(raw, dict):
+        return None
+    when = dt_util.parse_datetime(str(raw.get("time") or ""))
+    try:
+        value = float(raw["value"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if when is None:
+        return None
+    return Point(dt_util.as_utc(when), value)
 
 
 @dataclass(slots=True)
@@ -346,10 +444,15 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         # the hysteresis anchor. In-memory only: after a restart the first run
         # simply computes fresh.
         self._end_soc: EndSocDecision | None = None
-        # Today's planned SOC low/high, latched across runs -- see DayRange.
-        # In-memory only, same as _end_soc: after a restart the latch starts
-        # over rather than replaying the part of today already missed.
+        # Today's planned SOC low/high -- see DayRange. The past half is
+        # persisted and, after a restart, filled back in from the planned-SOC
+        # sensor's recorder history so a peak that already happened is not
+        # replaced by whatever the forward series still has ahead.
         self._soc_day_range: DayRange | None = None
+        self._soc_history_merged_day: date | None = None
+        self._soc_day_store: Store[dict[str, Any]] = Store(
+            hass, _SOC_DAY_STORE_VERSION, f"{DOMAIN}_{entry.entry_id}_soc_day"
+        )
 
         self._unsub_tick: Callable[[], None] | None = None
         # Smooths the live PV entity the same way NetHouseLoadSensor smooths
@@ -1023,7 +1126,10 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         horizon_end = window_start + step * inputs.horizon_steps
 
         if plan is not None:
-            self._update_soc_day_range(plan.series("soc_percent"), inputs.now)
+            await self._prepare_soc_day_range(inputs.now)
+            if self._soc_day_range is not None:
+                publish_soc_day_range(self._soc_day_range, plan.series("soc_percent"), inputs.now)
+                await self._save_soc_day_range()
 
         return EmhassData(
             plan=plan,
@@ -1054,27 +1160,94 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             last_success=dt_util.utcnow() if last_run.ok else None,
         )
 
-    def _update_soc_day_range(self, series: Series, now: datetime) -> None:
-        """Latch today's planned SOC low/high onto ``self._soc_day_range``.
+    async def _prepare_soc_day_range(self, now: datetime) -> None:
+        """Make sure today's past latch exists before this run publishes.
 
-        See DayRange for why this has to live here rather than in a dashboard
-        card: a run's series only ever looks forward from itself, so the
-        running extreme has to be carried forward across runs by something
-        that outlives a single card instance.
+        Restored from disk when the day matches, then filled from recorder
+        history once per local day. History is what puts back a peak from
+        earlier today after a restart: the forward series no longer contains
+        it, and the previous process's memory is gone.
         """
-        local_now = dt_util.as_local(now)
-        today = local_now.date()
+        today = dt_util.as_local(now).date()
         if self._soc_day_range is None or self._soc_day_range.day != today:
-            self._soc_day_range = DayRange(day=today)
-        start = dt_util.start_of_local_day(local_now)
-        end = start + timedelta(days=1)
-        for point in series:
-            if point.time < start or point.time >= end:
-                continue
-            if self._soc_day_range.low is None or point.value < self._soc_day_range.low.value:
-                self._soc_day_range.low = point
-            if self._soc_day_range.high is None or point.value > self._soc_day_range.high.value:
-                self._soc_day_range.high = point
+            self._soc_day_range = await self._load_soc_day_range(today) or DayRange(day=today)
+            self._soc_history_merged_day = None
+        if self._soc_history_merged_day != today and await self._merge_recorded_soc(now):
+            self._soc_history_merged_day = today
+
+    async def _load_soc_day_range(self, today: date) -> DayRange | None:
+        try:
+            stored = await self._soc_day_store.async_load()
+        except Exception:  # a missing store must not block the run
+            _LOGGER.debug("Could not load the SOC day range", exc_info=True)
+            return None
+        if not isinstance(stored, dict) or stored.get("day") != today.isoformat():
+            return None
+        return DayRange(
+            day=today,
+            past_low=_point_from_json(stored.get("past_low")),
+            past_high=_point_from_json(stored.get("past_high")),
+        )
+
+    def _planned_soc_entity_id(self) -> str | None:
+        """The planned battery-level sensor, looked up so a rename still hits."""
+        return er.async_get(self.hass).async_get_entity_id(
+            "sensor", DOMAIN, f"{self.config_entry.entry_id}_battery_soc"
+        )
+
+    async def _merge_recorded_soc(self, now: datetime) -> bool:
+        """Fold today's recorded planned SOC into the past latch.
+
+        Returns whether history was actually consulted. False leaves the next
+        run to try again -- the sensor may not be registered on the first
+        cycle, and a recorder blip should not drop the rest of the day.
+        """
+        if self._soc_day_range is None:
+            return False
+        entity_id = self._planned_soc_entity_id()
+        if entity_id is None:
+            return False
+        start = dt_util.start_of_local_day(dt_util.as_local(now))
+        try:
+            instance = get_instance(self.hass)
+        except (KeyError, RuntimeError):
+            return False
+
+        def read() -> list[Point]:
+            found = history.state_changes_during_period(
+                self.hass,
+                start,
+                dt_util.as_utc(now),
+                entity_id,
+                True,  # no_attributes -- only the percentage is used
+                False,  # descending
+                None,  # limit
+                True,  # include_start_time_state
+            )
+            return recorded_soc_points(found.get(entity_id, []), now)
+
+        try:
+            points = await instance.async_add_executor_job(read)
+        except Exception:  # a history probe must never break a run
+            _LOGGER.debug("Could not read today's planned SOC history", exc_info=True)
+            return False
+        latch_past_soc(self._soc_day_range, points)
+        return True
+
+    async def _save_soc_day_range(self) -> None:
+        day_range = self._soc_day_range
+        if day_range is None:
+            return
+        try:
+            await self._soc_day_store.async_save(
+                {
+                    "day": day_range.day.isoformat(),
+                    "past_low": _point_to_json(day_range.past_low),
+                    "past_high": _point_to_json(day_range.past_high),
+                }
+            )
+        except Exception:  # losing the latch is recoverable from history
+            _LOGGER.debug("Could not store the SOC day range", exc_info=True)
 
     def _schema_supported(self, plan: Plan) -> bool:
         """Refuse a plan written to a schema major we do not understand.

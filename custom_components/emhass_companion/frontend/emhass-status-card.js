@@ -59,13 +59,14 @@ const SOC_LOW_PCT = 20;
  * A lone fill answers "how full is it", which is the one thing a battery
  * owner can already read off their inverter. What a *plan* bar is for is the
  * comparison, so this draws four things on one rail: the level the plan has
- * for right now (the fill), the peak the plan is steering towards (a lighter
- * band carrying on from it), the lowest level it dips to on the way (a quiet
- * tick), and the measured level as a marker. A visible gap between the marker
- * and the fill is a plan running on a stale SOC -- which is invisible on any
- * single-value display. The low is the other half of the same question: a plan
- * that ends the day full can still empty the battery at 3pm, and neither the
- * fill nor the peak band ever says so.
+ * for right now (the fill), the highest level planned for today (a lighter
+ * band) whether that high is still ahead or already past, the lowest level
+ * planned for today (a quiet tick) on the same rule, and the measured level
+ * as a marker. A visible gap between the marker and the fill is a plan
+ * running on a stale SOC -- which is invisible on any single-value display.
+ * The low is the other half of the same question: a plan that ends the day
+ * full can still empty the battery at 3pm, and neither the fill nor the
+ * peak band ever says so.
  */
 function socBar(parent, label, tooltip) {
   const root = tag("div", "soc", parent);
@@ -701,16 +702,11 @@ class EmhassStatusCard extends LiveCard {
   /**
    * Today's planned low and high.
    *
-   * The SOC forecast is forward-looking from whichever run produced it, so a
-   * later run drops the portion of today it no longer looks back on -- a
-   * morning peak or dip vanishes from the raw series once the optimiser
-   * moves past it, not just once "now" moves past it. Latching that on the
-   * card itself (tried twice: bounding to today's calendar day alone still
-   * recedes, and a per-instance latch only ever sees what its own browser
-   * session was open for) is why this still receded after a reload or a
-   * dashboard reopened later in the day. The coordinator now latches it
-   * instead -- see DayRange in coordinator.py -- so this just reads what the
-   * backend already worked out, the same as every other box on this card.
+   * Whichever is more extreme: the level the plan already reached today, or
+   * the level the current plan still has ahead today. The forecast series on
+   * this sensor is only the part still ahead, so the morning peak is not in
+   * it; the coordinator publishes the combined answer as day_low / day_high
+   * (see DayRange in coordinator.py). This just reads that.
    */
   _socDayRange(soc) {
     const attrs = soc && soc.attributes ? soc.attributes : {};
