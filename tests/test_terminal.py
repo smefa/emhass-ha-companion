@@ -13,10 +13,11 @@ which matters most for the rules that do *not* ship, and matters again every
 time the active one changes.
 
 Scenarios about the shared machinery -- the price and PV proxies, the load
-source, hysteresis, the unreachable annotation -- pin the night cover as the
+source, hysteresis, the unreachable annotation -- pin the priced cover as the
 active rule too. Any candidate would exercise those paths; naming one keeps the
 expected numbers arithmetic rather than whatever the shipping rule happens to
-compute this month.
+compute this month. With published prices for the whole window its merit order
+is inert, so its answer is the bare night cover.
 """
 
 from __future__ import annotations
@@ -53,8 +54,7 @@ from custom_components.emhass_companion.terminal import (
     SALE_NO_MARGIN,
     SALE_NO_SELL_PRICE,
     SALE_PRICES_UNPUBLISHED,
-    TEST_DAILY_RATIO,
-    TEST_NIGHT_COVER,
+    TEST_CENTRED,
     TEST_PRICED_COVER,
     TEST_SHADOW_PLAN,
     decide_end_soc,
@@ -143,7 +143,7 @@ def test_fixed_50_respects_the_soc_range():
 
 
 def test_flat_prices_mean_refill_anytime_so_hold_only_the_reserve(active):
-    active(TEST_NIGHT_COVER)
+    active(TEST_PRICED_COVER)
     decision = _decide()
     assert decision.details["replenishment_kind"] == REPLENISH_CHEAP_GRID
     assert decision.soc == pytest.approx(0.30)
@@ -154,7 +154,7 @@ def test_flat_prices_mean_refill_anytime_so_hold_only_the_reserve(active):
 
 def test_solar_wins_over_an_earlier_cheap_price(active):
     """Free PV always outranks grid price, however soon the price dips."""
-    active(TEST_NIGHT_COVER)
+    active(TEST_PRICED_COVER)
     # Same price curve as the cheap-night test: cheap at tail hour 2 (26).
     prices = [1.0] * 12 + [2.0] * 14 + [1.0] + [2.0] * 21
     # A material PV block starts at tail hour 5 (29) -- later than the price
@@ -172,7 +172,7 @@ def test_solar_wins_over_an_earlier_cheap_price(active):
 
 def test_a_weak_pv_blip_does_not_preempt_the_cheap_price_fallback(active):
     """Winter: a PV glint too small to matter still falls back to price."""
-    active(TEST_NIGHT_COVER)
+    active(TEST_PRICED_COVER)
     prices = [1.0] * 12 + [2.0] * 14 + [1.0] + [2.0] * 21
     # Surplus of 200 W for one hour = 200 Wh, short of the 1000 Wh (10 % of
     # 10 kWh) material threshold, and it never accumulates further.
@@ -186,7 +186,7 @@ def test_a_weak_pv_blip_does_not_preempt_the_cheap_price_fallback(active):
 
 def test_a_missing_price_tail_borrows_todays_curve_and_says_so(active):
     """Before ~13:00 tomorrow's Nordpool prices do not exist yet."""
-    active(TEST_NIGHT_COVER)
+    active(TEST_PRICED_COVER)
     # Only 24 h of prices: cheap night hours 0-5, expensive rest. The proxy
     # shifts them a day, so tail hour 24 looks like hour 0: cheap at once.
     prices = [1.0] * 6 + [2.0] * 18
@@ -194,7 +194,8 @@ def test_a_missing_price_tail_borrows_todays_curve_and_says_so(active):
 
     assert decision.details["price_tail"] == PRICE_TAIL_PROXY
     assert decision.details["replenishment_kind"] == REPLENISH_CHEAP_GRID
-    assert decision.soc == pytest.approx(0.30)
+    # The cover is nil; the merit order is free to lift past it on a 24 h curve.
+    assert decision.details["cover_energy_wh"] == 0
 
 
 def test_a_missing_pv_tail_assumes_darkness_and_says_so():
@@ -217,7 +218,7 @@ def test_a_borrowed_load_source_is_recorded_verbatim():
 
 def test_an_unreachable_target_is_annotated_not_clamped(active):
     """From EMHASS 0.18 the solver degrades softly; we only explain."""
-    active(TEST_NIGHT_COVER)
+    active(TEST_PRICED_COVER)
     prices = [1.0] * 12 + [2.0] * 14 + [1.0] + [2.0] * 21
     decision = _decide(
         buy_price=_series(prices),
@@ -232,7 +233,7 @@ def test_an_unreachable_target_is_annotated_not_clamped(active):
 def test_a_charge_taper_can_make_an_otherwise_reachable_target_unreachable(active):
     """Flat 5 kW would fill 10 kWh in two hours; above 15% SOC the table
     allows only 50 W, which cannot climb from 0.10 to the 0.50 cover in 24 h."""
-    active(TEST_NIGHT_COVER)
+    active(TEST_PRICED_COVER)
     prices = [1.0] * 12 + [2.0] * 14 + [1.0] + [2.0] * 21
     reachable = _decide(
         buy_price=_series(prices),
@@ -255,7 +256,7 @@ def test_a_charge_taper_can_make_an_otherwise_reachable_target_unreachable(activ
 
 
 def test_hysteresis_holds_the_previous_target_against_jitter(active):
-    active(TEST_NIGHT_COVER)
+    active(TEST_PRICED_COVER)
     prices = [1.0] * 12 + [2.0] * 14 + [1.0] + [2.0] * 21
     first = _decide(buy_price=_series(prices))
     assert first.soc == pytest.approx(0.50)
@@ -290,15 +291,15 @@ def test_missing_inputs_fall_back_to_the_start_soc_with_the_cause():
 
 def test_a_fallback_decision_is_no_hysteresis_anchor(active):
     """A pin to the drifting live SOC must not hold the next real target."""
-    active(TEST_NIGHT_COVER)
+    active(TEST_PRICED_COVER)
     fallback = _decide(load=None, soc_init=0.51)
     prices = [1.0] * 12 + [2.0] * 14 + [1.0] + [2.0] * 21
     decision = _decide(buy_price=_series(prices), previous=fallback)
     assert decision.soc == pytest.approx(0.50)
-    assert decision.details.get("clamped_by") is None
+    assert decision.details.get("clamped_by") != "hysteresis"
 
 
-# --- test 4: the night cover, the shipping rule ------------------------------
+# --- the cover floor under Tests 6 and 8 -------------------------------------
 
 
 def _cover_day(**overrides):
@@ -317,10 +318,10 @@ def _cover_day(**overrides):
 
 def test_the_night_cover_carries_what_the_house_needs_until_sunrise(active):
     """8 tail hours at 500 W = 4000 Wh on top of the reserve."""
-    active(TEST_NIGHT_COVER)
+    active(TEST_PRICED_COVER)
     decision = _cover_day()
 
-    assert decision.details["active_test"] == TEST_NIGHT_COVER
+    assert decision.details["active_test"] == TEST_PRICED_COVER
     assert decision.soc == pytest.approx(0.70)
     assert decision.details["cover_energy_wh"] == 4000
     assert decision.details["replenishment_kind"] == REPLENISH_SOLAR
@@ -329,7 +330,7 @@ def test_the_night_cover_carries_what_the_house_needs_until_sunrise(active):
 
 def test_sun_arriving_at_the_pin_needs_no_cover_at_all(active):
     """The other end of the same rule: at dawn, ending on the reserve is right."""
-    active(TEST_NIGHT_COVER)
+    active(TEST_PRICED_COVER)
     prices = [1.0 + i * 0.01 for i in range(48)]
     # Surplus from the first tail hour onwards.
     pv = _series([0.0] * 24 + [5000.0] * 8 + [0.0] * 16)
@@ -348,7 +349,7 @@ def test_a_pin_inside_a_weak_morning_still_carries_the_night_behind_it(active):
     the day cannot pay for. The walk credits the day's 2 kWh against the 6 kWh
     night that follows and carries the difference.
     """
-    active(TEST_NIGHT_COVER)
+    active(TEST_PRICED_COVER)
     prices = [1.0 + i * 0.01 for i in range(48)]
     # Tail hours 0-3: 1000 W against a 500 W load = 2000 Wh banked. Then 12 h
     # of darkness at 500 W = 6000 Wh, and sunrise again at tail hour 16.
@@ -366,7 +367,7 @@ def test_darkness_past_the_last_sunrise_is_not_a_night_to_cover(active):
     which is a property of a 24 h window rather than of the world. Left in, it
     would propagate back and pin every sunny day at soc_max.
     """
-    active(TEST_NIGHT_COVER)
+    active(TEST_PRICED_COVER)
     decision = _cover_day()
 
     # 11 dark tail hours follow the block; only the 8 before it are covered.
@@ -380,7 +381,7 @@ def test_a_sunless_lookahead_ends_the_night_at_the_cheapest_hour(active):
     Without this the cover would run the whole 24 h and pin at soc_max, which
     is the hoarding the feature exists to end.
     """
-    active(TEST_NIGHT_COVER)
+    active(TEST_PRICED_COVER)
     prices = [1.0] * 12 + [2.0] * 14 + [1.0] + [2.0] * 21
     decision = _decide(buy_price=_series(prices))
 
@@ -391,7 +392,7 @@ def test_a_sunless_lookahead_ends_the_night_at_the_cheapest_hour(active):
 
 
 def test_a_sunless_lookahead_with_no_trough_holds_the_whole_stretch(active):
-    active(TEST_NIGHT_COVER)
+    active(TEST_PRICED_COVER)
     prices = [1.0 + i * 0.01 for i in range(48)]
     decision = _decide(buy_price=_series(prices))
 
@@ -402,7 +403,7 @@ def test_a_sunless_lookahead_with_no_trough_holds_the_whole_stretch(active):
 
 def test_a_guessed_sunrise_may_not_shorten_the_cover_either(active):
     """Proxied PV is darkness to the walk, as it is to Test 1's bridge."""
-    active(TEST_NIGHT_COVER)
+    active(TEST_PRICED_COVER)
     prices = [1.0 + i * 0.01 for i in range(48)]
     # PV known for 30 h only; the tail's sun is the previous day's shape.
     pv = _series([0.0] * 8 + [4000.0] * 6 + [0.0] * 16)
@@ -414,7 +415,7 @@ def test_a_guessed_sunrise_may_not_shorten_the_cover_either(active):
     assert decision.soc == 0.90
 
 
-# --- test 4: the priced exception --------------------------------------------
+# --- the cover floor: the priced exception ----------------------------------
 
 
 def _sale_day(sell: list[float] | None = None, **overrides):
@@ -441,7 +442,7 @@ def test_a_peak_worth_more_than_buying_it_back_sells_part_of_the_cover(active):
     Capped by what can physically leave: 1 kW of export over the 24 horizon
     hours = 24 kWh offered, more than the 4 kWh cover, so the cover caps it.
     """
-    active(TEST_NIGHT_COVER)
+    active(TEST_PRICED_COVER)
     decision = _sale_day()
 
     assert decision.details["sale_energy_wh"] == 4000
@@ -453,7 +454,7 @@ def test_a_peak_worth_more_than_buying_it_back_sells_part_of_the_cover(active):
 
 def test_a_sale_releases_only_what_fits_in_the_profitable_hours(active):
     """One hour above the bar at 1 kW releases 1 kWh, not the night."""
-    active(TEST_NIGHT_COVER)
+    active(TEST_PRICED_COVER)
     decision = _sale_day(sell=[3.0] + [0.10] * 47)
 
     assert decision.details["sale_energy_wh"] == 1000
@@ -463,7 +464,7 @@ def test_a_sale_releases_only_what_fits_in_the_profitable_hours(active):
 
 def test_a_spread_that_does_not_clear_the_wear_sells_nothing(active):
     """The summer case on this house's tariff: the cover is carried whole."""
-    active(TEST_NIGHT_COVER)
+    active(TEST_PRICED_COVER)
     decision = _sale_day(
         sell=[0.25] * 48,
         battery=_battery(weight_battery_discharge=0.10, weight_battery_charge=0.0),
@@ -480,7 +481,7 @@ def test_a_proxied_overnight_price_may_never_talk_the_cover_down(active):
     curve shifted -- and a sale priced against it would empty the battery on
     the strength of a market that has not opened.
     """
-    active(TEST_NIGHT_COVER)
+    active(TEST_PRICED_COVER)
     decision = _sale_day(buy_price=_series([1.0] * 12 + [0.20] * 12))
 
     assert decision.details["price_tail"] == PRICE_TAIL_PROXY
@@ -489,7 +490,7 @@ def test_a_proxied_overnight_price_may_never_talk_the_cover_down(active):
 
 
 def test_no_sell_price_means_the_cover_is_carried_whole(active):
-    active(TEST_NIGHT_COVER)
+    active(TEST_PRICED_COVER)
     decision = _cover_day()
     assert decision.details["sale_blocked"] == SALE_NO_SELL_PRICE
     assert decision.soc == pytest.approx(0.70)
@@ -511,34 +512,36 @@ def _published_horizon(prices: list[float], **overrides):
     return _decide(**kwargs)
 
 
-def test_a_cheap_horizon_against_an_expensive_tail_carries_more_than_the_night():
-    """The winter trade nothing else here can make.
+def test_a_cheap_horizon_against_an_expensive_tail_carries_more_than_the_night(active):
+    """The winter trade a bare cover can never make.
 
     Prices published for today only: a 0.20 trough tonight, inside the horizon,
     against a 3.00 evening that the proxy puts just past the pin. Buying the
     trough forward beats importing at 3.00, so the merit order arrives heavier
-    than the house physically needs -- which is the one thing Test 4's floor
-    can never do.
+    than the house physically needs.
     """
+    active(TEST_PRICED_COVER)
     prices = [0.20] * 6 + [1.0] * 12 + [3.0] * 6
-    tests = _published_horizon(prices).details["tests"]
+    details = _published_horizon(prices).details
 
-    assert tests[TEST_PRICED_COVER]["soc"] > tests[TEST_NIGHT_COVER]["soc"]
+    assert details["priced_energy_wh"] > details["cover_energy_wh"]
 
 
-def test_the_merit_order_never_plans_below_the_night_cover():
-    """Its floor is Test 4's answer, and the backtest is why.
+def test_the_merit_order_never_plans_below_the_night_cover(active):
+    """Its floor is the physical cover net of any sale, and the backtest is why.
 
     The same ladder free to undercut the physical cover scored 1.70 SEK of mean
     regret against 1.12 floored here. Lifting is where the idea pays.
     """
+    active(TEST_PRICED_COVER)
     for prices in (
         [1.0] * 12 + [2.0] * 14 + [1.0] + [2.0] * 21,  # a published trough
         [2.0] * 48,  # flat
         [1.0 + i * 0.01 for i in range(48)],  # nothing cheap anywhere
     ):
-        tests = _decide(buy_price=_series(prices)).details["tests"]
-        assert tests[TEST_PRICED_COVER]["soc"] >= tests[TEST_NIGHT_COVER]["soc"]
+        details = _decide(buy_price=_series(prices)).details
+        floor_wh = details["cover_energy_wh"] - details.get("sale_energy_wh", 0)
+        assert details["carry_energy_wh"] >= floor_wh
 
 
 def test_a_tail_that_can_refill_itself_more_cheaply_caps_what_carrying_is_worth(active):
@@ -647,6 +650,63 @@ def test_a_battery_with_no_room_to_plan_in_degrades_to_the_floor():
     assert decision.soc == pytest.approx(0.40)
 
 
+# --- test 8: the shadow plan, centred pin ------------------------------------
+
+
+def _peak_day(**overrides):
+    """A published horizon with a mild evening peak and a sunny day past the pin."""
+    spot = [0.5 + 0.02 * (i % 5) for i in range(24)]
+    for hour in (6, 7, 8):
+        spot[hour] = 1.0
+    kwargs = dict(
+        buy_price=_series([1.25 * value + 0.8 for value in spot]),
+        sell_price=_series(spot),
+        pv=_series([0.0] * 32 + [5000.0] * 6 + [0.0] * 10),
+        load=_series([500.0] * 48),
+    )
+    kwargs.update(overrides)
+    return _decide(**kwargs)
+
+
+def test_the_centred_pin_sits_inside_the_band_the_plan_calls_equivalent(active):
+    active(TEST_CENTRED)
+    decision = _peak_day()
+
+    assert decision.details["band_low"] <= decision.soc <= decision.details["band_high"]
+    assert decision.details["band_high"] >= decision.details["plan_soc"] - 1e-9
+
+
+def test_the_centred_pin_never_arrives_heavier_than_the_plan():
+    """Test 7 takes the top of the flat; taking the middle can only be lower."""
+    tests = _peak_day().details["tests"]
+
+    assert tests[TEST_CENTRED]["soc"] <= tests[TEST_SHADOW_PLAN]["soc"] + 1e-9
+
+
+def test_a_flat_cost_curve_takes_the_middle_not_the_top(active):
+    """Flat prices, no sun and a battery that can carry everything: every pin ties."""
+    active(TEST_CENTRED)
+    decision = _decide(
+        buy_price=_series([1.0] * 48),
+        sell_price=_series([1.0] * 48),
+        pv=_series([0.0] * 48),
+        load=_series([0.0] * 48),
+    )
+
+    assert decision.details["band_high"] > decision.details["band_low"]
+    middle = (decision.details["band_low"] + decision.details["band_high"]) / 2
+    assert decision.soc == pytest.approx(middle, abs=0.05)
+    assert decision.soc < decision.details["plan_soc"]
+
+
+def test_centred_with_no_room_to_plan_degrades_to_the_floor(active):
+    active(TEST_CENTRED)
+    decision = _decide(battery=_battery(soc_min=0.40, soc_max=0.40, soc_target=0.40))
+
+    assert decision.details["solver"] == "degenerate"
+    assert decision.soc == pytest.approx(0.40)
+
+
 # --- the candidate registry --------------------------------------------------
 
 
@@ -678,27 +738,16 @@ def test_the_active_candidate_is_the_one_that_drives_the_plan():
 
 
 def test_the_slate_is_the_one_the_backtest_left():
-    """Tests 1, 2 and 5 were retired on the numbers; their keys are not reused."""
+    """Tests 1-5 were retired; their keys are not reused."""
     keys = [candidate.key for candidate in CANDIDATES]
 
-    assert keys == [TEST_DAILY_RATIO, TEST_NIGHT_COVER, TEST_PRICED_COVER, TEST_SHADOW_PLAN]
+    assert keys == [TEST_PRICED_COVER, TEST_SHADOW_PLAN, TEST_CENTRED]
     assert ACTIVE_CANDIDATE == TEST_SHADOW_PLAN
-
-
-def test_the_template_candidate_reads_daily_yields():
-    """Test 3 ports the Jinja template: drift on tomorrow-minus-today."""
-    # T0 is 12:00 UTC, so "today" catches hours 0-11 and "tomorrow" 12-35.
-    pv = [1000.0] * 4 + [0.0] * 20 + [2000.0] * 6 + [0.0] * 18
-    decision = _decide(pv=_series(pv))
-
-    # today 4 kWh, tomorrow 12 kWh -> drift +0.2 * 0.4 on a 0.50 start SOC;
-    # the sliding floor is 0.5 - (12/40) * 0.4 = 0.38, so the drift wins.
-    assert decision.details["tests"][TEST_DAILY_RATIO]["soc"] == pytest.approx(0.58)
 
 
 def test_the_candidate_answers_are_recorded_before_hysteresis(active):
     """The pin may be held back; what each idea actually computed is not."""
-    active(TEST_NIGHT_COVER)
+    active(TEST_PRICED_COVER)
     prices = [1.0] * 12 + [2.0] * 14 + [1.0] + [2.0] * 21
     first = _decide(buy_price=_series(prices))
     second = _decide(
@@ -708,4 +757,4 @@ def test_the_candidate_answers_are_recorded_before_hysteresis(active):
     )
 
     assert second.soc == first.soc
-    assert second.details["tests"][TEST_NIGHT_COVER]["soc"] == pytest.approx(0.51)
+    assert second.details["tests"][TEST_PRICED_COVER]["soc"] == pytest.approx(0.51)
