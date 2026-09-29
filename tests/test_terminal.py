@@ -5,7 +5,7 @@ assertions state what the freed target should be instead. Times are UTC and
 hourly to keep the arithmetic legible: capacity 10 kWh, so every 1000 Wh of
 cover energy is exactly 0.1 SOC.
 
-Every candidate runs on every call, but only :data:`ACTIVE_CANDIDATE` reaches
+Only :data:`ACTIVE_CANDIDATE` is computed at run time, and it alone reaches
 ``decision.soc`` and ``decision.details``. Scenarios that check one candidate's
 own arithmetic say which with the ``active`` fixture, so a scenario reads as a
 claim about a named rule rather than about whichever rule happens to ship --
@@ -321,7 +321,6 @@ def test_the_night_cover_carries_what_the_house_needs_until_sunrise(active):
     active(TEST_PRICED_COVER)
     decision = _cover_day()
 
-    assert decision.details["active_test"] == TEST_PRICED_COVER
     assert decision.soc == pytest.approx(0.70)
     assert decision.details["cover_energy_wh"] == 4000
     assert decision.details["replenishment_kind"] == REPLENISH_SOLAR
@@ -668,22 +667,25 @@ def _peak_day(**overrides):
     return _decide(**kwargs)
 
 
-def test_the_centred_pin_sits_inside_the_band_the_plan_calls_equivalent(active):
+def test_the_centred_pin_is_never_above_the_top_of_the_band_nor_under_the_reserve(active):
     active(TEST_CENTRED)
     decision = _peak_day()
 
-    assert decision.details["band_low"] <= decision.soc <= decision.details["band_high"]
-    assert decision.details["band_high"] >= decision.details["plan_soc"] - 1e-9
+    assert decision.soc <= decision.details["band_high"] + 1e-9
+    assert decision.soc >= 0.30 - 1e-9
 
 
-def test_the_centred_pin_never_arrives_heavier_than_the_plan():
-    """Test 7 takes the top of the flat; taking the middle can only be lower."""
-    tests = _peak_day().details["tests"]
+def test_the_centred_pin_never_arrives_heavier_than_the_plan(active):
+    """Test 7 takes the top of the flat; the middle less a shift can only be lower."""
+    active(TEST_SHADOW_PLAN)
+    plan = _peak_day().soc
+    active(TEST_CENTRED)
+    centred = _peak_day().soc
 
-    assert tests[TEST_CENTRED]["soc"] <= tests[TEST_SHADOW_PLAN]["soc"] + 1e-9
+    assert centred <= plan + 1e-9
 
 
-def test_a_flat_cost_curve_takes_the_middle_not_the_top(active):
+def test_a_flat_cost_curve_takes_the_middle_less_the_shift(active):
     """Flat prices, no sun and a battery that can carry everything: every pin ties."""
     active(TEST_CENTRED)
     decision = _decide(
@@ -695,8 +697,17 @@ def test_a_flat_cost_curve_takes_the_middle_not_the_top(active):
 
     assert decision.details["band_high"] > decision.details["band_low"]
     middle = (decision.details["band_low"] + decision.details["band_high"]) / 2
-    assert decision.soc == pytest.approx(middle, abs=0.05)
-    assert decision.soc < decision.details["plan_soc"]
+    assert decision.soc == pytest.approx(middle - terminal.CENTRE_SHIFT, abs=0.05)
+    assert decision.soc < decision.details["band_high"]
+
+
+def test_the_shift_cannot_push_the_pin_under_the_reserve(active, monkeypatch):
+    """A band that starts at the reserve is shifted up against it, not through it."""
+    monkeypatch.setattr(terminal, "CENTRE_SHIFT", 0.5)
+    active(TEST_CENTRED)
+    decision = _peak_day()
+
+    assert decision.soc == pytest.approx(0.30)
 
 
 def test_centred_with_no_room_to_plan_degrades_to_the_floor(active):
@@ -719,22 +730,21 @@ def _big_solar_day():
     )
 
 
-def test_every_candidate_reports_its_own_answer():
-    decision = _big_solar_day()
-    tests = decision.details["tests"]
-
-    assert set(tests) == {candidate.key for candidate in CANDIDATES}
+def test_every_candidate_answers_when_it_is_the_active_one(active):
     for candidate in CANDIDATES:
-        entry = tests[candidate.key]
-        assert entry["label"] == candidate.label
-        assert 0.0 <= entry["soc"] <= 1.0
-        assert entry["reason"]
+        active(candidate.key)
+        decision = _big_solar_day()
+
+        assert 0.0 <= decision.soc <= 1.0
+        assert decision.reason
 
 
-def test_the_active_candidate_is_the_one_that_drives_the_plan():
-    decision = _big_solar_day()
-    assert decision.details["active_test"] == ACTIVE_CANDIDATE
-    assert decision.details["tests"][ACTIVE_CANDIDATE]["soc"] == decision.soc
+def test_the_decision_carries_no_candidate_comparison():
+    """The sensor reports the number that drives the plan and why, not the rivals."""
+    details = _big_solar_day().details
+
+    assert "tests" not in details
+    assert "active_test" not in details
 
 
 def test_the_slate_is_the_one_the_backtest_left():
@@ -742,11 +752,11 @@ def test_the_slate_is_the_one_the_backtest_left():
     keys = [candidate.key for candidate in CANDIDATES]
 
     assert keys == [TEST_PRICED_COVER, TEST_SHADOW_PLAN, TEST_CENTRED]
-    assert ACTIVE_CANDIDATE == TEST_SHADOW_PLAN
+    assert ACTIVE_CANDIDATE == TEST_CENTRED
 
 
-def test_the_candidate_answers_are_recorded_before_hysteresis(active):
-    """The pin may be held back; what each idea actually computed is not."""
+def test_the_raw_answer_is_kept_when_hysteresis_holds_the_pin_back(active):
+    """The pin may be held back; what the rule actually computed is not lost."""
     active(TEST_PRICED_COVER)
     prices = [1.0] * 12 + [2.0] * 14 + [1.0] + [2.0] * 21
     first = _decide(buy_price=_series(prices))
@@ -757,4 +767,4 @@ def test_the_candidate_answers_are_recorded_before_hysteresis(active):
     )
 
     assert second.soc == first.soc
-    assert second.details["tests"][TEST_PRICED_COVER]["soc"] == pytest.approx(0.51)
+    assert second.details["raw_target"] == pytest.approx(0.51)

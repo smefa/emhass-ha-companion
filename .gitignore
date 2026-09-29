@@ -41,3 +41,6 @@ _host_sync/
 _preview_*.html
 **/_preview-*.html
 
+
+# Private consumption history for the end-SOC backtest (see tools/end_soc_bench/README.md)
+tools/end_soc_bench/data/

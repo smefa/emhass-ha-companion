@@ -7,7 +7,7 @@ API has no way to say "you decide" -- a terminal condition is always the
 caller's job -- so this module is where the companion decides what stored
 energy is worth having when the known world ends.
 
-Optimized mode is governed by one rule (:func:`_shadow_plan`, Test 7):
+Optimized mode is governed by one rule (:func:`_shadow_centred`, Test 8):
 
     **Plan the whole window that can be seen -- the horizon and the 24 h past
     it -- and take the SOC that plan holds when the horizon runs out.**
@@ -28,11 +28,13 @@ will cost roughly what it costs today, and has nothing left to arbitrage. That
 is this module's oldest discipline in a new form -- see :func:`_sale_credit`,
 which refuses the same trade by refusing to price it.
 
-The rules it replaced are still computed on every run, and the asymmetry they
-were built on still holds and still shows up in the tie-breaks: arriving short
-means importing across a night at ``spot x multiplier + adder`` while the cheap
-way to fill a battery, sunlight, is hours away; arriving heavy costs at most a
-spread. Where the plan is indifferent, it arrives heavy.
+The rules it replaced are kept for the backtest, and the asymmetry they were
+built on still holds: arriving short means importing across a night at
+``spot x multiplier + adder`` while the cheap way to fill a battery, sunlight,
+is hours away; arriving heavy costs at most a spread. Where the plan is
+indifferent this rule takes the middle of the flat and then a little under it,
+because the backtest found the perfect-foresight pin sitting below the top of
+the flat far more often than above it.
 
 Everything here is pure computation on :class:`~.models.Series`; fetching them
 is the coordinator's job.
@@ -40,21 +42,20 @@ is the coordinator's job.
 Candidates
 ----------
 
-There is no ground truth for a terminal-value heuristic by inspection, so this
-module computes *several* and reports them all. :data:`CANDIDATES` is evaluated
-in full on every run against one shared view of the world (:class:`_Tail`);
-:data:`ACTIVE_CANDIDATE` names the one whose number actually reaches EMHASS.
-The rest ride along in the End SOC sensor's ``tests`` attribute, where recorded
-history says which one should have been driving.
+There is no ground truth for a terminal-value heuristic by inspection, so the
+rules are ranked by backtest (``tools/end_soc_bench``), which replays every
+entry in :data:`CANDIDATES` against years of this house's own history and
+scores each against a perfect-foresight dispatch. Only the one named by
+:data:`ACTIVE_CANDIDATE` is computed at run time and reaches EMHASS; the rest
+stay registered so the backtest can keep comparing against them.
 
 Adding another is three lines: write ``_my_idea(tail) -> EndSocDecision``, add
 ``_Candidate("my_idea", "Test 9 -- my idea", _my_idea)`` to :data:`CANDIDATES`,
-and it shows up in the sensor on the next run. Point :data:`ACTIVE_CANDIDATE`
-at it to promote it.
+run the backtest, and point :data:`ACTIVE_CANDIDATE` at it to promote it.
 
-A candidate's *key* is what recorded history is keyed on, so editing one in
-place silently rebases that history: improvements go in as a new candidate
-rather than as a change to an old one, and a retired number is never reused.
+A candidate's *key* names it in every backtest report, so improvements go in as
+a new candidate rather than as a change to an old one, and a retired number is
+never reused.
 Tests 1, 2 and 5 were retired on 2026-08-12 after a backtest over 685 real days
 of this house (8106 decisions, priced against a perfect-foresight dispatch)
 found all three dominated by Test 4 in every season -- Test 1 returned the same
@@ -166,6 +167,11 @@ PIN_TOLERANCE: float = 0.05
 # middle of them. Flat between 0.5 and 1.0 in the backtest (mean regret 0.77-0.78
 # against 0.93 for Test 7); past 2 it starts to give the gain back.
 CENTRE_TOLERANCE: float = 0.75
+
+# SOC Test 8 then takes off the middle of that band. Mean regret 0.77 -> 0.72 over
+# 685 days, better in 26 of 27 months; the gain flattens by 0.075 while the worst
+# single decision keeps growing (13 -> 15 -> 17 SEK at 0, 0.05, 0.10).
+CENTRE_SHIFT: float = 0.05
 
 # How far a reconstructed import tariff may miss the tail's own prices before
 # it stops being believed, as a fraction of the mean price.
@@ -381,27 +387,14 @@ def decide_end_soc(
         load_source=load_source,
     )
 
-    results = {candidate.key: candidate.compute(tail) for candidate in CANDIDATES}
-    decision = results[ACTIVE_CANDIDATE]
+    active = next(candidate for candidate in CANDIDATES if candidate.key == ACTIVE_CANDIDATE)
+    decision = active.compute(tail)
     decision.details.update(
         mode=END_SOC_OPTIMIZED,
         reserve=round(tail.reserve, 4),
         price_tail=PRICE_TAIL_PROXY if tail.price_proxied else PRICE_TAIL_KNOWN,
         pv_tail=_pv_tail(tail),
         load_tail=load_source,
-        active_test=ACTIVE_CANDIDATE,
-        # Every candidate's answer for the same moment. The active one is
-        # repeated here on purpose, so a recorded history of this attribute
-        # compares like with like -- and shows the pre-hysteresis value the
-        # candidate actually produced.
-        tests={
-            candidate.key: {
-                "label": candidate.label,
-                "soc": results[candidate.key].soc,
-                "reason": results[candidate.key].reason,
-            }
-            for candidate in CANDIDATES
-        },
     )
     _annotate_reach(decision, tail)
 
@@ -693,11 +686,12 @@ def _shadow_centred(tail: _Tail) -> EndSocDecision:
     the cost curve is flat it is a bias the solver has no evidence for.
 
     This rule takes the median pin of everything within :data:`CENTRE_TOLERANCE`
-    of the optimum instead. A wider band than Test 7's is what the sun-forecast
+    of the optimum instead, then :data:`CENTRE_SHIFT` below it (never under the
+    reserve). A wider band than Test 7's is what the sun-forecast
     noise justifies: two pins that differ by less than the error in the prices
     they were planned from are one answer. Mean regret over 685 days fell from
     0.93 to 0.77 SEK, p99 from 7.7 to 5.8 and the worst case from 26 to 13, and
-    every season improved.
+    every season improved; the shift takes it to about 0.72.
 
     An earlier form of this test held the physical night cover whenever the plan
     was nearly indifferent to it ("self-use on a draw"). That raised the pin in
@@ -714,11 +708,10 @@ def _shadow_centred(tail: _Tail) -> EndSocDecision:
         for index, value in enumerate(solution.total)
         if value <= solution.best + CENTRE_TOLERANCE
     ]
-    soc = tail.clamp(solution.soc_grid[band[len(band) // 2]])
+    soc = tail.clamp(max(solution.soc_grid[band[len(band) // 2]] - CENTRE_SHIFT, solution.floor))
 
     details = solution.details()
     details.update(
-        plan_soc=round(solution.soc, 4),
         band_low=round(solution.soc_grid[band[0]], 4),
         band_high=round(solution.soc_grid[band[-1]], 4),
     )
@@ -731,7 +724,7 @@ CANDIDATES: tuple[_Candidate, ...] = (
     _Candidate(TEST_CENTRED, "Test 8 -- shadow plan, centred pin", _shadow_centred),
 )
 
-ACTIVE_CANDIDATE: str = TEST_SHADOW_PLAN
+ACTIVE_CANDIDATE: str = TEST_CENTRED
 
 
 # --- the merit order -----------------------------------------------------------

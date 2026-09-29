@@ -1377,9 +1377,7 @@ def test_night_window_skips_a_post_dusk_blip_for_the_real_morning():
     real_night_wh = 1000.0 * ((end - start).total_seconds() / 3600)
     assert blip_night_wh == pytest.approx(1000.0)
     assert real_night_wh == pytest.approx(3500.0)
-    battery = _night_battery(
-        capacity_wh=23500.0, charge_efficiency=0.95, discharge_efficiency=0.95
-    )
+    battery = _night_battery(capacity_wh=23500.0, charge_efficiency=0.95, discharge_efficiency=0.95)
     hybrid = HybridInverterConfig(enabled=False)
     # At 5% SOC a 1 h blip-night is already covered by what's in the battery,
     # so the old first-sunrise end reserved nothing. The real overnight is not.
