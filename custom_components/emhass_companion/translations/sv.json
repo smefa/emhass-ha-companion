@@ -100,23 +100,19 @@
           "inverter_ac_input_max_w": "Maximal AC-ineffekt (laddning/import)",
           "soc_min": "Lägsta laddningsnivå",
           "soc_max": "Högsta laddningsnivå",
-          "soc_target": "Önskad laddningsnivå",
           "soc_entity": "Sensor för batteriets laddningsnivå",
           "battery_power_entity": "Sensor för batteriets effekt",
           "battery_power_invert": "Sensorn är positiv vid laddning",
-          "pv_entity": "Sensor för aktuell soleffekt",
-          "no_charge_from_grid": "Blockera laddning från elnätet"
+          "pv_entity": "Sensor för aktuell soleffekt"
         },
         "data_description": {
           "hybrid_inverter": "På om solpanelerna och batteriet delar en och samma växelriktares AC-effektgräns, vilket gäller de flesta hembatterisystem. Av om det är två separata växelriktare med varsin gräns.",
           "no_discharge_to_grid": "På hindrar batteriet från att ladda ur mot export -- det förser fortfarande huset med el, men säljer aldrig. EMHASS eget standardvärde är på, vilket tyst utesluter arbitrage även när en plan annars skulle tjäna på en prisspik, så detta levereras avstängt. Solöverskott exporteras ändå normalt oavsett detta -- det gäller bara batteriet.",
           "soc_min": "Optimeringen planerar aldrig batteriet under denna nivå.",
-          "soc_target": "Där optimeringen siktar på att lämna batteriet vid horisontens slut. Med slutladdningsnivå \"Optimerad\" är detta i stället reservgolvet som det beräknade målet aldrig planerar under; med \"Fast %-reglage\" är detta exakt den nivå den siktar på.",
           "soc_entity": "Läses vid varje körning så att planen utgår från verkligheten.",
           "battery_power_entity": "Vad batteriet gör just nu, så att korten kan rita det mot planen. Ingenting i optimeringen läser den.",
           "battery_power_invert": "Lämna av om sensorn är positiv vid urladdning, vilket är planens egen konvention. Fel håll gör att ett batteri som laddas visas som att det laddas ur.",
-          "pv_entity": "Valfritt. Blandas in i det första steget av varje MPC-prognos, viktat av reglaget \"Live-värdets vikt\". Last blandas in på samma sätt automatiskt, med sensorn vald under Husets förbrukning > Sensor för husets last -- ingen separat sensor behövs där.",
-          "no_charge_from_grid": "På begränsar batteriet till att endast laddas av solöverskott -- det köper aldrig nätström för att ladda. Husets el och export påverkas inte."
+          "pv_entity": "Valfritt. Blandas in i det första steget av varje MPC-prognos, viktat av reglaget \"Live-värdets vikt\". Last blandas in på samma sätt automatiskt, med sensorn vald under Husets förbrukning > Sensor för husets last -- ingen separat sensor behövs där."
         },
         "sections": {
           "advanced": {
@@ -141,7 +137,9 @@
               "battery_first_priority": "Töm batteriet före nätimport",
               "battery_dynamic": "Begränsa (ur)laddningens ramptakt",
               "battery_dynamic_max": "Max urladdningsramp",
-              "battery_dynamic_min": "Max laddningsramp"
+              "battery_dynamic_min": "Max laddningsramp",
+              "soc_target": "Önskad laddningsnivå",
+              "no_charge_from_grid": "Blockera laddning från elnätet"
             },
             "data_description": {
               "charge_power_derating": "Valfritt. Ett BMS sänker ofta tillåten laddström när batteriet fylls, så en plan som räknar med full effekt hela vägen startar för sent och missar målet. Varje rad är \"från denna laddningsnivå, ladda med högst denna procent av Maximal laddeffekt\". Lämna tomt för att behålla den platta maxeffekten. Kräver EMHASS 0.18.3 eller nyare; på ett äldre tillägg sparas tabellen men skickas inte.",
@@ -158,7 +156,9 @@
               "battery_first_priority": "På föredrar att tömma batteriet före nätimport, så att det används upp innan någon import sker medan det fortfarande är över sin minsta laddningsnivå. Mest användbart vid ett fast (icke tidsdifferentierat) elpris. Detta är en mjuk preferens, inte en hård gräns -- import medan batteriet är laddat straffas hårt så att uttömning vinner vid fast pris, men optimeraren kan ändå importera när det är den enda genomförbara lösningen, så det gör aldrig en plan olöslig.",
               "battery_dynamic": "På begränsar hur mycket (ur)laddningseffekten får ändras mellan tidssteg, med hjälp av de två rampgränserna nedan. Av lämnar batteriet fritt att svänga mellan full laddnings- och urladdningseffekt inom ett enda steg.",
               "battery_dynamic_max": "Hur mycket urladdningseffekten som mest får öka under ett tidssteg, som andel av batteriets maxeffekt. Gäller bara när rampgränsen ovan är på.",
-              "battery_dynamic_min": "Hur mycket laddningseffekten som mest får öka under ett tidssteg, som andel av batteriets maxeffekt. Gäller bara när rampgränsen ovan är på."
+              "battery_dynamic_min": "Hur mycket laddningseffekten som mest får öka under ett tidssteg, som andel av batteriets maxeffekt. Gäller bara när rampgränsen ovan är på.",
+              "soc_target": "Där optimeringen siktar på att lämna batteriet vid horisontens slut. Med slutladdningsnivå \"Optimerad\" är detta i stället reservgolvet som det beräknade målet aldrig planerar under; med \"Fast %-reglage\" är detta exakt den nivå den siktar på.",
+              "no_charge_from_grid": "På begränsar batteriet till att endast laddas av solöverskott -- det köper aldrig nätström för att ladda. Husets el och export påverkas inte."
             }
           }
         }
@@ -297,21 +297,17 @@
           "inverter_ac_input_max_w": "Maximal AC-ineffekt (laddning/import)",
           "soc_min": "Lägsta laddningsnivå",
           "soc_max": "Högsta laddningsnivå",
-          "soc_target": "Önskad laddningsnivå",
           "soc_entity": "Sensor för batteriets laddningsnivå",
           "battery_power_entity": "Sensor för batteriets effekt",
           "battery_power_invert": "Sensorn är positiv vid laddning",
-          "pv_entity": "Sensor för aktuell soleffekt",
-          "no_charge_from_grid": "Blockera laddning från elnätet"
+          "pv_entity": "Sensor för aktuell soleffekt"
         },
         "data_description": {
           "hybrid_inverter": "På om solpanelerna och batteriet delar en och samma växelriktares AC-effektgräns, vilket gäller de flesta hembatterisystem. Av om det är två separata växelriktare med varsin gräns.",
           "no_discharge_to_grid": "På hindrar batteriet från att ladda ur mot export -- det förser fortfarande huset med el, men säljer aldrig. EMHASS eget standardvärde är på, vilket tyst utesluter arbitrage även när en plan annars skulle tjäna på en prisspik, så detta levereras avstängt. Solöverskott exporteras ändå normalt oavsett detta -- det gäller bara batteriet.",
           "pv_entity": "Valfritt. Blandas in i det första steget av varje MPC-prognos, viktat av reglaget \"Live-värdets vikt\". Last blandas in på samma sätt automatiskt, med sensorn vald under Husets förbrukning > Sensor för husets last -- ingen separat sensor behövs där.",
-          "soc_target": "Där optimeringen siktar på att lämna batteriet vid horisontens slut. Med slutladdningsnivå \"Optimerad\" är detta i stället reservgolvet som det beräknade målet aldrig planerar under; med \"Fast %-reglage\" är detta exakt den nivå den siktar på.",
           "battery_power_entity": "Vad batteriet gör just nu, så att korten kan rita det mot planen. Ingenting i optimeringen läser den.",
-          "battery_power_invert": "Lämna av om sensorn är positiv vid urladdning, vilket är planens egen konvention. Fel håll gör att ett batteri som laddas visas som att det laddas ur.",
-          "no_charge_from_grid": "På begränsar batteriet till att endast laddas av solöverskott -- det köper aldrig nätström för att ladda. Husets el och export påverkas inte."
+          "battery_power_invert": "Lämna av om sensorn är positiv vid urladdning, vilket är planens egen konvention. Fel håll gör att ett batteri som laddas visas som att det laddas ur."
         },
         "sections": {
           "advanced": {
@@ -336,7 +332,9 @@
               "battery_first_priority": "Töm batteriet före nätimport",
               "battery_dynamic": "Begränsa (ur)laddningens ramptakt",
               "battery_dynamic_max": "Max urladdningsramp",
-              "battery_dynamic_min": "Max laddningsramp"
+              "battery_dynamic_min": "Max laddningsramp",
+              "soc_target": "Önskad laddningsnivå",
+              "no_charge_from_grid": "Blockera laddning från elnätet"
             },
             "data_description": {
               "charge_power_derating": "Valfritt. Ett BMS sänker ofta tillåten laddström när batteriet fylls, så en plan som räknar med full effekt hela vägen startar för sent och missar målet. Varje rad är \"från denna laddningsnivå, ladda med högst denna procent av Maximal laddeffekt\". Lämna tomt för att behålla den platta maxeffekten. Kräver EMHASS 0.18.3 eller nyare; på ett äldre tillägg sparas tabellen men skickas inte.",
@@ -353,7 +351,9 @@
               "battery_first_priority": "På föredrar att tömma batteriet före nätimport, så att det används upp innan någon import sker medan det fortfarande är över sin minsta laddningsnivå. Mest användbart vid ett fast (icke tidsdifferentierat) elpris. Detta är en mjuk preferens, inte en hård gräns -- import medan batteriet är laddat straffas hårt så att uttömning vinner vid fast pris, men optimeraren kan ändå importera när det är den enda genomförbara lösningen, så det gör aldrig en plan olöslig.",
               "battery_dynamic": "På begränsar hur mycket (ur)laddningseffekten får ändras mellan tidssteg, med hjälp av de två rampgränserna nedan. Av lämnar batteriet fritt att svänga mellan full laddnings- och urladdningseffekt inom ett enda steg.",
               "battery_dynamic_max": "Hur mycket urladdningseffekten som mest får öka under ett tidssteg, som andel av batteriets maxeffekt. Gäller bara när rampgränsen ovan är på.",
-              "battery_dynamic_min": "Hur mycket laddningseffekten som mest får öka under ett tidssteg, som andel av batteriets maxeffekt. Gäller bara när rampgränsen ovan är på."
+              "battery_dynamic_min": "Hur mycket laddningseffekten som mest får öka under ett tidssteg, som andel av batteriets maxeffekt. Gäller bara när rampgränsen ovan är på.",
+              "soc_target": "Där optimeringen siktar på att lämna batteriet vid horisontens slut. Med slutladdningsnivå \"Optimerad\" är detta i stället reservgolvet som det beräknade målet aldrig planerar under; med \"Fast %-reglage\" är detta exakt den nivå den siktar på.",
+              "no_charge_from_grid": "På begränsar batteriet till att endast laddas av solöverskott -- det köper aldrig nätström för att ladda. Husets el och export påverkas inte."
             }
           }
         }

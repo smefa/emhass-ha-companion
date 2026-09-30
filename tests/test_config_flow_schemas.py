@@ -214,7 +214,7 @@ def test_nest_suggested_moves_advanced_keys_under_the_section():
 def test_battery_schema_splits_basic_and_advanced():
     schema = battery_schema({})
     top = {str(k) for k in schema}
-    assert {"use_battery", "capacity_wh", "soc_min", "soc_max", "soc_target"} <= top
+    assert {"use_battery", "capacity_wh", "soc_min", "soc_max"} <= top
     assert {"inverter_ac_output_max_w", "hybrid_inverter"} <= top | {"inverter_ac_output_max_w"}
     advanced = {str(k) for k in _advanced_keys(schema)}
     assert advanced == set(BATTERY_ADVANCED_KEYS)

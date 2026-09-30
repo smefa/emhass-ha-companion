@@ -1727,6 +1727,8 @@ BATTERY_ADVANCED_KEYS: Final = frozenset(
         CONF_BATTERY_STRESS_SEGMENTS,
         CONF_BATTERY_STRESS_COST,
         CONF_END_SOC_MODE,
+        "soc_target",
+        "no_charge_from_grid",
         "self_consume_threshold_w",
         "battery_first_priority",
         "battery_dynamic",
