@@ -81,8 +81,7 @@ async def test_a_thermal_load_can_be_added_through_its_own_flow(hass: HomeAssist
             CONF_MAX_TEMPERATURE: 24.0,
             CONF_COMFORT_START: "06:30:00",
             CONF_COMFORT_END: "23:00:00",
-            CONF_HEATING_RATE: 3.0,
-            CONF_COOLING_CONSTANT: 0.1,
+            "advanced": {CONF_HEATING_RATE: 3.0, CONF_COOLING_CONSTANT: 0.1},
         },
     )
 
@@ -112,8 +111,7 @@ async def test_a_thermal_load_can_be_added_with_no_sensors_at_all(hass: HomeAssi
             CONF_MAX_TEMPERATURE: 24.0,
             CONF_COMFORT_START: "06:30:00",
             CONF_COMFORT_END: "23:00:00",
-            CONF_HEATING_RATE: 3.0,
-            CONF_COOLING_CONSTANT: 0.1,
+            "advanced": {CONF_HEATING_RATE: 3.0, CONF_COOLING_CONSTANT: 0.1},
         },
     )
 

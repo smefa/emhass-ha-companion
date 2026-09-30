@@ -86,8 +86,7 @@ async def test_a_newly_added_load_gets_entities_without_a_manual_reload(
             {
                 CONF_NOMINAL_POWER: 2000,
                 CONF_OPERATING_HOURS: 2,
-                CONF_SEMI_CONTINUOUS: True,
-                CONF_SINGLE_CONSTANT: False,
+                "advanced": {CONF_SEMI_CONTINUOUS: True, CONF_SINGLE_CONSTANT: False},
             },
         )
         assert result["type"] == "create_entry"

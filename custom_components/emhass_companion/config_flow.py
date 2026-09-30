@@ -1237,6 +1237,38 @@ def deferrable_kind_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
     }
 
 
+DEFERRABLE_ADVANCED_KEYS: Final = frozenset(
+    {
+        CONF_MINIMUM_POWER,
+        CONF_SEMI_CONTINUOUS,
+        CONF_STARTUP_PENALTY,
+        CONF_SINGLE_CONSTANT,
+        CONF_MAX_STARTUPS,
+        CONF_MINIMUM_ON_TIME,
+        CONF_MINIMUM_OFF_TIME,
+        CONF_ENERGY_NEEDED,
+        CONF_SURPLUS_HEADROOM,
+        CONF_SURPLUS_PRIORITY,
+    }
+)
+"""Add-load fields kept in the collapsed Advanced section.
+
+What stays up front is what every load needs: its power, its run time and
+window, and the two entities. Only used when adding -- reconfigure is short
+enough to stay flat."""
+
+THERMAL_ADVANCED_KEYS: Final = frozenset(
+    {CONF_HEATING_RATE, CONF_COOLING_CONSTANT, CONF_THERMAL_INERTIA}
+)
+"""The thermal model's tuning. All have defaults, so the section can stay closed."""
+
+
+def _split_advanced(schema: dict[Any, Any], advanced_keys: frozenset[str]) -> dict[Any, Any]:
+    basic = {k: v for k, v in schema.items() if str(k) not in advanced_keys}
+    advanced = {k: v for k, v in schema.items() if str(k) in advanced_keys}
+    return _with_advanced(basic, advanced)
+
+
 def deferrable_schema(
     defaults: dict[str, Any],
     step_minutes: int = DEFAULT_TIME_STEP,
@@ -1407,7 +1439,7 @@ def deferrable_schema(
             ),
         }
     )
-    return schema
+    return _split_advanced(schema, DEFERRABLE_ADVANCED_KEYS) if initial else schema
 
 
 def thermal_schema(
@@ -1530,7 +1562,7 @@ def thermal_schema(
             ),
         }
     )
-    return schema
+    return _split_advanced(schema, THERMAL_ADVANCED_KEYS) if initial else schema
 
 
 def _clean_deferrable(user_input: dict[str, Any]) -> dict[str, Any]:
@@ -1572,7 +1604,7 @@ class DeferrableLoadSubentryFlow(ConfigSubentryFlow):
         if self._kind_schema is None:
             # One step: nothing asked here changes which fields follow.
             if user_input is not None:
-                return self._create(_clean_deferrable(user_input))
+                return self._create(_clean_deferrable(_flatten_sections(user_input)))
             return self.async_show_form(
                 step_id="user",
                 data_schema=vol.Schema(self._schema({}, self._step_minutes)),
@@ -1594,7 +1626,7 @@ class DeferrableLoadSubentryFlow(ConfigSubentryFlow):
     ) -> SubentryFlowResult:
         """The fields the recurrence chosen in the first step actually uses."""
         if user_input is not None:
-            return self._create({**self._kind, **_clean_deferrable(user_input)})
+            return self._create({**self._kind, **_clean_deferrable(_flatten_sections(user_input))})
 
         return self.async_show_form(
             step_id="settings",

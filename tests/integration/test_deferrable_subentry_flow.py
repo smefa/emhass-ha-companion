@@ -68,8 +68,7 @@ async def test_a_load_can_be_added_with_every_optional_field_blank(
         {
             CONF_NOMINAL_POWER: 2000,
             CONF_OPERATING_HOURS: 2,
-            CONF_SEMI_CONTINUOUS: True,
-            CONF_SINGLE_CONSTANT: False,
+            "advanced": {CONF_SEMI_CONTINUOUS: True, CONF_SINGLE_CONSTANT: False},
         },
     )
 
@@ -96,8 +95,7 @@ async def test_a_binary_sensor_is_accepted_as_the_running_sensor(hass: HomeAssis
         {
             CONF_NOMINAL_POWER: 2000,
             CONF_OPERATING_HOURS: 2,
-            CONF_SEMI_CONTINUOUS: True,
-            CONF_SINGLE_CONSTANT: False,
+            "advanced": {CONF_SEMI_CONTINUOUS: True, CONF_SINGLE_CONSTANT: False},
             CONF_POWER_SENSOR: "binary_sensor.dishwasher_running",
         },
     )

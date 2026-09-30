@@ -264,6 +264,35 @@ def test_select_options_are_translated(strings):
             assert mode in states, f"{key} option '{mode}' has no translation"
 
 
+def _form_field_names(schema) -> set[str]:
+    """Field names of a form, including those inside its Advanced section."""
+    from custom_components.emhass_companion.const import ADVANCED_SECTION
+
+    names: set[str] = set()
+    for marker, value in schema.items():
+        if str(marker) == ADVANCED_SECTION:
+            names |= {str(inner.schema) for inner in value.schema.schema}
+        else:
+            names.add(str(marker.schema))
+    return names
+
+
+def _labelled_names(step: dict) -> set[str]:
+    """Labelled fields of a translated step, including its Advanced section."""
+    names = set(step.get("data", {}))
+    for section in step.get("sections", {}).values():
+        names |= set(section.get("data", {}))
+    return names
+
+
+def test_thermal_subentry_labels_cover_the_form_and_its_advanced_section(strings):
+    from custom_components.emhass_companion.config_flow import thermal_schema
+    from custom_components.emhass_companion.const import SUBENTRY_TYPE_THERMAL
+
+    step = strings["config_subentries"][SUBENTRY_TYPE_THERMAL]["step"]["user"]
+    assert _form_field_names(thermal_schema({})) == _labelled_names(step)
+
+
 def test_deferrable_subentry_is_translated(strings):
     """A subentry with no translations shows raw field names when adding a load."""
     from custom_components.emhass_companion.config_flow import (
@@ -283,7 +312,7 @@ def test_deferrable_subentry_is_translated(strings):
         ("user", deferrable_kind_schema({})),
         ("reconfigure", deferrable_schema({}, initial=False)),
     ):
-        fields = {str(marker.schema) for marker in schema}
+        fields = _form_field_names(schema)
         labelled = set(subentry["step"][step]["data"])
         assert fields <= labelled, f"{step} is missing labels for {fields - labelled}"
         assert labelled <= fields, f"{step} labels fields it does not show: {labelled - fields}"
@@ -292,8 +321,8 @@ def test_deferrable_subentry_is_translated(strings):
     # of labels has to cover every branch and label nothing that no branch shows.
     shown: set[str] = set()
     for recurrence in RECURRENCES:
-        shown |= {str(marker.schema) for marker in deferrable_schema({}, recurrence=recurrence)}
-    labelled = set(subentry["step"]["settings"]["data"])
+        shown |= _form_field_names(deferrable_schema({}, recurrence=recurrence))
+    labelled = _labelled_names(subentry["step"]["settings"])
     assert shown <= labelled, f"settings is missing labels for {shown - labelled}"
     assert labelled <= shown, f"settings labels fields no recurrence shows: {labelled - shown}"
 

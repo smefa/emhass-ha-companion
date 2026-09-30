@@ -1116,36 +1116,46 @@
           "description": "These are the values the load starts with -- once it is added, each becomes a control on the load's own page that you can also change from an automation.",
           "data": {
             "nominal_power_w": "Power when running",
-            "minimum_power_w": "Lowest power while running",
-            "semi_continuous": "Runs at full power only",
-            "startup_penalty": "Cost of starting",
             "operating_hours": "Hours needed per day",
             "earliest_start": "Earliest start",
             "latest_end": "Latest finish",
-            "single_constant": "Must run in one unbroken block",
-            "max_startups": "Most starts per plan",
-            "minimum_on_time_minutes": "Minimum time on",
-            "minimum_off_time_minutes": "Minimum time off",
-            "energy_needed_kwh": "Energy needed",
-            "surplus_headroom_w": "Spare solar headroom",
-            "surplus_priority": "Surplus priority",
             "power_sensor": "Running sensor",
             "control_entity": "Control entity"
           },
           "data_description": {
             "nominal_power_w": "Roughly what this load draws while it is on.",
-            "minimum_power_w": "Only used when \"Runs at full power only\" is off.",
-            "semi_continuous": "On for a dishwasher or pump, which are either on or off. Off for something whose power can be varied, such as a car charger.",
-            "startup_penalty": "Discourages switching on and off repeatedly. Leave at zero unless that is a problem. On spare solar this is the right way to keep a load from short-cycling -- it prices a restart rather than forbidding a break, so the load still runs in one block on a clear day but may split across two peaks on a cloudy one.",
             "operating_hours": "How long it needs to run in total. The optimiser chooses when. EMHASS plans in {time_step}-minute steps, so this is rounded to the nearest whole step ({time_step_hours} h).",
             "earliest_start": "Only used if you turn on the load's time window switch afterwards.",
-            "latest_end": "May be earlier than the start time, for an overnight window.",
-            "single_constant": "On if interrupting it would be a problem, such as a wash cycle.",
-            "minimum_on_time_minutes": "Once switched on, the load must stay on at least this long. Protects compressor-driven loads (heat pumps, freezers) from short-cycling. Zero means no minimum.",
-            "minimum_off_time_minutes": "Once switched off, the load must stay off at least this long. Zero means no minimum.",
-            "energy_needed_kwh": "Optional total: the load stops asking once it has had this much. Leave at zero to let it run on whatever solar is spare until you turn its Requested switch off.",
-            "surplus_headroom_w": "How much spare solar there must be beyond this load's own draw before a timestep counts. A margin against the solar forecast coming in light -- without it, a timestep counted at exactly this load's power imports as soon as a cloud arrives.",
-            "surplus_priority": "Only matters with more than one load on spare solar. The lowest number claims the shared surplus first; ties are broken by name. Leave at zero unless you have several and want one served before another."
+            "latest_end": "May be earlier than the start time, for an overnight window."
+          },
+          "sections": {
+            "advanced": {
+              "name": "Advanced settings",
+              "description": "Minimum power, start and stop limits, and surplus tuning. The defaults suit most loads.",
+              "data": {
+                "minimum_power_w": "Lowest power while running",
+                "semi_continuous": "Runs at full power only",
+                "startup_penalty": "Cost of starting",
+                "single_constant": "Must run in one unbroken block",
+                "max_startups": "Most starts per plan",
+                "minimum_on_time_minutes": "Minimum time on",
+                "minimum_off_time_minutes": "Minimum time off",
+                "energy_needed_kwh": "Energy needed",
+                "surplus_headroom_w": "Spare solar headroom",
+                "surplus_priority": "Surplus priority"
+              },
+              "data_description": {
+                "minimum_power_w": "Only used when \"Runs at full power only\" is off.",
+                "semi_continuous": "On for a dishwasher or pump, which are either on or off. Off for something whose power can be varied, such as a car charger.",
+                "startup_penalty": "Discourages switching on and off repeatedly. Leave at zero unless that is a problem. On spare solar this is the right way to keep a load from short-cycling -- it prices a restart rather than forbidding a break, so the load still runs in one block on a clear day but may split across two peaks on a cloudy one.",
+                "single_constant": "On if interrupting it would be a problem, such as a wash cycle.",
+                "minimum_on_time_minutes": "Once switched on, the load must stay on at least this long. Protects compressor-driven loads (heat pumps, freezers) from short-cycling. Zero means no minimum.",
+                "minimum_off_time_minutes": "Once switched off, the load must stay off at least this long. Zero means no minimum.",
+                "energy_needed_kwh": "Optional total: the load stops asking once it has had this much. Leave at zero to let it run on whatever solar is spare until you turn its Requested switch off.",
+                "surplus_headroom_w": "How much spare solar there must be beyond this load's own draw before a timestep counts. A margin against the solar forecast coming in light -- without it, a timestep counted at exactly this load's power imports as soon as a cloud arrives.",
+                "surplus_priority": "Only matters with more than one load on spare solar. The lowest number claims the shared surplus first; ties are broken by name. Leave at zero unless you have several and want one served before another."
+              }
+            }
           }
         }
       },
@@ -1175,9 +1185,6 @@
             "max_temperature": "Maximum temperature",
             "comfort_start": "Comfort from",
             "comfort_end": "Comfort until",
-            "heating_rate": "Heating rate",
-            "cooling_constant": "Heat loss constant",
-            "thermal_inertia": "Response delay",
             "power_sensor": "Running sensor",
             "control_entity": "Control entity"
           },
@@ -1190,11 +1197,24 @@
             "max_temperature": "A hard ceiling that applies at all times. The gap between the comfort temperature and this ceiling is the storage the optimiser plays with -- heating a little extra while electricity is cheap.",
             "comfort_start": "When the comfort temperature starts applying each day.",
             "comfort_end": "When it stops and the setback takes over. May be earlier than the start time, for a window that crosses midnight.",
-            "heating_rate": "How fast the temperature changes with the load running at full power. Watch a cold morning: a house that climbs from 18 to 21 °C in two hours with the heating flat out has a rate of 1.5 °C/h. For cooling, how fast it drops.",
-            "cooling_constant": "How fast heat leaks to the outdoors: degrees lost per hour, per degree of difference to the outdoor temperature. Most homes land between 0.05 (well insulated) and 0.3 (draughty). If the planned heating comes too early, lower it; too late, raise it.",
-            "thermal_inertia": "How long after switching on before the temperature responds. Underfloor heating in concrete can take an hour or more; a radiator or fan is nearly immediate. Leave at 0 if unsure.",
             "power_sensor": "Optional. Tells the optimiser whether this load is actually running. A power sensor gives the most detail (any unit is converted to watts automatically); a plain on/off binary_sensor works too.",
             "control_entity": "Optional. If set, the integration switches this on and off to follow the plan, once you enable control -- and its state doubles as the running signal when there is no power sensor. Leave empty to keep control in your own automations."
+          },
+          "sections": {
+            "advanced": {
+              "name": "Advanced settings",
+              "description": "The room's heating and cooling behaviour. The defaults are a reasonable starting point.",
+              "data": {
+                "heating_rate": "Heating rate",
+                "cooling_constant": "Heat loss constant",
+                "thermal_inertia": "Response delay"
+              },
+              "data_description": {
+                "heating_rate": "How fast the temperature changes with the load running at full power. Watch a cold morning: a house that climbs from 18 to 21 °C in two hours with the heating flat out has a rate of 1.5 °C/h. For cooling, how fast it drops.",
+                "cooling_constant": "How fast heat leaks to the outdoors: degrees lost per hour, per degree of difference to the outdoor temperature. Most homes land between 0.05 (well insulated) and 0.3 (draughty). If the planned heating comes too early, lower it; too late, raise it.",
+                "thermal_inertia": "How long after switching on before the temperature responds. Underfloor heating in concrete can take an hour or more; a radiator or fan is nearly immediate. Leave at 0 if unsure."
+              }
+            }
           }
         },
         "reconfigure": {

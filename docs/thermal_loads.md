@@ -26,7 +26,7 @@ separate button from *Add deferrable load*, with its own questions:
 | Power when running | Electrical draw at full power — this is the power EMHASS schedules. |
 | Comfort / setback / maximum temperature | The band. Comfort holds inside the comfort window, setback outside it, and the maximum is a hard ceiling at all times. |
 | Comfort from / until | The daily comfort window, which may cross midnight. |
-| Heating rate | Degrees per hour at full power. |
+| Heating rate | Degrees per hour at full power. In the collapsed *Advanced settings* section, along with the next two rows. |
 | Heat loss rate | Degrees lost per hour, per degree of difference to outdoors (EMHASS's `cooling_constant`). |
 | Response delay | Lag between switching on and the temperature responding (EMHASS's `thermal_inertia`) — an hour or more for underfloor heating in concrete, 0 for a radiator or fan. |
 | Running sensor / control entity | Same as an ordinary deferrable load. |

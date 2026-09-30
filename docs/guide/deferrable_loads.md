@@ -29,6 +29,9 @@ answer above, and every one of them becomes a control on the load's own
 device page afterwards — so nothing here is a permanent decision.
 
 - **Power when running** — roughly what it draws while on, in W.
+- **Advanced settings** — the collapsed section holds everything below
+  except *Power when running*, *Hours needed per day*, *Earliest start* /
+  *Latest finish* and the two entity pickers. The defaults suit most loads.
 - **Lowest power while running** — the least it may draw, if it can
   modulate. Only used when *Runs at full power only* is off.
 - **Runs at full power only** — on for a dishwasher or pump, which are

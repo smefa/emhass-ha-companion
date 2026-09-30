@@ -25,6 +25,9 @@ load*.
 - **Maximum temperature** — a hard ceiling, at all times.
 - **Comfort from** / **Comfort until** — when the comfort temperature
   applies each day. May cross midnight.
+- **Advanced settings** — the collapsed section holds the three model
+  settings below (*Heating rate*, *Heat loss constant*, *Response delay*). The
+  defaults are a reasonable starting point.
 - **Heating rate** — degrees per hour at full power.
 - **Heat loss constant** — degrees lost per hour, per degree of difference
   to the outdoor temperature.

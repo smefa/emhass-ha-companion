@@ -1116,36 +1116,46 @@
           "description": "Detta är värdena lasten börjar med -- när den har lagts till blir vart och ett en kontroll på lastens egen sida som du också kan ändra från en automation.",
           "data": {
             "nominal_power_w": "Effekt när den är igång",
-            "minimum_power_w": "Lägsta effekt när den kör",
-            "semi_continuous": "Kör bara på full effekt",
-            "startup_penalty": "Kostnad för att starta",
             "operating_hours": "Timmar som behövs per dygn",
             "earliest_start": "Tidigaste start",
             "latest_end": "Senaste slut",
-            "single_constant": "Måste köra i ett sammanhängande block",
-            "max_startups": "Högsta antal starter per plan",
-            "minimum_on_time_minutes": "Minsta tid på",
-            "minimum_off_time_minutes": "Minsta tid av",
-            "energy_needed_kwh": "Energi som behövs",
-            "surplus_headroom_w": "Marginal för solöverskott",
-            "surplus_priority": "Prioritet för solöverskott",
             "power_sensor": "Körsensor",
             "control_entity": "Styrenhet"
           },
           "data_description": {
             "nominal_power_w": "Ungefär vad lasten drar när den är igång.",
-            "minimum_power_w": "Används bara när \"Kör bara på full effekt\" är av.",
-            "semi_continuous": "På för en diskmaskin eller pump, som antingen är på eller av. Av för något vars effekt kan varieras, som en billaddare.",
-            "startup_penalty": "Motverkar att den slås på och av upprepade gånger. Lämna på noll om det inte är ett problem. På solöverskott är detta rätt sätt att hindra korta cykler -- det prissätter en omstart i stället för att förbjuda ett avbrott, så lasten kör i ett block en klar dag men kan delas över två toppar en molnig.",
             "operating_hours": "Hur länge den behöver köra totalt. Optimeraren väljer när. EMHASS planerar i steg om {time_step} minuter, så detta avrundas till närmaste hela steg ({time_step_hours} h).",
             "earliest_start": "Används bara om du slår på lastens tidsfönster efteråt.",
-            "latest_end": "Får vara tidigare än starttiden, för ett fönster över natten.",
-            "single_constant": "På om det vore ett problem att avbryta den, som ett tvättprogram.",
-            "minimum_on_time_minutes": "När lasten slås på måste den vara på minst så här länge. Skyddar kompressordrivna laster (värmepumpar, frysar) mot korta cykler. Noll betyder ingen minimigräns.",
-            "minimum_off_time_minutes": "När lasten stängs av måste den vara av minst så här länge. Noll betyder ingen minimigräns.",
-            "energy_needed_kwh": "Valfri total: lasten slutar be om mer när den fått så här mycket. Lämna på noll för att låta den köra på det solöverskott som finns tills du stänger av dess Begärd-brytare.",
-            "surplus_headroom_w": "Hur mycket solöverskott det måste finnas utöver lastens egen förbrukning innan ett tidssteg räknas. En marginal mot att solprognosen slår fel -- utan den importerar ett tidssteg som räknats vid exakt lastens effekt så snart ett moln kommer.",
-            "surplus_priority": "Betyder bara något med fler än en last på solöverskott. Lägsta numret gör anspråk på det delade överskottet först; lika värden avgörs av namn. Lämna på noll om du inte har flera och vill att en ska köras före en annan."
+            "latest_end": "Får vara tidigare än starttiden, för ett fönster över natten."
+          },
+          "sections": {
+            "advanced": {
+              "name": "Avancerade inställningar",
+              "description": "Minimieffekt, gränser för start och stopp samt överskottsinställningar. Standardvärdena passar de flesta laster.",
+              "data": {
+                "minimum_power_w": "Lägsta effekt när den kör",
+                "semi_continuous": "Kör bara på full effekt",
+                "startup_penalty": "Kostnad för att starta",
+                "single_constant": "Måste köra i ett sammanhängande block",
+                "max_startups": "Högsta antal starter per plan",
+                "minimum_on_time_minutes": "Minsta tid på",
+                "minimum_off_time_minutes": "Minsta tid av",
+                "energy_needed_kwh": "Energi som behövs",
+                "surplus_headroom_w": "Marginal för solöverskott",
+                "surplus_priority": "Prioritet för solöverskott"
+              },
+              "data_description": {
+                "minimum_power_w": "Används bara när \"Kör bara på full effekt\" är av.",
+                "semi_continuous": "På för en diskmaskin eller pump, som antingen är på eller av. Av för något vars effekt kan varieras, som en billaddare.",
+                "startup_penalty": "Motverkar att den slås på och av upprepade gånger. Lämna på noll om det inte är ett problem. På solöverskott är detta rätt sätt att hindra korta cykler -- det prissätter en omstart i stället för att förbjuda ett avbrott, så lasten kör i ett block en klar dag men kan delas över två toppar en molnig.",
+                "single_constant": "På om det vore ett problem att avbryta den, som ett tvättprogram.",
+                "minimum_on_time_minutes": "När lasten slås på måste den vara på minst så här länge. Skyddar kompressordrivna laster (värmepumpar, frysar) mot korta cykler. Noll betyder ingen minimigräns.",
+                "minimum_off_time_minutes": "När lasten stängs av måste den vara av minst så här länge. Noll betyder ingen minimigräns.",
+                "energy_needed_kwh": "Valfri total: lasten slutar be om mer när den fått så här mycket. Lämna på noll för att låta den köra på det solöverskott som finns tills du stänger av dess Begärd-brytare.",
+                "surplus_headroom_w": "Hur mycket solöverskott det måste finnas utöver lastens egen förbrukning innan ett tidssteg räknas. En marginal mot att solprognosen slår fel -- utan den importerar ett tidssteg som räknats vid exakt lastens effekt så snart ett moln kommer.",
+                "surplus_priority": "Betyder bara något med fler än en last på solöverskott. Lägsta numret gör anspråk på det delade överskottet först; lika värden avgörs av namn. Lämna på noll om du inte har flera och vill att en ska köras före en annan."
+              }
+            }
           }
         }
       },
@@ -1175,9 +1185,6 @@
             "max_temperature": "Högsta temperatur",
             "comfort_start": "Komfort från",
             "comfort_end": "Komfort till",
-            "heating_rate": "Uppvärmningstakt",
-            "cooling_constant": "Värmeförlustkonstant",
-            "thermal_inertia": "Svarsfördröjning",
             "power_sensor": "Körsensor",
             "control_entity": "Styrenhet"
           },
@@ -1190,11 +1197,24 @@
             "max_temperature": "Ett hårt tak som gäller hela tiden. Utrymmet mellan komforttemperaturen och taket är det lager optimeringen spelar med -- lite extra värme medan elen är billig.",
             "comfort_start": "När komforttemperaturen börjar gälla varje dag.",
             "comfort_end": "När den slutar och sänkningen tar över. Får vara tidigare än starttiden, för ett fönster över midnatt.",
-            "heating_rate": "Hur fort temperaturen ändras med lasten på full effekt. Titta en kall morgon: ett hus som går från 18 till 21 °C på två timmar med värmen för fullt har 1,5 °C/h. För kyla: hur fort den sjunker.",
-            "cooling_constant": "Hur fort värmen läcker ut: grader förlorade per timme, per grads skillnad mot utetemperaturen. De flesta hus ligger mellan 0,05 (välisolerat) och 0,3 (dragigt). Kommer den planerade värmen för tidigt, sänk; för sent, höj.",
-            "thermal_inertia": "Hur lång tid efter påslag innan temperaturen svarar. Golvvärme i betong kan ta en timme eller mer; en radiator eller fläkt svarar nästan direkt. Lämna på 0 om du är osäker.",
             "power_sensor": "Valfritt. Talar om för optimeringen om lasten faktiskt är igång. En effektsensor ger mest detalj (alla enheter räknas om till watt automatiskt); en enkel på/av-binärsensor fungerar också.",
             "control_entity": "Valfritt. Om satt slår integrationen på och av den här för att följa planen, när du aktiverat styrning -- och dess tillstånd fungerar som körsignal när effektsensor saknas. Lämna tomt för att behålla styrningen i egna automationer."
+          },
+          "sections": {
+            "advanced": {
+              "name": "Avancerade inställningar",
+              "description": "Rummets uppvärmnings- och avkylningsbeteende. Standardvärdena är en rimlig startpunkt.",
+              "data": {
+                "heating_rate": "Uppvärmningstakt",
+                "cooling_constant": "Värmeförlustkonstant",
+                "thermal_inertia": "Svarsfördröjning"
+              },
+              "data_description": {
+                "heating_rate": "Hur fort temperaturen ändras med lasten på full effekt. Titta en kall morgon: ett hus som går från 18 till 21 °C på två timmar med värmen för fullt har 1,5 °C/h. För kyla: hur fort den sjunker.",
+                "cooling_constant": "Hur fort värmen läcker ut: grader förlorade per timme, per grads skillnad mot utetemperaturen. De flesta hus ligger mellan 0,05 (välisolerat) och 0,3 (dragigt). Kommer den planerade värmen för tidigt, sänk; för sent, höj.",
+                "thermal_inertia": "Hur lång tid efter påslag innan temperaturen svarar. Golvvärme i betong kan ta en timme eller mer; en radiator eller fläkt svarar nästan direkt. Lämna på 0 om du är osäker."
+              }
+            }
           }
         },
         "reconfigure": {
