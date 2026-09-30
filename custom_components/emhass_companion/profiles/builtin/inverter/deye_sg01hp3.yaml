@@ -156,24 +156,28 @@ options:
         mode: box
 
   energy_pattern_battery_first:
+    advanced: true
     name: Energy pattern — battery first option name
     default: Battery First
     selector:
       text: {}
 
   energy_pattern_load_first:
+    advanced: true
     name: Energy pattern — load first option name
     default: Load First
     selector:
       text: {}
 
   work_mode_export:
+    advanced: true
     name: Work mode — export first option name
     default: Export First
     selector:
       text: {}
 
   work_mode_zero_export:
+    advanced: true
     name: Work mode — zero export option name
     description: What this profile returns the work mode to. Use "Zero Export To CT" if your meter is on the grid connection point rather than the load side.
     default: Zero Export To Load

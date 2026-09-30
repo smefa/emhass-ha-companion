@@ -185,42 +185,49 @@ options:
         domain: number
 
   mode_battery_first:
+    advanced: true
     name: Mode — battery first option name
     default: Battery First
     selector:
       text: {}
 
   mode_grid_first:
+    advanced: true
     name: Mode — grid first option name
     default: Grid First
     selector:
       text: {}
 
   mode_load_first:
+    advanced: true
     name: Mode — load first option name
     default: Load First
     selector:
       text: {}
 
   slot_enabled:
+    advanced: true
     name: Slot active — enabled option name
     default: Enabled
     selector:
       text: {}
 
   slot_disabled:
+    advanced: true
     name: Slot active — disabled option name
     default: Disabled
     selector:
       text: {}
 
   grid_charge_enabled:
+    advanced: true
     name: Allow grid charge — enabled option name
     default: Enabled
     selector:
       text: {}
 
   grid_charge_disabled:
+    advanced: true
     name: Allow grid charge — disabled option name
     default: Disabled
     selector:

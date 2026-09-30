@@ -30,7 +30,6 @@ import voluptuous as vol
 from .api import EmhassClient, EmhassError
 from .configuration import EmhassConfig
 from .const import (
-    ADVANCED_SECTION,
     CONF_ADDER,
     CONF_BATTERY_CHARGE_ENERGY_ENTITY,
     CONF_BATTERY_DISCHARGE_ENERGY_ENTITY,
@@ -164,6 +163,15 @@ from .const import (
     SUBENTRY_TYPE_LOAD_GROUP,
     SUBENTRY_TYPE_THERMAL,
     TEMPERATURE_PROFILE_ORDER,
+)
+from .forms import (
+    flatten_sections as _flatten_sections,
+)
+from .forms import (
+    nest_suggested as _nest_suggested,
+)
+from .forms import (
+    with_advanced as _with_advanced,
 )
 from .metering import async_energy_dashboard_defaults
 from .models import parse_charge_power_derating
@@ -508,44 +516,6 @@ def _collect_tariff(user_input: dict[str, Any]) -> dict[str, Any]:
     return tariff
 
 
-def _with_advanced(
-    basic: dict[Any, Any], advanced: dict[Any, Any], *, collapsed: bool = True
-) -> dict[Any, Any]:
-    """`basic` plus one collapsed Advanced section holding `advanced`.
-
-    Returns `basic` unchanged when there is nothing to put in the section, so
-    a form never shows an empty one. Every field in `advanced` must still be
-    valid untouched (an optional field, or one with a default): a collapsed
-    section the user never opens submits only its defaults.
-    """
-    if not advanced:
-        return basic
-    return {
-        **basic,
-        vol.Required(ADVANCED_SECTION): section(vol.Schema(advanced), {"collapsed": collapsed}),
-    }
-
-
-def _flatten_sections(user_input: dict[str, Any]) -> dict[str, Any]:
-    """Merge the Advanced section's fields into the top level.
-
-    Call first in every handler whose form has one, so everything downstream
-    sees the flat dict it always did and stored options keep their shape.
-    """
-    flat = {key: value for key, value in user_input.items() if key != ADVANCED_SECTION}
-    flat.update(user_input.get(ADVANCED_SECTION) or {})
-    return flat
-
-
-def _nest_suggested(values: dict[str, Any], advanced_keys: set[str]) -> dict[str, Any]:
-    """Suggested values for a form with an Advanced section: move its keys under it."""
-    nested = {key: value for key, value in values.items() if key not in advanced_keys}
-    inner = {key: value for key, value in values.items() if key in advanced_keys}
-    if inner:
-        nested[ADVANCED_SECTION] = inner
-    return nested
-
-
 def _collect_grid(user_input: dict[str, Any]) -> dict[str, Any]:
     """The grid step's own keys, split out from the schedule ones beside them.
 
@@ -733,6 +703,7 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
         profile = self._profiles[PROFILE_KEY_LOAD_SENSOR]
         schema = profile.selector_schema(skip={"entity"})
 
+        user_input = _flatten_sections(user_input) if user_input is not None else None
         if user_input is not None or not schema:
             self._options[CONF_LOAD] = {
                 CONF_PROFILE: PROFILE_KEY_LOAD_SENSOR,
@@ -818,6 +789,7 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         profile = self._profiles[self._options[CONF_INVERTER][CONF_PROFILE]]
 
+        user_input = _flatten_sections(user_input) if user_input is not None else None
         if user_input is not None or not profile.options:
             self._options[CONF_INVERTER][CONF_PROFILE_OPTIONS] = user_input or {}
             return await self.async_step_grid()
@@ -825,7 +797,8 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="inverter_options",
             data_schema=self.add_suggested_values_to_schema(
-                vol.Schema(profile.selector_schema()), _suggested_entities(self.hass, profile)
+                vol.Schema(profile.selector_schema()),
+                _nest_suggested(_suggested_entities(self.hass, profile), profile.advanced_keys),
             ),
             description_placeholders={"profile": profile.name, "notes": _profile_notes(profile)},
         )
@@ -953,7 +926,7 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
             return await next_step()
 
         if user_input is not None:
-            self._options[option_key][CONF_PROFILE_OPTIONS] = user_input
+            self._options[option_key][CONF_PROFILE_OPTIONS] = _flatten_sections(user_input)
             return await next_step()
 
         return self.async_show_form(
@@ -2473,6 +2446,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
         options = dict(self.config_entry.options)
         options[CONF_HOUSE_LOAD_TOTAL_ENTITY] = self._house_load_total_entity
 
+        user_input = _flatten_sections(user_input) if user_input is not None else None
         if user_input is not None or not schema:
             options[CONF_LOAD] = {
                 CONF_PROFILE: PROFILE_KEY_LOAD_SENSOR,
@@ -2484,7 +2458,9 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
         stored = (options.get(CONF_LOAD) or {}).get(CONF_PROFILE_OPTIONS) or {}
         return self.async_show_form(
             step_id="load_create_options",
-            data_schema=self.add_suggested_values_to_schema(vol.Schema(schema), stored),
+            data_schema=self.add_suggested_values_to_schema(
+                vol.Schema(schema), _nest_suggested(stored, profile.advanced_keys)
+            ),
             description_placeholders={
                 "profile": profile.name,
                 "notes": _profile_notes(profile),
@@ -2497,6 +2473,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
         options = dict(self.config_entry.options)
         profile = self._load_profiles[self._load_key]
 
+        user_input = _flatten_sections(user_input) if user_input is not None else None
         if user_input is not None or not profile.options:
             options[CONF_LOAD] = {
                 CONF_PROFILE: self._load_key,
@@ -2508,7 +2485,8 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
         return self.async_show_form(
             step_id="load_options",
             data_schema=self.add_suggested_values_to_schema(
-                vol.Schema(profile.selector_schema()), stored
+                vol.Schema(profile.selector_schema()),
+                _nest_suggested(stored, profile.advanced_keys),
             ),
             description_placeholders={
                 "profile": profile.name,
@@ -2560,6 +2538,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
         options = dict(self.config_entry.options)
         profile = self._pv_profiles[self._pv_key]
 
+        user_input = _flatten_sections(user_input) if user_input is not None else None
         if user_input is not None or not profile.options:
             options[CONF_PV] = {
                 CONF_PROFILE: self._pv_key,
@@ -2577,7 +2556,8 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
         return self.async_show_form(
             step_id="pv_options",
             data_schema=self.add_suggested_values_to_schema(
-                vol.Schema(profile.selector_schema()), stored
+                vol.Schema(profile.selector_schema()),
+                _nest_suggested(stored, profile.advanced_keys),
             ),
             description_placeholders={
                 "profile": profile.name,
@@ -2626,6 +2606,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
         options = dict(self.config_entry.options)
         profile = self._temperature_profiles[self._temperature_key]
 
+        user_input = _flatten_sections(user_input) if user_input is not None else None
         if user_input is not None or not profile.options:
             options[CONF_TEMPERATURE] = {
                 CONF_PROFILE: self._temperature_key,
@@ -2637,7 +2618,8 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
         return self.async_show_form(
             step_id="temperature_options",
             data_schema=self.add_suggested_values_to_schema(
-                vol.Schema(profile.selector_schema()), stored
+                vol.Schema(profile.selector_schema()),
+                _nest_suggested(stored, profile.advanced_keys),
             ),
             description_placeholders={
                 "profile": profile.name,
@@ -2690,6 +2672,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
         options = dict(self.config_entry.options)
         profile = self._network_profiles[self._network_key]
 
+        user_input = _flatten_sections(user_input) if user_input is not None else None
         if user_input is not None or not profile.options:
             options[CONF_NETWORK] = {
                 CONF_PROFILE: self._network_key,
@@ -2703,7 +2686,8 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
         return self.async_show_form(
             step_id="network_options",
             data_schema=self.add_suggested_values_to_schema(
-                vol.Schema(profile.selector_schema()), stored
+                vol.Schema(profile.selector_schema()),
+                _nest_suggested(stored, profile.advanced_keys),
             ),
             description_placeholders={
                 "profile": profile.name,
@@ -2752,6 +2736,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
         options = dict(self.config_entry.options)
         profile = self._inverter_profiles[self._inverter_key]
 
+        user_input = _flatten_sections(user_input) if user_input is not None else None
         if user_input is not None or not profile.options:
             options[CONF_INVERTER] = {
                 CONF_PROFILE: self._inverter_key,
@@ -2767,7 +2752,8 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
         return self.async_show_form(
             step_id="inverter_options",
             data_schema=self.add_suggested_values_to_schema(
-                vol.Schema(profile.selector_schema()), prefill
+                vol.Schema(profile.selector_schema()),
+                _nest_suggested(prefill, profile.advanced_keys),
             ),
             description_placeholders={
                 "profile": profile.name,

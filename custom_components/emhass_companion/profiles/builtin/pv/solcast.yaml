@@ -34,6 +34,7 @@ options:
         domain: sensor
         multiple: true
   estimate:
+    advanced: true
     name: Confidence level
     description: >-
       P50 is the central estimate. P10 is pessimistic, which biases the plan

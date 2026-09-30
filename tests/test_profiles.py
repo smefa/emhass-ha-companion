@@ -569,3 +569,60 @@ def test_the_script_profile_only_requires_the_script_it_falls_back_to():
     document = validate_document(load_yaml(str(BUILTIN_ROOT / "inverter" / "generic_script.yaml")))
     required = {key for key, option in document["options"].items() if option.get("required", True)}
     assert required == {"self_consume_script"}
+
+
+# --- advanced options --------------------------------------------------------
+
+
+def _option_doc(**extra) -> dict:
+    return {
+        "name": "Demo",
+        "kind": "price",
+        "version": 1,
+        "emhass": {"x": "1"},
+        "options": {
+            "shown": {"name": "Shown", "selector": {"text": {}}},
+            "hidden": {"name": "Hidden", "default": "x", "selector": {"text": {}}, **extra},
+        },
+    }
+
+
+def _profile(doc: dict):
+    from custom_components.emhass_companion.profiles.schema import Profile
+
+    return Profile(
+        key="demo", path="demo.yaml", kind="price", name="Demo", document=validate_document(doc)
+    )
+
+
+def test_an_advanced_option_lands_in_the_advanced_section():
+    from custom_components.emhass_companion.const import ADVANCED_SECTION
+
+    profile = _profile(_option_doc(advanced=True))
+    schema = profile.selector_schema()
+    assert {str(k) for k in schema} == {"shown", ADVANCED_SECTION}
+    assert profile.advanced_keys == {"hidden"}
+
+
+def test_a_profile_without_the_key_is_all_basic():
+    profile = _profile(_option_doc())
+    assert {str(k) for k in profile.selector_schema()} == {"shown", "hidden"}
+    assert profile.advanced_keys == set()
+
+
+def test_a_required_advanced_option_without_a_default_is_rejected():
+    doc = _option_doc()
+    doc["options"]["hidden"] = {"name": "Hidden", "advanced": True, "selector": {"text": {}}}
+    with pytest.raises(ProfileError, match="advanced"):
+        validate_document(doc)
+
+
+def test_an_optional_advanced_option_without_a_default_is_accepted():
+    doc = _option_doc()
+    doc["options"]["hidden"] = {
+        "name": "Hidden",
+        "advanced": True,
+        "required": False,
+        "selector": {"text": {}},
+    }
+    validate_document(doc)

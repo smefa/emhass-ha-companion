@@ -172,24 +172,28 @@ options:
         domain: number
 
   direction_off:
+    advanced: true
     name: Battery control override — off option name
     default: "Off"
     selector:
       text: {}
 
   direction_charge:
+    advanced: true
     name: Battery control override — force charge option name
     default: "Force charge"
     selector:
       text: {}
 
   direction_discharge:
+    advanced: true
     name: Battery control override — force discharge option name
     default: "Force discharge"
     selector:
       text: {}
 
   self_consume_mode:
+    advanced: true
     name: Energy storage mode — normal (no grid charging) option name
     description: >-
       What idle and self_consume put the storage-control mode back to.
@@ -201,6 +205,7 @@ options:
       text: {}
 
   grid_charge_allowed_mode:
+    advanced: true
     name: Energy storage mode — grid charging allowed option name
     description: >-
       What force_charge selects so the "No Grid Charging" gate is open

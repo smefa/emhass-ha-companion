@@ -138,6 +138,7 @@ options:
         mode: box
 
   mode_charge:
+    advanced: true
     name: Mode — forced charge option name
     description: '"Command Charging (PV First)" tops up from the grid after using the array. Use "Command Charging (Grid First)" to draw from the grid first.'
     default: Command Charging (PV First)
@@ -145,18 +146,21 @@ options:
       text: {}
 
   mode_discharge:
+    advanced: true
     name: Mode — forced discharge option name
     default: Command Discharging (ESS First)
     selector:
       text: {}
 
   mode_standby:
+    advanced: true
     name: Mode — standby option name
     default: Standby
     selector:
       text: {}
 
   mode_self_consume:
+    advanced: true
     name: Mode — self-consumption option name
     default: Maximum Self Consumption
     selector:

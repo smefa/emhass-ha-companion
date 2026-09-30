@@ -82,30 +82,35 @@ options:
         domain: number
 
   ems_mode_self_consume:
+    advanced: true
     name: EMS mode — self-consumption option name
     default: Self-consumption mode (default)
     selector:
       text: {}
 
   ems_mode_forced:
+    advanced: true
     name: EMS mode — forced option name
     default: Forced mode
     selector:
       text: {}
 
   direction_stop:
+    advanced: true
     name: Direction — stop option name
     default: Stop (default)
     selector:
       text: {}
 
   direction_charge:
+    advanced: true
     name: Direction — forced charge option name
     default: Forced charge
     selector:
       text: {}
 
   direction_discharge:
+    advanced: true
     name: Direction — forced discharge option name
     default: Forced discharge
     selector:

@@ -44,6 +44,7 @@ from ..const import (
     UNIT_CURRENCY_PER_KWH,
     UNIT_WATTS,
 )
+from ..forms import with_advanced
 
 
 class ProfileError(Exception):
@@ -94,8 +95,26 @@ OPTION_SCHEMA = vol.Schema(
         # field, never a silently wrong control model.
         vol.Optional("suggest", default=[]): vol.All(cv.ensure_list, [cv.string]),
         vol.Required("selector"): _validate_selector,
+        # Moves the option into the form's collapsed Advanced section. Only for
+        # options that are valid untouched -- see _check_advanced_has_default.
+        vol.Optional("advanced", default=False): cv.boolean,
     }
 )
+
+
+def _check_advanced_has_default(option: dict[str, Any]) -> dict[str, Any]:
+    """A hidden option must not be one the user has to answer.
+
+    A collapsed section that is never opened submits only defaults, so an
+    advanced option that is required and has none would fail the whole form
+    with the user unable to see why.
+    """
+    if option["advanced"] and option["required"] and "default" not in option:
+        raise vol.Invalid("an advanced option must have a default or be required: false")
+    return option
+
+
+OPTION_SCHEMA = vol.All(OPTION_SCHEMA, _check_advanced_has_default)
 
 # The semantics of the command, as opposed to its content. `actions:` says what
 # to write; this says what the number means and how long the write survives --
@@ -526,6 +545,11 @@ class Profile:
     def flat_demand_charge(self) -> Any:
         return self.document.get("flat_demand_charge")
 
+    @property
+    def advanced_keys(self) -> set[str]:
+        """Options shown in the collapsed Advanced section."""
+        return {key for key, option in self.options.items() if option.get("advanced")}
+
     def selector_schema(self, *, skip: set[str] = frozenset()) -> dict[Any, Any]:
         """Build a voluptuous schema fragment for this profile's options.
 
@@ -533,17 +557,19 @@ class Profile:
         "load/sensor" entity that a create-a-sensor flow builds dynamically
         rather than asking the user to pick directly.
         """
-        schema: dict[Any, Any] = {}
+        basic: dict[Any, Any] = {}
+        advanced: dict[Any, Any] = {}
         for key, option in self.options.items():
             if key in skip:
                 continue
+            schema = advanced if option.get("advanced") else basic
             marker = vol.Required if option.get("required", True) else vol.Optional
             if "default" in option:
                 field_key = marker(key, default=option["default"])
             else:
                 field_key = marker(key)
             schema[field_key] = selector.selector(option["selector"])
-        return schema
+        return with_advanced(basic, advanced)
 
 
 @dataclass(slots=True)

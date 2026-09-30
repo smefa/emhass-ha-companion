@@ -23,11 +23,13 @@ options:
     selector:
       text: {}
   time_field:
+    advanced: true
     name: Timestamp field
     default: datetime
     selector:
       text: {}
   value_field:
+    advanced: true
     name: Temperature field
     default: temperature
     selector:

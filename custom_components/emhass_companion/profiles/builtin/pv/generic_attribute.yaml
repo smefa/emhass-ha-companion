@@ -24,16 +24,19 @@ options:
     selector:
       text: {}
   time_field:
+    advanced: true
     name: Timestamp field
     default: period_start
     selector:
       text: {}
   value_field:
+    advanced: true
     name: Power field
     default: pv_estimate
     selector:
       text: {}
   scale:
+    advanced: true
     name: Scale factor
     description: Multiplier to reach watts. Use 1000 for kilowatts.
     default: 1000

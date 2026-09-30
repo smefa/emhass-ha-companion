@@ -28,6 +28,7 @@ options:
         domain: sensor
         device_class: power
   method:
+    advanced: true
     name: Forecast method
     description: >-
       "Typical" uses a generic daily profile. "Naive" repeats the last day,

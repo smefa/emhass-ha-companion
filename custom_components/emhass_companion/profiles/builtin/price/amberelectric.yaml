@@ -47,6 +47,7 @@ options:
           - {label: Feed-in (export), value: feed_in}
           - {label: Controlled load, value: controlled_load}
   price_field:
+    advanced: true
     name: Price field
     description: >-
       spot_per_kwh is the raw AEMO wholesale price. per_kwh is Amber's own

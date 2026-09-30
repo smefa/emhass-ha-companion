@@ -23,16 +23,19 @@ options:
     selector:
       text: {}
   time_field:
+    advanced: true
     name: Timestamp field
     default: time
     selector:
       text: {}
   value_field:
+    advanced: true
     name: Value field
     default: value
     selector:
       text: {}
   scale:
+    advanced: true
     name: Scale factor
     description: Multiplier to convert the values to watts. Use 1000 for kW.
     default: 1

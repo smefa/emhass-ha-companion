@@ -30,7 +30,13 @@
       },
       "price_options": {
         "title": "Konfigurera {profile}",
-        "description": "{notes}"
+        "description": "{notes}",
+        "sections": {
+          "advanced": {
+            "name": "Avancerade inställningar",
+            "description": "Tolkningsdetaljer och fasta alternativnamn. Standardvärdena passar de flesta installationer."
+          }
+        }
       },
       "tariff": {
         "title": "Köp- och säljpriser",
@@ -62,7 +68,13 @@
       },
       "pv_options": {
         "title": "Konfigurera {profile}",
-        "description": "{notes}"
+        "description": "{notes}",
+        "sections": {
+          "advanced": {
+            "name": "Avancerade inställningar",
+            "description": "Tolkningsdetaljer och fasta alternativnamn. Standardvärdena passar de flesta installationer."
+          }
+        }
       },
       "load": {
         "title": "Husets förbrukning",
@@ -80,11 +92,23 @@
       },
       "load_options": {
         "title": "Konfigurera {profile}",
-        "description": "{notes}"
+        "description": "{notes}",
+        "sections": {
+          "advanced": {
+            "name": "Avancerade inställningar",
+            "description": "Tolkningsdetaljer och fasta alternativnamn. Standardvärdena passar de flesta installationer."
+          }
+        }
       },
       "load_create_options": {
         "title": "Konfigurera {profile}",
-        "description": "{notes}"
+        "description": "{notes}",
+        "sections": {
+          "advanced": {
+            "name": "Avancerade inställningar",
+            "description": "Tolkningsdetaljer och fasta alternativnamn. Standardvärdena passar de flesta installationer."
+          }
+        }
       },
       "battery": {
         "title": "Batteri",
@@ -176,6 +200,12 @@
         "data": {
           "export_limit_switch": "Exportgränsbrytare",
           "export_limit_number": "Exportgränseffekt"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Avancerade inställningar",
+            "description": "Tolkningsdetaljer och fasta alternativnamn. Standardvärdena passar de flesta installationer."
+          }
         }
       },
       "grid": {
@@ -266,11 +296,23 @@
       },
       "load_options": {
         "title": "Konfigurera {profile}",
-        "description": "{notes}"
+        "description": "{notes}",
+        "sections": {
+          "advanced": {
+            "name": "Avancerade inställningar",
+            "description": "Tolkningsdetaljer och fasta alternativnamn. Standardvärdena passar de flesta installationer."
+          }
+        }
       },
       "load_create_options": {
         "title": "Konfigurera {profile}",
-        "description": "{notes}"
+        "description": "{notes}",
+        "sections": {
+          "advanced": {
+            "name": "Avancerade inställningar",
+            "description": "Tolkningsdetaljer och fasta alternativnamn. Standardvärdena passar de flesta installationer."
+          }
+        }
       },
       "pv": {
         "title": "Solprognos",
@@ -281,7 +323,13 @@
       },
       "pv_options": {
         "title": "Konfigurera {profile}",
-        "description": "{notes}"
+        "description": "{notes}",
+        "sections": {
+          "advanced": {
+            "name": "Avancerade inställningar",
+            "description": "Tolkningsdetaljer och fasta alternativnamn. Standardvärdena passar de flesta installationer."
+          }
+        }
       },
       "battery": {
         "title": "Batteri",
@@ -411,6 +459,12 @@
         "data": {
           "export_limit_switch": "Exportgränsbrytare",
           "export_limit_number": "Exportgränseffekt"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Avancerade inställningar",
+            "description": "Tolkningsdetaljer och fasta alternativnamn. Standardvärdena passar de flesta installationer."
+          }
         }
       },
       "temperature": {
@@ -422,7 +476,13 @@
       },
       "temperature_options": {
         "title": "Konfigurera {profile}",
-        "description": "{notes}"
+        "description": "{notes}",
+        "sections": {
+          "advanced": {
+            "name": "Avancerade inställningar",
+            "description": "Tolkningsdetaljer och fasta alternativnamn. Standardvärdena passar de flesta installationer."
+          }
+        }
       },
       "network": {
         "title": "Nättariff",
@@ -433,7 +493,13 @@
       },
       "network_options": {
         "title": "Konfigurera {profile}",
-        "description": "{notes}"
+        "description": "{notes}",
+        "sections": {
+          "advanced": {
+            "name": "Avancerade inställningar",
+            "description": "Tolkningsdetaljer och fasta alternativnamn. Standardvärdena passar de flesta installationer."
+          }
+        }
       },
       "compatibility": {
         "title": "EMHASS entitetsnamn",

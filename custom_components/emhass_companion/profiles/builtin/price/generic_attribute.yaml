@@ -28,6 +28,7 @@ options:
     selector:
       text: {}
   second_attribute:
+    advanced: true
     name: Second attribute
     description: >-
       Optional. Many integrations split today and tomorrow across two
@@ -37,16 +38,19 @@ options:
     selector:
       text: {}
   time_field:
+    advanced: true
     name: Timestamp field
     default: start
     selector:
       text: {}
   value_field:
+    advanced: true
     name: Price field
     default: value
     selector:
       text: {}
   scale:
+    advanced: true
     name: Scale factor
     description: >-
       Multiplier to reach a price per kWh. Use 0.001 if the source is priced

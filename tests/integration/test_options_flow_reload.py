@@ -81,7 +81,7 @@ async def test_load_forecast_method_is_reachable_and_saves(hass: HomeAssistant) 
     )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
-        {"entity": "sensor.house_load", "method": "mlforecaster"},
+        {"entity": "sensor.house_load", "advanced": {"method": "mlforecaster"}},
     )
 
     assert result["type"] == "create_entry"
@@ -142,7 +142,7 @@ async def test_create_a_house_load_sensor_lets_you_pick_the_forecast_method(
     )
     assert result["step_id"] == "load_create_options"
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"method": "mlforecaster"}
+        result["flow_id"], {"advanced": {"method": "mlforecaster"}}
     )
 
     assert result["type"] == "create_entry"
@@ -182,7 +182,7 @@ async def test_the_pv_profile_is_reachable_and_saves(hass: HomeAssistant) -> Non
         "sensor.solcast_pv_forecast_forecast_day_3",
     ]
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"entities": entities, "estimate": "pv_estimate"}
+        result["flow_id"], {"entities": entities, "advanced": {"estimate": "pv_estimate"}}
     )
 
     assert result["type"] == "create_entry"

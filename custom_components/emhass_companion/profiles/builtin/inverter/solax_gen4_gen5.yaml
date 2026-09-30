@@ -149,12 +149,14 @@ options:
         mode: box
 
   mode_battery_control:
+    advanced: true
     name: Mode — battery control option name
     default: Enabled Battery Control
     selector:
       text: {}
 
   mode_disabled:
+    advanced: true
     name: Mode — disabled option name
     default: Disabled
     selector:

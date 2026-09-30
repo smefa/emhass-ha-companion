@@ -96,24 +96,28 @@ options:
         domain: number
 
   mode_self_consume:
+    advanced: true
     name: Battery mode — self-consumption option name
     default: Self-consumption
     selector:
       text: {}
 
   mode_force_charge:
+    advanced: true
     name: Battery mode — force charge option name
     default: Force charge
     selector:
       text: {}
 
   mode_force_discharge:
+    advanced: true
     name: Battery mode — force discharge option name
     default: Force discharge
     selector:
       text: {}
 
   mode_stop:
+    advanced: true
     name: Battery mode — stop option name
     default: Stop
     selector:
@@ -137,12 +141,14 @@ options:
         domain: number
 
   feed_in_limitation_enable:
+    advanced: true
     name: Feed-in limitation — enable option name
     default: Enable
     selector:
       text: {}
 
   feed_in_limitation_disable:
+    advanced: true
     name: Feed-in limitation — disable option name
     default: Disable
     selector:

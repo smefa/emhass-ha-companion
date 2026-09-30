@@ -22,16 +22,19 @@ options:
     description: Dollars per kW per day, as quoted on your plan.
     selector: {number: {min: 0, max: 10, step: any, mode: box}}
   window_start:
+    advanced: true
     name: Demand window start
     description: Local time the daily demand window opens.
     default: "15:00:00"
     selector: {time: {}}
   window_end:
+    advanced: true
     name: Demand window end
     description: Local time the daily demand window closes.
     default: "20:00:00"
     selector: {time: {}}
   window_months:
+    advanced: true
     name: Months the window applies
     description: >-
       Leave every box unticked if your DNSP's demand window runs all year.
