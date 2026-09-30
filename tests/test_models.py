@@ -285,14 +285,6 @@ def test_hours_to_charge_walks_the_derating_bands():
     assert config.hours_to_charge(0.4, 0.4) == 0.0
 
 
-def test_grid_capacity_charge_defaults_to_zero():
-    assert GridConfig.from_dict({}).capacity_cost_per_kw == 0.0
-
-
-def test_grid_capacity_charge_is_read_from_stored_options():
-    assert GridConfig.from_dict({"capacity_cost_per_kw": 45.0}).capacity_cost_per_kw == 45.0
-
-
 def test_compute_curtailment_is_unset_for_an_entry_that_predates_it():
     """None, not False: an entry saved before this setting existed must leave
     the add-on's own compute_curtailment alone rather than switch it off."""

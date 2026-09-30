@@ -198,7 +198,10 @@ CONF_GRID_EXPORT_LIMIT_ENTITY: Final = "grid_export_limit_entity"
 # `peak_import`, which exists whether or not a battery does -- deferrable loads
 # can shave a peak on their own. Kept out of _battery_settings for exactly that
 # reason, since that helper returns early when the battery is switched off.
+# Retired grid-step key; only the entry migration still reads it.
 CONF_CAPACITY_COST_PER_KW: Final = "capacity_cost_per_kw"
+MANUAL_DEMAND_PROFILE_KEY: Final = "network/manual_demand_charge"
+MANUAL_DEMAND_RATE_OPTION: Final = "demand_rate"
 # EMHASS's own PV curtailment. A `plant_conf` parameter on its side, listed in
 # its associations.csv, so it can be set per run through runtimeparams rather
 # than only in the add-on's stored configuration. Turning it on is what makes
@@ -404,9 +407,6 @@ DEFAULT_BATTERY_DYNAMIC_MIN: Final = -0.9
 DEFAULT_INVERTER_EFFICIENCY: Final = 0.97
 DEFAULT_GRID_IMPORT_MAX: Final = 9000
 DEFAULT_GRID_EXPORT_MAX: Final = 9000
-# Zero is a true no-op in EMHASS: the peak_import variable is only created when
-# this is above zero, so an untouched config solves exactly the same problem.
-DEFAULT_CAPACITY_COST_PER_KW: Final = 0.0
 
 # Executor
 DEFAULT_POWER_DEADBAND_W: Final = 100

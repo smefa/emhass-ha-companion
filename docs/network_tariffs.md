@@ -143,6 +143,16 @@ regardless of backend — both gating parameters only mean anything to
 `naive-mpc-optim`, so a day-ahead run prices no peak at all and shapes the day
 purely through the cap below; the MPC runs that follow correct it.
 
+### Flat demand charge (manual)
+
+The built-in **Flat demand charge (manual)** option takes a single kr/kW and
+sends it as `capacity_cost_per_kw` on every run, day-ahead and MPC, priced
+across the whole planning horizon. It has no window and no peak memory, so it
+suits a rough estimate or an operator that bills the highest power at any
+hour. If yours bills inside a window, use a real tariff template such as
+Göteborg Energi. It replaces the old grid-step capacity charge, which
+existing entries are migrated onto.
+
 ## The windowed hard cap
 
 The **v0.18.0 fallback**, and the mechanism behind an explicit

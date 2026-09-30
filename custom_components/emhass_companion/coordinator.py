@@ -389,6 +389,9 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         # profile is configured, or when the one configured no longer resolves
         # -- see _refresh_network_calendar.
         self.network_calendar: NetworkCalendar | None = None
+        self.flat_demand_charge_per_kw: float = 0.0
+        """The selected network profile's ``flat_demand_charge``, 0 when it has
+        none. Sent as ``capacity_cost_per_kw`` unwindowed, on every run."""
         # Per-date red-day answers behind any `exclude_holidays` calendar,
         # shared between the band sensor and the demand-window predicate a
         # peak tracker is built against -- both need the same "is today a red
@@ -701,15 +704,20 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         """
         selection = self.config.network
         profile = self.profiles.get(selection.key) if selection.key else None
+        self.flat_demand_charge_per_kw = 0.0
         if profile is None:
             self.network_calendar = None
             return
         try:
             resolved = resolve_network(self.hass, profile, selection.options)
             self.network_calendar = NetworkCalendar.from_resolved(resolved)
-        except (ProfileError, NetworkCalendarError) as err:
+            self.flat_demand_charge_per_kw = max(
+                0.0, float(resolved.get("flat_demand_charge") or 0.0)
+            )
+        except (ProfileError, NetworkCalendarError, TypeError, ValueError) as err:
             _LOGGER.warning("Network profile '%s' could not be resolved: %s", selection.key, err)
             self.network_calendar = None
+            self.flat_demand_charge_per_kw = 0.0
 
     def demand_charge_pricing(self, now: datetime) -> DemandChargePricing | None:
         """What to send EMHASS for the selected network profile's demand
@@ -1693,6 +1701,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             cost_fun=self.cost_fun,
             extra_settings=settings,
             network_demand_charge_configured=demand_pricing is not None,
+            flat_demand_charge_per_kw=self.flat_demand_charge_per_kw,
             demand_charge_rate_per_kw=(
                 rates if rates is not None and len(rates) > 1 else (rates[0] if rates else None)
             ),

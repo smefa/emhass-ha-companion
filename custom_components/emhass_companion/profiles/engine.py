@@ -292,6 +292,7 @@ def resolve_network(
         "demand_charge": render(hass, profile.demand_charge, variables),
         "demand_charges": render(hass, profile.demand_charges, variables),
         "capacity_limit": render(hass, profile.capacity_limit, variables),
+        "flat_demand_charge": render(hass, profile.flat_demand_charge, variables),
     }
 
 

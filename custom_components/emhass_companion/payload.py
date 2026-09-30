@@ -353,6 +353,10 @@ class PayloadInputs:
     mix_beta: float = 0.5
     cost_fun: str = DEFAULT_COST_FUN
     extra_settings: dict[str, Any] = field(default_factory=dict)
+    flat_demand_charge_per_kw: float = 0.0
+    """The manual network option's single rate, sent as ``capacity_cost_per_kw``
+    across the whole horizon (no window, no memory) whenever no real demand
+    charge is configured."""
     network_demand_charge_configured: bool = False
     """Whether the selected network profile defines a ``demand_charge`` at
     all -- set independently of whether it can currently be priced, so that a
@@ -892,7 +896,7 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
             # whole horizon with no window and no memory.
             payload["capacity_cost_per_kw"] = 0.0
     else:
-        payload["capacity_cost_per_kw"] = inputs.grid.capacity_cost_per_kw
+        payload["capacity_cost_per_kw"] = inputs.flat_demand_charge_per_kw
     # EMHASS's own PV curtailment, a plant_conf parameter reachable through
     # runtimeparams via its associations.csv. With it off there is no
     # `P_PV_curtailment` column at all, so strategy.decide_curtailment's

@@ -291,10 +291,17 @@ def _validate_network(document: dict[str, Any]) -> dict[str, Any]:
     plural = document.get("demand_charges")
     if singular and plural:
         raise vol.Invalid("Define either 'demand_charge' or 'demand_charges', not both")
-    if not (document.get("energy_bands") or singular or plural or document.get("capacity_limit")):
+    if not (
+        document.get("energy_bands")
+        or singular
+        or plural
+        or document.get("capacity_limit")
+        or document.get("flat_demand_charge") is not None
+    ):
         raise vol.Invalid(
             "'network' profile must define at least one of 'energy_bands', "
-            "'demand_charge', 'demand_charges' or 'capacity_limit'; it currently "
+            "'demand_charge', 'demand_charges', 'flat_demand_charge' or "
+            "'capacity_limit'; it currently "
             "contributes nothing"
         )
     return document
@@ -382,6 +389,10 @@ PROFILE_SCHEMA = vol.All(
                 vol.All(cv.ensure_list, [dict])
             ),
             vol.Optional("capacity_limit", default={}): _empty_block(dict),
+            # A single kr/kW priced across the whole horizon, with no window
+            # and no peak memory -- see builtin/network/manual_demand_charge.
+            # A template or a number, rendered by resolve_network.
+            vol.Optional("flat_demand_charge"): vol.Any(cv.string, vol.Coerce(float)),
         }
     ),
     _validate_profile,
@@ -510,6 +521,10 @@ class Profile:
     @property
     def capacity_limit(self) -> dict[str, Any]:
         return self.document.get("capacity_limit", {})
+
+    @property
+    def flat_demand_charge(self) -> Any:
+        return self.document.get("flat_demand_charge")
 
     def selector_schema(self, *, skip: set[str] = frozenset()) -> dict[Any, Any]:
         """Build a voluptuous schema fragment for this profile's options.

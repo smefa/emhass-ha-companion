@@ -29,8 +29,12 @@ from homeassistant.util import slugify
 
 from .api import EmhassClient, EmhassError
 from .const import (
+    CONF_CAPACITY_COST_PER_KW,
     CONF_CONTROL_ENTITY,
     CONF_HOUSE_LOAD_TOTAL_ENTITY,
+    CONF_NETWORK,
+    CONF_PROFILE,
+    CONF_PROFILE_OPTIONS,
     CONF_URL,
     CONTROL_ENTITY_DOMAINS,
     DOMAIN,
@@ -38,6 +42,8 @@ from .const import (
     ISSUE_EMHASS_VERSION,
     ISSUE_SCRIPT_CONTROL_ENTITY,
     LOAD_SUBENTRY_TYPES,
+    MANUAL_DEMAND_PROFILE_KEY,
+    MANUAL_DEMAND_RATE_OPTION,
     MIN_EMHASS_VERSION,
     NET_HOUSE_LOAD_KEY,
 )
@@ -98,6 +104,34 @@ class EmhassRuntimeData:
         # of peak_trackers[0] when K>=1.
         self.peak_tracker = peak_tracker
         self.peak_trackers = list(peak_trackers or ([peak_tracker] if peak_tracker else []))
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bool:
+    """Move the retired grid-step demand charge onto the network tariff.
+
+    1.1 -> 1.2: ``grid.capacity_cost_per_kw`` becomes the "Flat demand charge
+    (manual)" network option. An entry that already has a network tariff keeps
+    it and drops the number, which that tariff's own demand charge overrode
+    anyway.
+    """
+    if entry.version == 1 and entry.minor_version < 2:
+        options = dict(entry.options)
+        grid = dict(options.get("grid") or {})
+        rate = grid.pop(CONF_CAPACITY_COST_PER_KW, None)
+        if "grid" in options:
+            options["grid"] = grid
+        try:
+            rate = float(rate or 0.0)
+        except (TypeError, ValueError):
+            rate = 0.0
+        network = options.get(CONF_NETWORK) or {}
+        if rate > 0 and not network.get(CONF_PROFILE):
+            options[CONF_NETWORK] = {
+                CONF_PROFILE: MANUAL_DEMAND_PROFILE_KEY,
+                CONF_PROFILE_OPTIONS: {MANUAL_DEMAND_RATE_OPTION: rate},
+            }
+        hass.config_entries.async_update_entry(entry, options=options, minor_version=2)
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bool:

@@ -23,7 +23,6 @@ from .const import (
     CONF_BATTERY_SOC_SURPLUS_THRESHOLD,
     CONF_BATTERY_STRESS_COST,
     CONF_BATTERY_STRESS_SEGMENTS,
-    CONF_CAPACITY_COST_PER_KW,
     CONF_CHARGE_POWER_DERATING,
     CONF_COMPUTE_CURTAILMENT,
     CONF_END_SOC_MODE,
@@ -44,7 +43,6 @@ from .const import (
     DEFAULT_BATTERY_SOC_SURPLUS_THRESHOLD,
     DEFAULT_BATTERY_STRESS_COST,
     DEFAULT_BATTERY_STRESS_SEGMENTS,
-    DEFAULT_CAPACITY_COST_PER_KW,
     DEFAULT_CHARGE_EFFICIENCY,
     DEFAULT_DISCHARGE_EFFICIENCY,
     DEFAULT_END_SOC_MODE,
@@ -584,10 +582,6 @@ class GridConfig:
 
     import_max_w: float = DEFAULT_GRID_IMPORT_MAX
     export_max_w: float = DEFAULT_GRID_EXPORT_MAX
-    capacity_cost_per_kw: float = DEFAULT_CAPACITY_COST_PER_KW
-    """Demand charge on the highest import power over the horizon, per kW. A
-    grid setting rather than a battery one -- deferrable loads shave a peak
-    with no battery involved. Zero is a genuine no-op inside EMHASS."""
     compute_curtailment: bool | None = None
     """Whether EMHASS itself should optimise PV curtailment, sent as a runtime
     parameter so the answer travels with the run instead of living only in the
@@ -610,9 +604,6 @@ class GridConfig:
         return cls(
             import_max_w=float(data.get("grid_import_max_w", DEFAULT_GRID_IMPORT_MAX)),
             export_max_w=float(data.get("grid_export_max_w", DEFAULT_GRID_EXPORT_MAX)),
-            capacity_cost_per_kw=float(
-                data.get(CONF_CAPACITY_COST_PER_KW, DEFAULT_CAPACITY_COST_PER_KW)
-            ),
             import_limit_entity=data.get(CONF_GRID_IMPORT_LIMIT_ENTITY) or None,
             export_limit_entity=data.get(CONF_GRID_EXPORT_LIMIT_ENTITY) or None,
             compute_curtailment=(

@@ -173,16 +173,13 @@ def test_the_grid_step_asks_only_about_emhass_curtailment():
     assert "curtail_on_negative_price" not in keys
 
 
-def test_collect_grid_keeps_the_capacity_charge():
-    """It was asked for and then dropped by both handlers for a while."""
-    submitted = {
-        "grid_import_max_w": 9000,
-        "grid_export_max_w": 9000,
-        CONF_CAPACITY_COST_PER_KW: 45.0,
-        CONF_COMPUTE_CURTAILMENT: True,
-    }
-    collected = _collect_grid(submitted)
-    assert collected[CONF_CAPACITY_COST_PER_KW] == 45.0
+def test_grid_step_no_longer_asks_for_a_capacity_charge():
+    """It moved to the network tariff step ("Flat demand charge (manual)")."""
+    assert CONF_CAPACITY_COST_PER_KW not in {str(key) for key in grid_schema({})}
+    collected = _collect_grid(
+        {"grid_import_max_w": 9000, "grid_export_max_w": 9000, CONF_COMPUTE_CURTAILMENT: True}
+    )
+    assert CONF_CAPACITY_COST_PER_KW not in collected
     assert collected[CONF_COMPUTE_CURTAILMENT] is True
 
 
@@ -190,7 +187,6 @@ def test_collect_grid_keeps_the_limit_sensors():
     submitted = {
         "grid_import_max_w": 9000,
         "grid_export_max_w": 9000,
-        CONF_CAPACITY_COST_PER_KW: 0.0,
         CONF_COMPUTE_CURTAILMENT: False,
         CONF_GRID_IMPORT_LIMIT_ENTITY: "sensor.phase_balanced_import_limit",
         CONF_GRID_EXPORT_LIMIT_ENTITY: "sensor.export_limit",
@@ -207,7 +203,6 @@ def test_a_blank_limit_sensor_is_stored_as_none():
         {
             "grid_import_max_w": 9000,
             "grid_export_max_w": 9000,
-            CONF_CAPACITY_COST_PER_KW: 0.0,
             CONF_COMPUTE_CURTAILMENT: False,
         }
     )

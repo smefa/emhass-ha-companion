@@ -661,8 +661,7 @@ def test_capacity_charge_is_sent_even_without_a_battery():
     """It prices peak *grid* import, which deferrable loads can shave on their
     own -- so it must not be gated behind set_use_battery the way the battery
     cost knobs are."""
-    grid = GridConfig(capacity_cost_per_kw=45.0)
-    payload = build_payload(_inputs(grid=grid)).payload
+    payload = build_payload(_inputs(flat_demand_charge_per_kw=45.0)).payload
     assert payload["set_use_battery"] is False
     assert payload["capacity_cost_per_kw"] == 45.0
 
@@ -674,13 +673,11 @@ def test_capacity_charge_defaults_to_a_no_op():
 
 def test_network_demand_charge_prices_the_peak_on_mpc():
     """A network profile's effective rate owns the field entirely -- the
-    unrelated manual number on GridConfig must not leak through underneath
-    it (see network_tariffs_plan.md's "Band adders applied twice" guardrail,
+    unrelated flat number must not leak through underneath it (see network_tariffs_plan.md's "Band adders applied twice" guardrail,
     the same doctrine applied to this field instead)."""
-    grid = GridConfig(capacity_cost_per_kw=999.0)
     payload = build_payload(
         _inputs(
-            grid=grid,
+            flat_demand_charge_per_kw=999.0,
             network_demand_charge_configured=True,
             demand_charge_rate_per_kw=45.0,
             current_period_peak_w=3200.0,
@@ -711,9 +708,12 @@ def test_network_demand_charge_zeroed_rather_than_falling_back_when_not_priceabl
     coordinator's "configured, but not safely priceable right now" case
     (backend too old, or a real window on a backend with no window mask) --
     it must zero the field, not fall back to the manual number."""
-    grid = GridConfig(capacity_cost_per_kw=999.0)
     payload = build_payload(
-        _inputs(grid=grid, network_demand_charge_configured=True, demand_charge_rate_per_kw=None)
+        _inputs(
+            flat_demand_charge_per_kw=999.0,
+            network_demand_charge_configured=True,
+            demand_charge_rate_per_kw=None,
+        )
     ).payload
     assert payload["capacity_cost_per_kw"] == 0.0
 

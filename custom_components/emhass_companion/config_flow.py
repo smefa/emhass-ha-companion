@@ -41,7 +41,6 @@ from .const import (
     CONF_BATTERY_SOC_SURPLUS_THRESHOLD,
     CONF_BATTERY_STRESS_COST,
     CONF_BATTERY_STRESS_SEGMENTS,
-    CONF_CAPACITY_COST_PER_KW,
     CONF_CHARGE_EFFICIENCY,
     CONF_CHARGE_POWER_DERATING,
     CONF_COMFORT_END,
@@ -121,7 +120,6 @@ from .const import (
     DEFAULT_BATTERY_SOC_SURPLUS_THRESHOLD,
     DEFAULT_BATTERY_STRESS_COST,
     DEFAULT_BATTERY_STRESS_SEGMENTS,
-    DEFAULT_CAPACITY_COST_PER_KW,
     DEFAULT_CHARGE_EFFICIENCY,
     DEFAULT_COMPUTE_CURTAILMENT,
     DEFAULT_DAYAHEAD_FALLBACK_TIME,
@@ -512,15 +510,12 @@ def _collect_tariff(user_input: dict[str, Any]) -> dict[str, Any]:
 def _collect_grid(user_input: dict[str, Any]) -> dict[str, Any]:
     """The grid step's own keys, split out from the schedule ones beside them.
 
-    Shared by setup and options so the two cannot drift -- which is exactly
-    what happened to ``capacity_cost_per_kw``: the schema asked for it and
-    both handlers dropped it on the floor, leaving it stuck at its default no
-    matter what anyone typed.
+    Shared by setup and options so the two cannot drift -- a field the schema
+    asks for and a handler drops is stuck at its default whatever anyone types.
     """
     return {
         "grid_import_max_w": user_input["grid_import_max_w"],
         "grid_export_max_w": user_input["grid_export_max_w"],
-        CONF_CAPACITY_COST_PER_KW: user_input[CONF_CAPACITY_COST_PER_KW],
         CONF_COMPUTE_CURTAILMENT: user_input[CONF_COMPUTE_CURTAILMENT],
         # Absent when left blank (see _optional_blank), and stored as None
         # rather than dropped so that clearing the field in the options flow
@@ -534,6 +529,7 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
     """Guided setup."""
 
     VERSION = 1
+    MINOR_VERSION = 2
 
     def __init__(self) -> None:
         self._data: dict[str, Any] = {}
@@ -2018,8 +2014,7 @@ Two fields that the first version of this screen had are gone on purpose:
   so the question could only ever be asked of people already answered.
 
 One tuple, read by the schema, the summary and the step that collects it, so a
-field can never be offered and then dropped on save -- which is what happened
-to ``capacity_cost_per_kw`` (see the note on the setup flow's grid step).
+field can never be offered and then dropped on save.
 """
 
 
@@ -2133,15 +2128,6 @@ def grid_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
         ),
         _optional_blank(CONF_GRID_EXPORT_LIMIT_ENTITY, defaults): selector.EntitySelector(
             selector.EntitySelectorConfig(domain="sensor")
-        ),
-        # Demand charge on the horizon's peak import, in currency per kW. Sits
-        # with the grid limits rather than the battery because it prices grid
-        # power: deferrable loads can shave a peak with no battery in play.
-        vol.Optional(
-            CONF_CAPACITY_COST_PER_KW,
-            default=defaults.get(CONF_CAPACITY_COST_PER_KW, DEFAULT_CAPACITY_COST_PER_KW),
-        ): selector.NumberSelector(
-            selector.NumberSelectorConfig(min=0, max=1000, step=0.01, mode="box")
         ),
         # The only curtailment question there is: without this, no run ever
         # produces a P_PV_curtailment column, and strategy.decide_curtailment

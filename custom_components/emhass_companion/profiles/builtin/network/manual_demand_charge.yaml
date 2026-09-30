@@ -1,0 +1,29 @@
+name: Flat demand charge (manual)
+kind: network
+version: 1
+description: >-
+  A single demand charge in kr/kW, priced across the whole planning horizon.
+  No time window, no peak memory.
+notes: >-
+  The plan flattens its single worst import peak over the horizon, shifting
+  loads apart and discharging the battery across it. The price is charged
+  once on that peak, not per hour. It has no window and no memory of the
+  month's peak so far, so it suits a rough estimate or an operator that bills
+  the highest power at any hour. If your operator bills inside a time window
+  (for example weekday daytime), choose a real tariff template such as
+  Göteborg Energi instead -- it prices only that window and remembers the
+  peak already set this month.
+
+detect:
+  always: true
+
+options:
+  demand_rate:
+    name: Capacity (demand) charge
+    description: >-
+      Price per kW of the highest import power over the planning horizon.
+      Charged once on the peak, not per hour. 0 turns it off.
+    default: 0
+    selector: {number: {min: 0, max: 1000, step: 0.01, mode: box}}
+
+flat_demand_charge: "{{ options.demand_rate }}"

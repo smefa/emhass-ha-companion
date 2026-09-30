@@ -202,7 +202,7 @@ now.
 
 ## Time resolution
 
-![The Grid connection and schedule step, with import/export limits, capacity charge, PV curtailment, time resolution, recalculation interval, planning horizon and day-ahead fallback time](assets/setup-grid-schedule.png)
+![The Grid connection and schedule step, with import/export limits, PV curtailment, time resolution, recalculation interval, planning horizon and day-ahead fallback time](assets/setup-grid-schedule.png)
 
 The **Grid and schedule** step defaults the optimisation time step to whatever
 your chosen price source actually publishes at — Nord Pool has been 15-minute
@@ -214,16 +214,13 @@ list, type any number of minutes.
 This is only the *resolution EMHASS plans at*. How often the plan is
 recalculated (below) is a separate setting.
 
-**Capacity (demand) charge**, also on this step, is for network tariffs that
-bill the highest power you draw rather than only the energy you use. Enter the
-price per kW and the plan starts flattening its single worst import peak —
-spreading deferrable loads apart and discharging the battery across the peak —
-instead of only chasing cheap hours. It is charged once on that peak, not per
-hour, so it is the one cost here that is not an energy price.
-
-This is a grid setting, not a battery one: peak shaving works through
-deferrable loads too, so it applies whether or not you have a battery. **0**
-(the default) turns it off entirely.
+A **capacity (demand) charge** is not set on this step any more: it belongs
+with the network tariff. Choose **Flat demand charge (manual)** under
+*Network tariff* and enter one price per kW. The plan then flattens its single
+worst import peak over the whole planning horizon, with no time window and no
+memory of the month's peak so far. If your operator bills inside a window,
+pick a real tariff template such as Göteborg Energi instead. Entries that had
+a capacity charge here are moved onto the manual option automatically.
 
 **Let EMHASS optimise PV curtailment**, on the same step, is off by default.
 It is EMHASS's own `compute_curtailment`, sent with every run rather than left
