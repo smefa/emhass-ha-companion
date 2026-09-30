@@ -61,14 +61,14 @@
       },
       "pv": {
         "title": "Solprognos",
-        "description": "Välj varifrån prognosen för solproduktion kommer. Välj **Ingen sol** om du saknar paneler.\n\n{profiles}",
+        "description": "Välj varifrån prognosen för solproduktion kommer.\n\n{profiles}\n\nInga paneler, eller en annan källa? Öppna **Avancerade inställningar**.",
         "data": {
           "profile": "Källa för solprognos"
         },
         "sections": {
           "advanced": {
             "name": "Avancerade inställningar",
-            "description": "Andra källor: EMHASS inbyggda prognos, en prognos från valfri entitet eller ingen sol alls.",
+            "description": "- **EMHASS built-in forecast (Open-Meteo)** — EMHASS gör prognosen från väderdata och din anläggning. Ingen API-nyckel.\n- **Solar forecast from an entity attribute** — läser en listattribut på valfri entitet.\n- **No solar** — du har ingen solcellsanläggning.",
             "data": {
               "profile": "Annan källa för solprognos"
             }
@@ -345,14 +345,14 @@
       },
       "pv": {
         "title": "Solprognos",
-        "description": "Ändra varifrån prognosen för solproduktion kommer, eller justera bara den källa du redan använder.\n\nVärt att titta på efter en uppdatering: en profils standardval kan ha fått fler poster (Solcasts day 3-sensor, som End SOC-läget \"Optimerad\" använder för att se nästa soldygn bortom horisonten), och de erbjuds här i stället för att sättas åt dig.\n\n{profiles}",
+        "description": "Ändra varifrån solprognosen kommer, eller justera källan du använder. Efter en uppdatering kan en profils standardval ha fått fler poster; de erbjuds här i stället för att sättas åt dig.\n\n{profiles}",
         "data": {
           "profile": "Källa för solprognos"
         },
         "sections": {
           "advanced": {
             "name": "Avancerade inställningar",
-            "description": "Andra källor: EMHASS inbyggda prognos, en prognos från valfri entitet eller ingen sol alls.",
+            "description": "- **EMHASS built-in forecast (Open-Meteo)** — EMHASS gör prognosen från väderdata och din anläggning. Ingen API-nyckel.\n- **Solar forecast from an entity attribute** — läser en listattribut på valfri entitet.\n- **No solar** — du har ingen solcellsanläggning.",
             "data": {
               "profile": "Annan källa för solprognos"
             }

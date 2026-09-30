@@ -386,6 +386,17 @@ _ADVANCED_PROFILES_BY_KIND: dict[str, tuple[str, ...]] = {
 }
 
 
+def _profiles_shown_first(kind: str, profiles: list[Profile]) -> list[Profile]:
+    """The profiles the picker lists outside its Advanced section.
+
+    Their descriptions go in the form text; the others are described by the
+    section's own (static) translation. Everything, when the picker is flat.
+    """
+    hidden = _ADVANCED_PROFILES_BY_KIND.get(kind, ())
+    basic = [profile for profile in profiles if profile.key not in hidden]
+    return basic if basic and len(basic) < len(profiles) else profiles
+
+
 def _profile_picker_schema(
     kind: str,
     profiles: list[Profile],
@@ -986,7 +997,7 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
             errors["base"] = "profile_required"
 
         order = _PROFILE_ORDER_BY_KIND.get(kind, ())
-        ranked = _rank_profiles(choices, order)
+        ranked = _rank_profiles(_profiles_shown_first(kind, choices), order)
         return self.async_show_form(
             step_id=step_id,
             data_schema=vol.Schema(
@@ -2669,7 +2680,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
             errors["base"] = "profile_required"
 
         current = (options.get(CONF_PV) or {}).get(CONF_PROFILE)
-        ranked = _rank_profiles(choices, PV_PROFILE_ORDER)
+        ranked = _rank_profiles(_profiles_shown_first(PROFILE_KIND_PV, choices), PV_PROFILE_ORDER)
         return self.async_show_form(
             step_id="pv",
             data_schema=vol.Schema(

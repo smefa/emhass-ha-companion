@@ -61,14 +61,14 @@
       },
       "pv": {
         "title": "Solar forecast",
-        "description": "Choose where the PV production forecast comes from. Pick **No solar** if you have no panels.\n\n{profiles}",
+        "description": "Choose where the PV production forecast comes from.\n\n{profiles}\n\nNo panels, or another source? Open **Advanced settings**.",
         "data": {
           "profile": "Solar forecast source"
         },
         "sections": {
           "advanced": {
             "name": "Advanced settings",
-            "description": "Other sources: EMHASS's built-in forecast, a forecast read from any entity, or no solar at all.",
+            "description": "- **EMHASS built-in forecast (Open-Meteo)** — EMHASS makes the forecast from weather data and your array. No API key.\n- **Solar forecast from an entity attribute** — reads a list-valued attribute on any entity.\n- **No solar** — you have no PV array.",
             "data": {
               "profile": "Other solar forecast source"
             }
@@ -345,14 +345,14 @@
       },
       "pv": {
         "title": "Solar forecast",
-        "description": "Change where the PV production forecast comes from, or just retune the source you already use.\n\nWorth revisiting after an update: a profile's default options can gain entries (Solcast's day-3 sensor, which the End SOC \"Optimized\" mode uses to see the next solar day past the horizon), and those are offered here rather than applied for you.\n\n{profiles}",
+        "description": "Change where the PV forecast comes from, or retune the source you use. After an update, a profile's defaults can gain entries; they are offered here rather than applied for you.\n\n{profiles}",
         "data": {
           "profile": "Solar forecast source"
         },
         "sections": {
           "advanced": {
             "name": "Advanced settings",
-            "description": "Other sources: EMHASS's built-in forecast, a forecast read from any entity, or no solar at all.",
+            "description": "- **EMHASS built-in forecast (Open-Meteo)** — EMHASS makes the forecast from weather data and your array. No API key.\n- **Solar forecast from an entity attribute** — reads a list-valued attribute on any entity.\n- **No solar** — you have no PV array.",
             "data": {
               "profile": "Other solar forecast source"
             }
