@@ -6,9 +6,9 @@ separate from the Battery step: leave it unset and the integration only ever
 *reads* — the plan is yours to act on however you like.
 
 Configure it under **Settings → Devices & Services → EMHASS Companion →
-Configure → Inverter control**.
+Configure → Inverter profile**.
 
-![The Inverter control step, choosing between Scripts and a Sungrow SH-RT profile](assets/inverter-control-profile.png)
+![The Inverter profile step, choosing between Scripts and a Sungrow SH-RT profile](assets/inverter-control-profile.png)
 
 ## How it works
 

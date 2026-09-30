@@ -14,13 +14,18 @@ import voluptuous as vol
 
 from custom_components.emhass_companion.config_flow import (
     BATTERY_ADVANCED_KEYS,
+    INVERTER_ADVANCED_KEYS,
+    INVERTER_KEYS,
     STANDARD_TIME_STEPS,
     UNTESTED_NOTICE,
+    _battery_blob_after_battery_form,
+    _battery_blob_after_inverter_form,
     _battery_errors,
     _collect_grid,
     _collect_tariff,
     _default_profile_options,
     _flatten_sections,
+    _inverter_errors,
     _inverter_profile_selector,
     _load_profile_selector,
     _nest_suggested,
@@ -31,6 +36,7 @@ from custom_components.emhass_companion.config_flow import (
     _with_advanced,
     battery_schema,
     grid_schema,
+    inverter_schema,
 )
 from custom_components.emhass_companion.const import (
     ADVANCED_SECTION,
@@ -122,21 +128,21 @@ def test_battery_schema_builds():
 def test_hybrid_on_with_zero_ac_output_is_rejected():
     """The toggle defaults on and the watt field defaults to 0 -- that pair
     would send EMHASS a zero-capacity hybrid and make the plan infeasible."""
-    assert _battery_errors({CONF_HYBRID_INVERTER: True, CONF_INVERTER_AC_OUTPUT_MAX: 0}) == {
+    assert _inverter_errors({CONF_HYBRID_INVERTER: True, CONF_INVERTER_AC_OUTPUT_MAX: 0}) == {
         CONF_INVERTER_AC_OUTPUT_MAX: "ac_output_required"
     }
-    assert _battery_errors({CONF_HYBRID_INVERTER: True}) == {
+    assert _inverter_errors({CONF_HYBRID_INVERTER: True}) == {
         CONF_INVERTER_AC_OUTPUT_MAX: "ac_output_required"
     }
 
 
 def test_hybrid_on_with_a_positive_ac_output_is_accepted():
-    assert _battery_errors({CONF_HYBRID_INVERTER: True, CONF_INVERTER_AC_OUTPUT_MAX: 5000}) == {}
+    assert _inverter_errors({CONF_HYBRID_INVERTER: True, CONF_INVERTER_AC_OUTPUT_MAX: 5000}) == {}
 
 
 def test_hybrid_off_may_leave_ac_output_at_zero():
     """The watt fields are inert when the toggle is off, so 0 is not a plant."""
-    assert _battery_errors({CONF_HYBRID_INVERTER: False, CONF_INVERTER_AC_OUTPUT_MAX: 0}) == {}
+    assert _inverter_errors({CONF_HYBRID_INVERTER: False, CONF_INVERTER_AC_OUTPUT_MAX: 0}) == {}
 
 
 def test_battery_schema_builds_with_a_derating_table():
@@ -148,7 +154,6 @@ def test_battery_schema_builds_with_a_derating_table():
 def test_a_misordered_derating_table_is_rejected_on_the_form():
     assert _battery_errors(
         {
-            CONF_HYBRID_INVERTER: False,
             CONF_CHARGE_POWER_DERATING: [
                 {"soc_pct": 70, "charge_pct": 42},
                 {"soc_pct": 50, "charge_pct": 84},
@@ -158,7 +163,7 @@ def test_a_misordered_derating_table_is_rejected_on_the_form():
 
 
 def test_an_empty_derating_table_is_accepted():
-    assert _battery_errors({CONF_HYBRID_INVERTER: False, CONF_CHARGE_POWER_DERATING: []}) == {}
+    assert _battery_errors({CONF_CHARGE_POWER_DERATING: []}) == {}
 
 
 def _advanced_keys(schema):
@@ -215,7 +220,7 @@ def test_battery_schema_splits_basic_and_advanced():
     schema = battery_schema({})
     top = {str(k) for k in schema}
     assert {"use_battery", "capacity_wh", "soc_min", "soc_max"} <= top
-    assert {"inverter_ac_output_max_w", "hybrid_inverter"} <= top | {"inverter_ac_output_max_w"}
+    assert not top & INVERTER_KEYS
     advanced = {str(k) for k in _advanced_keys(schema)}
     assert advanced == set(BATTERY_ADVANCED_KEYS)
     assert not advanced & top
@@ -227,6 +232,55 @@ def test_battery_advanced_fields_are_valid_untouched():
         assert not isinstance(key, vol.Required) or key.default is not vol.UNDEFINED, key
     result = vol.Schema(battery_schema({}))({"use_battery": True, ADVANCED_SECTION: {}})
     assert "charge_efficiency" in result[ADVANCED_SECTION]
+
+
+def test_inverter_schema_splits_basic_and_advanced():
+    schema = inverter_schema({})
+    top = {str(k) for k in schema}
+    assert {CONF_HYBRID_INVERTER, CONF_INVERTER_AC_OUTPUT_MAX, "inverter_ac_input_max_w"} <= top
+    advanced = {str(k) for k in _advanced_keys(schema)}
+    assert advanced == set(INVERTER_ADVANCED_KEYS)
+    assert not advanced & top
+    assert set(INVERTER_KEYS) == top - {ADVANCED_SECTION} | advanced
+
+
+def test_inverter_advanced_fields_are_valid_untouched():
+    result = vol.Schema(inverter_schema({}))(
+        {CONF_INVERTER_AC_OUTPUT_MAX: 5000, ADVANCED_SECTION: {}}
+    )
+    assert result[ADVANCED_SECTION]["inverter_efficiency_dc_ac"]
+
+
+def test_the_two_forms_never_claim_the_same_stored_key():
+    battery = {str(k) for k in battery_schema({})} | {
+        str(k) for k in _advanced_keys(battery_schema({}))
+    }
+    assert not battery & INVERTER_KEYS
+
+
+def test_saving_one_form_keeps_the_other_forms_stored_values():
+    stored = {"capacity_wh": 10000, CONF_HYBRID_INVERTER: True, CONF_INVERTER_AC_OUTPUT_MAX: 5000}
+    after_battery = _battery_blob_after_battery_form(stored, {"capacity_wh": 12000})
+    assert after_battery == {
+        "capacity_wh": 12000,
+        CONF_HYBRID_INVERTER: True,
+        CONF_INVERTER_AC_OUTPUT_MAX: 5000,
+    }
+    after_inverter = _battery_blob_after_inverter_form(
+        stored, {CONF_HYBRID_INVERTER: False, CONF_INVERTER_AC_OUTPUT_MAX: 0}
+    )
+    assert after_inverter == {
+        "capacity_wh": 10000,
+        CONF_HYBRID_INVERTER: False,
+        CONF_INVERTER_AC_OUTPUT_MAX: 0,
+    }
+
+
+def test_a_cleared_field_is_removed_from_the_stored_blob():
+    stored = {"capacity_wh": 10000, CONF_CHARGE_POWER_DERATING: [[0.5, 0.8]]}
+    assert _battery_blob_after_battery_form(stored, {"capacity_wh": 10000}) == {
+        "capacity_wh": 10000
+    }
 
 
 def test_battery_section_opens_on_request():

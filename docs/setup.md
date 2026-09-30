@@ -11,15 +11,16 @@ sources you actually have installed**.
 | Solar forecast | Which forecast source — or *No solar* |
 | House consumption | Which sensor, and how to forecast from it |
 | Battery | Capacity and limits — or leave it off |
-| Inverter control | Which profile writes the plan to hardware — or none, and stay read-only |
+| Inverter | The inverter's AC power limits and conversion efficiencies |
+| Inverter profile | Which profile writes the plan to hardware — or none, and stay read-only |
 | Grid and schedule | Connection limits, curtailment, time resolution, how often to recalculate |
 
 Most of these can be revisited any time from **Settings → Devices & Services
 → EMHASS Companion → Configure**:
 
-![The Configure menu, listing House consumption, Battery, Grid and schedule, Buy and sell prices, Inverter control and Outdoor temperature](assets/setup-configure-menu.png)
+![The Configure menu, listing House consumption, Battery, Grid and schedule, Buy and sell prices, Inverter, Inverter profile and Outdoor temperature](assets/setup-configure-menu.png)
 
-**Inverter control** is the same step as during setup — come back here to add
+**Inverter profile** is the same step as during setup — come back here to add
 a profile you skipped, or to swap one. **Outdoor temperature** is only worth
 visiting once you have a thermal load. Both are covered in
 [Inverter control](inverter_control.md) and
@@ -76,6 +77,16 @@ export:
 > Tax and subsidy schemes change. Nothing here is kept current for you — check
 > your own numbers each year.
 
+## Inverter
+
+The inverter's own limits and losses. This step is always there, battery or not.
+
+| Setting | Meaning |
+|---|---|
+| Shared inverter (hybrid) | On if PV and the battery share one inverter's AC-side power limit — true for most home battery systems. Off if they are two independent inverters, each with its own limit |
+| Maximum AC output / input | Only asked if hybrid — the shared inverter's own throughput ceiling, separate from the battery's own charge/discharge limits |
+| DC to AC / AC to DC efficiency | Conversion losses, in the collapsed *Advanced settings* section |
+
 ## Battery
 
 ![The Battery step, with capacity, power limits, hybrid inverter fields, efficiencies and charge levels](assets/setup-battery.png)
@@ -94,9 +105,6 @@ the optimiser plans around PV, load and price alone.
 | Minimum / maximum charge level | The optimiser will not plan the battery outside this range |
 | Target charge level | Where the optimiser aims to leave the battery at the end of the horizon. What it means depends on End SOC below |
 | End SOC | How that end-of-horizon level is chosen. See below |
-| Shared inverter (hybrid) | On if PV and the battery share one inverter's AC-side power limit — true for most home battery systems. Off if they are two independent inverters, each with its own limit |
-| Maximum AC output / input | Only asked if hybrid — the shared inverter's own throughput ceiling, separate from the battery's own charge/discharge limits |
-| DC to AC / AC to DC efficiency | Conversion losses, only asked if hybrid |
 | Discharge / charge cycle cost | What a kWh through the battery costs in wear. See below |
 | Low / high charge comfort level | Levels the plan prefers to stay between, softly. See below |
 | Cost of sitting below / above it | What that preference is worth, per kWh past the level per hour |

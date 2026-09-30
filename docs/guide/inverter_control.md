@@ -6,11 +6,11 @@ off by default — see [Handing over control](#turning-it-on) below before you
 turn it on.
 
 Configure it under **Settings → Devices & Services → EMHASS Companion →
-Configure → Inverter control**.
+Configure → Inverter profile**.
 
-## Inverter control step
+## Inverter profile step
 
-![The Inverter control step](../assets/inverter-control-profile.png)
+![The Inverter profile step](../assets/inverter-control-profile.png)
 
 - **Inverter profile** — how the battery is actually commanded:
     - **Scripts (works with any inverter)** — you provide a script for each

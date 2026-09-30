@@ -736,7 +736,9 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
             user_input = _flatten_sections(user_input)
             errors = _battery_errors(user_input)
             if not errors:
-                self._options["battery"] = _battery_storage_from_input(user_input)
+                self._options["battery"] = _battery_blob_after_battery_form(
+                    self._options.get("battery"), _battery_storage_from_input(user_input)
+                )
                 if soc := user_input.get(CONF_SOC_ENTITY):
                     self._options[CONF_SOC_ENTITY] = soc
                 if battery_power := user_input.get(CONF_BATTERY_POWER_ENTITY):
@@ -746,13 +748,38 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
                     )
                 if pv_live := user_input.get(CONF_PV_ENTITY):
                     self._options[CONF_PV_ENTITY] = pv_live
-                return await self.async_step_inverter()
+                return await self.async_step_inverter_settings()
 
         defaults = _battery_form_defaults(user_input) if user_input is not None else {}
         return self.async_show_form(
             step_id="battery",
             data_schema=vol.Schema(battery_schema(defaults, advanced_open="base" in errors)),
-            description_placeholders={"round_trip": _battery_efficiency_note(defaults)},
+            description_placeholders={
+                "round_trip": _battery_efficiency_note(
+                    {**(self._options.get("battery") or {}), **defaults}
+                )
+            },
+            errors=errors,
+        )
+
+    async def async_step_inverter_settings(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """The inverter's own limits and losses, split from the battery form."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            user_input = _flatten_sections(user_input)
+            errors = _inverter_errors(user_input)
+            if not errors:
+                self._options["battery"] = _battery_blob_after_inverter_form(
+                    self._options.get("battery"), _inverter_storage_from_input(user_input)
+                )
+                return await self.async_step_inverter()
+
+        defaults = user_input if user_input is not None else (self._options.get("battery") or {})
+        return self.async_show_form(
+            step_id="inverter_settings",
+            data_schema=vol.Schema(inverter_schema(defaults)),
             errors=errors,
         )
 
@@ -1623,8 +1650,8 @@ def _battery_storage_from_input(user_input: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _battery_errors(user_input: dict[str, Any]) -> dict[str, str]:
-    """Reject a hybrid inverter with no AC throughput, or a bad charge taper.
+def _inverter_errors(user_input: dict[str, Any]) -> dict[str, str]:
+    """Reject a hybrid inverter with no AC throughput.
 
     The toggle defaults on and the watt fields default to 0. Sending that pair
     to EMHASS caps PV and battery at the AC bus and makes the plan infeasible.
@@ -1635,6 +1662,12 @@ def _battery_errors(user_input: dict[str, Any]) -> dict[str, str]:
         ac_output = user_input.get(CONF_INVERTER_AC_OUTPUT_MAX) or 0
         if ac_output <= 0:
             errors[CONF_INVERTER_AC_OUTPUT_MAX] = "ac_output_required"
+    return errors
+
+
+def _battery_errors(user_input: dict[str, Any]) -> dict[str, str]:
+    """Reject a bad charge taper."""
+    errors: dict[str, str] = {}
     try:
         _derating_storage_from_form(user_input.get(CONF_CHARGE_POWER_DERATING))
     except (TypeError, ValueError):
@@ -1689,8 +1722,6 @@ BATTERY_ADVANCED_KEYS: Final = frozenset(
         CONF_CHARGE_POWER_DERATING,
         CONF_CHARGE_EFFICIENCY,
         CONF_DISCHARGE_EFFICIENCY,
-        CONF_INVERTER_EFFICIENCY_DC_AC,
-        CONF_INVERTER_EFFICIENCY_AC_DC,
         CONF_WEIGHT_BATTERY_DISCHARGE,
         CONF_WEIGHT_BATTERY_CHARGE,
         CONF_BATTERY_SOC_DEFICIT_THRESHOLD,
@@ -1801,33 +1832,8 @@ def _battery_fields(defaults: dict[str, Any]) -> dict[Any, Any]:
         vol.Required(
             "no_discharge_to_grid", default=defaults.get("no_discharge_to_grid", False)
         ): selector.BooleanSelector(),
-        # A hybrid inverter shares one AC-side throughput limit between PV and
-        # battery. Defaults on (most home battery installs are hybrids); when
-        # off, the fields below are collected but never sent to EMHASS (see
-        # payload.py's _hybrid_inverter_settings) -- harmless to show
-        # unconditionally, matching how the battery fields above already
-        # behave when "use_battery" is off. When on, _battery_errors refuses a
-        # 0 W output limit rather than let it reach EMHASS as a zero-capacity
-        # hybrid.
-        vol.Required(
-            CONF_HYBRID_INVERTER, default=defaults.get(CONF_HYBRID_INVERTER, True)
-        ): selector.BooleanSelector(),
-        vol.Optional(
-            CONF_INVERTER_AC_OUTPUT_MAX, default=defaults.get(CONF_INVERTER_AC_OUTPUT_MAX, 0)
-        ): selector.NumberSelector(
-            selector.NumberSelectorConfig(
-                min=0, max=100000, step=100, unit_of_measurement="W", mode="box"
-            )
-        ),
-        vol.Optional(
-            CONF_INVERTER_AC_INPUT_MAX, default=defaults.get(CONF_INVERTER_AC_INPUT_MAX, 0)
-        ): selector.NumberSelector(
-            selector.NumberSelectorConfig(
-                min=0, max=100000, step=100, unit_of_measurement="W", mode="box"
-            )
-        ),
-        # Cell-level losses, grouped with the inverter's AC/DC pair below since
-        # all four multiply together into the round trip the description text
+        # Cell-level losses, the inverter's AC/DC pair lives on the Inverter
+        # step, but all four multiply together into the round trip the description text
         # above the form works out (see _battery_efficiency_note). EMHASS
         # applies these on the DC side, inside the battery itself -- separate
         # from the inverter's own conversion loss.
@@ -1840,18 +1846,6 @@ def _battery_fields(defaults: dict[str, Any]) -> dict[Any, Any]:
         vol.Optional(
             CONF_DISCHARGE_EFFICIENCY,
             default=defaults.get(CONF_DISCHARGE_EFFICIENCY, DEFAULT_DISCHARGE_EFFICIENCY),
-        ): selector.NumberSelector(
-            selector.NumberSelectorConfig(min=0.5, max=1.0, step=0.01, mode="slider")
-        ),
-        vol.Optional(
-            CONF_INVERTER_EFFICIENCY_DC_AC,
-            default=defaults.get(CONF_INVERTER_EFFICIENCY_DC_AC, DEFAULT_INVERTER_EFFICIENCY),
-        ): selector.NumberSelector(
-            selector.NumberSelectorConfig(min=0.5, max=1.0, step=0.01, mode="slider")
-        ),
-        vol.Optional(
-            CONF_INVERTER_EFFICIENCY_AC_DC,
-            default=defaults.get(CONF_INVERTER_EFFICIENCY_AC_DC, DEFAULT_INVERTER_EFFICIENCY),
         ): selector.NumberSelector(
             selector.NumberSelectorConfig(min=0.5, max=1.0, step=0.01, mode="slider")
         ),
@@ -2042,6 +2036,95 @@ def _battery_fields(defaults: dict[str, Any]) -> dict[Any, Any]:
             )
         ),
     }
+
+
+INVERTER_ADVANCED_KEYS: Final = frozenset(
+    {CONF_INVERTER_EFFICIENCY_DC_AC, CONF_INVERTER_EFFICIENCY_AC_DC}
+)
+"""Inverter fields kept in the collapsed Advanced section."""
+
+INVERTER_KEYS: Final = frozenset(
+    {CONF_HYBRID_INVERTER, CONF_INVERTER_AC_OUTPUT_MAX, CONF_INVERTER_AC_INPUT_MAX}
+    | INVERTER_ADVANCED_KEYS
+)
+"""Everything the Inverter step owns inside the stored ``battery`` options.
+
+The values stay in ``options["battery"]`` where they always lived, so the split
+is a form change only: no migration, no new storage key."""
+
+
+def inverter_schema(defaults: dict[str, Any], *, advanced_open: bool = False) -> dict[Any, Any]:
+    """The inverter form: the AC limits, then a collapsed Advanced section."""
+    fields = _inverter_fields(defaults)
+    basic = {k: v for k, v in fields.items() if str(k) not in INVERTER_ADVANCED_KEYS}
+    advanced = {k: v for k, v in fields.items() if str(k) in INVERTER_ADVANCED_KEYS}
+    return _with_advanced(basic, advanced, collapsed=not advanced_open)
+
+
+def _inverter_fields(defaults: dict[str, Any]) -> dict[Any, Any]:
+    return {
+        # A hybrid inverter shares one AC-side throughput limit between PV and
+        # battery. Defaults on (most home battery installs are hybrids); when
+        # off, the fields below are collected but never sent to EMHASS (see
+        # payload.py's _hybrid_inverter_settings) -- harmless to show
+        # unconditionally, matching how the battery fields above already
+        # behave when "use_battery" is off. When on, _battery_errors refuses a
+        # 0 W output limit rather than let it reach EMHASS as a zero-capacity
+        # hybrid.
+        vol.Required(
+            CONF_HYBRID_INVERTER, default=defaults.get(CONF_HYBRID_INVERTER, True)
+        ): selector.BooleanSelector(),
+        vol.Optional(
+            CONF_INVERTER_AC_OUTPUT_MAX, default=defaults.get(CONF_INVERTER_AC_OUTPUT_MAX, 0)
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0, max=100000, step=100, unit_of_measurement="W", mode="box"
+            )
+        ),
+        vol.Optional(
+            CONF_INVERTER_AC_INPUT_MAX, default=defaults.get(CONF_INVERTER_AC_INPUT_MAX, 0)
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0, max=100000, step=100, unit_of_measurement="W", mode="box"
+            )
+        ),
+        vol.Optional(
+            CONF_INVERTER_EFFICIENCY_DC_AC,
+            default=defaults.get(CONF_INVERTER_EFFICIENCY_DC_AC, DEFAULT_INVERTER_EFFICIENCY),
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(min=0.5, max=1.0, step=0.01, mode="slider")
+        ),
+        vol.Optional(
+            CONF_INVERTER_EFFICIENCY_AC_DC,
+            default=defaults.get(CONF_INVERTER_EFFICIENCY_AC_DC, DEFAULT_INVERTER_EFFICIENCY),
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(min=0.5, max=1.0, step=0.01, mode="slider")
+        ),
+    }
+
+
+def _inverter_storage_from_input(user_input: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in user_input.items() if key in INVERTER_KEYS}
+
+
+def _battery_blob_after_battery_form(
+    stored: dict[str, Any] | None, part: dict[str, Any]
+) -> dict[str, Any]:
+    """The stored ``battery`` blob after the Battery form is saved.
+
+    The battery form's keys are replaced by ``part`` (so a cleared field really
+    clears); the Inverter form's keys are kept as they were.
+    """
+    kept = {k: v for k, v in (stored or {}).items() if k in INVERTER_KEYS}
+    return {**kept, **part}
+
+
+def _battery_blob_after_inverter_form(
+    stored: dict[str, Any] | None, part: dict[str, Any]
+) -> dict[str, Any]:
+    """The stored ``battery`` blob after the Inverter form is saved."""
+    kept = {k: v for k, v in (stored or {}).items() if k not in INVERTER_KEYS}
+    return {**kept, **part}
 
 
 METERING_SECTION: Final = "meters"
@@ -2265,6 +2348,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
                 "load",
                 "pv",
                 "battery",
+                "inverter_settings",
                 "grid",
                 "tariff",
                 "inverter",
@@ -2770,7 +2854,9 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
             user_input = _flatten_sections(user_input)
             errors = _battery_errors(user_input)
             if not errors:
-                options["battery"] = _battery_storage_from_input(user_input)
+                options["battery"] = _battery_blob_after_battery_form(
+                    options.get("battery"), _battery_storage_from_input(user_input)
+                )
                 options[CONF_SOC_ENTITY] = user_input.get(CONF_SOC_ENTITY) or None
                 options[CONF_BATTERY_POWER_ENTITY] = (
                     user_input.get(CONF_BATTERY_POWER_ENTITY) or None
@@ -2790,7 +2876,30 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
         return self.async_show_form(
             step_id="battery",
             data_schema=vol.Schema(battery_schema(defaults, advanced_open="base" in errors)),
-            description_placeholders={"round_trip": _battery_efficiency_note(defaults)},
+            description_placeholders={
+                "round_trip": _battery_efficiency_note({**options.get("battery", {}), **defaults})
+            },
+            errors=errors,
+        )
+
+    async def async_step_inverter_settings(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        options = dict(self.config_entry.options)
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            user_input = _flatten_sections(user_input)
+            errors = _inverter_errors(user_input)
+            if not errors:
+                options["battery"] = _battery_blob_after_inverter_form(
+                    options.get("battery"), _inverter_storage_from_input(user_input)
+                )
+                return self.async_create_entry(data=options)
+
+        defaults = user_input if user_input is not None else options.get("battery", {})
+        return self.async_show_form(
+            step_id="inverter_settings",
+            data_schema=vol.Schema(inverter_schema(defaults)),
             errors=errors,
         )
 

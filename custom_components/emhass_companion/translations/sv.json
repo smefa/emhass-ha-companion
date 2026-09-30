@@ -119,9 +119,6 @@
           "charge_power_max_w": "Maximal laddeffekt",
           "discharge_power_max_w": "Maximal urladdningseffekt",
           "no_discharge_to_grid": "Blockera export till elnätet",
-          "hybrid_inverter": "Delad växelriktare (hybrid)",
-          "inverter_ac_output_max_w": "Maximal AC-uteffekt (urladdning/export)",
-          "inverter_ac_input_max_w": "Maximal AC-ineffekt (laddning/import)",
           "soc_min": "Lägsta laddningsnivå",
           "soc_max": "Högsta laddningsnivå",
           "soc_entity": "Sensor för batteriets laddningsnivå",
@@ -130,7 +127,6 @@
           "pv_entity": "Sensor för aktuell soleffekt"
         },
         "data_description": {
-          "hybrid_inverter": "På om solpanelerna och batteriet delar en och samma växelriktares AC-effektgräns, vilket gäller de flesta hembatterisystem. Av om det är två separata växelriktare med varsin gräns.",
           "no_discharge_to_grid": "På hindrar batteriet från att ladda ur mot export -- det förser fortfarande huset med el, men säljer aldrig. EMHASS eget standardvärde är på, vilket tyst utesluter arbitrage även när en plan annars skulle tjäna på en prisspik, så detta levereras avstängt. Solöverskott exporteras ändå normalt oavsett detta -- det gäller bara batteriet.",
           "soc_min": "Optimeringen planerar aldrig batteriet under denna nivå.",
           "soc_entity": "Läses vid varje körning så att planen utgår från verkligheten.",
@@ -146,8 +142,6 @@
               "charge_power_derating": "Ladda långsammare när batteriet fylls",
               "charge_efficiency": "Batteriets laddningsverkningsgrad",
               "discharge_efficiency": "Batteriets urladdningsverkningsgrad",
-              "inverter_efficiency_dc_ac": "Verkningsgrad DC till AC",
-              "inverter_efficiency_ac_dc": "Verkningsgrad AC till DC",
               "weight_battery_discharge": "Cykelkostnad urladdning",
               "weight_battery_charge": "Cykelkostnad laddning",
               "battery_soc_deficit_threshold": "Bekväm lägsta laddningsnivå",
@@ -187,8 +181,30 @@
           }
         }
       },
+      "inverter_settings": {
+        "title": "Växelriktare",
+        "description": "Växelriktarens egna gränser och förluster. De gäller oavsett om du har batteri eller inte; utan batteri är det bara maximal AC-uteffekt som spelar roll.",
+        "data": {
+          "hybrid_inverter": "Delad växelriktare (hybrid)",
+          "inverter_ac_output_max_w": "Maximal AC-uteffekt (urladdning/export)",
+          "inverter_ac_input_max_w": "Maximal AC-ineffekt (laddning/import)"
+        },
+        "data_description": {
+          "hybrid_inverter": "På om solpanelerna och batteriet delar en och samma växelriktares AC-effektgräns, vilket gäller de flesta hembatterisystem. Av om det är två separata växelriktare med varsin gräns."
+        },
+        "sections": {
+          "advanced": {
+            "name": "Avancerade inställningar",
+            "description": "Verkningsgrader mellan DC och AC. Standardvärdena passar de flesta växelriktare.",
+            "data": {
+              "inverter_efficiency_dc_ac": "Verkningsgrad DC till AC",
+              "inverter_efficiency_ac_dc": "Verkningsgrad AC till DC"
+            }
+          }
+        }
+      },
       "inverter": {
-        "title": "Växelriktarstyrning",
+        "title": "Växelriktarprofil",
         "description": "Hur batteriet faktiskt styrs. Lämnar du detta tomt läser integrationen bara — planen är din att agera på hur du vill.\n\nInget skrivs till din utrustning förrän du dessutom slår på reglaget Styrning aktiverad.",
         "data": {
           "profile": "Växelriktarprofil"
@@ -271,9 +287,10 @@
           "load": "Husets förbrukning",
           "pv": "Solprognos",
           "battery": "Batteri",
+          "inverter_settings": "Växelriktare",
           "grid": "Nät och schema",
           "tariff": "Köp- och säljpriser",
-          "inverter": "Växelriktarstyrning",
+          "inverter": "Växelriktarprofil",
           "temperature": "Utetemperatur",
           "network": "Nättariff",
           "metering": "Kostnad och besparing",
@@ -340,9 +357,6 @@
           "charge_power_max_w": "Maximal laddeffekt",
           "discharge_power_max_w": "Maximal urladdningseffekt",
           "no_discharge_to_grid": "Blockera export till elnätet",
-          "hybrid_inverter": "Delad växelriktare (hybrid)",
-          "inverter_ac_output_max_w": "Maximal AC-uteffekt (urladdning/export)",
-          "inverter_ac_input_max_w": "Maximal AC-ineffekt (laddning/import)",
           "soc_min": "Lägsta laddningsnivå",
           "soc_max": "Högsta laddningsnivå",
           "soc_entity": "Sensor för batteriets laddningsnivå",
@@ -351,7 +365,6 @@
           "pv_entity": "Sensor för aktuell soleffekt"
         },
         "data_description": {
-          "hybrid_inverter": "På om solpanelerna och batteriet delar en och samma växelriktares AC-effektgräns, vilket gäller de flesta hembatterisystem. Av om det är två separata växelriktare med varsin gräns.",
           "no_discharge_to_grid": "På hindrar batteriet från att ladda ur mot export -- det förser fortfarande huset med el, men säljer aldrig. EMHASS eget standardvärde är på, vilket tyst utesluter arbitrage även när en plan annars skulle tjäna på en prisspik, så detta levereras avstängt. Solöverskott exporteras ändå normalt oavsett detta -- det gäller bara batteriet.",
           "pv_entity": "Valfritt. Blandas in i det första steget av varje MPC-prognos, viktat av reglaget \"Live-värdets vikt\". Last blandas in på samma sätt automatiskt, med sensorn vald under Husets förbrukning > Sensor för husets last -- ingen separat sensor behövs där.",
           "battery_power_entity": "Vad batteriet gör just nu, så att korten kan rita det mot planen. Ingenting i optimeringen läser den.",
@@ -365,8 +378,6 @@
               "charge_power_derating": "Ladda långsammare när batteriet fylls",
               "charge_efficiency": "Batteriets laddningsverkningsgrad",
               "discharge_efficiency": "Batteriets urladdningsverkningsgrad",
-              "inverter_efficiency_dc_ac": "Verkningsgrad DC till AC",
-              "inverter_efficiency_ac_dc": "Verkningsgrad AC till DC",
               "weight_battery_discharge": "Cykelkostnad urladdning",
               "weight_battery_charge": "Cykelkostnad laddning",
               "battery_soc_deficit_threshold": "Bekväm lägsta laddningsnivå",
@@ -402,6 +413,28 @@
               "battery_dynamic_min": "Hur mycket laddningseffekten som mest får öka under ett tidssteg, som andel av batteriets maxeffekt. Gäller bara när rampgränsen ovan är på.",
               "soc_target": "Där optimeringen siktar på att lämna batteriet vid horisontens slut. Med slutladdningsnivå \"Optimerad\" är detta i stället reservgolvet som det beräknade målet aldrig planerar under; med \"Fast %-reglage\" är detta exakt den nivå den siktar på.",
               "no_charge_from_grid": "På begränsar batteriet till att endast laddas av solöverskott -- det köper aldrig nätström för att ladda. Husets el och export påverkas inte."
+            }
+          }
+        }
+      },
+      "inverter_settings": {
+        "title": "Växelriktare",
+        "description": "Växelriktarens egna gränser och förluster. De gäller oavsett om du har batteri eller inte; utan batteri är det bara maximal AC-uteffekt som spelar roll.",
+        "data": {
+          "hybrid_inverter": "Delad växelriktare (hybrid)",
+          "inverter_ac_output_max_w": "Maximal AC-uteffekt (urladdning/export)",
+          "inverter_ac_input_max_w": "Maximal AC-ineffekt (laddning/import)"
+        },
+        "data_description": {
+          "hybrid_inverter": "På om solpanelerna och batteriet delar en och samma växelriktares AC-effektgräns, vilket gäller de flesta hembatterisystem. Av om det är två separata växelriktare med varsin gräns."
+        },
+        "sections": {
+          "advanced": {
+            "name": "Avancerade inställningar",
+            "description": "Verkningsgrader mellan DC och AC. Standardvärdena passar de flesta växelriktare.",
+            "data": {
+              "inverter_efficiency_dc_ac": "Verkningsgrad DC till AC",
+              "inverter_efficiency_ac_dc": "Verkningsgrad AC till DC"
             }
           }
         }
@@ -447,7 +480,7 @@
         }
       },
       "inverter": {
-        "title": "Växelriktarstyrning",
+        "title": "Växelriktarprofil",
         "description": "Hur batteriet faktiskt styrs. Lämnar du detta tomt läser integrationen bara — planen är din att agera på hur du vill.\n\nInget skrivs till din utrustning förrän du dessutom slår på reglaget Styrning aktiverad.",
         "data": {
           "profile": "Växelriktarprofil"

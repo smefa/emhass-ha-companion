@@ -212,13 +212,6 @@ this screen is then ignored.
   charge at most this percent of Maximum charge power" — for example 50% →
   84%, 70% → 42%, 90% → 23%. Leave empty to keep the flat maximum. Needs
   EMHASS 0.18.3 or newer; on an older add-on the table is kept but not sent.
-- **Shared inverter (hybrid)** — on if PV and the battery share one
-  inverter's AC-side limit (most home systems). Off if they're two separate
-  inverters.
-- **Maximum AC output (discharge/export)** / **Maximum AC input
-  (charge/import)** — only asked if hybrid; the shared inverter's own
-  ceiling.
-- **DC to AC efficiency** / **AC to DC efficiency** — conversion losses.
 - **Discharge cycle cost** / **Charge cycle cost** — what a kWh through the
   battery costs you in wear, in the same currency as your prices. The
   optimiser charges it against the profit it's chasing, so the battery only
@@ -274,7 +267,21 @@ this screen is then ignored.
   **Live value weight** number on the hub device. Load is blended the same
   way automatically when the load source is *House load sensor*.
 
-## 7. Inverter control
+## 7. Inverter
+
+The inverter's own limits and losses. This step is always there, with or
+without a battery.
+
+- **Shared inverter (hybrid)** — on if PV and the battery share one
+  inverter's AC-side limit (most home systems). Off if they're two separate
+  inverters.
+- **Maximum AC output (discharge/export)** / **Maximum AC input
+  (charge/import)** — the shared inverter's own ceiling. Required while
+  hybrid is on.
+- **DC to AC efficiency** / **AC to DC efficiency** — conversion losses,
+  under *Advanced settings*.
+
+## 8. Inverter profile
 
 Optional — leave the profile blank and the integration only ever reads, and
 the plan is yours to act on however you like. Pick a profile and you're asked
@@ -288,7 +295,7 @@ plan out — which is a property of the profile you pick here.
 See **[Inverter control](inverter_control.md)** for what each profile can do,
 and for writing your own if yours isn't listed.
 
-## 8. Grid and schedule
+## 9. Grid and schedule
 
 ![The Grid connection and schedule step](../assets/setup-grid-schedule.png)
 
@@ -331,11 +338,11 @@ Services → EMHASS Companion → Configure**:
 ![The Configure menu](../assets/setup-configure-menu.png)
 
 The menu holds **House consumption**, **Solar forecast**, **Battery**, **Grid
-and schedule**, **Buy and sell prices**, **Inverter control** and **Outdoor
+and schedule**, **Buy and sell prices**, **Inverter**, **Inverter profile** and **Outdoor
 temperature** — the same screens as above, plus one more:
 
 **Outdoor temperature** is only worth visiting once you have a thermal load —
-see **[Thermal loads](thermal_loads.md)**. **Inverter control** is the same
+see **[Thermal loads](thermal_loads.md)**. **Inverter profile** is the same
 step you saw during setup, so this is where you go to add a profile you
 skipped, or to swap one.
 

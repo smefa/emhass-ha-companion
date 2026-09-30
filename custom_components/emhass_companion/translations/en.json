@@ -119,9 +119,6 @@
           "charge_power_max_w": "Maximum charge power",
           "discharge_power_max_w": "Maximum discharge power",
           "no_discharge_to_grid": "Block export to grid",
-          "hybrid_inverter": "Shared inverter (hybrid)",
-          "inverter_ac_output_max_w": "Maximum AC output (discharge/export)",
-          "inverter_ac_input_max_w": "Maximum AC input (charge/import)",
           "soc_min": "Minimum charge level",
           "soc_max": "Maximum charge level",
           "soc_entity": "Battery SOC sensor",
@@ -130,7 +127,6 @@
           "pv_entity": "Live PV power sensor"
         },
         "data_description": {
-          "hybrid_inverter": "On if PV and the battery share one inverter's AC-side power limit, which is most home battery systems. Off if they are two independent inverters, each with its own limit.",
           "no_discharge_to_grid": "On blocks the battery from exporting and using arbitrage - house power is unaffected.",
           "soc_min": "The optimiser will not plan the battery below this level.",
           "soc_entity": "Read at the start of every run so the plan starts from reality.",
@@ -146,8 +142,6 @@
               "charge_power_derating": "Charge slower as the battery fills",
               "charge_efficiency": "Battery charge efficiency",
               "discharge_efficiency": "Battery discharge efficiency",
-              "inverter_efficiency_dc_ac": "DC to AC efficiency",
-              "inverter_efficiency_ac_dc": "AC to DC efficiency",
               "weight_battery_discharge": "Discharge cycle cost",
               "weight_battery_charge": "Charge cycle cost",
               "battery_soc_deficit_threshold": "Low charge comfort level",
@@ -187,8 +181,30 @@
           }
         }
       },
+      "inverter_settings": {
+        "title": "Inverter",
+        "description": "The inverter's own limits and losses. These apply whether or not you have a battery; without one only the maximum AC output matters.",
+        "data": {
+          "hybrid_inverter": "Shared inverter (hybrid)",
+          "inverter_ac_output_max_w": "Maximum AC output (discharge/export)",
+          "inverter_ac_input_max_w": "Maximum AC input (charge/import)"
+        },
+        "data_description": {
+          "hybrid_inverter": "On if PV and the battery share one inverter's AC-side power limit, which is most home battery systems. Off if they are two independent inverters, each with its own limit."
+        },
+        "sections": {
+          "advanced": {
+            "name": "Advanced settings",
+            "description": "Conversion efficiencies between DC and AC. The defaults suit most inverters.",
+            "data": {
+              "inverter_efficiency_dc_ac": "DC to AC efficiency",
+              "inverter_efficiency_ac_dc": "AC to DC efficiency"
+            }
+          }
+        }
+      },
       "inverter": {
-        "title": "Inverter control",
+        "title": "Inverter profile",
         "description": "How the battery is actually commanded. Leave this unset and the integration only ever reads — the plan is yours to act on however you like.\n\nDon't see your inverter? **Scripts** works with any inverter you can already control from Home Assistant, and advanced users can write their own YAML profile for a dedicated entry — see the profiles guide in the documentation.\n\nNothing is written to your hardware until you also turn on the Control enabled switch.",
         "data": {
           "profile": "Inverter profile"
@@ -271,9 +287,10 @@
           "load": "House consumption",
           "pv": "Solar forecast",
           "battery": "Battery",
+          "inverter_settings": "Inverter",
           "grid": "Grid and schedule",
           "tariff": "Buy and sell prices",
-          "inverter": "Inverter control",
+          "inverter": "Inverter profile",
           "temperature": "Outdoor temperature",
           "network": "Network tariff",
           "metering": "Cost and savings",
@@ -340,9 +357,6 @@
           "charge_power_max_w": "Maximum charge power",
           "discharge_power_max_w": "Maximum discharge power",
           "no_discharge_to_grid": "Block export to grid",
-          "hybrid_inverter": "Shared inverter (hybrid)",
-          "inverter_ac_output_max_w": "Maximum AC output (discharge/export)",
-          "inverter_ac_input_max_w": "Maximum AC input (charge/import)",
           "soc_min": "Minimum charge level",
           "soc_max": "Maximum charge level",
           "soc_entity": "Battery SOC sensor",
@@ -351,7 +365,6 @@
           "pv_entity": "Live PV power sensor"
         },
         "data_description": {
-          "hybrid_inverter": "On if PV and the battery share one inverter's AC-side power limit, which is most home battery systems. Off if they are two independent inverters, each with its own limit.",
           "no_discharge_to_grid": "On blocks the battery from exporting and using arbitrage - house power is unaffected.",
           "pv_entity": "Optional. Blended into the first step of every MPC forecast, weighted by the \"Live value weight\" number entity. Load is blended the same way automatically, using the sensor picked under House consumption > House load sensor -- no separate entity needed there.",
           "battery_power_entity": "What the battery is doing right now, for the dashboard cards to draw against the plan. Nothing in the optimisation reads it.",
@@ -365,8 +378,6 @@
               "charge_power_derating": "Charge slower as the battery fills",
               "charge_efficiency": "Battery charge efficiency",
               "discharge_efficiency": "Battery discharge efficiency",
-              "inverter_efficiency_dc_ac": "DC to AC efficiency",
-              "inverter_efficiency_ac_dc": "AC to DC efficiency",
               "weight_battery_discharge": "Discharge cycle cost",
               "weight_battery_charge": "Charge cycle cost",
               "battery_soc_deficit_threshold": "Low charge comfort level",
@@ -402,6 +413,28 @@
               "battery_dynamic_min": "The most the charge power may increase in one timestep, as a percentage of the battery's maximum power. Only takes effect once the ramp limit above is on.",
               "soc_target": "Where the optimiser aims to leave the battery at the end of the horizon. With End SOC set to \"Optimized\" this is instead the reserve floor the computed target never plans below; with \"Fixed % slider\" this is the exact level it aims for.",
               "no_charge_from_grid": "On restricts the battery to charging from excess PV only -- it will never buy grid power to charge. House power and export are unaffected."
+            }
+          }
+        }
+      },
+      "inverter_settings": {
+        "title": "Inverter",
+        "description": "The inverter's own limits and losses. These apply whether or not you have a battery; without one only the maximum AC output matters.",
+        "data": {
+          "hybrid_inverter": "Shared inverter (hybrid)",
+          "inverter_ac_output_max_w": "Maximum AC output (discharge/export)",
+          "inverter_ac_input_max_w": "Maximum AC input (charge/import)"
+        },
+        "data_description": {
+          "hybrid_inverter": "On if PV and the battery share one inverter's AC-side power limit, which is most home battery systems. Off if they are two independent inverters, each with its own limit."
+        },
+        "sections": {
+          "advanced": {
+            "name": "Advanced settings",
+            "description": "Conversion efficiencies between DC and AC. The defaults suit most inverters.",
+            "data": {
+              "inverter_efficiency_dc_ac": "DC to AC efficiency",
+              "inverter_efficiency_ac_dc": "AC to DC efficiency"
             }
           }
         }
@@ -447,7 +480,7 @@
         }
       },
       "inverter": {
-        "title": "Inverter control",
+        "title": "Inverter profile",
         "description": "How the battery is actually commanded. Leave this unset and the integration only ever reads — the plan is yours to act on however you like.\n\nDon't see your inverter? **Scripts** works with any inverter you can already control from Home Assistant, and advanced users can write their own YAML profile for a dedicated entry — see the profiles guide in the documentation.\n\nNothing is written to your hardware until you also turn on the Control enabled switch.",
         "data": {
           "profile": "Inverter profile"

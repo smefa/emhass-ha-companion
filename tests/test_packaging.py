@@ -323,6 +323,7 @@ def test_config_flow_steps_are_translated(strings):
         "load",
         "load_options",
         "battery",
+        "inverter_settings",
         "grid",
     ):
         assert step in steps, f"config step '{step}' has no translation"
@@ -331,7 +332,7 @@ def test_config_flow_steps_are_translated(strings):
 
 def test_options_flow_menu_is_translated(strings):
     menu = strings["options"]["step"]["init"]["menu_options"]
-    for option in ("battery", "grid", "tariff", "inverter"):
+    for option in ("battery", "inverter_settings", "grid", "tariff", "inverter"):
         assert option in menu
         assert option in strings["options"]["step"]
 
@@ -906,12 +907,20 @@ def test_cards_attach_their_shadow_root_at_most_once(bundle):
 @pytest.mark.parametrize(
     "filename", ["strings.json", "translations/en.json", "translations/sv.json"]
 )
-@pytest.mark.parametrize("step", ["grid", "battery"])
+@pytest.mark.parametrize("step", ["grid", "battery", "inverter_settings"])
 def test_sectioned_form_fields_are_labelled_where_the_schema_puts_them(filename, step):
-    from custom_components.emhass_companion.config_flow import battery_schema, grid_schema
+    from custom_components.emhass_companion.config_flow import (
+        battery_schema,
+        grid_schema,
+        inverter_schema,
+    )
     from custom_components.emhass_companion.const import ADVANCED_SECTION
 
-    schema = {"grid": grid_schema, "battery": battery_schema}[step]({})
+    schema = {
+        "grid": grid_schema,
+        "battery": battery_schema,
+        "inverter_settings": inverter_schema,
+    }[step]({})
     basic = {str(k) for k in schema if str(k) != ADVANCED_SECTION}
     inner = next(v for k, v in schema.items() if str(k) == ADVANCED_SECTION).schema.schema
     advanced = {str(k) for k in inner}

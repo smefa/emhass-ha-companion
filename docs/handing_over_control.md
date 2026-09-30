@@ -18,7 +18,7 @@ power, the reasoning, and the precise service calls — on
 3. When you agree with its judgement, turn the switch on and retire the
    automations.
 
-**Battery control** is configured under **Configure → Inverter control**, by
+**Battery control** is configured under **Configure → Inverter profile**, by
 choosing an inverter profile — see [Inverter control](inverter_control.md)
 for what ships today and the scripts fallback for any inverter that isn't
 listed yet. This integration never talks to hardware directly — it only ever
