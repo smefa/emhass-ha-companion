@@ -147,6 +147,7 @@ from .const import (
     LOAD_PROFILE_ORDER,
     LOAD_SUBENTRY_TYPES,
     MIN_EMHASS_VERSION,
+    PRICE_ADVANCED_PROFILES,
     PRICE_PROFILE_ORDER,
     PROFILE_KEY_LOAD_SENSOR,
     PROFILE_KIND_INVERTER,
@@ -382,6 +383,7 @@ def _profile_selector(
 
 
 _ADVANCED_PROFILES_BY_KIND: dict[str, tuple[str, ...]] = {
+    PROFILE_KIND_PRICE: PRICE_ADVANCED_PROFILES,
     PROFILE_KIND_PV: PV_ADVANCED_PROFILES,
 }
 
@@ -603,6 +605,40 @@ def _tariff_side_schema(prefix: str, defaults: dict[str, Any]) -> dict[Any, Any]
     }
 
 
+TARIFF_ADVANCED_KEYS: Final = frozenset({f"{side}_{CONF_TEMPLATE}" for side in ("buy", "sell")})
+"""The two price templates. Blank unless a side is in Template mode."""
+
+
+def tariff_schema(
+    tariff: dict[str, Any],
+    *,
+    advanced_open: bool = False,
+    sell_defaults: dict[str, Any] | None = None,
+) -> dict[Any, Any]:
+    """The buy and sell price form: methods and markups, templates under Advanced."""
+    fields = {
+        **_tariff_side_schema("buy", tariff.get("buy", {})),
+        **_tariff_side_schema("sell", tariff.get("sell", sell_defaults or {})),
+    }
+    basic = {k: v for k, v in fields.items() if str(k) not in TARIFF_ADVANCED_KEYS}
+    advanced = {k: v for k, v in fields.items() if str(k) in TARIFF_ADVANCED_KEYS}
+    return _with_advanced(basic, advanced, collapsed=not advanced_open)
+
+
+def _tariff_errors(user_input: dict[str, Any]) -> dict[str, str]:
+    """A side in Template mode needs its template.
+
+    On "base": the template lives in the collapsed Advanced section, where a
+    field-keyed error would not be seen.
+    """
+    for side in ("buy", "sell"):
+        if user_input.get(f"{side}_{CONF_MODE}") == MODE_TEMPLATE and not user_input.get(
+            f"{side}_{CONF_TEMPLATE}"
+        ):
+            return {"base": "template_required"}
+    return {}
+
+
 def _collect_tariff(user_input: dict[str, Any]) -> dict[str, Any]:
     tariff: dict[str, Any] = {}
     for side in ("buy", "sell"):
@@ -733,15 +769,23 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
         return await self._async_profile_options_step(CONF_PRICE, "price_options", user_input)
 
     async def async_step_tariff(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        errors: dict[str, str] = {}
         if user_input is not None:
-            self._options["tariff"] = _collect_tariff(user_input)
-            return await self.async_step_pv()
+            user_input = _flatten_sections(user_input)
+            errors = _tariff_errors(user_input)
+            if not errors:
+                self._options["tariff"] = _collect_tariff(user_input)
+                return await self.async_step_pv()
 
-        schema = {
-            **_tariff_side_schema("buy", {}),
-            **_tariff_side_schema("sell", {CONF_MODE: MODE_LINEAR}),
-        }
-        return self.async_show_form(step_id="tariff", data_schema=vol.Schema(schema))
+        return self.async_show_form(
+            step_id="tariff",
+            data_schema=vol.Schema(
+                tariff_schema(
+                    {}, advanced_open=bool(errors), sell_defaults={CONF_MODE: MODE_LINEAR}
+                )
+            ),
+            errors=errors,
+        )
 
     # -- solar ----------------------------------------------------------------
 
@@ -3071,13 +3115,18 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
 
     async def async_step_tariff(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         options = dict(self.config_entry.options)
+        errors: dict[str, str] = {}
         if user_input is not None:
-            options["tariff"] = _collect_tariff(user_input)
-            return self.async_create_entry(data=options)
+            user_input = _flatten_sections(user_input)
+            errors = _tariff_errors(user_input)
+            if not errors:
+                options["tariff"] = _collect_tariff(user_input)
+                return self.async_create_entry(data=options)
 
-        tariff = options.get("tariff", {})
-        schema = {
-            **_tariff_side_schema("buy", tariff.get("buy", {})),
-            **_tariff_side_schema("sell", tariff.get("sell", {})),
-        }
-        return self.async_show_form(step_id="tariff", data_schema=vol.Schema(schema))
+        return self.async_show_form(
+            step_id="tariff",
+            data_schema=vol.Schema(
+                tariff_schema(options.get("tariff", {}), advanced_open=bool(errors))
+            ),
+            errors=errors,
+        )

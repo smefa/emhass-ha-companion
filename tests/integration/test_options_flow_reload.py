@@ -59,6 +59,7 @@ async def test_saving_tariff_options_does_not_raise_the_reload_conflict(
             "sell_mode": "linear",
             "sell_multiplier": 1.25,
             "sell_adder": 0.0,
+            "advanced": {},
         },
     )
 
@@ -362,3 +363,30 @@ async def test_the_load_picker_reports_no_choice_instead_of_guessing(
     result = await hass.config_entries.options.async_configure(result["flow_id"], {"advanced": {}})
     assert result["type"] == "form"
     assert result["errors"] == {"base": "profile_required"}
+
+
+async def test_template_mode_without_a_template_is_rejected_with_advanced_open(
+    hass: HomeAssistant,
+) -> None:
+    entry = await _setup_entry(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "tariff"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            "buy_mode": "template",
+            "buy_multiplier": 1.0,
+            "buy_adder": 0.0,
+            "sell_mode": "linear",
+            "sell_multiplier": 1.0,
+            "sell_adder": 0.0,
+            "advanced": {},
+        },
+    )
+    assert result["type"] == "form"
+    assert result["errors"] == {"base": "template_required"}
+    (section_key,) = (key for key in result["data_schema"].schema if key == "advanced")
+    assert result["data_schema"].schema[section_key].options["collapsed"] is False

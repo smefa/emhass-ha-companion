@@ -29,6 +29,11 @@ Every screen is listed below field by field, in the order it appears.
     - **ENTSO-E** — reads the `prices` attribute of the ENTSO-E
       integration's average-price sensor.
     - **Tibber** — asks Tibber for the price series of one of your homes.
+
+      The next four are under **Advanced settings**, collapsed until you open
+      it (it opens by itself if one of them is already selected). If none of
+      the sources above is installed, all of them are listed together.
+
     - **Amber Electric** — uses the core Amber Electric integration's
       `get_forecasts` action to fetch the AEMO wholesale price.
     - **Amber Express** — reads the `forecast` attribute of a price sensor
@@ -101,10 +106,12 @@ actually pay or get paid, for import and export separately:
   25%.
 - **Import addition per kWh** — a flat amount added after the multiplier. Use
   for grid fees, energy tax, supplier markup.
-- **Import template** — only used if you picked *Template* above. `spot` and
-  `time` (your local time) are available.
-- **Export price method / multiplier / addition per kWh / template** — the
-  same four questions, for what you're paid when selling back to the grid.
+- **Export price method / multiplier / addition per kWh** — the same three
+  questions, for what you're paid when selling back to the grid.
+- **Import template** / **Export template** — under **Advanced settings**,
+  only used if you picked *Template* above. `spot` and `time` (your local
+  time) are available. Choosing *Template* without one shows an error and
+  opens the section for you.
 
 ## 4. Solar forecast
 

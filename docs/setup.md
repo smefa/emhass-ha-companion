@@ -72,7 +72,8 @@ export:
 - **Already includes costs** — some price integrations can bake fees in
   themselves. If yours does, use this and do not add them twice.
 - **Template** — a Jinja template with `spot` and `time` (a local-time
-  `datetime`) available, for tiered or time-of-day structures.
+  `datetime`) available, for tiered or time-of-day structures. The template
+  itself is entered in the collapsed *Advanced settings* section.
 
 > Tax and subsidy schemes change. Nothing here is kept current for you — check
 > your own numbers each year.

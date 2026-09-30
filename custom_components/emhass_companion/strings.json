@@ -23,9 +23,18 @@
       },
       "price": {
         "title": "Electricity prices",
-        "description": "Only sources you have installed are listed.\n\n{profiles}",
+        "description": "Only sources you have installed are listed.\n\n{profiles}\n\nA flat tariff, Amber, or prices from another entity? Open **Advanced settings**.",
         "data": {
           "profile": "Price source"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Advanced settings",
+            "description": "Fixed tariff: a flat rate or a simple peak and off-peak split, for when you have no dynamic pricing. Prices from an entity attribute: reads a price forecast from any entity. Amber Electric and Amber Express: the two Amber integrations.",
+            "data": {
+              "profile": "Other price source"
+            }
+          }
         }
       },
       "price_options": {
@@ -40,23 +49,33 @@
       },
       "tariff": {
         "title": "Buy and sell prices",
-        "description": "Your price source provides raw spot prices. Add whatever your supplier and grid operator charge on top, and what you are paid for exports.\n\nUse **Linear** for VAT plus a fixed markup per kWh, **Already includes costs** if your price source already adds them, or **Template** for tiered or time-of-day pricing.",
+        "description": "Your price source provides raw spot prices. Add whatever your supplier and grid operator charge on top, and what you are paid for exports.\n\nUse **Linear** for VAT plus a fixed markup per kWh, **Already includes costs** if your price source already adds them, or **Template** for tiered or time-of-day pricing, which is entered under **Advanced settings**.",
         "data": {
           "buy_mode": "Import price method",
           "buy_multiplier": "Import multiplier",
           "buy_adder": "Import addition per kWh",
-          "buy_template": "Import template",
           "sell_mode": "Export price method",
           "sell_multiplier": "Export multiplier",
-          "sell_adder": "Export addition per kWh",
-          "sell_template": "Export template"
+          "sell_adder": "Export addition per kWh"
         },
         "data_description": {
           "buy_multiplier": "Multiplied with the spot price. Use 1.25 for 25% VAT.",
           "buy_adder": "Added after the multiplier. Grid fees, energy tax, supplier markup.",
-          "buy_template": "Only used in Template mode. `spot` and `time` (your local time) are available.",
-          "sell_adder": "Added after the multiplier. Any per-kWh export compensation.",
-          "sell_template": "Only used in Template mode. `spot` and `time` (your local time) are available."
+          "sell_adder": "Added after the multiplier. Any per-kWh export compensation."
+        },
+        "sections": {
+          "advanced": {
+            "name": "Advanced settings",
+            "description": "Price templates, only used when the method above is Template. The variables spot and time (your local time) are available.",
+            "data": {
+              "buy_template": "Import template",
+              "sell_template": "Export template"
+            },
+            "data_description": {
+              "buy_template": "Only used in Template mode. `spot` and `time` (your local time) are available.",
+              "sell_template": "Only used in Template mode. `spot` and `time` (your local time) are available."
+            }
+          }
         }
       },
       "pv": {
@@ -68,7 +87,7 @@
         "sections": {
           "advanced": {
             "name": "Advanced settings",
-            "description": "- **EMHASS built-in forecast (Open-Meteo)** — EMHASS makes the forecast from weather data and your array. No API key.\n- **Solar forecast from an entity attribute** — reads a list-valued attribute on any entity.\n- **No solar** — you have no PV array.",
+            "description": "EMHASS built-in forecast (Open-Meteo): EMHASS makes it from weather data and your array, no API key. Solar forecast from an entity attribute: reads a list-valued attribute on any entity. No solar: you have no PV array.",
             "data": {
               "profile": "Other solar forecast source"
             }
@@ -94,7 +113,7 @@
         "sections": {
           "advanced": {
             "name": "Advanced settings",
-            "description": "- **House load sensor (without deferrables)** — a sensor that already leaves out your deferrable loads; EMHASS learns from its history.\n- **Typical household profile (no sensor needed)** — a generic daily shape scaled to an average power you enter.\n- **Load forecast from an entity attribute** — reads a ready-made forecast from any entity.",
+            "description": "House load sensor (without deferrables): a sensor that already leaves out your deferrable loads; EMHASS learns from its history. Typical household profile (no sensor needed): a generic daily shape scaled to an average power you enter. Load forecast from an entity attribute: a ready-made forecast read from any entity.",
             "data": {
               "profile": "Existing load source"
             }
@@ -293,7 +312,8 @@
       "version_too_old": "This EMHASS is too old. Version {min_version} or newer is required, because this integration reads the plan through the JSON API introduced in that release.",
       "ac_output_required": "A shared inverter needs a positive AC output limit. Zero would block PV and the battery from reaching the house.",
       "derating_not_ascending": "Charge-taper rows must list strictly increasing charge levels, each between 1 and 99%, with a charge rate of 1–100% of maximum.",
-      "profile_required": "Pick a solar forecast source, or open Advanced settings for the other choices."
+      "profile_required": "Pick a solar forecast source, or open Advanced settings for the other choices.",
+      "template_required": "Template mode needs a template. Enter it under Advanced settings, or pick another method."
     },
     "abort": {
       "single_instance_allowed": "EMHASS Companion is already configured.",
@@ -327,7 +347,7 @@
         "sections": {
           "advanced": {
             "name": "Advanced settings",
-            "description": "- **House load sensor (without deferrables)** — a sensor that already leaves out your deferrable loads; EMHASS learns from its history.\n- **Typical household profile (no sensor needed)** — a generic daily shape scaled to an average power you enter.\n- **Load forecast from an entity attribute** — reads a ready-made forecast from any entity.",
+            "description": "House load sensor (without deferrables): a sensor that already leaves out your deferrable loads; EMHASS learns from its history. Typical household profile (no sensor needed): a generic daily shape scaled to an average power you enter. Load forecast from an entity attribute: a ready-made forecast read from any entity.",
             "data": {
               "profile": "Existing load source"
             }
@@ -370,7 +390,7 @@
         "sections": {
           "advanced": {
             "name": "Advanced settings",
-            "description": "- **EMHASS built-in forecast (Open-Meteo)** — EMHASS makes the forecast from weather data and your array. No API key.\n- **Solar forecast from an entity attribute** — reads a list-valued attribute on any entity.\n- **No solar** — you have no PV array.",
+            "description": "EMHASS built-in forecast (Open-Meteo): EMHASS makes it from weather data and your array, no API key. Solar forecast from an entity attribute: reads a list-valued attribute on any entity. No solar: you have no PV array.",
             "data": {
               "profile": "Other solar forecast source"
             }
@@ -513,11 +533,20 @@
           "buy_mode": "Import price method",
           "buy_multiplier": "Import multiplier",
           "buy_adder": "Import addition per kWh",
-          "buy_template": "Import template",
           "sell_mode": "Export price method",
           "sell_multiplier": "Export multiplier",
-          "sell_adder": "Export addition per kWh",
-          "sell_template": "Export template"
+          "sell_adder": "Export addition per kWh"
+        },
+        "description": "Your price source provides raw spot prices. Add whatever your supplier and grid operator charge on top, and what you are paid for exports.\n\nUse **Linear** for VAT plus a fixed markup per kWh, **Already includes costs** if your price source already adds them, or **Template** for tiered or time-of-day pricing, which is entered under **Advanced settings**.",
+        "sections": {
+          "advanced": {
+            "name": "Advanced settings",
+            "description": "Price templates, only used when the method above is Template. The variables spot and time (your local time) are available.",
+            "data": {
+              "buy_template": "Import template",
+              "sell_template": "Export template"
+            }
+          }
         }
       },
       "inverter": {
@@ -619,7 +648,8 @@
     "error": {
       "ac_output_required": "A shared inverter needs a positive AC output limit. Zero would block PV and the battery from reaching the house.",
       "derating_not_ascending": "Charge-taper rows must list strictly increasing charge levels, each between 1 and 99%, with a charge rate of 1–100% of maximum.",
-      "profile_required": "Pick a solar forecast source, or open Advanced settings for the other choices."
+      "profile_required": "Pick a solar forecast source, or open Advanced settings for the other choices.",
+      "template_required": "Template mode needs a template. Enter it under Advanced settings, or pick another method."
     }
   },
   "selector": {

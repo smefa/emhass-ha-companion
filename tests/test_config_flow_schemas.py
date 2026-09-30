@@ -30,6 +30,7 @@ from custom_components.emhass_companion.config_flow import (
     _load_profile_selector,
     _nest_suggested,
     _profile_notes,
+    _profile_picker_schema,
     _profile_selector,
     _tariff_side_schema,
     _time_step_options,
@@ -50,7 +51,9 @@ from custom_components.emhass_companion.const import (
     CONF_MULTIPLIER,
     CONF_TIME_STEP,
     LOAD_PROFILE_CREATE_SENTINEL,
+    PRICE_ADVANCED_PROFILES,
     PRICE_PROFILE_ORDER,
+    PV_ADVANCED_PROFILES,
 )
 from custom_components.emhass_companion.profiles import BUILTIN_ROOT
 from custom_components.emhass_companion.profiles.schema import Profile, validate_document
@@ -599,3 +602,36 @@ def test_builtin_profile_options_render_as_a_schema(path):
         document=document,
     )
     assert vol.Schema(profile.selector_schema()) is not None
+
+
+def _picker_profiles(kind, *keys):
+    return [Profile(key=key, path="x", kind=kind, name=key, document={}) for key in keys]
+
+
+@pytest.mark.parametrize(
+    ("kind", "hidden"),
+    [("price", PRICE_ADVANCED_PROFILES), ("pv", PV_ADVANCED_PROFILES)],
+)
+def test_advanced_picker_profiles_are_real_builtin_profiles(kind, hidden):
+    shipped = {f"{kind}/{path.stem}" for path in (BUILTIN_ROOT / kind).glob("*.yaml")}
+    assert set(hidden) <= shipped
+
+
+def test_a_picker_splits_only_while_the_main_list_has_something_in_it():
+    everything = _picker_profiles("price", "price/tibber", *PRICE_ADVANCED_PROFILES)
+    split = _profile_picker_schema("price", everything)
+    assert {str(k) for k in split} == {"profile", ADVANCED_SECTION}
+
+    only_hidden = _picker_profiles("price", *PRICE_ADVANCED_PROFILES)
+    flat = _profile_picker_schema("price", only_hidden)
+    assert {str(k) for k in flat} == {"profile"}
+
+
+def test_the_picker_section_opens_for_a_saved_hidden_source():
+    profiles = _picker_profiles("pv", "pv/solcast", "pv/none")
+    closed = _profile_picker_schema("pv", profiles, current="pv/solcast")
+    opened = _profile_picker_schema("pv", profiles, current="pv/none")
+    key = next(k for k in closed if str(k) == ADVANCED_SECTION)
+    assert closed[key].options["collapsed"] is True
+    key = next(k for k in opened if str(k) == ADVANCED_SECTION)
+    assert opened[key].options["collapsed"] is False

@@ -693,6 +693,17 @@ PRICE_PROFILE_ORDER: Final = (
 )
 PV_PROFILE_ORDER: Final = ("pv/solcast",)
 
+# The price sources kept in the collapsed Advanced section of the picker: the
+# two Amber integrations, a flat tariff, and prices read from any entity.
+# Nord Pool, ENTSO-E and Tibber stay in the main list. As with the solar
+# picker this only applies while the main list is not empty.
+PRICE_ADVANCED_PROFILES: Final = (
+    "price/amber_express",
+    "price/amberelectric",
+    "price/fixed",
+    "price/generic_attribute",
+)
+
 # The solar sources kept in the collapsed Advanced section of the picker: the
 # built-in forecast, a forecast read from any entity, and no solar at all.
 # Only applies while at least one other source is on offer -- a picker with
