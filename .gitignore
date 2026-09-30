@@ -44,3 +44,6 @@ _preview_*.html
 
 # Private consumption history for the end-SOC backtest (see tools/end_soc_bench/README.md)
 tools/end_soc_bench/data/
+
+# Solcast forecast cache and SOC history for the PV caution backtest
+tools/pv_caution_bench/data/
