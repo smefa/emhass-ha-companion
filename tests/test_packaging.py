@@ -96,6 +96,31 @@ def test_data_descriptions_only_describe_existing_fields():
                 )
 
 
+@pytest.mark.parametrize(
+    "filename", ["strings.json", "translations/en.json", "translations/sv.json"]
+)
+def test_section_descriptions_are_single_line_plain_text(filename):
+    """The frontend renders a section's description as plain text.
+
+    Markdown shows up literally and newlines collapse to spaces, so anything
+    formatted belongs in the step description or a field's data_description
+    (both rendered as markdown), never in `sections.<key>.description`.
+    """
+    strings = _json(COMPONENT / filename)
+    blocks = [strings.get("config", {}), strings.get("options", {})]
+    blocks += list(strings.get("config_subentries", {}).values())
+    for block in blocks:
+        for step_name, step in block.get("step", {}).items():
+            for sec_name, sec in step.get("sections", {}).items():
+                text = sec.get("description", "")
+                assert "\n" not in text, (filename, step_name, sec_name)
+                assert not any(mark in text for mark in ("**", "`", "](")), (
+                    filename,
+                    step_name,
+                    sec_name,
+                )
+
+
 def test_imported_home_assistant_components_are_declared():
     """hassfest fails if a component is imported but not declared.
 

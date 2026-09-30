@@ -54,6 +54,7 @@ from custom_components.emhass_companion.const import (
     PRICE_ADVANCED_PROFILES,
     PRICE_PROFILE_ORDER,
     PV_ADVANCED_PROFILES,
+    TEMPERATURE_ADVANCED_PROFILES,
 )
 from custom_components.emhass_companion.profiles import BUILTIN_ROOT
 from custom_components.emhass_companion.profiles.schema import Profile, validate_document
@@ -610,7 +611,11 @@ def _picker_profiles(kind, *keys):
 
 @pytest.mark.parametrize(
     ("kind", "hidden"),
-    [("price", PRICE_ADVANCED_PROFILES), ("pv", PV_ADVANCED_PROFILES)],
+    [
+        ("price", PRICE_ADVANCED_PROFILES),
+        ("pv", PV_ADVANCED_PROFILES),
+        ("temperature", TEMPERATURE_ADVANCED_PROFILES),
+    ],
 )
 def test_advanced_picker_profiles_are_real_builtin_profiles(kind, hidden):
     shipped = {f"{kind}/{path.stem}" for path in (BUILTIN_ROOT / kind).glob("*.yaml")}

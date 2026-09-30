@@ -693,6 +693,14 @@ PRICE_PROFILE_ORDER: Final = (
 )
 PV_PROFILE_ORDER: Final = ("pv/solcast",)
 
+# The outdoor temperature sources kept in the collapsed Advanced section of
+# the picker: everything except a Home Assistant weather entity. As with
+# the other pickers this only applies while the main list is not empty.
+TEMPERATURE_ADVANCED_PROFILES: Final = (
+    "temperature/emhass_native",
+    "temperature/generic_attribute",
+)
+
 # The price sources kept in the collapsed Advanced section of the picker: the
 # two Amber integrations, a flat tariff, and prices read from any entity.
 # Nord Pool, ENTSO-E and Tibber stay in the main list. As with the solar

@@ -164,6 +164,7 @@ from .const import (
     SUBENTRY_TYPE_DEFERRABLE,
     SUBENTRY_TYPE_LOAD_GROUP,
     SUBENTRY_TYPE_THERMAL,
+    TEMPERATURE_ADVANCED_PROFILES,
     TEMPERATURE_PROFILE_ORDER,
 )
 from .forms import (
@@ -328,6 +329,7 @@ def _suggested_entities(hass: HomeAssistant, profile: Profile) -> dict[str, str]
 _PROFILE_ORDER_BY_KIND: dict[str, tuple[str, ...]] = {
     PROFILE_KIND_PRICE: PRICE_PROFILE_ORDER,
     PROFILE_KIND_PV: PV_PROFILE_ORDER,
+    PROFILE_KIND_TEMPERATURE: TEMPERATURE_PROFILE_ORDER,
 }
 
 
@@ -384,6 +386,7 @@ def _profile_selector(
 
 _ADVANCED_PROFILES_BY_KIND: dict[str, tuple[str, ...]] = {
     PROFILE_KIND_PRICE: PRICE_ADVANCED_PROFILES,
+    PROFILE_KIND_TEMPERATURE: TEMPERATURE_ADVANCED_PROFILES,
     PROFILE_KIND_PV: PV_ADVANCED_PROFILES,
 }
 
@@ -2841,22 +2844,30 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
         profiles = (await async_load_profiles(self.hass)).profiles
         choices = available_profiles(self.hass, profiles, PROFILE_KIND_TEMPERATURE)
 
+        errors: dict[str, str] = {}
         if user_input is not None:
-            self._temperature_key = user_input[CONF_PROFILE]
-            self._temperature_profiles = profiles
-            return await self.async_step_temperature_options()
+            user_input = _flatten_sections(user_input)
+            if CONF_PROFILE in user_input:
+                self._temperature_key = user_input[CONF_PROFILE]
+                self._temperature_profiles = profiles
+                return await self.async_step_temperature_options()
+            errors["base"] = "profile_required"
 
         current = (options.get(CONF_TEMPERATURE) or {}).get(CONF_PROFILE)
-        ranked = _rank_profiles(choices, TEMPERATURE_PROFILE_ORDER)
+        ranked = _rank_profiles(
+            _profiles_shown_first(PROFILE_KIND_TEMPERATURE, choices), TEMPERATURE_PROFILE_ORDER
+        )
         return self.async_show_form(
             step_id="temperature",
             data_schema=vol.Schema(
-                {
-                    vol.Required(
-                        CONF_PROFILE, description={"suggested_value": current}
-                    ): _profile_selector(choices, TEMPERATURE_PROFILE_ORDER)
-                }
+                _profile_picker_schema(
+                    PROFILE_KIND_TEMPERATURE,
+                    choices,
+                    current=current,
+                    advanced_open=bool(errors),
+                )
             ),
+            errors=errors,
             description_placeholders={
                 "profiles": "\n".join(
                     f"- **{profile.name}** — {profile.description or ''}" for profile in ranked

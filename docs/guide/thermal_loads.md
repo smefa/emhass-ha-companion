@@ -68,6 +68,8 @@ required:
 - **Home Assistant weather entity** — hourly forecast via
   `weather.get_forecasts`. Pick one that actually offers hourly data; daily or
   twice-daily forecasts are too coarse to schedule heating against.
+  The other two sources are under the collapsed **Advanced settings** section
+  (it opens by itself if one of them is already selected).
 - **Temperature forecast from an entity attribute** — for a weather
   integration that exposes its forecast as a list-valued attribute instead of
   through an action, or a template sensor you build yourself.

@@ -74,6 +74,7 @@ and a source is required once a thermal load exists:
 
 - **Home Assistant weather entity** — hourly forecast via
   `weather.get_forecasts`.
+  The two below are under the collapsed *Advanced settings* section.
 - **Entity attribute** — a list-valued attribute on any entity.
 - **EMHASS built-in (Open-Meteo)** — no series; sets
   `weather_forecast_method: open-meteo` so EMHASS fetches it itself. Requires

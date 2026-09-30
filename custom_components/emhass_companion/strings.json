@@ -30,9 +30,12 @@
         "sections": {
           "advanced": {
             "name": "Advanced settings",
-            "description": "Fixed tariff: a flat rate or a simple peak and off-peak split, for when you have no dynamic pricing. Prices from an entity attribute: reads a price forecast from any entity. Amber Electric and Amber Express: the two Amber integrations.",
+            "description": "Other price sources.",
             "data": {
               "profile": "Other price source"
+            },
+            "data_description": {
+              "profile": "- **Fixed tariff** — a flat rate or a simple peak and off-peak split, for when you have no dynamic pricing.\n- **Prices from an entity attribute** — reads a price forecast from any entity.\n- **Amber Electric** and **Amber Express** — the two Amber integrations."
             }
           }
         }
@@ -87,9 +90,12 @@
         "sections": {
           "advanced": {
             "name": "Advanced settings",
-            "description": "EMHASS built-in forecast (Open-Meteo): EMHASS makes it from weather data and your array, no API key. Solar forecast from an entity attribute: reads a list-valued attribute on any entity. No solar: you have no PV array.",
+            "description": "Other solar forecast sources.",
             "data": {
               "profile": "Other solar forecast source"
+            },
+            "data_description": {
+              "profile": "- **EMHASS built-in forecast (Open-Meteo)** — EMHASS makes the forecast from weather data and your array. No API key.\n- **Solar forecast from an entity attribute** — reads a list-valued attribute on any entity.\n- **No solar** — you have no PV array."
             }
           }
         }
@@ -113,9 +119,12 @@
         "sections": {
           "advanced": {
             "name": "Advanced settings",
-            "description": "House load sensor (without deferrables): a sensor that already leaves out your deferrable loads; EMHASS learns from its history. Typical household profile (no sensor needed): a generic daily shape scaled to an average power you enter. Load forecast from an entity attribute: a ready-made forecast read from any entity.",
+            "description": "Other house load sources.",
             "data": {
               "profile": "Existing load source"
+            },
+            "data_description": {
+              "profile": "- **House load sensor (without deferrables)** — a sensor that already leaves out your deferrable loads; EMHASS learns from its history.\n- **Typical household profile (no sensor needed)** — a generic daily shape scaled to an average power you enter.\n- **Load forecast from an entity attribute** — reads a ready-made forecast from any entity."
             }
           }
         }
@@ -347,9 +356,12 @@
         "sections": {
           "advanced": {
             "name": "Advanced settings",
-            "description": "House load sensor (without deferrables): a sensor that already leaves out your deferrable loads; EMHASS learns from its history. Typical household profile (no sensor needed): a generic daily shape scaled to an average power you enter. Load forecast from an entity attribute: a ready-made forecast read from any entity.",
+            "description": "Other house load sources.",
             "data": {
               "profile": "Existing load source"
+            },
+            "data_description": {
+              "profile": "- **House load sensor (without deferrables)** — a sensor that already leaves out your deferrable loads; EMHASS learns from its history.\n- **Typical household profile (no sensor needed)** — a generic daily shape scaled to an average power you enter.\n- **Load forecast from an entity attribute** — reads a ready-made forecast from any entity."
             }
           }
         }
@@ -390,9 +402,12 @@
         "sections": {
           "advanced": {
             "name": "Advanced settings",
-            "description": "EMHASS built-in forecast (Open-Meteo): EMHASS makes it from weather data and your array, no API key. Solar forecast from an entity attribute: reads a list-valued attribute on any entity. No solar: you have no PV array.",
+            "description": "Other solar forecast sources.",
             "data": {
               "profile": "Other solar forecast source"
+            },
+            "data_description": {
+              "profile": "- **EMHASS built-in forecast (Open-Meteo)** — EMHASS makes the forecast from weather data and your array. No API key.\n- **Solar forecast from an entity attribute** — reads a list-valued attribute on any entity.\n- **No solar** — you have no PV array."
             }
           }
         }
@@ -572,9 +587,21 @@
       },
       "temperature": {
         "title": "Outdoor temperature",
-        "description": "Where the outdoor temperature forecast comes from. Only used once a thermal load exists: it is what the thermal model drifts towards while the load is off.\n\n{profiles}",
+        "description": "Where the outdoor temperature forecast comes from. Only used once a thermal load exists.\n\n{profiles}\n\nOther sources are under **Advanced settings**.",
         "data": {
           "profile": "Temperature source"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Advanced settings",
+            "description": "Other outdoor temperature sources.",
+            "data": {
+              "profile": "Other temperature source"
+            },
+            "data_description": {
+              "profile": "- **EMHASS built-in (Open-Meteo)** — EMHASS fetches it itself, with no weather integration. Needs your home location set in Home Assistant, and the solar forecast set to EMHASS built-in.\n- **Temperature forecast from an entity attribute** — reads a Celsius forecast from a list-valued attribute on any entity."
+            }
+          }
         }
       },
       "temperature_options": {
