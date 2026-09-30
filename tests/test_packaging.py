@@ -121,6 +121,28 @@ def test_section_descriptions_are_single_line_plain_text(filename):
                 )
 
 
+@pytest.mark.parametrize(
+    "filename", ["strings.json", "translations/en.json", "translations/sv.json"]
+)
+@pytest.mark.parametrize(
+    ("step", "blocks", "count"),
+    [
+        ("pv", ("config", "options"), 3),
+        ("load", ("config", "options"), 3),
+        ("price", ("config",), 4),
+        ("temperature", ("options",), 2),
+    ],
+)
+def test_numbered_picker_explanations_match_the_numbered_sources(filename, step, blocks, count):
+    """The Advanced picker labels its sources 1..n; the helper text under it
+    must explain exactly those n, in the same order."""
+    strings = _json(COMPONENT / filename)
+    for block in blocks:
+        helper = strings[block]["step"][step]["sections"]["advanced"]["data_description"]["profile"]
+        lines = helper.split("\n")
+        assert [line.split(". ", 1)[0] for line in lines] == [str(i) for i in range(1, count + 1)]
+
+
 def test_imported_home_assistant_components_are_declared():
     """hassfest fails if a component is imported but not declared.
 

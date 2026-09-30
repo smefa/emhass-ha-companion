@@ -640,3 +640,22 @@ def test_the_picker_section_opens_for_a_saved_hidden_source():
     assert closed[key].options["collapsed"] is True
     key = next(k for k in opened if str(k) == ADVANCED_SECTION)
     assert opened[key].options["collapsed"] is False
+
+
+def _option_labels(schema, section: bool):
+    top = next(k for k in schema if str(k) == ADVANCED_SECTION) if section else None
+    fields = schema[top].schema.schema if section else schema
+    (marker,) = (k for k in fields if str(k) == "profile")
+    return {o["value"]: o["label"] for o in fields[marker].config["options"]}
+
+
+def test_hidden_picker_sources_are_numbered_by_their_fixed_position():
+    """An uninstalled source leaves a gap: the numbers must keep matching the
+    numbered explanation in the translations."""
+    profiles = _picker_profiles("price", "price/tibber", "price/fixed", "price/amber_express")
+    schema = _profile_picker_schema("price", profiles)
+    assert _option_labels(schema, section=True) == {
+        "price/fixed": "1. price/fixed",
+        "price/amber_express": "4. price/amber_express",
+    }
+    assert _option_labels(schema, section=False) == {"price/tibber": "price/tibber"}

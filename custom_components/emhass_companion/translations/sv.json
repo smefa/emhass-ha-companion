@@ -35,7 +35,7 @@
               "profile": "Annan priskälla"
             },
             "data_description": {
-              "profile": "- **Fixed tariff** — ett fast pris eller en enkel topp- och lågtaxa, när du saknar dynamisk prissättning.\n- **Prices from an entity attribute** — läser en prisprognos från valfri entitet.\n- **Amber Electric** och **Amber Express** — de två Amber-integrationerna."
+              "profile": "1. Ett fast pris eller en enkel topp- och lågtaxa, när du saknar dynamisk prissättning.\n2. Läser en prisprognos från valfri entitet.\n3. Amber Electric-integrationen i Home Assistant core.\n4. Den anpassade integrationen Amber Express."
             }
           }
         }
@@ -95,7 +95,7 @@
               "profile": "Annan källa för solprognos"
             },
             "data_description": {
-              "profile": "- **EMHASS built-in forecast (Open-Meteo)** — EMHASS gör prognosen från väderdata och din anläggning. Ingen API-nyckel.\n- **Solar forecast from an entity attribute** — läser en listattribut på valfri entitet.\n- **No solar** — du har ingen solcellsanläggning."
+              "profile": "1. EMHASS gör prognosen från väderdata och din anläggning. Ingen API-nyckel.\n2. Läser en listattribut på valfri entitet.\n3. Du har ingen solcellsanläggning."
             }
           }
         }
@@ -124,7 +124,7 @@
               "profile": "Befintlig förbrukningskälla"
             },
             "data_description": {
-              "profile": "- **House load sensor (without deferrables)** — en sensor som redan utesluter dina styrbara laster; EMHASS lär sig av dess historik.\n- **Typical household profile (no sensor needed)** — en generisk dygnskurva skalad till en medeleffekt du anger.\n- **Load forecast from an entity attribute** — läser en färdig prognos från valfri entitet."
+              "profile": "1. En sensor som redan utesluter dina styrbara laster; EMHASS lär sig av dess historik.\n2. En generisk dygnskurva skalad till en medeleffekt du anger. Ingen sensor behövs.\n3. Läser en färdig prognos från valfri entitet."
             }
           }
         }
@@ -361,7 +361,7 @@
               "profile": "Befintlig förbrukningskälla"
             },
             "data_description": {
-              "profile": "- **House load sensor (without deferrables)** — en sensor som redan utesluter dina styrbara laster; EMHASS lär sig av dess historik.\n- **Typical household profile (no sensor needed)** — en generisk dygnskurva skalad till en medeleffekt du anger.\n- **Load forecast from an entity attribute** — läser en färdig prognos från valfri entitet."
+              "profile": "1. En sensor som redan utesluter dina styrbara laster; EMHASS lär sig av dess historik.\n2. En generisk dygnskurva skalad till en medeleffekt du anger. Ingen sensor behövs.\n3. Läser en färdig prognos från valfri entitet."
             }
           }
         }
@@ -407,7 +407,7 @@
               "profile": "Annan källa för solprognos"
             },
             "data_description": {
-              "profile": "- **EMHASS built-in forecast (Open-Meteo)** — EMHASS gör prognosen från väderdata och din anläggning. Ingen API-nyckel.\n- **Solar forecast from an entity attribute** — läser en listattribut på valfri entitet.\n- **No solar** — du har ingen solcellsanläggning."
+              "profile": "1. EMHASS gör prognosen från väderdata och din anläggning. Ingen API-nyckel.\n2. Läser en listattribut på valfri entitet.\n3. Du har ingen solcellsanläggning."
             }
           }
         }
@@ -599,7 +599,7 @@
               "profile": "Annan temperaturkälla"
             },
             "data_description": {
-              "profile": "- **EMHASS built-in (Open-Meteo)** — EMHASS hämtar den själv, utan väderintegration. Kräver att hemmets plats är satt i Home Assistant och att solprognosen är EMHASS built-in.\n- **Temperature forecast from an entity attribute** — läser en prognos i Celsius från en listattribut på valfri entitet."
+              "profile": "1. EMHASS hämtar den själv, utan väderintegration. Kräver att hemmets plats är satt i Home Assistant och att solprognosen är EMHASS built-in.\n2. Läser en prognos i Celsius från en listattribut på valfri entitet."
             }
           }
         }

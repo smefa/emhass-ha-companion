@@ -703,13 +703,18 @@ TEMPERATURE_ADVANCED_PROFILES: Final = (
 
 # The price sources kept in the collapsed Advanced section of the picker: the
 # two Amber integrations, a flat tariff, and prices read from any entity.
-# Nord Pool, ENTSO-E and Tibber stay in the main list. As with the solar
+# Nord Pool, ENTSO-E and Tibber stay in the main list.
+#
+# The order of these tuples is the number each source is shown with ("1. "
+# before its label) and the order of the numbered explanations in the
+# translations, so reordering one means updating the other. A source that
+# is not installed leaves a gap rather than renumbering the rest. As with the solar
 # picker this only applies while the main list is not empty.
 PRICE_ADVANCED_PROFILES: Final = (
-    "price/amber_express",
-    "price/amberelectric",
     "price/fixed",
     "price/generic_attribute",
+    "price/amberelectric",
+    "price/amber_express",
 )
 
 # The solar sources kept in the collapsed Advanced section of the picker: the

@@ -370,14 +370,30 @@ def _profile_notes(profile: Profile) -> str:
     return f"{UNTESTED_NOTICE}{notes}" if profile.untested else notes
 
 
+def _numbered(label: str, key: str, numbering: tuple[str, ...]) -> str:
+    """``label`` prefixed with its fixed number, when ``key`` is one of ``numbering``.
+
+    The number is the key's position in the tuple, not its position among the
+    profiles that happen to be installed, so it always matches the numbered
+    explanation in the translations.
+    """
+    return f"{numbering.index(key) + 1}. {label}" if key in numbering else label
+
+
 def _profile_selector(
-    profiles: list[Profile], order: tuple[str, ...] = ()
+    profiles: list[Profile],
+    order: tuple[str, ...] = (),
+    *,
+    numbering: tuple[str, ...] = (),
 ) -> selector.SelectSelector:
     return selector.SelectSelector(
         selector.SelectSelectorConfig(
             mode=selector.SelectSelectorMode.LIST,
             options=[
-                selector.SelectOptionDict(value=profile.key, label=_profile_label(profile))
+                selector.SelectOptionDict(
+                    value=profile.key,
+                    label=_numbered(_profile_label(profile), profile.key, numbering),
+                )
                 for profile in _rank_profiles(profiles, order)
             ],
         )
@@ -436,7 +452,8 @@ def _profile_picker_schema(
         {vol.Optional(CONF_PROFILE, description=suggested(basic)): _profile_selector(basic, order)},
         {
             vol.Optional(CONF_PROFILE, description=suggested(advanced)): _profile_selector(
-                advanced, order
+                sorted(advanced, key=lambda profile: hidden.index(profile.key)),
+                numbering=hidden,
             )
         },
         collapsed=not (advanced_open or current in {profile.key for profile in advanced}),
@@ -527,14 +544,14 @@ def _load_picker_schema(
             vol.Optional(
                 CONF_PROFILE,
                 description={"suggested_value": current} if current in profile_keys else {},
-            ): _load_profile_selector(profiles, create=False)
+            ): _load_profile_selector(profiles, create=False, numbered=True)
         },
         collapsed=not (advanced_open or current in profile_keys),
     )
 
 
 def _load_profile_selector(
-    profiles: list[Profile], *, create: bool = True
+    profiles: list[Profile], *, create: bool = True, numbered: bool = False
 ) -> selector.SelectSelector:
     """The load-profile picker, with "Create a house load sensor" first.
 
@@ -545,13 +562,21 @@ def _load_profile_selector(
     """
     order = {key: index for index, key in enumerate(LOAD_PROFILE_ORDER)}
     ranked = sorted(profiles, key=lambda profile: order.get(profile.key, len(order)))
+    # The create option is not a profile, so it has no number of its own.
+    numbering = LOAD_PROFILE_ORDER[1:] if numbered else ()
     options = [
         *(
             [selector.SelectOptionDict(value=LOAD_PROFILE_CREATE_SENTINEL, label=LOAD_CREATE_LABEL)]
             if create
             else []
         ),
-        *(selector.SelectOptionDict(value=profile.key, label=profile.name) for profile in ranked),
+        *(
+            selector.SelectOptionDict(
+                value=profile.key,
+                label=_numbered(profile.name, profile.key, numbering),
+            )
+            for profile in ranked
+        ),
     ]
     return selector.SelectSelector(
         selector.SelectSelectorConfig(mode=selector.SelectSelectorMode.LIST, options=options)
