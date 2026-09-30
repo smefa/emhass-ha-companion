@@ -479,7 +479,58 @@ def _default_profile_options(profile: Profile, *, skip: set[str] = frozenset()) 
     }
 
 
-def _load_profile_selector(profiles: list[Profile]) -> selector.SelectSelector:
+LOAD_CREATE_LABEL: Final = "Create a house load sensor"
+
+
+def _load_picker_schema(
+    profiles: list[Profile], *, current: str | None = None, advanced_open: bool = False
+) -> dict[Any, Any]:
+    """The load picker: creating a sensor up front, every existing source under Advanced.
+
+    Same shape as ``_profile_picker_schema`` -- one ``profile`` key in both
+    places, the section winning when ``_flatten_sections`` merges them. The
+    basic list is the create option alone (always offered), so the section is
+    never empty while a profile exists.
+    """
+    profile_keys = {profile.key for profile in profiles}
+    if not profiles:
+        return {
+            vol.Required(CONF_PROFILE, description={"suggested_value": current}): (
+                _load_profile_selector(profiles)
+            )
+        }
+    create_only = selector.SelectSelector(
+        selector.SelectSelectorConfig(
+            mode=selector.SelectSelectorMode.LIST,
+            options=[
+                selector.SelectOptionDict(
+                    value=LOAD_PROFILE_CREATE_SENTINEL, label=LOAD_CREATE_LABEL
+                )
+            ],
+        )
+    )
+    return _with_advanced(
+        {
+            vol.Optional(
+                CONF_PROFILE,
+                description=(
+                    {"suggested_value": current} if current == LOAD_PROFILE_CREATE_SENTINEL else {}
+                ),
+            ): create_only
+        },
+        {
+            vol.Optional(
+                CONF_PROFILE,
+                description={"suggested_value": current} if current in profile_keys else {},
+            ): _load_profile_selector(profiles, create=False)
+        },
+        collapsed=not (advanced_open or current in profile_keys),
+    )
+
+
+def _load_profile_selector(
+    profiles: list[Profile], *, create: bool = True
+) -> selector.SelectSelector:
     """The load-profile picker, with "Create a house load sensor" first.
 
     Also reorders the real profiles per LOAD_PROFILE_ORDER: available_profiles
@@ -490,8 +541,10 @@ def _load_profile_selector(profiles: list[Profile]) -> selector.SelectSelector:
     order = {key: index for index, key in enumerate(LOAD_PROFILE_ORDER)}
     ranked = sorted(profiles, key=lambda profile: order.get(profile.key, len(order)))
     options = [
-        selector.SelectOptionDict(
-            value=LOAD_PROFILE_CREATE_SENTINEL, label="Create a house load sensor"
+        *(
+            [selector.SelectOptionDict(value=LOAD_PROFILE_CREATE_SENTINEL, label=LOAD_CREATE_LABEL)]
+            if create
+            else []
         ),
         *(selector.SelectOptionDict(value=profile.key, label=profile.name) for profile in ranked),
     ]
@@ -708,23 +761,24 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
             # Should not happen: every kind ships an always-available profile.
             return self.async_abort(reason="no_profiles")
 
+        errors: dict[str, str] = {}
         if user_input is not None:
-            if user_input[CONF_PROFILE] == LOAD_PROFILE_CREATE_SENTINEL:
+            user_input = _flatten_sections(user_input)
+            if CONF_PROFILE not in user_input:
+                errors["base"] = "profile_required"
+            elif user_input[CONF_PROFILE] == LOAD_PROFILE_CREATE_SENTINEL:
                 return await self.async_step_load_create()
-            self._options[CONF_LOAD] = {
-                CONF_PROFILE: user_input[CONF_PROFILE],
-                CONF_PROFILE_OPTIONS: {},
-            }
-            return await self.async_step_load_options()
+            else:
+                self._options[CONF_LOAD] = {
+                    CONF_PROFILE: user_input[CONF_PROFILE],
+                    CONF_PROFILE_OPTIONS: {},
+                }
+                return await self.async_step_load_options()
 
         return self.async_show_form(
             step_id="load",
-            data_schema=vol.Schema({vol.Required(CONF_PROFILE): _load_profile_selector(choices)}),
-            description_placeholders={
-                "profiles": "\n".join(
-                    f"- **{profile.name}** — {profile.description or ''}" for profile in choices
-                )
-            },
+            data_schema=vol.Schema(_load_picker_schema(choices, advanced_open=bool(errors))),
+            errors=errors,
         )
 
     async def async_step_load_create(
@@ -2541,13 +2595,18 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
         profiles = (await async_load_profiles(self.hass)).profiles
         choices = available_profiles(self.hass, profiles, PROFILE_KIND_LOAD)
 
+        errors: dict[str, str] = {}
         if user_input is not None:
-            if user_input[CONF_PROFILE] == LOAD_PROFILE_CREATE_SENTINEL:
+            user_input = _flatten_sections(user_input)
+            if CONF_PROFILE not in user_input:
+                errors["base"] = "profile_required"
+            elif user_input[CONF_PROFILE] == LOAD_PROFILE_CREATE_SENTINEL:
                 self._load_profiles = profiles
                 return await self.async_step_load_create()
-            self._load_key = user_input[CONF_PROFILE]
-            self._load_profiles = profiles
-            return await self.async_step_load_options()
+            else:
+                self._load_key = user_input[CONF_PROFILE]
+                self._load_profiles = profiles
+                return await self.async_step_load_options()
 
         load = options.get(CONF_LOAD) or {}
         current = load.get(CONF_PROFILE)
@@ -2563,12 +2622,9 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
         return self.async_show_form(
             step_id="load",
             data_schema=vol.Schema(
-                {
-                    vol.Required(
-                        CONF_PROFILE, description={"suggested_value": current}
-                    ): _load_profile_selector(choices)
-                }
+                _load_picker_schema(choices, current=current, advanced_open=bool(errors))
             ),
+            errors=errors,
         )
 
     async def async_step_load_create(

@@ -77,7 +77,7 @@ async def test_load_forecast_method_is_reachable_and_saves(hass: HomeAssistant) 
         result["flow_id"], {"next_step_id": "load"}
     )
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"profile": "load/sensor"}
+        result["flow_id"], {"advanced": {"profile": "load/sensor"}}
     )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
@@ -134,7 +134,7 @@ async def test_create_a_house_load_sensor_lets_you_pick_the_forecast_method(
         result["flow_id"], {"next_step_id": "load"}
     )
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"profile": "__create__"}
+        result["flow_id"], {"profile": "__create__", "advanced": {}}
     )
     assert result["step_id"] == "load_create"
     result = await hass.config_entries.options.async_configure(
@@ -330,3 +330,35 @@ async def test_the_live_pv_sensor_lives_on_the_inverter_step_and_survives_a_batt
     assert result["type"] == "create_entry"
     assert entry.options["pv_entity"] == "sensor.pv_now"
     assert entry.options["battery"]["hybrid_inverter"] is False
+
+
+async def test_the_load_picker_offers_only_the_create_option_up_front(
+    hass: HomeAssistant,
+) -> None:
+    entry = await _setup_entry(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "load"}
+    )
+    schema = result["data_schema"].schema
+    (basic,) = (key for key in schema if key == "profile")
+    assert [o["value"] for o in schema[basic].config["options"]] == ["__create__"]
+    (section_key,) = (key for key in schema if key == "advanced")
+    (inner,) = (key for key in schema[section_key].schema.schema if key == "profile")
+    values = [o["value"] for o in schema[section_key].schema.schema[inner].config["options"]]
+    assert "load/sensor" in values and "__create__" not in values
+
+
+async def test_the_load_picker_reports_no_choice_instead_of_guessing(
+    hass: HomeAssistant,
+) -> None:
+    entry = await _setup_entry(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "load"}
+    )
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"advanced": {}})
+    assert result["type"] == "form"
+    assert result["errors"] == {"base": "profile_required"}

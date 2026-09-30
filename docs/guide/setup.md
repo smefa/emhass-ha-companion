@@ -167,6 +167,10 @@ the horizon instead of inferring it from the previous day.
       measure is *total* house power. It builds you a new sensor that keeps
       that reading minus whatever your deferrable loads are drawing at any
       moment, and forecasts from that.
+
+  The other three sources are under **Advanced settings**, collapsed until
+  you open it (it opens by itself if one of them is already selected):
+
     - **Typical household profile (no sensor needed)** — a generic daily
       shape, scaled to an average power you type in. Least accurate, but
       works with no sensor at all.
