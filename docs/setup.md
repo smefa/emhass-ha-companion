@@ -86,6 +86,7 @@ The inverter's own limits and losses. This step is always there, battery or not.
 | Shared inverter (hybrid) | On if PV and the battery share one inverter's AC-side power limit — true for most home battery systems. Off if they are two independent inverters, each with its own limit |
 | Maximum AC output / input | Only asked if hybrid — the shared inverter's own throughput ceiling, separate from the battery's own charge/discharge limits |
 | DC to AC / AC to DC efficiency | Conversion losses, in the collapsed *Advanced settings* section |
+| Live PV power sensor | Optional, in *Advanced settings*. See "Blending live PV/load into MPC" below |
 
 ## Battery
 
@@ -111,7 +112,6 @@ the optimiser plans around PV, load and price alone.
 | Stress cost detail | How finely the stress cost curve is approximated — 10 is a good balance |
 | High-power stress cost | Discourages fast charge/discharge, growing with the square of the power. See below |
 | Self-consumption handoff threshold | See below |
-| Live PV power sensor | Optional. See "Blending live PV/load into MPC" below |
 
 **Discharge cycle cost / charge cycle cost.** A battery that is worked hard
 wears out sooner, and a plan that only reads prices will happily cycle for a

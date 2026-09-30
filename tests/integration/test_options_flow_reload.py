@@ -172,7 +172,7 @@ async def test_the_pv_profile_is_reachable_and_saves(hass: HomeAssistant) -> Non
         result["flow_id"], {"next_step_id": "pv"}
     )
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"profile": "pv/solcast"}
+        result["flow_id"], {"profile": "pv/solcast", "advanced": {}}
     )
     assert result["step_id"] == "pv_options"
 
@@ -221,7 +221,7 @@ async def test_the_pv_step_suggests_what_is_stored_not_the_template_default(
     assert marker.description["suggested_value"] == "pv/solcast"
 
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"profile": "pv/solcast"}
+        result["flow_id"], {"profile": "pv/solcast", "advanced": {}}
     )
     (marker,) = (key for key in result["data_schema"].schema if key == "entities")
     assert marker.description["suggested_value"] == stored
@@ -261,3 +261,72 @@ async def test_reconfigure_reloads_so_the_new_address_takes_effect(
     assert entry.data["url"] == "http://elsewhere:5000"
     # The reload is the point: a fresh client, built from the new address.
     assert entry.runtime_data.coordinator.client is not old_client
+
+
+async def test_the_pv_picker_lists_solcast_first_and_the_rest_under_advanced(
+    hass: HomeAssistant,
+) -> None:
+    entry = await _setup_entry(hass)
+    hass.config.components.add("solcast_solar")
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "pv"}
+    )
+    schema = result["data_schema"].schema
+    (section_key,) = (key for key in schema if key == "advanced")
+    assert set(schema[section_key].schema.schema) == {"profile"}
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"advanced": {"profile": "pv/none"}}
+    )
+    assert result["type"] == "create_entry"
+    assert entry.options[CONF_PV]["profile"] == "pv/none"
+
+
+async def test_the_pv_picker_reports_no_choice_instead_of_guessing(
+    hass: HomeAssistant,
+) -> None:
+    entry = await _setup_entry(hass)
+    hass.config.components.add("solcast_solar")
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "pv"}
+    )
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"advanced": {}})
+    assert result["type"] == "form"
+    assert result["errors"] == {"base": "profile_required"}
+
+
+async def test_the_live_pv_sensor_lives_on_the_inverter_step_and_survives_a_battery_save(
+    hass: HomeAssistant,
+) -> None:
+    entry = await _setup_entry(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "inverter_settings"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            "hybrid_inverter": False,
+            "inverter_ac_output_max_w": 0,
+            "advanced": {"pv_entity": "sensor.pv_now"},
+        },
+    )
+    assert result["type"] == "create_entry"
+    assert entry.options["pv_entity"] == "sensor.pv_now"
+    assert "pv_entity" not in entry.options["battery"]
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "battery"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"use_battery": True, "capacity_wh": 10000, "advanced": {}}
+    )
+    assert result["type"] == "create_entry"
+    assert entry.options["pv_entity"] == "sensor.pv_now"
+    assert entry.options["battery"]["hybrid_inverter"] is False

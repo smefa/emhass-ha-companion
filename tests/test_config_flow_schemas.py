@@ -241,7 +241,8 @@ def test_inverter_schema_splits_basic_and_advanced():
     advanced = {str(k) for k in _advanced_keys(schema)}
     assert advanced == set(INVERTER_ADVANCED_KEYS)
     assert not advanced & top
-    assert set(INVERTER_KEYS) == top - {ADVANCED_SECTION} | advanced
+    # the live PV sensor is stored outside the battery blob
+    assert set(INVERTER_KEYS) == (top - {ADVANCED_SECTION} | advanced) - {"pv_entity"}
 
 
 def test_inverter_advanced_fields_are_valid_untouched():

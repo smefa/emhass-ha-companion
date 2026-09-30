@@ -64,6 +64,15 @@
         "description": "Välj varifrån prognosen för solproduktion kommer. Välj **Ingen sol** om du saknar paneler.\n\n{profiles}",
         "data": {
           "profile": "Källa för solprognos"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Avancerade inställningar",
+            "description": "Andra källor: EMHASS inbyggda prognos, en prognos från valfri entitet eller ingen sol alls.",
+            "data": {
+              "profile": "Annan källa för solprognos"
+            }
+          }
         }
       },
       "pv_options": {
@@ -123,16 +132,14 @@
           "soc_max": "Högsta laddningsnivå",
           "soc_entity": "Sensor för batteriets laddningsnivå",
           "battery_power_entity": "Sensor för batteriets effekt",
-          "battery_power_invert": "Sensorn är positiv vid laddning",
-          "pv_entity": "Sensor för aktuell soleffekt"
+          "battery_power_invert": "Sensorn är positiv vid laddning"
         },
         "data_description": {
           "no_discharge_to_grid": "På hindrar batteriet från att ladda ur mot export -- det förser fortfarande huset med el, men säljer aldrig. EMHASS eget standardvärde är på, vilket tyst utesluter arbitrage även när en plan annars skulle tjäna på en prisspik, så detta levereras avstängt. Solöverskott exporteras ändå normalt oavsett detta -- det gäller bara batteriet.",
           "soc_min": "Optimeringen planerar aldrig batteriet under denna nivå.",
           "soc_entity": "Läses vid varje körning så att planen utgår från verkligheten.",
           "battery_power_entity": "Vad batteriet gör just nu, så att korten kan rita det mot planen. Ingenting i optimeringen läser den.",
-          "battery_power_invert": "Lämna av om sensorn är positiv vid urladdning, vilket är planens egen konvention. Fel håll gör att ett batteri som laddas visas som att det laddas ur.",
-          "pv_entity": "Valfritt. Blandas in i det första steget av varje MPC-prognos, viktat av reglaget \"Live-värdets vikt\". Last blandas in på samma sätt automatiskt, med sensorn vald under Husets förbrukning > Sensor för husets last -- ingen separat sensor behövs där."
+          "battery_power_invert": "Lämna av om sensorn är positiv vid urladdning, vilket är planens egen konvention. Fel håll gör att ett batteri som laddas visas som att det laddas ur."
         },
         "sections": {
           "advanced": {
@@ -195,10 +202,14 @@
         "sections": {
           "advanced": {
             "name": "Avancerade inställningar",
-            "description": "Verkningsgrader mellan DC och AC. Standardvärdena passar de flesta växelriktare.",
+            "description": "Verkningsgrader mellan DC och AC samt en valfri sensor för aktuell solelproduktion. Standardvärdena passar de flesta växelriktare.",
             "data": {
               "inverter_efficiency_dc_ac": "Verkningsgrad DC till AC",
-              "inverter_efficiency_ac_dc": "Verkningsgrad AC till DC"
+              "inverter_efficiency_ac_dc": "Verkningsgrad AC till DC",
+              "pv_entity": "Sensor för aktuell soleffekt"
+            },
+            "data_description": {
+              "pv_entity": "Valfritt. Blandas in i det första steget av varje MPC-prognos, viktat av reglaget \"Live-värdets vikt\". Last blandas in på samma sätt automatiskt, med sensorn vald under Husets förbrukning > Sensor för husets last -- ingen separat sensor behövs där."
             }
           }
         }
@@ -272,7 +283,8 @@
       "unknown_version": "Ansluten, men EMHASS rapporterade ingen version. Det är förmodligen för gammalt.",
       "version_too_old": "Denna EMHASS är för gammal. Version {min_version} eller senare krävs, eftersom integrationen läser planen via det JSON-API som infördes i den versionen.",
       "ac_output_required": "En delad växelriktare behöver en positiv AC-uteffektgräns. Noll skulle stoppa både sol och batteri från att nå huset.",
-      "derating_not_ascending": "Raderna för laddavtrappning måste ha strikt stigande laddningsnivåer, var och en mellan 1 och 99 %, med en laddeffekt på 1–100 % av max."
+      "derating_not_ascending": "Raderna för laddavtrappning måste ha strikt stigande laddningsnivåer, var och en mellan 1 och 99 %, med en laddeffekt på 1–100 % av max.",
+      "profile_required": "Välj en källa för solprognosen, eller öppna Avancerade inställningar för de andra alternativen."
     },
     "abort": {
       "single_instance_allowed": "EMHASS Companion är redan konfigurerad.",
@@ -336,6 +348,15 @@
         "description": "Ändra varifrån prognosen för solproduktion kommer, eller justera bara den källa du redan använder.\n\nVärt att titta på efter en uppdatering: en profils standardval kan ha fått fler poster (Solcasts day 3-sensor, som End SOC-läget \"Optimerad\" använder för att se nästa soldygn bortom horisonten), och de erbjuds här i stället för att sättas åt dig.\n\n{profiles}",
         "data": {
           "profile": "Källa för solprognos"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Avancerade inställningar",
+            "description": "Andra källor: EMHASS inbyggda prognos, en prognos från valfri entitet eller ingen sol alls.",
+            "data": {
+              "profile": "Annan källa för solprognos"
+            }
+          }
         }
       },
       "pv_options": {
@@ -361,12 +382,10 @@
           "soc_max": "Högsta laddningsnivå",
           "soc_entity": "Sensor för batteriets laddningsnivå",
           "battery_power_entity": "Sensor för batteriets effekt",
-          "battery_power_invert": "Sensorn är positiv vid laddning",
-          "pv_entity": "Sensor för aktuell soleffekt"
+          "battery_power_invert": "Sensorn är positiv vid laddning"
         },
         "data_description": {
           "no_discharge_to_grid": "På hindrar batteriet från att ladda ur mot export -- det förser fortfarande huset med el, men säljer aldrig. EMHASS eget standardvärde är på, vilket tyst utesluter arbitrage även när en plan annars skulle tjäna på en prisspik, så detta levereras avstängt. Solöverskott exporteras ändå normalt oavsett detta -- det gäller bara batteriet.",
-          "pv_entity": "Valfritt. Blandas in i det första steget av varje MPC-prognos, viktat av reglaget \"Live-värdets vikt\". Last blandas in på samma sätt automatiskt, med sensorn vald under Husets förbrukning > Sensor för husets last -- ingen separat sensor behövs där.",
           "battery_power_entity": "Vad batteriet gör just nu, så att korten kan rita det mot planen. Ingenting i optimeringen läser den.",
           "battery_power_invert": "Lämna av om sensorn är positiv vid urladdning, vilket är planens egen konvention. Fel håll gör att ett batteri som laddas visas som att det laddas ur."
         },
@@ -431,10 +450,14 @@
         "sections": {
           "advanced": {
             "name": "Avancerade inställningar",
-            "description": "Verkningsgrader mellan DC och AC. Standardvärdena passar de flesta växelriktare.",
+            "description": "Verkningsgrader mellan DC och AC samt en valfri sensor för aktuell solelproduktion. Standardvärdena passar de flesta växelriktare.",
             "data": {
               "inverter_efficiency_dc_ac": "Verkningsgrad DC till AC",
-              "inverter_efficiency_ac_dc": "Verkningsgrad AC till DC"
+              "inverter_efficiency_ac_dc": "Verkningsgrad AC till DC",
+              "pv_entity": "Sensor för aktuell soleffekt"
+            },
+            "data_description": {
+              "pv_entity": "Valfritt. Blandas in i det första steget av varje MPC-prognos, viktat av reglaget \"Live-värdets vikt\". Last blandas in på samma sätt automatiskt, med sensorn vald under Husets förbrukning > Sensor för husets last -- ingen separat sensor behövs där."
             }
           }
         }
@@ -577,7 +600,8 @@
     },
     "error": {
       "ac_output_required": "En delad växelriktare behöver en positiv AC-uteffektgräns. Noll skulle stoppa både sol och batteri från att nå huset.",
-      "derating_not_ascending": "Raderna för laddavtrappning måste ha strikt stigande laddningsnivåer, var och en mellan 1 och 99 %, med en laddeffekt på 1–100 % av max."
+      "derating_not_ascending": "Raderna för laddavtrappning måste ha strikt stigande laddningsnivåer, var och en mellan 1 och 99 %, med en laddeffekt på 1–100 % av max.",
+      "profile_required": "Välj en källa för solprognosen, eller öppna Avancerade inställningar för de andra alternativen."
     }
   },
   "selector": {

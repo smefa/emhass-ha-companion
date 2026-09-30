@@ -693,6 +693,16 @@ PRICE_PROFILE_ORDER: Final = (
 )
 PV_PROFILE_ORDER: Final = ("pv/solcast",)
 
+# The solar sources kept in the collapsed Advanced section of the picker: the
+# built-in forecast, a forecast read from any entity, and no solar at all.
+# Only applies while at least one other source is on offer -- a picker with
+# nothing left in its basic list shows all of them.
+PV_ADVANCED_PROFILES: Final = (
+    "pv/emhass_native",
+    "pv/generic_attribute",
+    "pv/none",
+)
+
 # The inverter picker is a plain alphabetical list of hardware -- the user
 # knows what is bolted to their wall, so there is nothing to rank. The one
 # exception is the universal script fallback, which is pinned to the bottom:

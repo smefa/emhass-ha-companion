@@ -155,6 +155,7 @@ from .const import (
     PROFILE_KIND_PRICE,
     PROFILE_KIND_PV,
     PROFILE_KIND_TEMPERATURE,
+    PV_ADVANCED_PROFILES,
     PV_PROFILE_ORDER,
     RECURRENCE_DAILY,
     RECURRENCE_SURPLUS,
@@ -377,6 +378,52 @@ def _profile_selector(
                 for profile in _rank_profiles(profiles, order)
             ],
         )
+    )
+
+
+_ADVANCED_PROFILES_BY_KIND: dict[str, tuple[str, ...]] = {
+    PROFILE_KIND_PV: PV_ADVANCED_PROFILES,
+}
+
+
+def _profile_picker_schema(
+    kind: str,
+    profiles: list[Profile],
+    *,
+    current: str | None = None,
+    advanced_open: bool = False,
+) -> dict[Any, Any]:
+    """The profile picker, with the less common sources in a collapsed section.
+
+    Both lists write the same ``profile`` key and ``_flatten_sections`` lets the
+    section win, so choosing from either ends up as one answer. The basic list
+    has no default: leaving both untouched is reported as ``profile_required``
+    rather than silently picking something. When either list would be empty the
+    picker stays one flat list.
+    """
+    order = _PROFILE_ORDER_BY_KIND.get(kind, ())
+    hidden = _ADVANCED_PROFILES_BY_KIND.get(kind, ())
+    basic = [profile for profile in profiles if profile.key not in hidden]
+    advanced = [profile for profile in profiles if profile.key in hidden]
+    if not basic or not advanced:
+        return {
+            vol.Required(CONF_PROFILE, description={"suggested_value": current}): _profile_selector(
+                profiles, order
+            )
+        }
+
+    def suggested(group: list[Profile]) -> dict[str, Any]:
+        keys = {profile.key for profile in group}
+        return {"suggested_value": current} if current in keys else {}
+
+    return _with_advanced(
+        {vol.Optional(CONF_PROFILE, description=suggested(basic)): _profile_selector(basic, order)},
+        {
+            vol.Optional(CONF_PROFILE, description=suggested(advanced)): _profile_selector(
+                advanced, order
+            )
+        },
+        collapsed=not (advanced_open or current in {profile.key for profile in advanced}),
     )
 
 
@@ -746,8 +793,6 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
                     self._options[CONF_BATTERY_POWER_INVERT] = bool(
                         user_input.get(CONF_BATTERY_POWER_INVERT)
                     )
-                if pv_live := user_input.get(CONF_PV_ENTITY):
-                    self._options[CONF_PV_ENTITY] = pv_live
                 return await self.async_step_inverter_settings()
 
         defaults = _battery_form_defaults(user_input) if user_input is not None else {}
@@ -774,9 +819,18 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
                 self._options["battery"] = _battery_blob_after_inverter_form(
                     self._options.get("battery"), _inverter_storage_from_input(user_input)
                 )
+                if pv_live := user_input.get(CONF_PV_ENTITY):
+                    self._options[CONF_PV_ENTITY] = pv_live
                 return await self.async_step_inverter()
 
-        defaults = user_input if user_input is not None else (self._options.get("battery") or {})
+        defaults = (
+            user_input
+            if user_input is not None
+            else {
+                **(self._options.get("battery") or {}),
+                CONF_PV_ENTITY: self._options.get(CONF_PV_ENTITY) or "",
+            }
+        )
         return self.async_show_form(
             step_id="inverter_settings",
             data_schema=vol.Schema(inverter_schema(defaults)),
@@ -920,18 +974,25 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
             # Should not happen: every kind ships an always-available profile.
             return self.async_abort(reason="no_profiles")
 
+        errors: dict[str, str] = {}
         if user_input is not None:
-            self._options[option_key] = {
-                CONF_PROFILE: user_input[CONF_PROFILE],
-                CONF_PROFILE_OPTIONS: {},
-            }
-            return await getattr(self, f"async_step_{step_id}_options")()
+            user_input = _flatten_sections(user_input)
+            if CONF_PROFILE in user_input:
+                self._options[option_key] = {
+                    CONF_PROFILE: user_input[CONF_PROFILE],
+                    CONF_PROFILE_OPTIONS: {},
+                }
+                return await getattr(self, f"async_step_{step_id}_options")()
+            errors["base"] = "profile_required"
 
         order = _PROFILE_ORDER_BY_KIND.get(kind, ())
         ranked = _rank_profiles(choices, order)
         return self.async_show_form(
             step_id=step_id,
-            data_schema=vol.Schema({vol.Required(CONF_PROFILE): _profile_selector(choices, order)}),
+            data_schema=vol.Schema(
+                _profile_picker_schema(kind, choices, advanced_open=bool(errors))
+            ),
+            errors=errors,
             description_placeholders={
                 "profiles": "\n".join(
                     f"- **{profile.name}** — {profile.description or ''}" for profile in ranked
@@ -1690,7 +1751,6 @@ def _battery_form_defaults(user_input: dict[str, Any]) -> dict[str, Any]:
         CONF_SOC_ENTITY: user_input.get(CONF_SOC_ENTITY) or "",
         CONF_BATTERY_POWER_ENTITY: user_input.get(CONF_BATTERY_POWER_ENTITY) or "",
         CONF_BATTERY_POWER_INVERT: bool(user_input.get(CONF_BATTERY_POWER_INVERT)),
-        CONF_PV_ENTITY: user_input.get(CONF_PV_ENTITY) or "",
         # Keep the submitted rows, even if they failed validation -- converting
         # through storage would drop a misordered table and wipe the form.
         CONF_CHARGE_POWER_DERATING: user_input.get(CONF_CHARGE_POWER_DERATING) or [],
@@ -1993,16 +2053,6 @@ def _battery_fields(defaults: dict[str, Any]) -> dict[Any, Any]:
             CONF_BATTERY_POWER_INVERT,
             default=defaults.get(CONF_BATTERY_POWER_INVERT, False),
         ): selector.BooleanSelector(),
-        # Not a battery setting -- there is no PV-specific step in either flow
-        # to put it in (the setup flow's PV step is profile selection only,
-        # and PV has no options-flow step at all), so it rides along with
-        # soc_entity as the form that already collects miscellaneous live
-        # sensor readings. Blended into the first naive-mpc-optim forecast
-        # step (payload.build_payload) when set; see number.MixBetaNumber for
-        # the blend weight.
-        _optional_blank(CONF_PV_ENTITY, defaults): selector.EntitySelector(
-            selector.EntitySelectorConfig(domain="sensor", device_class="power")
-        ),
         # EMHASS runtime flags with no counterpart above -- appended at the end
         # rather than grouped with the fields they relate to, so the order of
         # everything above stays stable for anyone who already has this form
@@ -2038,19 +2088,27 @@ def _battery_fields(defaults: dict[str, Any]) -> dict[Any, Any]:
     }
 
 
-INVERTER_ADVANCED_KEYS: Final = frozenset(
-    {CONF_INVERTER_EFFICIENCY_DC_AC, CONF_INVERTER_EFFICIENCY_AC_DC}
-)
-"""Inverter fields kept in the collapsed Advanced section."""
-
 INVERTER_KEYS: Final = frozenset(
-    {CONF_HYBRID_INVERTER, CONF_INVERTER_AC_OUTPUT_MAX, CONF_INVERTER_AC_INPUT_MAX}
-    | INVERTER_ADVANCED_KEYS
+    {
+        CONF_HYBRID_INVERTER,
+        CONF_INVERTER_AC_OUTPUT_MAX,
+        CONF_INVERTER_AC_INPUT_MAX,
+        CONF_INVERTER_EFFICIENCY_DC_AC,
+        CONF_INVERTER_EFFICIENCY_AC_DC,
+    }
 )
 """Everything the Inverter step owns inside the stored ``battery`` options.
 
 The values stay in ``options["battery"]`` where they always lived, so the split
 is a form change only: no migration, no new storage key."""
+
+INVERTER_ADVANCED_KEYS: Final = frozenset(
+    {CONF_INVERTER_EFFICIENCY_DC_AC, CONF_INVERTER_EFFICIENCY_AC_DC, CONF_PV_ENTITY}
+)
+"""Inverter form fields kept in the collapsed Advanced section.
+
+``CONF_PV_ENTITY`` is stored at the top level of the options, not in the
+battery blob, so it is in this set but not in ``INVERTER_KEYS``."""
 
 
 def inverter_schema(defaults: dict[str, Any], *, advanced_open: bool = False) -> dict[Any, Any]:
@@ -2099,6 +2157,14 @@ def _inverter_fields(defaults: dict[str, Any]) -> dict[Any, Any]:
             default=defaults.get(CONF_INVERTER_EFFICIENCY_AC_DC, DEFAULT_INVERTER_EFFICIENCY),
         ): selector.NumberSelector(
             selector.NumberSelectorConfig(min=0.5, max=1.0, step=0.01, mode="slider")
+        ),
+        # The live PV reading, not an inverter setting as such -- but it is what
+        # the inverter reports, and no PV step has room for a non-profile field.
+        # Blended into the first naive-mpc-optim forecast step
+        # (payload.build_payload) when set; see number.MixBetaNumber for the
+        # blend weight.
+        _optional_blank(CONF_PV_ENTITY, defaults): selector.EntitySelector(
+            selector.EntitySelectorConfig(domain="sensor", device_class="power")
         ),
     }
 
@@ -2593,22 +2659,25 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
             # Should not happen: every kind ships an always-available profile.
             return self.async_abort(reason="no_profiles")
 
+        errors: dict[str, str] = {}
         if user_input is not None:
-            self._pv_key = user_input[CONF_PROFILE]
-            self._pv_profiles = profiles
-            return await self.async_step_pv_options()
+            user_input = _flatten_sections(user_input)
+            if CONF_PROFILE in user_input:
+                self._pv_key = user_input[CONF_PROFILE]
+                self._pv_profiles = profiles
+                return await self.async_step_pv_options()
+            errors["base"] = "profile_required"
 
         current = (options.get(CONF_PV) or {}).get(CONF_PROFILE)
         ranked = _rank_profiles(choices, PV_PROFILE_ORDER)
         return self.async_show_form(
             step_id="pv",
             data_schema=vol.Schema(
-                {
-                    vol.Required(
-                        CONF_PROFILE, description={"suggested_value": current}
-                    ): _profile_selector(choices, PV_PROFILE_ORDER)
-                }
+                _profile_picker_schema(
+                    PROFILE_KIND_PV, choices, current=current, advanced_open=bool(errors)
+                )
             ),
+            errors=errors,
             description_placeholders={
                 "profiles": "\n".join(
                     f"- **{profile.name}** — {profile.description or ''}" for profile in ranked
@@ -2862,7 +2931,6 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
                     user_input.get(CONF_BATTERY_POWER_ENTITY) or None
                 )
                 options[CONF_BATTERY_POWER_INVERT] = bool(user_input.get(CONF_BATTERY_POWER_INVERT))
-                options[CONF_PV_ENTITY] = user_input.get(CONF_PV_ENTITY) or None
                 return self.async_create_entry(data=options)
             defaults = _battery_form_defaults(user_input)
         else:
@@ -2871,7 +2939,6 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
                 CONF_SOC_ENTITY: options.get(CONF_SOC_ENTITY) or "",
                 CONF_BATTERY_POWER_ENTITY: options.get(CONF_BATTERY_POWER_ENTITY) or "",
                 CONF_BATTERY_POWER_INVERT: bool(options.get(CONF_BATTERY_POWER_INVERT)),
-                CONF_PV_ENTITY: options.get(CONF_PV_ENTITY) or "",
             }
         return self.async_show_form(
             step_id="battery",
@@ -2894,9 +2961,17 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
                 options["battery"] = _battery_blob_after_inverter_form(
                     options.get("battery"), _inverter_storage_from_input(user_input)
                 )
+                options[CONF_PV_ENTITY] = user_input.get(CONF_PV_ENTITY) or None
                 return self.async_create_entry(data=options)
 
-        defaults = user_input if user_input is not None else options.get("battery", {})
+        defaults = (
+            user_input
+            if user_input is not None
+            else {
+                **options.get("battery", {}),
+                CONF_PV_ENTITY: options.get(CONF_PV_ENTITY) or "",
+            }
+        )
         return self.async_show_form(
             step_id="inverter_settings",
             data_schema=vol.Schema(inverter_schema(defaults)),

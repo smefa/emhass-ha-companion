@@ -113,6 +113,11 @@ actually pay or get paid, for import and export separately:
 - **Solar forecast source**:
     - **Solcast PV Forecast** — reads the `detailedForecast` attribute of the
       Solcast integration's daily sensors.
+
+  The other three sources are under **Advanced settings**, which stays
+  collapsed until you open it (it opens by itself if one of them is already
+  selected):
+
     - **EMHASS built-in forecast (Open-Meteo)** — EMHASS produces the
       forecast itself, from Open-Meteo weather data and a description of your
       array. No API key, no forecast integration needed.
@@ -262,10 +267,6 @@ this screen is then ignored.
   convention, positive while discharging, which is the plan's own. This is
   the answer the cards cannot work out for themselves, which is why a card
   pointed straight at a sensor shows only magnitude.
-- **Live PV power sensor** — optional. Its current reading is blended into
-  the first step of every model-predictive PV forecast, weighted by the
-  **Live value weight** number on the hub device. Load is blended the same
-  way automatically when the load source is *House load sensor*.
 
 ## 7. Inverter
 
@@ -280,6 +281,11 @@ without a battery.
   hybrid is on.
 - **DC to AC efficiency** / **AC to DC efficiency** — conversion losses,
   under *Advanced settings*.
+- **Live PV power sensor** — optional, under *Advanced settings*. Its
+  current reading is blended into the first step of every model-predictive PV
+  forecast, weighted by the **Live value weight** number on the hub device.
+  Load is blended the same way automatically when the load source is *House
+  load sensor*.
 
 ## 8. Inverter profile
 

@@ -64,6 +64,15 @@
         "description": "Choose where the PV production forecast comes from. Pick **No solar** if you have no panels.\n\n{profiles}",
         "data": {
           "profile": "Solar forecast source"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Advanced settings",
+            "description": "Other sources: EMHASS's built-in forecast, a forecast read from any entity, or no solar at all.",
+            "data": {
+              "profile": "Other solar forecast source"
+            }
+          }
         }
       },
       "pv_options": {
@@ -123,16 +132,14 @@
           "soc_max": "Maximum charge level",
           "soc_entity": "Battery SOC sensor",
           "battery_power_entity": "Battery power sensor",
-          "battery_power_invert": "That sensor is positive when charging",
-          "pv_entity": "Live PV power sensor"
+          "battery_power_invert": "That sensor is positive when charging"
         },
         "data_description": {
           "no_discharge_to_grid": "On blocks the battery from exporting and using arbitrage - house power is unaffected.",
           "soc_min": "The optimiser will not plan the battery below this level.",
           "soc_entity": "Read at the start of every run so the plan starts from reality.",
           "battery_power_entity": "What the battery is doing right now, for the dashboard cards to draw against the plan. Nothing in the optimisation reads it.",
-          "battery_power_invert": "Leave off if the sensor is positive while discharging, which is the plan's own convention. Getting it the wrong way round labels a charging battery as discharging.",
-          "pv_entity": "Optional. Blended into the first step of every MPC forecast, weighted by the \"Live value weight\" number entity. Load is blended the same way automatically, using the sensor picked under House consumption > House load sensor -- no separate entity needed there."
+          "battery_power_invert": "Leave off if the sensor is positive while discharging, which is the plan's own convention. Getting it the wrong way round labels a charging battery as discharging."
         },
         "sections": {
           "advanced": {
@@ -195,10 +202,14 @@
         "sections": {
           "advanced": {
             "name": "Advanced settings",
-            "description": "Conversion efficiencies between DC and AC. The defaults suit most inverters.",
+            "description": "Conversion efficiencies between DC and AC, and an optional live PV power sensor. The defaults suit most inverters.",
             "data": {
               "inverter_efficiency_dc_ac": "DC to AC efficiency",
-              "inverter_efficiency_ac_dc": "AC to DC efficiency"
+              "inverter_efficiency_ac_dc": "AC to DC efficiency",
+              "pv_entity": "Live PV power sensor"
+            },
+            "data_description": {
+              "pv_entity": "Optional. Blended into the first step of every MPC forecast, weighted by the \"Live value weight\" number entity. Load is blended the same way automatically, using the sensor picked under House consumption > House load sensor -- no separate entity needed there."
             }
           }
         }
@@ -272,7 +283,8 @@
       "unknown_version": "Connected, but EMHASS did not report its version. It is probably too old.",
       "version_too_old": "This EMHASS is too old. Version {min_version} or newer is required, because this integration reads the plan through the JSON API introduced in that release.",
       "ac_output_required": "A shared inverter needs a positive AC output limit. Zero would block PV and the battery from reaching the house.",
-      "derating_not_ascending": "Charge-taper rows must list strictly increasing charge levels, each between 1 and 99%, with a charge rate of 1–100% of maximum."
+      "derating_not_ascending": "Charge-taper rows must list strictly increasing charge levels, each between 1 and 99%, with a charge rate of 1–100% of maximum.",
+      "profile_required": "Pick a solar forecast source, or open Advanced settings for the other choices."
     },
     "abort": {
       "single_instance_allowed": "EMHASS Companion is already configured.",
@@ -336,6 +348,15 @@
         "description": "Change where the PV production forecast comes from, or just retune the source you already use.\n\nWorth revisiting after an update: a profile's default options can gain entries (Solcast's day-3 sensor, which the End SOC \"Optimized\" mode uses to see the next solar day past the horizon), and those are offered here rather than applied for you.\n\n{profiles}",
         "data": {
           "profile": "Solar forecast source"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Advanced settings",
+            "description": "Other sources: EMHASS's built-in forecast, a forecast read from any entity, or no solar at all.",
+            "data": {
+              "profile": "Other solar forecast source"
+            }
+          }
         }
       },
       "pv_options": {
@@ -361,12 +382,10 @@
           "soc_max": "Maximum charge level",
           "soc_entity": "Battery SOC sensor",
           "battery_power_entity": "Battery power sensor",
-          "battery_power_invert": "That sensor is positive when charging",
-          "pv_entity": "Live PV power sensor"
+          "battery_power_invert": "That sensor is positive when charging"
         },
         "data_description": {
           "no_discharge_to_grid": "On blocks the battery from exporting and using arbitrage - house power is unaffected.",
-          "pv_entity": "Optional. Blended into the first step of every MPC forecast, weighted by the \"Live value weight\" number entity. Load is blended the same way automatically, using the sensor picked under House consumption > House load sensor -- no separate entity needed there.",
           "battery_power_entity": "What the battery is doing right now, for the dashboard cards to draw against the plan. Nothing in the optimisation reads it.",
           "battery_power_invert": "Leave off if the sensor is positive while discharging, which is the plan's own convention. Getting it the wrong way round labels a charging battery as discharging."
         },
@@ -431,10 +450,14 @@
         "sections": {
           "advanced": {
             "name": "Advanced settings",
-            "description": "Conversion efficiencies between DC and AC. The defaults suit most inverters.",
+            "description": "Conversion efficiencies between DC and AC, and an optional live PV power sensor. The defaults suit most inverters.",
             "data": {
               "inverter_efficiency_dc_ac": "DC to AC efficiency",
-              "inverter_efficiency_ac_dc": "AC to DC efficiency"
+              "inverter_efficiency_ac_dc": "AC to DC efficiency",
+              "pv_entity": "Live PV power sensor"
+            },
+            "data_description": {
+              "pv_entity": "Optional. Blended into the first step of every MPC forecast, weighted by the \"Live value weight\" number entity. Load is blended the same way automatically, using the sensor picked under House consumption > House load sensor -- no separate entity needed there."
             }
           }
         }
@@ -577,7 +600,8 @@
     },
     "error": {
       "ac_output_required": "A shared inverter needs a positive AC output limit. Zero would block PV and the battery from reaching the house.",
-      "derating_not_ascending": "Charge-taper rows must list strictly increasing charge levels, each between 1 and 99%, with a charge rate of 1–100% of maximum."
+      "derating_not_ascending": "Charge-taper rows must list strictly increasing charge levels, each between 1 and 99%, with a charge rate of 1–100% of maximum.",
+      "profile_required": "Pick a solar forecast source, or open Advanced settings for the other choices."
     }
   },
   "selector": {
