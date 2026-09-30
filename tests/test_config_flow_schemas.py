@@ -13,6 +13,7 @@ import pytest
 import voluptuous as vol
 
 from custom_components.emhass_companion.config_flow import (
+    BATTERY_ADVANCED_KEYS,
     STANDARD_TIME_STEPS,
     UNTESTED_NOTICE,
     _battery_errors,
@@ -153,7 +154,7 @@ def test_a_misordered_derating_table_is_rejected_on_the_form():
                 {"soc_pct": 50, "charge_pct": 84},
             ],
         }
-    ) == {CONF_CHARGE_POWER_DERATING: "derating_not_ascending"}
+    ) == {"base": "derating_not_ascending"}
 
 
 def test_an_empty_derating_table_is_accepted():
@@ -208,6 +209,30 @@ def test_with_advanced_omits_an_empty_section():
 def test_nest_suggested_moves_advanced_keys_under_the_section():
     assert _nest_suggested({"a": 1, "b": 2}, {"b"}) == {"a": 1, ADVANCED_SECTION: {"b": 2}}
     assert _nest_suggested({"a": 1}, {"b"}) == {"a": 1}
+
+
+def test_battery_schema_splits_basic_and_advanced():
+    schema = battery_schema({})
+    top = {str(k) for k in schema}
+    assert {"use_battery", "capacity_wh", "soc_min", "soc_max", "soc_target"} <= top
+    assert {"inverter_ac_output_max_w", "hybrid_inverter"} <= top | {"inverter_ac_output_max_w"}
+    advanced = {str(k) for k in _advanced_keys(schema)}
+    assert advanced == set(BATTERY_ADVANCED_KEYS)
+    assert not advanced & top
+
+
+def test_battery_advanced_fields_are_valid_untouched():
+    """Rule 1, and a basic-only save must keep every advanced default."""
+    for key in _advanced_keys(battery_schema({})):
+        assert not isinstance(key, vol.Required) or key.default is not vol.UNDEFINED, key
+    result = vol.Schema(battery_schema({}))({"use_battery": True, ADVANCED_SECTION: {}})
+    assert "charge_efficiency" in result[ADVANCED_SECTION]
+
+
+def test_battery_section_opens_on_request():
+    schema = battery_schema({}, advanced_open=True)
+    section_key = next(k for k in schema if str(k) == ADVANCED_SECTION)
+    assert schema[section_key].options["collapsed"] is False
 
 
 def test_grid_schema_builds():

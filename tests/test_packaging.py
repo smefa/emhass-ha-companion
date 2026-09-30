@@ -906,19 +906,18 @@ def test_cards_attach_their_shadow_root_at_most_once(bundle):
 @pytest.mark.parametrize(
     "filename", ["strings.json", "translations/en.json", "translations/sv.json"]
 )
-def test_grid_form_fields_are_labelled_where_the_schema_puts_them(filename):
-    from custom_components.emhass_companion.config_flow import grid_schema
+@pytest.mark.parametrize("step", ["grid", "battery"])
+def test_sectioned_form_fields_are_labelled_where_the_schema_puts_them(filename, step):
+    from custom_components.emhass_companion.config_flow import battery_schema, grid_schema
     from custom_components.emhass_companion.const import ADVANCED_SECTION
 
-    schema = grid_schema({})
+    schema = {"grid": grid_schema, "battery": battery_schema}[step]({})
     basic = {str(k) for k in schema if str(k) != ADVANCED_SECTION}
-    advanced = {
-        str(k)
-        for k in next(v for k, v in schema.items() if str(k) == ADVANCED_SECTION).schema.schema
-    }
+    inner = next(v for k, v in schema.items() if str(k) == ADVANCED_SECTION).schema.schema
+    advanced = {str(k) for k in inner}
     strings = _json(COMPONENT / filename)
     for block in ("config", "options"):
-        step = strings[block]["step"]["grid"]
-        assert basic <= set(step["data"]), (filename, block)
-        section = step["sections"][ADVANCED_SECTION]
+        form = strings[block]["step"][step]
+        assert basic <= set(form["data"]), (filename, block)
+        section = form["sections"][ADVANCED_SECTION]
         assert section["name"] and advanced <= set(section["data"]), (filename, block)

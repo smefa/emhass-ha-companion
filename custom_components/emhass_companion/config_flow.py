@@ -508,7 +508,9 @@ def _collect_tariff(user_input: dict[str, Any]) -> dict[str, Any]:
     return tariff
 
 
-def _with_advanced(basic: dict[Any, Any], advanced: dict[Any, Any]) -> dict[Any, Any]:
+def _with_advanced(
+    basic: dict[Any, Any], advanced: dict[Any, Any], *, collapsed: bool = True
+) -> dict[Any, Any]:
     """`basic` plus one collapsed Advanced section holding `advanced`.
 
     Returns `basic` unchanged when there is nothing to put in the section, so
@@ -520,7 +522,7 @@ def _with_advanced(basic: dict[Any, Any], advanced: dict[Any, Any]) -> dict[Any,
         return basic
     return {
         **basic,
-        vol.Required(ADVANCED_SECTION): section(vol.Schema(advanced), {"collapsed": True}),
+        vol.Required(ADVANCED_SECTION): section(vol.Schema(advanced), {"collapsed": collapsed}),
     }
 
 
@@ -760,6 +762,7 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
+            user_input = _flatten_sections(user_input)
             errors = _battery_errors(user_input)
             if not errors:
                 self._options["battery"] = _battery_storage_from_input(user_input)
@@ -777,7 +780,7 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
         defaults = _battery_form_defaults(user_input) if user_input is not None else {}
         return self.async_show_form(
             step_id="battery",
-            data_schema=vol.Schema(battery_schema(defaults)),
+            data_schema=vol.Schema(battery_schema(defaults, advanced_open="base" in errors)),
             description_placeholders={"round_trip": _battery_efficiency_note(defaults)},
             errors=errors,
         )
@@ -1662,7 +1665,9 @@ def _battery_errors(user_input: dict[str, Any]) -> dict[str, str]:
     try:
         _derating_storage_from_form(user_input.get(CONF_CHARGE_POWER_DERATING))
     except (TypeError, ValueError):
-        errors[CONF_CHARGE_POWER_DERATING] = "derating_not_ascending"
+        # On "base": the field lives in the collapsed Advanced section, where a
+        # field-keyed error would not be seen. The message names the field.
+        errors["base"] = "derating_not_ascending"
     return errors
 
 
@@ -1706,7 +1711,47 @@ def _battery_efficiency_note(defaults: dict[str, Any]) -> str:
     )
 
 
-def battery_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
+BATTERY_ADVANCED_KEYS: Final = frozenset(
+    {
+        CONF_CHARGE_POWER_DERATING,
+        CONF_CHARGE_EFFICIENCY,
+        CONF_DISCHARGE_EFFICIENCY,
+        CONF_INVERTER_EFFICIENCY_DC_AC,
+        CONF_INVERTER_EFFICIENCY_AC_DC,
+        CONF_WEIGHT_BATTERY_DISCHARGE,
+        CONF_WEIGHT_BATTERY_CHARGE,
+        CONF_BATTERY_SOC_DEFICIT_THRESHOLD,
+        CONF_BATTERY_SOC_DEFICIT_COST,
+        CONF_BATTERY_SOC_SURPLUS_THRESHOLD,
+        CONF_BATTERY_SOC_SURPLUS_COST,
+        CONF_BATTERY_STRESS_SEGMENTS,
+        CONF_BATTERY_STRESS_COST,
+        CONF_END_SOC_MODE,
+        "self_consume_threshold_w",
+        "battery_first_priority",
+        "battery_dynamic",
+        "battery_dynamic_max",
+        "battery_dynamic_min",
+    }
+)
+"""Battery fields kept in the collapsed Advanced section.
+
+Every one has a working default, so the section can stay closed."""
+
+
+def battery_schema(defaults: dict[str, Any], *, advanced_open: bool = False) -> dict[Any, Any]:
+    """The battery form: the everyday fields, then one collapsed Advanced section.
+
+    ``advanced_open`` expands the section, used when a validation error names a
+    field inside it so the user is not left hunting for it.
+    """
+    fields = _battery_fields(defaults)
+    basic = {k: v for k, v in fields.items() if str(k) not in BATTERY_ADVANCED_KEYS}
+    advanced = {k: v for k, v in fields.items() if str(k) in BATTERY_ADVANCED_KEYS}
+    return _with_advanced(basic, advanced, collapsed=not advanced_open)
+
+
+def _battery_fields(defaults: dict[str, Any]) -> dict[Any, Any]:
     return {
         vol.Required(
             "use_battery", default=defaults.get("use_battery", False)
@@ -2734,6 +2779,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
         options = dict(self.config_entry.options)
         errors: dict[str, str] = {}
         if user_input is not None:
+            user_input = _flatten_sections(user_input)
             errors = _battery_errors(user_input)
             if not errors:
                 options["battery"] = _battery_storage_from_input(user_input)
@@ -2755,7 +2801,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
             }
         return self.async_show_form(
             step_id="battery",
-            data_schema=vol.Schema(battery_schema(defaults)),
+            data_schema=vol.Schema(battery_schema(defaults, advanced_open="base" in errors)),
             description_placeholders={"round_trip": _battery_efficiency_note(defaults)},
             errors=errors,
         )
