@@ -19,16 +19,20 @@ from custom_components.emhass_companion.config_flow import (
     _collect_grid,
     _collect_tariff,
     _default_profile_options,
+    _flatten_sections,
     _inverter_profile_selector,
     _load_profile_selector,
+    _nest_suggested,
     _profile_notes,
     _profile_selector,
     _tariff_side_schema,
     _time_step_options,
+    _with_advanced,
     battery_schema,
     grid_schema,
 )
 from custom_components.emhass_companion.const import (
+    ADVANCED_SECTION,
     CONF_CAPACITY_COST_PER_KW,
     CONF_CHARGE_POWER_DERATING,
     CONF_COMPUTE_CURTAILMENT,
@@ -156,6 +160,56 @@ def test_an_empty_derating_table_is_accepted():
     assert _battery_errors({CONF_HYBRID_INVERTER: False, CONF_CHARGE_POWER_DERATING: []}) == {}
 
 
+def _advanced_keys(schema):
+    inner = next(v for k, v in schema.items() if str(k) == ADVANCED_SECTION)
+    return inner.schema.schema
+
+
+def test_grid_schema_keeps_the_limits_and_time_step_basic():
+    schema = grid_schema({})
+    top = {str(key) for key in schema}
+    assert {"grid_import_max_w", "grid_export_max_w", CONF_TIME_STEP} <= top
+    assert ADVANCED_SECTION in top
+    assert {str(k) for k in _advanced_keys(schema)} == {
+        "grid_import_limit_entity",
+        "grid_export_limit_entity",
+        CONF_COMPUTE_CURTAILMENT,
+        "mpc_interval_minutes",
+        "horizon_hours",
+        "dayahead_fallback_time",
+    }
+
+
+def test_an_unopened_advanced_section_submits_its_defaults():
+    result = vol.Schema(grid_schema({}))(
+        {"grid_import_max_w": 1, "grid_export_max_w": 1, CONF_TIME_STEP: "15", ADVANCED_SECTION: {}}
+    )
+    flat = _flatten_sections(result)
+    assert ADVANCED_SECTION not in flat
+    assert flat["horizon_hours"] and flat["mpc_interval_minutes"]
+    assert flat[CONF_COMPUTE_CURTAILMENT] is False
+
+
+def test_advanced_fields_without_a_default_are_optional():
+    """Rule 1: a hidden field must stay valid untouched."""
+    for key in _advanced_keys(grid_schema({})):
+        assert not isinstance(key, vol.Required) or key.default is not vol.UNDEFINED, key
+
+
+def test_flatten_sections_merges_and_drops_the_section_key():
+    assert _flatten_sections({"a": 1, ADVANCED_SECTION: {"b": 2}}) == {"a": 1, "b": 2}
+    assert _flatten_sections({"a": 1}) == {"a": 1}
+
+
+def test_with_advanced_omits_an_empty_section():
+    assert _with_advanced({"a": 1}, {}) == {"a": 1}
+
+
+def test_nest_suggested_moves_advanced_keys_under_the_section():
+    assert _nest_suggested({"a": 1, "b": 2}, {"b"}) == {"a": 1, ADVANCED_SECTION: {"b": 2}}
+    assert _nest_suggested({"a": 1}, {"b"}) == {"a": 1}
+
+
 def test_grid_schema_builds():
     assert vol.Schema(grid_schema({}))
 
@@ -168,7 +222,7 @@ def test_grid_schema_builds_with_a_detected_time_step():
 def test_the_grid_step_asks_only_about_emhass_curtailment():
     """The Companion's own negative-price rule is gone -- one curtailment
     question, and it is EMHASS's."""
-    keys = {str(key) for key in grid_schema({})}
+    keys = {str(key) for key in _advanced_keys(grid_schema({}))}
     assert CONF_COMPUTE_CURTAILMENT in keys
     assert "curtail_on_negative_price" not in keys
 
@@ -249,9 +303,7 @@ def _validate_time_step(raw):
             "grid_import_max_w": 9000,
             "grid_export_max_w": 9000,
             CONF_TIME_STEP: raw,
-            "mpc_interval_minutes": 15,
-            "horizon_hours": 24,
-            "dayahead_fallback_time": "13:30:00",
+            ADVANCED_SECTION: {},
         }
     )
     return result[CONF_TIME_STEP]

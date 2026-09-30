@@ -30,6 +30,7 @@ import voluptuous as vol
 from .api import EmhassClient, EmhassError
 from .configuration import EmhassConfig
 from .const import (
+    ADVANCED_SECTION,
     CONF_ADDER,
     CONF_BATTERY_CHARGE_ENERGY_ENTITY,
     CONF_BATTERY_DISCHARGE_ENERGY_ENTITY,
@@ -507,6 +508,42 @@ def _collect_tariff(user_input: dict[str, Any]) -> dict[str, Any]:
     return tariff
 
 
+def _with_advanced(basic: dict[Any, Any], advanced: dict[Any, Any]) -> dict[Any, Any]:
+    """`basic` plus one collapsed Advanced section holding `advanced`.
+
+    Returns `basic` unchanged when there is nothing to put in the section, so
+    a form never shows an empty one. Every field in `advanced` must still be
+    valid untouched (an optional field, or one with a default): a collapsed
+    section the user never opens submits only its defaults.
+    """
+    if not advanced:
+        return basic
+    return {
+        **basic,
+        vol.Required(ADVANCED_SECTION): section(vol.Schema(advanced), {"collapsed": True}),
+    }
+
+
+def _flatten_sections(user_input: dict[str, Any]) -> dict[str, Any]:
+    """Merge the Advanced section's fields into the top level.
+
+    Call first in every handler whose form has one, so everything downstream
+    sees the flat dict it always did and stored options keep their shape.
+    """
+    flat = {key: value for key, value in user_input.items() if key != ADVANCED_SECTION}
+    flat.update(user_input.get(ADVANCED_SECTION) or {})
+    return flat
+
+
+def _nest_suggested(values: dict[str, Any], advanced_keys: set[str]) -> dict[str, Any]:
+    """Suggested values for a form with an Advanced section: move its keys under it."""
+    nested = {key: value for key, value in values.items() if key not in advanced_keys}
+    inner = {key: value for key, value in values.items() if key in advanced_keys}
+    if inner:
+        nested[ADVANCED_SECTION] = inner
+    return nested
+
+
 def _collect_grid(user_input: dict[str, Any]) -> dict[str, Any]:
     """The grid step's own keys, split out from the schedule ones beside them.
 
@@ -792,6 +829,7 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
 
     async def async_step_grid(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is not None:
+            user_input = _flatten_sections(user_input)
             self._options["grid"] = _collect_grid(user_input)
             self._options.update(
                 {
@@ -2099,7 +2137,7 @@ def _time_step_options(defaults: dict[str, Any]) -> list[str]:
 
 
 def grid_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
-    return {
+    basic: dict[Any, Any] = {
         vol.Required(
             "grid_import_max_w",
             default=defaults.get("grid_import_max_w", DEFAULT_GRID_IMPORT_MAX),
@@ -2116,6 +2154,26 @@ def grid_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
                 min=0, max=100000, step=100, unit_of_measurement="W", mode="box"
             )
         ),
+        # A fixed list would leave anyone whose price source publishes at some
+        # other resolution stuck rounding to the nearest preset; custom_value
+        # lets them type the real number instead. Coerced and range-checked
+        # here rather than left as a free string, so a typo is a form error
+        # now instead of a crash reading the config entry months later.
+        vol.Required(
+            CONF_TIME_STEP, default=str(defaults.get(CONF_TIME_STEP, DEFAULT_TIME_STEP))
+        ): vol.All(
+            selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                    options=_time_step_options(defaults),
+                    custom_value=True,
+                )
+            ),
+            vol.Coerce(int),
+            vol.Range(min=1, max=180),
+        ),
+    }
+    advanced: dict[Any, Any] = {
         # Live overrides for the two numbers above, for a connection whose
         # usable limit is not constant -- most often an unbalanced three-phase
         # service, where the fuse that binds is the worst phase's, not the sum.
@@ -2136,24 +2194,6 @@ def grid_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
             CONF_COMPUTE_CURTAILMENT,
             default=defaults.get(CONF_COMPUTE_CURTAILMENT, DEFAULT_COMPUTE_CURTAILMENT),
         ): selector.BooleanSelector(),
-        # A fixed list would leave anyone whose price source publishes at some
-        # other resolution stuck rounding to the nearest preset; custom_value
-        # lets them type the real number instead. Coerced and range-checked
-        # here rather than left as a free string, so a typo is a form error
-        # now instead of a crash reading the config entry months later.
-        vol.Required(
-            CONF_TIME_STEP, default=str(defaults.get(CONF_TIME_STEP, DEFAULT_TIME_STEP))
-        ): vol.All(
-            selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    mode=selector.SelectSelectorMode.DROPDOWN,
-                    options=_time_step_options(defaults),
-                    custom_value=True,
-                )
-            ),
-            vol.Coerce(int),
-            vol.Range(min=1, max=180),
-        ),
         vol.Required(
             CONF_MPC_INTERVAL,
             default=defaults.get(CONF_MPC_INTERVAL, DEFAULT_MPC_INTERVAL),
@@ -2175,6 +2215,7 @@ def grid_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
             default=defaults.get(CONF_DAYAHEAD_FALLBACK_TIME, DEFAULT_DAYAHEAD_FALLBACK_TIME),
         ): selector.TimeSelector(),
     }
+    return _with_advanced(basic, advanced)
 
 
 class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
@@ -2723,6 +2764,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
         options = dict(self.config_entry.options)
         stored = options.get("grid", {})
         if user_input is not None:
+            user_input = _flatten_sections(user_input)
             options["grid"] = _collect_grid(user_input)
             options.update(
                 {

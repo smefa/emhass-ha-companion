@@ -87,6 +87,13 @@ def test_data_descriptions_only_describe_existing_fields():
             assert described <= labelled, (
                 f"step '{step_name}' describes fields it does not label: {described - labelled}"
             )
+            for sec_name, sec in step.get("sections", {}).items():
+                described = set(sec.get("data_description", {}))
+                labelled = set(sec.get("data", {}))
+                assert described <= labelled, (
+                    f"step '{step_name}' section '{sec_name}' describes fields it does not "
+                    f"label: {described - labelled}"
+                )
 
 
 def test_imported_home_assistant_components_are_declared():
@@ -894,3 +901,24 @@ def test_cards_attach_their_shadow_root_at_most_once(bundle):
     assert source.count("this.attachShadow(") == source.count(
         "if (!this.shadowRoot) this.attachShadow("
     )
+
+
+@pytest.mark.parametrize(
+    "filename", ["strings.json", "translations/en.json", "translations/sv.json"]
+)
+def test_grid_form_fields_are_labelled_where_the_schema_puts_them(filename):
+    from custom_components.emhass_companion.config_flow import grid_schema
+    from custom_components.emhass_companion.const import ADVANCED_SECTION
+
+    schema = grid_schema({})
+    basic = {str(k) for k in schema if str(k) != ADVANCED_SECTION}
+    advanced = {
+        str(k)
+        for k in next(v for k, v in schema.items() if str(k) == ADVANCED_SECTION).schema.schema
+    }
+    strings = _json(COMPONENT / filename)
+    for block in ("config", "options"):
+        step = strings[block]["step"]["grid"]
+        assert basic <= set(step["data"]), (filename, block)
+        section = step["sections"][ADVANCED_SECTION]
+        assert section["name"] and advanced <= set(section["data"]), (filename, block)

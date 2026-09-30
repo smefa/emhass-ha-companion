@@ -85,6 +85,9 @@ CONF_USE_ADDON: Final = "use_addon"
 CONF_TIME_STEP: Final = "optimization_time_step"
 CONF_MPC_INTERVAL: Final = "mpc_interval_minutes"
 CONF_HORIZON_HOURS: Final = "horizon_hours"
+
+# The one collapsed section every form keeps its rarely-touched settings in.
+ADVANCED_SECTION: Final = "advanced"
 CONF_DAYAHEAD_FALLBACK_TIME: Final = "dayahead_fallback_time"
 
 CONF_PROFILE: Final = "profile"
