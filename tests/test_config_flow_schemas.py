@@ -27,6 +27,7 @@ from custom_components.emhass_companion.config_flow import (
     _flatten_sections,
     _inverter_errors,
     _inverter_profile_selector,
+    _load_picker_schema,
     _load_profile_selector,
     _nest_suggested,
     _profile_notes,
@@ -36,8 +37,11 @@ from custom_components.emhass_companion.config_flow import (
     _time_step_options,
     _with_advanced,
     battery_schema,
+    deferrable_schema,
     grid_schema,
     inverter_schema,
+    tariff_schema,
+    thermal_schema,
 )
 from custom_components.emhass_companion.const import (
     ADVANCED_SECTION,
@@ -659,3 +663,98 @@ def test_hidden_picker_sources_are_numbered_by_their_fixed_position():
         "price/amber_express": "4. price/amber_express",
     }
     assert _option_labels(schema, section=False) == {"price/tibber": "price/tibber"}
+
+
+def _builtin_profiles():
+    for path in sorted(BUILTIN_ROOT.rglob("*.yaml")):
+        document = validate_document(load_yaml(str(path)))
+        yield Profile(
+            key=f"{path.parent.name}/{path.stem}",
+            path=str(path),
+            kind=document["kind"],
+            name=document["name"],
+            document=document,
+        )
+
+
+def _every_form_schema():
+    """Every form builder this integration has, in each variant it shows."""
+    from custom_components.emhass_companion.const import RECURRENCES
+
+    yield "grid", grid_schema({})
+    yield "battery", battery_schema({})
+    yield "inverter", inverter_schema({})
+    yield "tariff", tariff_schema({})
+    yield "thermal", thermal_schema({})
+    for recurrence in RECURRENCES:
+        yield f"deferrable/{recurrence}", deferrable_schema({}, recurrence=recurrence)
+    for kind, hidden in (
+        ("price", PRICE_ADVANCED_PROFILES),
+        ("pv", PV_ADVANCED_PROFILES),
+        ("temperature", TEMPERATURE_ADVANCED_PROFILES),
+    ):
+        yield (
+            f"{kind} picker",
+            _profile_picker_schema(kind, _picker_profiles(kind, f"{kind}/other", *hidden)),
+        )
+    yield "load picker", _load_picker_schema(_picker_profiles("load", "load/sensor"))
+    for profile in _builtin_profiles():
+        yield f"profile {profile.key}", profile.selector_schema()
+
+
+def test_no_hidden_field_is_required_without_a_default():
+    """Rule 1, over every form: a collapsed section that is never opened submits
+    only its defaults, so a field in it that has none would make the form
+    unsavable."""
+    checked = 0
+    for name, schema in _every_form_schema():
+        section = next((v for k, v in schema.items() if str(k) == ADVANCED_SECTION), None)
+        if section is None:
+            continue
+        for key in section.schema.schema:
+            checked += 1
+            assert not isinstance(key, vol.Required) or key.default is not vol.UNDEFINED, (
+                name,
+                str(key),
+            )
+    assert checked > 50  # the walk actually reached the sections
+
+
+def test_a_basic_only_save_keeps_stored_advanced_values():
+    """Round trip: a form built from stored options, submitted the way Home
+    Assistant sends an unopened section, must hand the stored values back."""
+    battery = vol.Schema(
+        battery_schema(
+            {
+                "charge_efficiency": 0.91,
+                "weight_battery_discharge": 0.05,
+                "self_consume_threshold_w": 250,
+                "battery_first_priority": True,
+            }
+        )
+    )({"use_battery": True, ADVANCED_SECTION: {}})[ADVANCED_SECTION]
+    assert battery["charge_efficiency"] == 0.91
+    assert battery["weight_battery_discharge"] == 0.05
+    assert battery["self_consume_threshold_w"] == 250
+    assert battery["battery_first_priority"] is True
+
+    inverter = vol.Schema(
+        inverter_schema({"inverter_efficiency_dc_ac": 0.93, "inverter_efficiency_ac_dc": 0.94})
+    )({CONF_INVERTER_AC_OUTPUT_MAX: 5000, ADVANCED_SECTION: {}})[ADVANCED_SECTION]
+    assert inverter["inverter_efficiency_dc_ac"] == 0.93
+    assert inverter["inverter_efficiency_ac_dc"] == 0.94
+
+    grid = _flatten_sections(
+        vol.Schema(
+            grid_schema({"horizon_hours": 12, "mpc_interval_minutes": 10, CONF_TIME_STEP: 15})
+        )(
+            {
+                "grid_import_max_w": 9000,
+                "grid_export_max_w": 9000,
+                CONF_TIME_STEP: "15",
+                ADVANCED_SECTION: {},
+            }
+        )
+    )
+    assert grid["horizon_hours"] == 12
+    assert grid["mpc_interval_minutes"] == 10

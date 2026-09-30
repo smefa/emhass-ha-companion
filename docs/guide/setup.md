@@ -6,6 +6,13 @@ have installed.
 
 Every screen is listed below field by field, in the order it appears.
 
+Most screens keep the questions nearly everyone has to answer at the top and put
+the rest in one collapsed **Advanced settings** section at the bottom. The
+defaults suit most houses, so you can leave it closed. Nothing you have to fill
+in is ever hidden there. Where a screen is a list of sources, the common ones
+are listed first and the others are in *Advanced settings*, numbered, with a
+matching numbered explanation underneath.
+
 ## 1. Connect
 
 ![The Connect to EMHASS step, with the EMHASS address field filled in](../assets/install-connect-to-emhass.png)
@@ -219,6 +226,11 @@ the horizon instead of inferring it from the previous day.
 Leave **I have a battery** off if you don't have one — everything else on
 this screen is then ignored.
 
+Under **Advanced settings** you'll find the charge taper, the battery's own
+efficiencies, the cycle, comfort and stress costs, the target charge level,
+End SOC, blocking charging from the grid, the self-consumption threshold and
+the dynamic limits. The inverter's own settings are on the next screen.
+
 - **Usable capacity** — in Wh.
 - **Maximum charge power** / **Maximum discharge power** — the battery's own
   limits, in W.
@@ -315,6 +327,9 @@ and for writing your own if yours isn't listed.
 ## 9. Grid and schedule
 
 ![The Grid connection and schedule step](../assets/setup-grid-schedule.png)
+
+The main view is the two limits and the time resolution. Everything else here
+is under **Advanced settings**.
 
 - **Maximum import power** / **Maximum export power** — your connection's
   limits, in W.

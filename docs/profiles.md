@@ -70,6 +70,33 @@ options:
 
 Answers are available everywhere else in the profile as `{{ options.<key> }}`.
 
+### Keeping rarely-changed options out of the way: `advanced`
+
+```yaml
+options:
+  attribute:
+    name: Attribute name
+    default: forecast
+    selector: {text: {}}
+  time_field:
+    advanced: true            # default false
+    name: Timestamp field
+    default: datetime
+    selector: {text: {}}
+```
+
+An option with `advanced: true` is shown in the form's collapsed **Advanced
+settings** section instead of the main view. Use it for the format details of an
+unusual sensor, fixed option names and other per-profile constants that the
+default already gets right. The collapsed section still saves its defaults, and
+the answers are stored and templated exactly as before.
+
+**An advanced option must be safe to leave alone**, so it needs a `default`. A
+profile that marks a required option without one as `advanced: true` is rejected
+when it loads: a hidden field with no value would leave the form unable to save.
+Anything the user has to fill in, such as the entity to read, stays in the main
+view.
+
 > Selector configuration is validated when the profile loads. Note `NumberSelector` rejects a `step` below `0.001` — use `step: any` for prices and scale factors.
 
 ## `source` — fetching a series

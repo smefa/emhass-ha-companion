@@ -254,25 +254,35 @@ options:
   # Make them options rather than hardcoding, and default to what the common
   # integration uses. Check the select entity's own option list to get the
   # capitalisation exactly right — these must match character for character.
+  #
+  # `advanced: true` moves an option into the form's collapsed "Advanced
+  # settings" section. Do that for anything the default already gets right, so
+  # the main view is just the entities the user has to pick. It requires a
+  # `default`: a hidden option with none would make the form unsavable, and the
+  # profile is rejected when it loads.
   self_consume_option:
+    advanced: true
     name: Self-consumption mode name
     default: Self Consumption
     selector:
       text: {}
 
   force_charge_option:
+    advanced: true
     name: Forced charge mode name
     default: Forced Charge
     selector:
       text: {}
 
   force_discharge_option:
+    advanced: true
     name: Forced discharge mode name
     default: Forced Discharge
     selector:
       text: {}
 
   idle_option:
+    advanced: true
     name: Idle mode name
     default: Stop
     selector:

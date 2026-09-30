@@ -31,6 +31,23 @@ The electricity price source is the one thing asked only during initial setup
 integration, since it decides which other questions even apply. The solar
 forecast source can be changed from **Configure → Solar forecast**.
 
+## Advanced settings
+
+Most forms keep the questions nearly everyone has to answer at the top and put
+the rest in one collapsed **Advanced settings** section at the bottom. The
+defaults suit most houses, so you can leave it closed: a form saved without
+opening it stores those defaults. It opens by itself when an error points into
+it, or when a picker's saved choice is in it.
+
+- **Nothing you must fill in is hidden.** A field with no default always
+  stays in the main view.
+- **Source pickers** (price, solar, house load, outdoor temperature) list the
+  common sources first. The others are under *Advanced settings* and numbered,
+  with a matching numbered explanation underneath. If none of the common
+  sources is installed, all of them are listed together.
+- **Storage is unchanged.** Settings you saved before still load and save the
+  same way; moving a field into or out of *Advanced settings* never resets it.
+
 ## Connect
 
 The first question, during initial setup, is simply where EMHASS is. The
@@ -95,6 +112,14 @@ The inverter's own limits and losses. This step is always there, battery or not.
 
 Leave **I have a battery** off and everything else on this step is ignored —
 the optimiser plans around PV, load and price alone.
+
+The main view has capacity, charge and discharge power, the charge levels, the
+SOC and power sensors, and *Block export to grid*. Everything else on this page
+is under *Advanced settings*: the charge taper, the two battery efficiencies,
+cycle and comfort costs, stress cost, target charge level, End SOC, *Block
+charging from grid*, the self-consumption threshold and the dynamic limits.
+The inverter's own limits and the live PV sensor are on the
+[Inverter](#inverter) step.
 
 | Setting | Meaning |
 |---|---|
@@ -212,6 +237,10 @@ now.
 ## Time resolution
 
 ![The Grid connection and schedule step, with import/export limits, PV curtailment, time resolution, recalculation interval, planning horizon and day-ahead fallback time](assets/setup-grid-schedule.png)
+
+The main view of **Grid and schedule** is the import and export limits and this
+time step. The limit sensors, curtailment, recalculation interval, planning
+horizon and day-ahead fallback time are under *Advanced settings*.
 
 The **Grid and schedule** step defaults the optimisation time step to whatever
 your chosen price source actually publishes at — Nord Pool has been 15-minute

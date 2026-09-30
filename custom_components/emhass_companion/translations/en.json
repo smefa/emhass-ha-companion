@@ -1126,7 +1126,9 @@
             "nominal_power_w": "Roughly what this load draws while it is on.",
             "operating_hours": "How long it needs to run in total. The optimiser chooses when. EMHASS plans in {time_step}-minute steps, so this is rounded to the nearest whole step ({time_step_hours} h).",
             "earliest_start": "Only used if you turn on the load's time window switch afterwards.",
-            "latest_end": "May be earlier than the start time, for an overnight window."
+            "latest_end": "May be earlier than the start time, for an overnight window.",
+            "power_sensor": "Optional. Tells the optimiser whether the load is actually running, so it can catch a run that finished early or never happened. A power sensor (any unit) gives the most detail; an on/off binary_sensor works too. Without one, the optimiser assumes the load followed its last plan.",
+            "control_entity": "Optional. If set, the integration switches this on and off to follow the plan once you enable control, and its state also serves as the running signal when there is no power sensor. Leave empty to keep control in your own automations."
           },
           "sections": {
             "advanced": {
@@ -1153,7 +1155,8 @@
                 "minimum_off_time_minutes": "Once switched off, the load must stay off at least this long. Zero means no minimum.",
                 "energy_needed_kwh": "Optional total: the load stops asking once it has had this much. Leave at zero to let it run on whatever solar is spare until you turn its Requested switch off.",
                 "surplus_headroom_w": "How much spare solar there must be beyond this load's own draw before a timestep counts. A margin against the solar forecast coming in light -- without it, a timestep counted at exactly this load's power imports as soon as a cloud arrives.",
-                "surplus_priority": "Only matters with more than one load on spare solar. The lowest number claims the shared surplus first; ties are broken by name. Leave at zero unless you have several and want one served before another."
+                "surplus_priority": "Only matters with more than one load on spare solar. The lowest number claims the shared surplus first; ties are broken by name. Leave at zero unless you have several and want one served before another.",
+                "max_startups": "A cap on how many times the load may switch on within one plan. Zero means no cap."
               }
             }
           }

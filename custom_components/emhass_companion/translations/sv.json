@@ -1126,7 +1126,9 @@
             "nominal_power_w": "Ungefär vad lasten drar när den är igång.",
             "operating_hours": "Hur länge den behöver köra totalt. Optimeraren väljer när. EMHASS planerar i steg om {time_step} minuter, så detta avrundas till närmaste hela steg ({time_step_hours} h).",
             "earliest_start": "Används bara om du slår på lastens tidsfönster efteråt.",
-            "latest_end": "Får vara tidigare än starttiden, för ett fönster över natten."
+            "latest_end": "Får vara tidigare än starttiden, för ett fönster över natten.",
+            "power_sensor": "Valfritt. Talar om för optimeringen om lasten faktiskt kör, så att ett pass som avslutades tidigt eller aldrig blev av kan upptäckas. En effektsensor (valfri enhet) ger mest detalj; en enkel av/på-binary_sensor fungerar också. Utan någon antar optimeringen att lasten följde sin senaste plan.",
+            "control_entity": "Valfritt. Om den anges slår integrationen på och av denna för att följa planen när du aktiverat styrning, och dess tillstånd används också som körsignal när det inte finns någon effektsensor. Lämna tom för att behålla styrningen i dina egna automationer."
           },
           "sections": {
             "advanced": {
@@ -1153,7 +1155,8 @@
                 "minimum_off_time_minutes": "När lasten stängs av måste den vara av minst så här länge. Noll betyder ingen minimigräns.",
                 "energy_needed_kwh": "Valfri total: lasten slutar be om mer när den fått så här mycket. Lämna på noll för att låta den köra på det solöverskott som finns tills du stänger av dess Begärd-brytare.",
                 "surplus_headroom_w": "Hur mycket solöverskott det måste finnas utöver lastens egen förbrukning innan ett tidssteg räknas. En marginal mot att solprognosen slår fel -- utan den importerar ett tidssteg som räknats vid exakt lastens effekt så snart ett moln kommer.",
-                "surplus_priority": "Betyder bara något med fler än en last på solöverskott. Lägsta numret gör anspråk på det delade överskottet först; lika värden avgörs av namn. Lämna på noll om du inte har flera och vill att en ska köras före en annan."
+                "surplus_priority": "Betyder bara något med fler än en last på solöverskott. Lägsta numret gör anspråk på det delade överskottet först; lika värden avgörs av namn. Lämna på noll om du inte har flera och vill att en ska köras före en annan.",
+                "max_startups": "Ett tak för hur många gånger lasten får slås på inom en plan. Noll betyder inget tak."
               }
             }
           }
