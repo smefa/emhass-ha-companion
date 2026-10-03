@@ -635,6 +635,7 @@ class LoadNumber(EmhassLoadEntity, RestoreNumber):
 
     async def async_set_native_value(self, value: float) -> None:
         self.entity_description.set_fn(self.load, value)
+        self.load.invalidate_battery_lockout()
         self.load.notify()
         await self.coordinator.async_request_refresh()
         if self.load.is_thermal:

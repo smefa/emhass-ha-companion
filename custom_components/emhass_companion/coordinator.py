@@ -39,6 +39,7 @@ from .const import (
     EMHASS_CONF_TIME_STEP,
     EMHASS_CONF_VAR_MODEL,
     END_SOC_OPTIMIZED,
+    INFEASIBLE_CAUSE_CODES,
     ISSUE_LOAD_NEVER_STARTED,
     ISSUE_ML_FORECASTER_NOT_READY,
     ISSUE_OPTIMIZATION_INFEASIBLE,
@@ -69,6 +70,7 @@ from .const import (
 )
 from .deferrable import DeferrableRegistry, state_to_watts
 from .health import SourceHealth
+from .infeasibility import Finding, Severity, diagnose, headline
 from .models import (
     DeferrableLoad,
     DeferrableLoadGroup,
@@ -82,6 +84,7 @@ from .models import (
 from .network_calendar import HolidayCache, NetworkCalendar, NetworkCalendarError
 from .payload import PayloadInputs, PayloadResult, build_payload
 from .peaks import PeakTracker, days_in_current_period, effective_rate_per_kw
+from .phase_guard import PhaseGuard
 from .profiles import (
     Profile,
     ProfileError,
@@ -343,6 +346,11 @@ class EmhassData:
     interval per run -- never the six hours the trigger looks for. Recording
     the untrimmed end keeps the two concerns separate: ``buy_price`` describes
     what the plan covers, this describes what the market has published."""
+    last_infeasibility: list[Finding] = field(default_factory=list)
+    """What infeasibility.py found when this run came back infeasible.
+
+    Empty after a feasible run, and also when the checks found nothing or
+    could not run. Shown in diagnostics and on the Last request sensor."""
 
     def deferrable_index(self, subentry_id: str) -> int | None:
         """Position of a load in EMHASS's ``P_deferrable{k}`` numbering."""
@@ -410,6 +418,10 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         # tracker's floor on every MPC run. peak_tracker aliases [0].
         self.peak_trackers: list[PeakTracker] = []
         self.peak_tracker: PeakTracker | None = None
+        # Set by __init__.async_setup_entry when the grid step has a main fuse
+        # and phase readings. Read here for the plan's import limit and by the
+        # executor for its charge clamp -- one set of readings for both.
+        self.phase_guard: PhaseGuard | None = None
 
         # Owned by the control switch and the mode select. Held here rather than
         # read back out of the state machine so the executor never has to parse
@@ -1092,6 +1104,9 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             )
         last_run, plan = await self.client.async_optimize(action, built.payload)
 
+        findings: list[Finding] = []
+        load_order = built.load_order
+        last_success = dt_util.utcnow() if last_run.ok else None
         if last_run.status == "error":
             raise UpdateFailed(f"EMHASS reported an error: {last_run.error_message or 'unknown'}")
         if last_run.infeasible:
@@ -1101,8 +1116,20 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
                 "EMHASS could not find a feasible solution for %s; keeping the previous plan",
                 action,
             )
-            plan = self.data.plan if self.data else None
-            self._track_infeasible_issue(True, action)
+            previous = self.data
+            plan = previous.plan if previous else None
+            # The kept plan keeps its own age and its own deferrable numbering.
+            # EMHASS still says status "ok" for an infeasible solve, so stamping
+            # it fresh would let a run of failures hold an old plan executable
+            # indefinitely, past the staleness watchdog that exists to stop
+            # exactly that. And its P_deferrable{k} columns are numbered by the
+            # request that produced them: read through this request's order, a
+            # load added or removed since would switch on from its neighbour's
+            # schedule.
+            last_success = previous.last_success if previous else None
+            load_order = previous.load_order if previous else built.load_order
+            findings = self._diagnose_infeasible(built, action)
+            self._track_infeasible_issue(True, action, findings)
         else:
             self._track_infeasible_issue(False, action)
             if last_run.status == "no-run":
@@ -1156,16 +1183,18 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             load_forecast=inputs.load or Series.empty(),
             payload=built.payload,
             warnings=built.warnings,
-            load_order=built.load_order,
+            load_order=load_order,
             end_soc=self._end_soc,
             soc_day_range=self._soc_day_range,
             last_action=action,
             # Before the trim above, deliberately -- see the field's docstring.
             price_source_end=inputs.buy_price.end if inputs.buy_price else None,
-            # Only a genuinely successful solve counts. "no-run" and infeasible
-            # both leave the staleness watchdog tripped, which is what stops an
-            # executor from acting on a plan that was never actually produced.
-            last_success=dt_util.utcnow() if last_run.ok else None,
+            # Only a genuinely successful solve counts. "no-run" trips the
+            # staleness watchdog outright; infeasible leaves it counting down
+            # from the kept plan's own solve (above). Either way the executor
+            # stops acting on a plan that is no longer being renewed.
+            last_success=last_success,
+            last_infeasibility=findings,
         )
 
     async def _prepare_soc_day_range(self, now: datetime) -> None:
@@ -1291,25 +1320,69 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         )
         return False
 
-    def _track_infeasible_issue(self, infeasible: bool, action: str) -> None:
+    def _diagnose_infeasible(self, built: PayloadResult, action: str) -> list[Finding]:
+        """Run infeasibility.py's checks on the request EMHASS just refused.
+
+        Only ever called for an infeasible run, so it costs nothing on a
+        normal one. A few loops over the horizon, cheap enough to run inline.
+        Every finding goes to the log, where the repair issue points; the
+        issue itself shows only the headline. A failure here must never cost
+        the run, so it falls back to no findings and the generic issue text.
+        """
+        try:
+            names = [
+                subentry.title
+                if (subentry := self.config_entry.subentries.get(subentry_id))
+                else f"Deferrable {k}"
+                for k, subentry_id in enumerate(built.load_order)
+            ]
+            findings = diagnose(built.payload, load_names=names, warnings=built.warnings)
+        except Exception:  # a diagnosis must never break a run
+            _LOGGER.debug("Could not diagnose the infeasible %s run", action, exc_info=True)
+            return []
+        for finding in findings:
+            _LOGGER.warning(
+                "%s infeasible, %s: %s. %s",
+                action,
+                finding.severity.value,
+                finding.title,
+                finding.detail,
+            )
+        return findings
+
+    def _track_infeasible_issue(
+        self, infeasible: bool, action: str, findings: list[Finding] | None = None
+    ) -> None:
         """Raise or clear the whole-integration infeasible-run repair.
 
         EMHASS reports infeasibility for the problem as a whole, with no hint
         at which load caused it, so this is one issue per integration rather
         than per load (contrast :meth:`LoadNumber._check_thermal_reachability`,
         which can name the offending load and so gets its own issue each).
+
+        When infeasibility.py names a cause, the issue switches to that cause's
+        own translation under the same issue id. Re-creating the issue updates
+        it in place, so a changed cause replaces the old text and nothing is
+        left behind to clear separately.
         """
         if not infeasible:
             ir.async_delete_issue(self.hass, DOMAIN, ISSUE_OPTIMIZATION_INFEASIBLE)
             return
+        translation_key = ISSUE_OPTIMIZATION_INFEASIBLE
+        placeholders = {"action": action}
+        top = headline(findings or [])
+        if top is not None and top.code in INFEASIBLE_CAUSE_CODES:
+            translation_key = f"{ISSUE_OPTIMIZATION_INFEASIBLE}_{top.code}"
+            critical = sum(1 for f in findings or [] if f.severity is Severity.CRITICAL)
+            placeholders = {**top.placeholders, "action": action, "total": str(critical)}
         ir.async_create_issue(
             self.hass,
             DOMAIN,
             ISSUE_OPTIMIZATION_INFEASIBLE,
             is_fixable=False,
             severity=ir.IssueSeverity.WARNING,
-            translation_key=ISSUE_OPTIMIZATION_INFEASIBLE,
-            translation_placeholders={"action": action},
+            translation_key=translation_key,
+            translation_placeholders=placeholders,
         )
 
     def _track_never_started_issues(self) -> None:
@@ -1695,7 +1768,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             soc_final=end_soc.soc if end_soc else None,
             pv_live_w=self._read_pv_live(),
             load_live_w=self._read_load_live(),
-            grid_import_limit_w=self._read_grid_limit(config.grid.import_limit_entity, "import"),
+            grid_import_limit_w=self._grid_import_limit_w(config),
             grid_export_limit_w=self._read_grid_limit(config.grid.export_limit_entity, "export"),
             mix_beta=self.mix_beta,
             cost_fun=self.cost_fun,
@@ -1817,6 +1890,21 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         if state is None or state.state in ("unknown", "unavailable", ""):
             return str(entity_id)
         return None
+
+    def _grid_import_limit_w(self, config: EmhassConfig) -> float | None:
+        """The live import limit: the phase guard's, a limit sensor's, or both.
+
+        Both may be configured -- someone moving off a hand-written template
+        may keep it for a while -- and then the lower one wins, since each is
+        only ever allowed to make the plan more careful. None from both leaves
+        the static limit in charge, as before.
+        """
+        candidates = [
+            self._read_grid_limit(config.grid.import_limit_entity, "import"),
+            self.phase_guard.import_limit_w if self.phase_guard is not None else None,
+        ]
+        readings = [value for value in candidates if value is not None]
+        return min(readings) if readings else None
 
     def _read_grid_limit(self, entity_id: str | None, direction: str) -> float | None:
         """A live grid import/export limit, in watts, or None to use the static one.

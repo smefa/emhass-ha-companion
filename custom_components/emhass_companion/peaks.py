@@ -20,8 +20,8 @@ sends as ``capacity_cost_per_kw``, and ``coordinator.py`` sends
 short" section.
 
 Shaped like ``metering.py``'s ``SavingsTracker`` on purpose, one level up: a
-:class:`~.metering.Meter` watched on every state change rather than a timer,
-for the same reason -- an interval average built from sparse samples is wrong
+:class:`~.metering.Meter` watched on every state change, with a clock tick only
+as a backstop (``metering.SETTLE_MINUTES``), for the same reason -- an interval average built from sparse samples is wrong
 in the same way a net grid position is -- a ``Store``, a scheduled rollover,
 and restore-on-restart. ``metering.py`` keeps the money in ``savings.py`` and
 the Home Assistant plumbing in itself; this module keeps that same split, but
@@ -51,7 +51,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
-from .metering import Meter
+from .metering import SETTLE_MINUTES, Meter
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -291,6 +291,24 @@ def _bucket_start(when: datetime, interval: timedelta) -> datetime:
     return (midnight + whole * interval).astimezone(UTC)
 
 
+def _share_before(boundary: datetime, since: datetime | None, now: datetime) -> float:
+    """The fraction of the span ``since``..``now`` that lies before ``boundary``.
+
+    No known start (a first reading) or an empty span counts as all after:
+    there is nothing to say any of it happened earlier.
+    """
+    if since is None or now <= since:
+        return 0.0
+    return min(max((boundary - since) / (now - since), 0.0), 1.0)
+
+
+def _share_after(boundary: datetime, since: datetime | None, now: datetime) -> float:
+    """The fraction of the span ``since``..``now`` that lies after ``boundary``."""
+    if since is None or now <= since:
+        return 1.0
+    return min(max((now - boundary) / (now - since), 0.0), 1.0)
+
+
 def _local_day(when: datetime) -> str:
     """The local calendar date ``when`` falls on, as an ISO string. Same
     reasoning as ``metering.py``'s function of the same name, one level up:
@@ -455,6 +473,10 @@ class PeakTracker:
         self._unsubs.append(
             async_track_time_change(self.hass, self._async_midnight, hour=0, minute=0, second=5)
         )
+        # Settle on the clock as well as on the meter: see SETTLE_MINUTES.
+        self._unsubs.append(
+            async_track_time_change(self.hass, self._async_tick, minute=SETTLE_MINUTES, second=0)
+        )
         # One immediate settle so a restart's bucket boundary is evaluated
         # now rather than whenever the source next happens to move.
         self._settle(dt_util.utcnow())
@@ -493,11 +515,26 @@ class PeakTracker:
         self._settle(now)
         self._publish(force=True)
 
+    @callback
+    def _async_tick(self, _now: datetime) -> None:
+        # The live clock, not the scheduled instant handed in: a meter tick
+        # settled a moment after the boundary must not be followed by a take
+        # stamped before it.
+        self._settle(dt_util.utcnow())
+
     def _settle(self, now: datetime) -> None:
-        """Fold everything that moved since the last settle into the record."""
+        """Fold everything that moved since the last settle into the record.
+
+        Taken before the bucket advances, not after: the energy since the
+        last reading flowed up to ``now``, and the part of it that flowed
+        before a boundary belongs to the bucket that boundary closes. Taking
+        it afterwards put all of it in the new bucket -- a steady 6 kW read
+        once a minute came out as 5.9 kW for the hour.
+        """
+        since = self.meter.last_time
+        kwh = self.meter.take(self.hass, now)
+        self._advance_interval(now, kwh, since)
         self._roll_over(now)
-        self._advance_interval(now)
-        self._current_kwh += self.meter.take(self.hass, now)
         self._store.async_delay_save(self._data_to_save, _SAVE_DELAY)
         self._publish()
 
@@ -509,6 +546,10 @@ class PeakTracker:
         docstring gives one level down: a restart at 00:05 on the 1st would
         otherwise merge two periods into one, and a machine asleep through
         midnight would never fire the timer at all.
+
+        Runs after :meth:`_advance_interval`, so the old period's last bucket
+        has already been closed into it, and the bucket now open -- with its
+        share of the energy that straddled midnight -- is the new period's.
         """
         period = _local_period(now)
         if self._period == period:
@@ -521,39 +562,43 @@ class PeakTracker:
         )
         self._period = period
         self._intervals = []
-        self._current_start = None
-        self._current_kwh = 0.0
+        if self._current_start is not None and _local_period(self._current_start) != period:
+            self._current_start = None
+            self._current_kwh = 0.0
 
-    def _advance_interval(self, now: datetime) -> None:
-        """Close the open bucket once wall-clock time has moved past it, and
-        open the next one aligned to ``now``.
+    def _advance_interval(self, now: datetime, kwh: float, since: datetime | None) -> None:
+        """Fold ``kwh`` -- what flowed from ``since`` to ``now`` -- into the
+        buckets it belongs to, closing the open one once ``now`` is past it.
 
         This is the one mechanism that has to be right both in ordinary
         operation and across a restart: whether the boundary was crossed
         because a meter tick simply arrived in the next hour, or because Home
-        Assistant was down across it, the answer is the same -- finalise
-        whatever energy the still-open bucket actually saw, at whatever
-        fraction of a full interval that turns out to be, and start counting
-        the next one from zero. Only the bucket that was actually open gets
-        finalised this way; if a downtime spanned more than one boundary, the
-        buckets in between are left unrecorded rather than invented, for the
-        same reason ``Meter`` treats a long outage as "no reading" rather
-        than as a flat power draw (see ``_RESTORE_MAX_GAP`` in
-        ``metering.py``). The one honest inaccuracy left is a bucket that
-        happens to close *during* a gap: its measured minutes are all it
-        gets, which understates that one interval's average rather than
-        losing or duplicating any energy -- the energy that flowed during the
-        gap itself lands in the *new* bucket, via the very next ``take()``.
+        Assistant was down across it, the answer is the same -- the energy
+        is split at the boundary in proportion to time (exact for a power
+        sensor, which is integrated as a constant over the span; the best
+        available for an energy counter), the closing bucket keeps its share
+        and is finalised, and the new one starts from its own share. If the
+        span crossed more than one boundary, the buckets in between are left
+        unrecorded rather than invented, for the same reason ``Meter`` treats
+        a long outage as "no reading" rather than as a flat power draw (see
+        ``_RESTORE_MAX_GAP`` in ``metering.py``) -- and their share of the
+        energy goes with them rather than inflating the new bucket into a
+        peak that never happened. The clock tick (``SETTLE_MINUTES``) keeps
+        ordinary spans short, so a split is a few seconds either side.
         """
         bucket = _bucket_start(now, self._interval)
         if self._current_start is None:
             self._current_start = bucket
+            self._current_kwh += kwh * _share_after(bucket, since, now)
             return
         if bucket == self._current_start:
+            self._current_kwh += kwh
             return
+        closing_end = self._current_start + self._interval
+        self._current_kwh += kwh * _share_before(closing_end, since, now)
         self._close_current_interval()
         self._current_start = bucket
-        self._current_kwh = 0.0
+        self._current_kwh = kwh * _share_after(bucket, since, now)
 
     def _close_current_interval(self) -> None:
         if self._current_start is None:

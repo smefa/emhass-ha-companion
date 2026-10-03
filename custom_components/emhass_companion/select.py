@@ -131,5 +131,6 @@ class LoadRecurrenceSelect(EmhassLoadEntity, SelectEntity, RestoreEntity):
         if option != self.load.recurrence:
             self.load.cancel()
         self.load.recurrence = option
+        self.load.invalidate_battery_lockout()
         self.load.notify()
         await self.coordinator.async_request_refresh()

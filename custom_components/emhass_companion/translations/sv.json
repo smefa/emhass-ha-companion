@@ -290,6 +290,14 @@
             "data": {
               "grid_import_limit_entity": "Sensor för importgräns (valfritt)",
               "grid_export_limit_entity": "Sensor för exportgräns (valfritt)",
+              "phase_l1_entity": "Avläsning fas L1 (valfritt)",
+              "phase_l2_entity": "Avläsning fas L2 (valfritt)",
+              "phase_l3_entity": "Avläsning fas L3 (valfritt)",
+              "main_fuse_a": "Huvudsäkring per fas (valfritt)",
+              "phase_margin_a": "Säkringsmarginal",
+              "phase_voltage_v": "Fasspänning",
+              "phase_voltage_entity": "Spänningssensor (valfritt)",
+              "phase_limit_window_min": "Fasgränsens tillbakablick",
               "compute_curtailment": "Låt EMHASS optimera solcellsbegränsning",
               "mpc_interval_minutes": "Räkna om var",
               "horizon_hours": "Planeringshorisont",
@@ -298,6 +306,14 @@
             "data_description": {
               "grid_import_limit_entity": "Lämna tomt om inte din användbara importgräns varierar. En sensor som anger gränsen i watt just nu används i stället för det fasta värdet ovan — för en trefasanslutning är det så du tar hänsyn till ojämn fasbelastning, eftersom det är säkringen på den värsta fasen som stoppar dig och den användbara totalen ligger under summan så snart faserna är obalanserade. Andra användningar: lastbalansering eller dynamisk huvudsäkring, eller en effektbegränsning från nätägaren. Sensorn kan bara sänka det fasta värdet, aldrig höja det, och det fasta värdet används så fort sensorn inte går att läsa. Den höjs också tillbaka till den effekt huset ändå väntas dra om den skulle hamna under den, eftersom ingen plan finns under det värdet.",
               "grid_export_limit_entity": "Samma sak för export: en sensor som anger hur många watt du får mata ut just nu, använd i stället för det fasta värdet ovan och bara kapabel att sänka det. Är EMHASS begränsning avstängd, var försiktig med en gräns under ditt största solelöverskott — optimeraren har då ingenstans att göra av effekten och rapporterar problemet som olösbart.",
+              "phase_l1_entity": "Elmätarens aktuella värde för varje fas, i W, kW eller A. Ström är bäst, eftersom det är den säkringen reagerar på. Tillsammans med huvudsäkringen nedan ersätter detta en egenskriven mall för importgränsen. Planen får den värsta fasens gräns automatiskt. Med en effektsensor för batteriet vald i batteristeget sänks dessutom en tvångsladdning inom några sekunder om någon fas närmar sig sin säkring. Fyll i alla tre faserna, eller bara L1 för en enfasanslutning.",
+              "phase_l2_entity": "Den andra fasen. Alla enheter som stöds fungerar, oavsett vad L1 använder.",
+              "phase_l3_entity": "Den tredje fasen.",
+              "main_fuse_a": "Märkströmmen för varje huvudsäkring, till exempel 16, 20 eller 25 A. Lämna tomt för att stänga av fasvakten.",
+              "phase_margin_a": "Hur långt under säkringens märkström varje fas hålls. Standardvärdet 1 A täcker mätarens fördröjning, effektfaktor och en last som slås på mellan två avläsningar. En gG-säkring (Diazed, Neozed) håller 1,25 gånger märkströmmen i upp till en timme, så en kort överskridning medan vakten reagerar gör ingen skada.",
+              "phase_voltage_v": "Används för att räkna om wattvärden till ström, och när spänningssensorn nedan saknas eller inte går att läsa. 230 V i större delen av Europa.",
+              "phase_voltage_entity": "En aktuell fasspänning från elmätaren, som används i stället för den fasta spänningen ovan för att räkna om wattvärden till ström. En hårt belastad fas sjunker i spänning, så samma watt blir fler ampere. Det är just då det spelar roll. Använd L1:s spänning, eller den lägsta av de tre om mätaren har en sådan. Ett värde som avviker mer än 20 % från den fasta spänningen ignoreras och den fasta spänningen används i stället, så att en 400 V-sensor mellan faser inte kan få faserna att se tommare ut än de är. Behövs inte om fasavläsningarna är i A.",
+              "phase_limit_window_min": "Planen använder den lägsta fasgräns som setts under den här perioden, inte värdet i det ögonblick den beräknas. Annars kan en diskmaskin mellan två uppvärmningar ge planen hela säkringen. 0 använder det aktuella värdet.",
               "compute_curtailment": "Slår på EMHASS egen begränsning (inställningen compute_curtailment) och skickar den med varje körning, så den åsidosätter det som står i tillägget. Optimeraren får då kapa solproduktion den inte kan använda — planen får en begränsningskolumn, och en växelriktarprofil som stöder begränsning följer den. Av som standard, och bara meningsfull om något faktiskt kan agera på den: utan en växelriktarprofil som stöder begränsning utgår planen från att solel kapades som i verkligheten fortfarande går ut på nätet.",
               "dayahead_fallback_time": "En fullständig dygnsplan byggs normalt om automatiskt så snart nya priser kommer. Den här tiden används bara som reserv om det aldrig sker."
             }
@@ -322,7 +338,9 @@
       "ac_output_required": "En delad växelriktare behöver en positiv AC-uteffektgräns. Noll skulle stoppa både sol och batteri från att nå huset.",
       "derating_not_ascending": "Raderna för laddavtrappning måste ha strikt stigande laddningsnivåer, var och en mellan 1 och 99 %, med en laddeffekt på 1–100 % av max.",
       "profile_required": "Välj en källa för solprognosen, eller öppna Avancerade inställningar för de andra alternativen.",
-      "template_required": "Mall-läget kräver en mall. Ange den under Avancerade inställningar, eller välj en annan metod."
+      "template_required": "Mall-läget kräver en mall. Ange den under Avancerade inställningar, eller välj en annan metod.",
+      "phase_entities_incomplete": "Fasvakten behöver alla tre faserna, eller bara L1 för en enfasanslutning.",
+      "phase_margin_too_large": "Säkringsmarginalen måste vara mindre än säkringens märkström."
     },
     "abort": {
       "single_instance_allowed": "EMHASS Companion är redan konfigurerad.",
@@ -529,6 +547,14 @@
             "data": {
               "grid_import_limit_entity": "Sensor för importgräns (valfritt)",
               "grid_export_limit_entity": "Sensor för exportgräns (valfritt)",
+              "phase_l1_entity": "Avläsning fas L1 (valfritt)",
+              "phase_l2_entity": "Avläsning fas L2 (valfritt)",
+              "phase_l3_entity": "Avläsning fas L3 (valfritt)",
+              "main_fuse_a": "Huvudsäkring per fas (valfritt)",
+              "phase_margin_a": "Säkringsmarginal",
+              "phase_voltage_v": "Fasspänning",
+              "phase_voltage_entity": "Spänningssensor (valfritt)",
+              "phase_limit_window_min": "Fasgränsens tillbakablick",
               "compute_curtailment": "Låt EMHASS optimera solcellsbegränsning",
               "mpc_interval_minutes": "Räkna om var",
               "horizon_hours": "Planeringshorisont",
@@ -537,6 +563,14 @@
             "data_description": {
               "grid_import_limit_entity": "Lämna tomt om inte din användbara importgräns varierar. En sensor som anger gränsen i watt just nu används i stället för det fasta värdet ovan — för en trefasanslutning är det så du tar hänsyn till ojämn fasbelastning, eftersom det är säkringen på den värsta fasen som stoppar dig och den användbara totalen ligger under summan så snart faserna är obalanserade. Andra användningar: lastbalansering eller dynamisk huvudsäkring, eller en effektbegränsning från nätägaren. Sensorn kan bara sänka det fasta värdet, aldrig höja det, och det fasta värdet används så fort sensorn inte går att läsa. Den höjs också tillbaka till den effekt huset ändå väntas dra om den skulle hamna under den, eftersom ingen plan finns under det värdet.",
               "grid_export_limit_entity": "Samma sak för export: en sensor som anger hur många watt du får mata ut just nu, använd i stället för det fasta värdet ovan och bara kapabel att sänka det. Är EMHASS begränsning avstängd, var försiktig med en gräns under ditt största solelöverskott — optimeraren har då ingenstans att göra av effekten och rapporterar problemet som olösbart.",
+              "phase_l1_entity": "Elmätarens aktuella värde för varje fas, i W, kW eller A. Ström är bäst, eftersom det är den säkringen reagerar på. Tillsammans med huvudsäkringen nedan ersätter detta en egenskriven mall för importgränsen. Planen får den värsta fasens gräns automatiskt. Med en effektsensor för batteriet vald i batteristeget sänks dessutom en tvångsladdning inom några sekunder om någon fas närmar sig sin säkring. Fyll i alla tre faserna, eller bara L1 för en enfasanslutning.",
+              "phase_l2_entity": "Den andra fasen. Alla enheter som stöds fungerar, oavsett vad L1 använder.",
+              "phase_l3_entity": "Den tredje fasen.",
+              "main_fuse_a": "Märkströmmen för varje huvudsäkring, till exempel 16, 20 eller 25 A. Lämna tomt för att stänga av fasvakten.",
+              "phase_margin_a": "Hur långt under säkringens märkström varje fas hålls. Standardvärdet 1 A täcker mätarens fördröjning, effektfaktor och en last som slås på mellan två avläsningar. En gG-säkring (Diazed, Neozed) håller 1,25 gånger märkströmmen i upp till en timme, så en kort överskridning medan vakten reagerar gör ingen skada.",
+              "phase_voltage_v": "Används för att räkna om wattvärden till ström, och när spänningssensorn nedan saknas eller inte går att läsa. 230 V i större delen av Europa.",
+              "phase_voltage_entity": "En aktuell fasspänning från elmätaren, som används i stället för den fasta spänningen ovan för att räkna om wattvärden till ström. En hårt belastad fas sjunker i spänning, så samma watt blir fler ampere. Det är just då det spelar roll. Använd L1:s spänning, eller den lägsta av de tre om mätaren har en sådan. Ett värde som avviker mer än 20 % från den fasta spänningen ignoreras och den fasta spänningen används i stället, så att en 400 V-sensor mellan faser inte kan få faserna att se tommare ut än de är. Behövs inte om fasavläsningarna är i A.",
+              "phase_limit_window_min": "Planen använder den lägsta fasgräns som setts under den här perioden, inte värdet i det ögonblick den beräknas. Annars kan en diskmaskin mellan två uppvärmningar ge planen hela säkringen. 0 använder det aktuella värdet.",
               "compute_curtailment": "Slår på EMHASS egen begränsning (inställningen compute_curtailment) och skickar den med varje körning, så den åsidosätter det som står i tillägget. Optimeraren får då kapa solproduktion den inte kan använda — planen får en begränsningskolumn, och en växelriktarprofil som stöder begränsning följer den. Av som standard, och bara meningsfull om något faktiskt kan agera på den: utan en växelriktarprofil som stöder begränsning utgår planen från att solel kapades som i verkligheten fortfarande går ut på nätet."
             }
           }
@@ -676,7 +710,9 @@
       "ac_output_required": "En delad växelriktare behöver en positiv AC-uteffektgräns. Noll skulle stoppa både sol och batteri från att nå huset.",
       "derating_not_ascending": "Raderna för laddavtrappning måste ha strikt stigande laddningsnivåer, var och en mellan 1 och 99 %, med en laddeffekt på 1–100 % av max.",
       "profile_required": "Välj en källa för solprognosen, eller öppna Avancerade inställningar för de andra alternativen.",
-      "template_required": "Mall-läget kräver en mall. Ange den under Avancerade inställningar, eller välj en annan metod."
+      "template_required": "Mall-läget kräver en mall. Ange den under Avancerade inställningar, eller välj en annan metod.",
+      "phase_entities_incomplete": "Fasvakten behöver alla tre faserna, eller bara L1 för en enfasanslutning.",
+      "phase_margin_too_large": "Säkringsmarginalen måste vara mindre än säkringens märkström."
     }
   },
   "selector": {
@@ -820,6 +856,9 @@
       },
       "demand_charge_rate": {
         "name": "Effektavgift"
+      },
+      "phase_headroom": {
+        "name": "Fasmarginal"
       }
     },
     "binary_sensor": {
@@ -837,6 +876,9 @@
       },
       "solar_surplus": {
         "name": "Solöverskott"
+      },
+      "phase_guard_active": {
+        "name": "Fasvakt aktiv"
       }
     },
     "switch": {
@@ -1007,7 +1049,39 @@
     },
     "optimization_infeasible": {
       "title": "EMHASS kunde inte hitta en genomförbar plan",
-      "description": "Den senaste körningen av {action} rapporterade att optimeringsproblemet var olösbart, även efter att EMHASS försökte igen med lättade villkor. Den tidigare planen behålls istället för en oanvändbar. Detta beror nästan alltid på en styrbar last vars nödvändiga körtid inte får plats inom den återstående horisonten, eller ett komfortschema som en termisk last inte kan nå -- kontrollera varje lasts varaktighet och tidsfönster mot planens horisont. Detta löser sig automatiskt så snart en körning löses framgångsrikt."
+      "description": "Den senaste körningen av {action} rapporterade att optimeringsproblemet var olösbart, även efter att EMHASS försökte igen med lättade villkor. Den tidigare planen behålls istället för en oanvändbar. EMHASS Companions egna kontroller hittade ingen specifik orsak. Ladda ner diagnostik från integrationens enhetssida och kör `scripts/check_infeasibility.py` på filen, och kontrollera EMHASS-tilläggets logg. Detta löser sig automatiskt så snart en körning löses framgångsrikt."
+    },
+    "optimization_infeasible_timestep0_deficit": {
+      "title": "EMHASS-planen är olösbar: inte tillräckligt med effekt just nu",
+      "description": "Den senaste körningen av {action} var olösbar: just nu behöver planen minst {needed} ({pins} går redan och hålls på den effekten, plus huset {house}), men högst {available} finns tillgängligt (nät {grid}, sol {pv}, batteri {battery}). EMHASS kan inte flytta en last som redan går ut ur första tidssteget, så den hittar ingen plan alls. Oftast har nätets importgräns precis sjunkit (en sensor för säkringsgräns) medan batteriet är tomt. Stäng av eller sänk någon av lasterna som går, eller kontrollera importgränsen. Den tidigare planen behålls. Totalt {total} blockerande orsak(er) hittades; Home Assistant-loggen listar alla fynd. Detta löser sig automatiskt så snart en körning löses framgångsrikt."
+    },
+    "optimization_infeasible_battery_energy": {
+      "title": "EMHASS-planen är olösbar: batteriet är för tomt just nu",
+      "description": "Den senaste körningen av {action} var olösbar: batteriet ligger på {soc} (minimum {soc_min}), så under nästa tidssteg kan det leverera högst {battery}, inte sina märkta {rated}. Med nätet begränsat till {grid} och sol på {pv} kan huslasten på {house} inte täckas. Kontrollera nätets importgräns och att batterinivåsensorn visar rätt. Den tidigare planen behålls. Totalt {total} blockerande orsak(er) hittades; Home Assistant-loggen listar alla fynd. Detta löser sig automatiskt så snart en körning löses framgångsrikt."
+    },
+    "optimization_infeasible_pin_vs_window": {
+      "title": "EMHASS-planen är olösbar: en last är både igång och parkerad",
+      "description": "Den senaste körningen av {action} var olösbar: {name} rapporterades gå på {power} just nu, men samma förfrågan bad om ingen körtid alls för den. EMHASS kan inte uppfylla båda. Detta är en bugg i EMHASS Companion; rapportera den gärna med en diagnostiknedladdning. Att byta lastens läge eller stänga av lasten brukar lösa det. Den tidigare planen behålls. Totalt {total} blockerande orsak(er) hittades; Home Assistant-loggen listar alla fynd. Detta löser sig automatiskt så snart en körning löses framgångsrikt."
+    },
+    "optimization_infeasible_window_too_short": {
+      "title": "EMHASS-planen är olösbar: {name} får inte plats i sitt tidsfönster",
+      "description": "Den senaste körningen av {action} var olösbar: {name} behöver {needed} tidssteg för att gå {hours} h, men dess tidsfönster (tidssteg {start} till {end}) har bara {available}. Korta körtiden, flytta deadline senare eller vidga de tillåtna timmarna. Den tidigare planen behålls. Totalt {total} blockerande orsak(er) hittades; Home Assistant-loggen listar alla fynd. Detta löser sig automatiskt så snart en körning löses framgångsrikt."
+    },
+    "optimization_infeasible_power_deficit": {
+      "title": "EMHASS-planen är olösbar: huslasten kan inte försörjas",
+      "description": "Den senaste körningen av {action} var olösbar: vid {count} tidssteg kan den prognostiserade huslasten inte försörjas ens med nätimport och batteriurladdning på max. Värst vid tidssteg {timestep}: huset {house}, sol {pv}, saknas {short}. Kontrollera nätets importgräns, batteriets och växelriktarens effektgränser samt huslastprognosen. Den tidigare planen behålls. Totalt {total} blockerande orsak(er) hittades; Home Assistant-loggen listar alla fynd. Detta löser sig automatiskt så snart en körning löses framgångsrikt."
+    },
+    "optimization_infeasible_pv_surplus": {
+      "title": "EMHASS-planen är olösbar: solelsöverskottet har ingenstans att ta vägen",
+      "description": "Den senaste körningen av {action} var olösbar: vid {count} tidssteg överstiger solprognosen vad batteriet, huset och nätexporten kan ta emot. Värst vid tidssteg {timestep}: sol {pv}, huset {house}, {excess} för mycket. Aktivera PV curtailment i EMHASS, eller kontrollera nätets exportgräns och växelriktarens gränser. Den tidigare planen behålls. Totalt {total} blockerande orsak(er) hittades; Home Assistant-loggen listar alla fynd. Detta löser sig automatiskt så snart en körning löses framgångsrikt."
+    },
+    "optimization_infeasible_array_length": {
+      "title": "EMHASS-planen är olösbar: förfrågans listor har olika längd",
+      "description": "Den senaste körningen av {action} var olösbar: förfrågans listor har olika längd ({details}). Detta är en bugg i EMHASS Companion eller i en datakällprofil; rapportera den gärna med en diagnostiknedladdning. Den tidigare planen behålls. Totalt {total} blockerande orsak(er) hittades; Home Assistant-loggen listar alla fynd. Detta löser sig automatiskt så snart en körning löses framgångsrikt."
+    },
+    "optimization_infeasible_forecast_nan": {
+      "title": "EMHASS-planen är olösbar: en prognos har luckor",
+      "description": "Den senaste körningen av {action} var olösbar: {key} har {count} tomma värde(n), det första vid tidssteg {first}. En datakälla returnerade inget för en del av horisonten; kontrollera källan bakom den prognosen. Den tidigare planen behålls. Totalt {total} blockerande orsak(er) hittades; Home Assistant-loggen listar alla fynd. Detta löser sig automatiskt så snart en körning löses framgångsrikt."
     },
     "run_failed": {
       "title": "Den senaste körningen av {action} misslyckades",
@@ -1040,6 +1114,18 @@
     "standard_names_taken": {
       "title": "{count} EMHASS-entitetsnamn är redan upptagna",
       "description": "EMHASS Companion ombads publicera under EMHASS egna entitets-id, men dessa används redan:\n\n{details}\n\nNästan alltid är det EMHASS-tillägget som publicerar dem själv. De sensorerna behåller sina Companion-namn tills vidare. För att slutföra bytet: stäng av publiceringen i EMHASS (töm `publish_prefix`, eller sluta anropa dess publish-data), ta bort de kvarvarande entiteterna och ladda om EMHASS Companion. För att sluta försöka: slå av alternativet under Inställningar > Enheter och tjänster > EMHASS Companion > Konfigurera > EMHASS entitetsnamn."
+    },
+    "phase_clamp_off": {
+      "title": "Fasvakten kan inte sänka batteriladdningen",
+      "description": "En huvudsäkring är angiven i nätsteget, men tvångsladdning av batteriet kan inte begränsas i realtid i den här installationen. Planens importgräns från faserna gäller fortfarande. Se Dynamiska nätgränser i dokumentationen för vad begränsningen behöver."
+    },
+    "phase_clamp_off_no_battery_sensor": {
+      "title": "Fasvakten kan inte sänka batteriladdningen",
+      "description": "En huvudsäkring är angiven i nätsteget, men batteriet saknar effektsensor. Vakten måste mäta vad batteriet faktiskt drar. Annars får en laddning som växelriktaren inte har börjat med ännu, eller en urladdning, huset att se lättare ut än det är, och vakten tillåter för mycket. Tills en effektsensor för batteriet är vald under Konfigurera → Batteri begränsas tvångsladdning inte i realtid. Planens importgräns från faserna gäller fortfarande."
+    },
+    "phase_clamp_off_slow_profile": {
+      "title": "Fasvakten kan inte sänka batteriladdningen tillräckligt snabbt",
+      "description": "En huvudsäkring är angiven i nätsteget, men växelriktarprofilen {profile} får bara skrivas en gång var {interval}:e sekund. En sänkning som hålls tillbaka så länge kan vara längre än en överbelastad säkring tål, så tvångsladdning begränsas inte i realtid med den här profilen. Planens importgräns från faserna gäller fortfarande. En profil som pratar direkt med växelriktaren, till exempel över Modbus, har inte den begränsningen."
     }
   },
   "services": {

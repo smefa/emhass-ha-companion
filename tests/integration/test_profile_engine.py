@@ -876,3 +876,32 @@ def test_deye_clamps_a_huge_plan_to_the_everyday_ceiling(hass: HomeAssistant) ->
     # The schema stores an option default as a string, which is exactly why
     # every profile template here coerces before using one arithmetically.
     assert written["number.charge"] == int(profile.options["max_current_a"]["default"])
+
+
+@pytest.mark.parametrize(
+    ("control", "power_w", "ceiling_w", "expected"),
+    [
+        # Rounded to nearest, 2550 on a 100 W step would be 2600.
+        ({"round_to": 100}, 2550, 2550, 2500),
+        # A boost may not take the command back over the cap.
+        ({"charge_boost": 1.1, "round_to": 100}, 2550, 2550, 2500),
+        ({"charge_boost": 1.1}, 2550, 2550, 2550),
+        # Below the cap, the boost still applies.
+        ({"charge_boost": 1.1}, 2000, 2550, 2200),
+        ({"power_unit": "kw", "round_to": 0.1}, 2550, 2550, 2.5),
+        ({"power_unit": "percent_of_rated", "rated_power_w": 10000}, 2550, 2550, 25),
+        # Float noise does not cost a whole step.
+        ({"round_to": 100}, 2500.0000001, 2500.0000001, 2500),
+    ],
+)
+def test_a_charge_ceiling_holds_after_boost_and_rounding(
+    hass: HomeAssistant, control: dict, power_w: float, ceiling_w: float, expected: float
+) -> None:
+    profile = _control_profile(control)
+    value = convert_power(hass, profile, {}, "force_charge", power_w, ceiling_w=ceiling_w)
+    assert value == pytest.approx(expected)
+
+
+def test_a_ceiling_does_not_touch_discharge(hass: HomeAssistant) -> None:
+    profile = _control_profile({"round_to": 100})
+    assert convert_power(hass, profile, {}, "force_discharge", 2550, ceiling_w=1000) == 2600

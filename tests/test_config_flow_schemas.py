@@ -25,6 +25,7 @@ from custom_components.emhass_companion.config_flow import (
     _collect_tariff,
     _default_profile_options,
     _flatten_sections,
+    _grid_errors,
     _inverter_errors,
     _inverter_profile_selector,
     _load_picker_schema,
@@ -187,6 +188,14 @@ def test_grid_schema_keeps_the_limits_and_time_step_basic():
     assert {str(k) for k in _advanced_keys(schema)} == {
         "grid_import_limit_entity",
         "grid_export_limit_entity",
+        "phase_l1_entity",
+        "phase_l2_entity",
+        "phase_l3_entity",
+        "main_fuse_a",
+        "phase_margin_a",
+        "phase_voltage_v",
+        "phase_voltage_entity",
+        "phase_limit_window_min",
         CONF_COMPUTE_CURTAILMENT,
         "mpc_interval_minutes",
         "horizon_hours",
@@ -350,6 +359,71 @@ def test_a_blank_limit_sensor_is_stored_as_none():
     )
     assert collected[CONF_GRID_IMPORT_LIMIT_ENTITY] is None
     assert collected[CONF_GRID_EXPORT_LIMIT_ENTITY] is None
+
+
+# --- phase guard: main fuse + per-phase readings ------------------------------
+
+_PHASES = {
+    "phase_l1_entity": "sensor.l1",
+    "phase_l2_entity": "sensor.l2",
+    "phase_l3_entity": "sensor.l3",
+}
+
+
+def test_the_phase_guard_settings_live_in_the_advanced_section():
+    keys = {str(key) for key in _advanced_keys(grid_schema({}))}
+    assert {*_PHASES, "main_fuse_a", "phase_margin_a", "phase_voltage_v"} <= keys
+    assert "phase_limit_window_min" in keys
+
+
+def test_grid_section_opens_on_an_error():
+    schema = grid_schema({}, advanced_open=True)
+    section_key = next(k for k in schema if str(k) == ADVANCED_SECTION)
+    assert schema[section_key].options["collapsed"] is False
+
+
+def test_collect_grid_keeps_the_phase_guard():
+    collected = _collect_grid(
+        {
+            "grid_import_max_w": 11000,
+            "grid_export_max_w": 11000,
+            CONF_COMPUTE_CURTAILMENT: False,
+            **_PHASES,
+            "main_fuse_a": 16,
+            "phase_margin_a": 1.0,
+        }
+    )
+    assert collected["phase_l3_entity"] == "sensor.l3"
+    assert collected["main_fuse_a"] == 16
+    assert collected["phase_voltage_v"] == 230.0
+    assert collected["phase_voltage_entity"] is None
+
+
+def test_a_cleared_fuse_is_stored_as_none_so_the_guard_turns_off():
+    collected = _collect_grid(
+        {"grid_import_max_w": 9000, "grid_export_max_w": 9000, CONF_COMPUTE_CURTAILMENT: False}
+    )
+    assert collected["main_fuse_a"] is None
+    assert collected["phase_l1_entity"] is None
+
+
+@pytest.mark.parametrize(
+    ("submitted", "error"),
+    [
+        ({}, None),
+        ({**_PHASES, "main_fuse_a": 16}, None),
+        ({"phase_l1_entity": "sensor.l1", "main_fuse_a": 25}, None),
+        (_PHASES, None),  # an empty fuse is the off switch
+        (
+            {"phase_l1_entity": "sensor.l1", "phase_l2_entity": "sensor.l2", "main_fuse_a": 16},
+            "phase_entities_incomplete",
+        ),
+        ({"main_fuse_a": 16}, "phase_entities_incomplete"),
+        ({**_PHASES, "main_fuse_a": 1, "phase_margin_a": 1.0}, "phase_margin_too_large"),
+    ],
+)
+def test_the_phase_guard_is_all_or_nothing(submitted, error):
+    assert _grid_errors(submitted) == ({"base": error} if error else {})
 
 
 # --- time step: the dropdown offers presets plus whatever was detected -------

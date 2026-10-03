@@ -1,0 +1,362 @@
+name: Ferroamp EnergyHub (Operation Settings)
+kind: inverter
+version: 2
+
+brand: Ferroamp
+
+models:
+  - EnergyHub with ESO/ESM battery
+
+requires: Ferroamp Operation Settings (HACS, jonasbkarlsson) — cloud, via the Ferroamp Portal
+
+docs: https://github.com/jonasbkarlsson/ferroamp_operation_settings
+
+untested: true
+
+description: >-
+  Ferroamp EnergyHub through the Portal's operation settings: Manual mode for
+  forced charge, discharge and idle, Peak Shaving for self-consumption.
+
+notes: >-
+  **Nothing reaches the EnergyHub until Update is pressed.** The integration's
+  selects, numbers and switches only stage values inside Home Assistant; the
+  Update button then posts the whole set to the Ferroamp Portal, which passes
+  it on to the EnergyHub. Every action below therefore ends by pressing Update.
+  Values this profile does not write (PV, ACE, Limit import) are sent as
+  whatever the integration last held — press **Get data** once by hand before
+  enabling control so those match the Portal, or pick the Get data button
+  under Advanced to refresh them before every write, at the cost of one more
+  Portal call each time.
+
+  **This is a cloud route.** Writes take seconds to land. On a live install,
+  an Update the Status sensor reports as Success has reliably reached the
+  EnergyHub. The deadband and a 30-second write floor keep the Portal from
+  being hammered.
+
+  Mode mapping, matching the Portal: "Default" in Home Assistant is
+  **Manual** in the Portal. Forced charge is Manual + Charge at the plan's
+  power, forced discharge is Manual + Discharge, and idle is Manual with
+  battery power Off — a genuine hold. Self-consumption is **Peak Shaving**
+  with both thresholds at the values below (0 W by default), so the battery
+  charges only from surplus and covers the house, and its charge and discharge
+  references are the ceiling it may run at. A threshold slightly below zero
+  (for example -75 W) trades a little export for fewer small import blips.
+
+  Peak Shaving is also the fallback whenever a plan goes stale or control is
+  switched off. Battery SoC limits are written on every forced or
+  self-consumption command; keep them in line with the companion's own battery
+  limits so the plan and the hardware agree.
+
+  The integration has no measurements of its own. The sensors below come from
+  the separate Ferroamp MQTT integration (henricm/ha-ferroamp) with its default
+  "Ferroamp" device name; adjust them if yours differs.
+
+control:
+  archetype: mode_and_magnitude
+  power_unit: w
+  signed: false
+  invert_sign: false
+  charge_boost: 1.0
+  # The references take 0.1 W steps, but every write is a Portal round trip --
+  # there is nothing to gain from chasing single watts.
+  round_to: 100
+  # Manual-mode settings stay in force until changed. Nothing reverts.
+  lifetime: persistent
+  duration_min: 30
+  deadband_w: 200
+  # A cloud API. 30 s is also the slowest a profile may be for the phase
+  # guard's real-time charge clamp to stay available.
+  min_write_interval_s: 30
+  restore_required: true
+
+options:
+  mode_select:
+    name: Mode
+    description: Default (= Manual in the Portal), Peak Shaving or Self Consumption.
+    suggest:
+      - select.ferroamp_operation_settings_mode
+    selector:
+      entity:
+        domain: select
+
+  battery_power_mode_select:
+    name: Battery power mode
+    description: Off, Charge or Discharge. Only used in Default (Manual) mode.
+    suggest:
+      - select.ferroamp_operation_settings_battery_power_mode
+    selector:
+      entity:
+        domain: select
+
+  charge_reference_number:
+    name: Charge reference
+    suggest:
+      - number.ferroamp_operation_settings_charge_reference
+    selector:
+      entity:
+        domain: number
+
+  discharge_reference_number:
+    name: Discharge reference
+    suggest:
+      - number.ferroamp_operation_settings_discharge_reference
+    selector:
+      entity:
+        domain: number
+
+  charge_threshold_number:
+    name: Charge threshold
+    description: Peak Shaving's lower grid threshold.
+    suggest:
+      - number.ferroamp_operation_settings_charge_threshold
+    selector:
+      entity:
+        domain: number
+
+  discharge_threshold_number:
+    name: Discharge threshold
+    description: Peak Shaving's upper grid threshold.
+    suggest:
+      - number.ferroamp_operation_settings_discharge_threshold
+    selector:
+      entity:
+        domain: number
+
+  lower_reference_number:
+    name: Lower reference (SoC)
+    suggest:
+      - number.ferroamp_operation_settings_lower_reference
+    selector:
+      entity:
+        domain: number
+
+  upper_reference_number:
+    name: Upper reference (SoC)
+    suggest:
+      - number.ferroamp_operation_settings_upper_reference
+    selector:
+      entity:
+        domain: number
+
+  update_button:
+    name: Update button
+    description: Sends the staged settings to the Ferroamp Portal. Nothing takes effect without it.
+    suggest:
+      - button.ferroamp_operation_settings_update
+    selector:
+      entity:
+        domain: button
+
+  limit_export_switch:
+    name: Limit export switch
+    description: >-
+      Turned off on every command, so a forced discharge can actually export.
+      Clear this if your connection has a standing export limit you set in the
+      Portal — it is then left alone.
+    required: false
+    suggest:
+      - switch.ferroamp_operation_settings_limit_export
+    selector:
+      entity:
+        domain: switch
+
+  soc_min:
+    name: Lower SoC limit
+    description: The battery is not discharged below this. Keep it equal to the companion's minimum SoC.
+    default: 10
+    selector:
+      number:
+        min: 5
+        max: 100
+        step: 1
+        unit_of_measurement: "%"
+        mode: box
+
+  soc_max:
+    name: Upper SoC limit
+    description: The battery is not charged above this. Keep it equal to the companion's maximum SoC.
+    default: 100
+    selector:
+      number:
+        min: 5
+        max: 100
+        step: 1
+        unit_of_measurement: "%"
+        mode: box
+
+  get_data_button:
+    advanced: true
+    name: Get data button (optional)
+    description: >-
+      Pressed before every write to reload the Portal's current settings, so
+      fields this profile does not write (PV, ACE, Limit import) are never sent
+      stale. Costs one extra Portal call per write.
+    required: false
+    selector:
+      entity:
+        domain: button
+
+  self_consume_charge_threshold_w:
+    advanced: true
+    name: Self-consumption charge threshold
+    description: >-
+      Peak Shaving charges the battery while grid power is below this. 0 W
+      charges from surplus only; a little below zero, such as -75 W, leaves a
+      small export margin.
+    default: 0
+    selector:
+      number:
+        min: -5000
+        max: 5000
+        step: 1
+        unit_of_measurement: W
+        mode: box
+
+  self_consume_discharge_threshold_w:
+    advanced: true
+    name: Self-consumption discharge threshold
+    description: >-
+      Peak Shaving discharges the battery while grid power is above this. Keep
+      it equal to or above the charge threshold.
+    default: 0
+    selector:
+      number:
+        min: -5000
+        max: 5000
+        step: 1
+        unit_of_measurement: W
+        mode: box
+
+  self_consume_power_w:
+    advanced: true
+    name: Self-consumption power ceiling
+    description: >-
+      The charge and discharge references used in Peak Shaving: the most the
+      battery may move while following the house. Set it at or above your
+      battery's rating to leave it unrestricted.
+    default: 12000
+    selector:
+      number:
+        min: 0
+        max: 100000
+        step: 100
+        unit_of_measurement: W
+        mode: box
+
+sensors:
+  # From henricm/ha-ferroamp, not from the Operation Settings integration.
+  battery_soc: sensor.ferroamp_system_state_of_charge
+  pv_power: sensor.ferroamp_solar_power
+  load_power: sensor.ferroamp_consumption_power
+  # Both signs confirmed on a live EnergyHub, and both match EMHASS:
+  battery_power: sensor.ferroamp_battery_power   # positive = discharging
+  grid_power: sensor.ferroamp_grid_power         # positive = importing
+
+limits:
+  # battery_capacity_wh: "{{ states('sensor.ferroamp_total_rated_capacity_of_all_batteries') | float(0) }}"
+
+# The mode and battery-power-mode option strings are constants in the
+# integration's own source (const.py), not per-firmware text, so they are
+# written here directly rather than asked for.
+#
+# Order within an action does not matter to the hardware -- everything is
+# staged locally and applied together by Update -- but it stays power first,
+# mode second, Update last, so the staged state is never a mode with a stale
+# power behind it.
+
+actions:
+  self_consume:
+    - service: button.press
+      target: { entity_id: "{{ options.get_data_button }}" }
+    - service: number.set_value
+      target: { entity_id: "{{ options.charge_threshold_number }}" }
+      data: { value: "{{ options.self_consume_charge_threshold_w }}" }
+    - service: number.set_value
+      target: { entity_id: "{{ options.discharge_threshold_number }}" }
+      data: { value: "{{ options.self_consume_discharge_threshold_w }}" }
+    - service: number.set_value
+      target: { entity_id: "{{ options.charge_reference_number }}" }
+      data: { value: "{{ options.self_consume_power_w }}" }
+    - service: number.set_value
+      target: { entity_id: "{{ options.discharge_reference_number }}" }
+      data: { value: "{{ options.self_consume_power_w }}" }
+    - service: number.set_value
+      target: { entity_id: "{{ options.lower_reference_number }}" }
+      data: { value: "{{ [options.soc_min | float, options.soc_max | float] | min }}" }
+    - service: number.set_value
+      target: { entity_id: "{{ options.upper_reference_number }}" }
+      data: { value: "{{ [options.soc_min | float, options.soc_max | float] | max }}" }
+    - service: switch.turn_off
+      target: { entity_id: "{{ options.limit_export_switch }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.mode_select }}" }
+      data: { option: Peak Shaving }
+    - service: button.press
+      target: { entity_id: "{{ options.update_button }}" }
+
+  force_charge:
+    - service: button.press
+      target: { entity_id: "{{ options.get_data_button }}" }
+    - service: number.set_value
+      target: { entity_id: "{{ options.charge_reference_number }}" }
+      data: { value: "{{ power }}" }
+    - service: number.set_value
+      target: { entity_id: "{{ options.discharge_reference_number }}" }
+      data: { value: 0 }
+    - service: number.set_value
+      target: { entity_id: "{{ options.lower_reference_number }}" }
+      data: { value: "{{ [options.soc_min | float, options.soc_max | float] | min }}" }
+    - service: number.set_value
+      target: { entity_id: "{{ options.upper_reference_number }}" }
+      data: { value: "{{ [options.soc_min | float, options.soc_max | float] | max }}" }
+    - service: switch.turn_off
+      target: { entity_id: "{{ options.limit_export_switch }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.battery_power_mode_select }}" }
+      data: { option: Charge }
+    - service: select.select_option
+      target: { entity_id: "{{ options.mode_select }}" }
+      data: { option: Default }
+    - service: button.press
+      target: { entity_id: "{{ options.update_button }}" }
+
+  force_discharge:
+    - service: button.press
+      target: { entity_id: "{{ options.get_data_button }}" }
+    - service: number.set_value
+      target: { entity_id: "{{ options.discharge_reference_number }}" }
+      data: { value: "{{ power }}" }
+    - service: number.set_value
+      target: { entity_id: "{{ options.charge_reference_number }}" }
+      data: { value: 0 }
+    - service: number.set_value
+      target: { entity_id: "{{ options.lower_reference_number }}" }
+      data: { value: "{{ [options.soc_min | float, options.soc_max | float] | min }}" }
+    - service: number.set_value
+      target: { entity_id: "{{ options.upper_reference_number }}" }
+      data: { value: "{{ [options.soc_min | float, options.soc_max | float] | max }}" }
+    - service: switch.turn_off
+      target: { entity_id: "{{ options.limit_export_switch }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.battery_power_mode_select }}" }
+      data: { option: Discharge }
+    - service: select.select_option
+      target: { entity_id: "{{ options.mode_select }}" }
+      data: { option: Default }
+    - service: button.press
+      target: { entity_id: "{{ options.update_button }}" }
+
+  idle:
+    # Manual with battery power Off: Update sends both power references as 0,
+    # whatever the numbers hold, so the battery is held while PV and grid
+    # carry the house.
+    - service: button.press
+      target: { entity_id: "{{ options.get_data_button }}" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.battery_power_mode_select }}" }
+      data: { option: "Off" }
+    - service: select.select_option
+      target: { entity_id: "{{ options.mode_select }}" }
+      data: { option: Default }
+    - service: button.press
+      target: { entity_id: "{{ options.update_button }}" }

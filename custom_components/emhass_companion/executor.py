@@ -18,9 +18,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 import logging
+import math
 from typing import Any, Final
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.util import dt as dt_util
 
 from .const import (
@@ -32,11 +33,13 @@ from .const import (
     DEFAULT_POWER_DEADBAND_W,
     LIFETIME_PERSISTENT,
     MODE_AUTO,
+    MODE_FORCE_CHARGE,
     MODE_IDLE,
     MODE_SELF_CONSUME,
 )
 from .coordinator import EmhassCoordinator
 from .deferrable import DeferrableRuntime, resolve_should_run
+from .phase_guard import clamp_blocker, clamp_charge
 from .profiles import (
     Profile,
     ProfileError,
@@ -89,6 +92,14 @@ class Decision:
     with no way to tell which branch ran; this is what makes that visible on
     the sensor, in dry-run, before control is ever handed over."""
 
+    planned_charge_w: float = 0.0
+    """The forced charge the plan asked for, before the phase guard. Zero
+    whenever the plan is not asking to charge, which is also how the guard
+    knows there is nothing of this decision for it to revisit."""
+
+    phase_cut_w: float = 0.0
+    """How much of ``planned_charge_w`` the phase guard took away."""
+
     def as_attributes(self) -> dict[str, Any]:
         return {
             "action": self.action,
@@ -102,6 +113,8 @@ class Decision:
             "curtail": self.curtail,
             "curtail_w": round(self.curtail_w),
             "rules": self.rules,
+            "planned_charge_w": round(self.planned_charge_w),
+            "phase_cut_w": round(self.phase_cut_w),
         }
 
 
@@ -127,9 +140,15 @@ class Executor:
         # inverters gate remote control behind a mode that has to be opened
         # once per session rather than before every write.
         self._prepared = False
-        # Used to notice the control gate being switched *off*, which is one of
-        # the moments an inverter has to be given back.
-        self._control_was_enabled = False
+        # Axes this executor may have written to since control was last handed
+        # back. Marked *before* a write rather than after it succeeds: a
+        # multi-step action that fails halfway (mode set, power write times
+        # out) has still left the inverter somewhere it was not, and only a
+        # restore puts it back. `_last_applied` cannot answer this -- it records
+        # commands known to have landed, for the deadband. Cleared per axis
+        # only by a restore that went through, so a handover that fails is
+        # retried rather than forgotten.
+        self._held: set[str] = set()
         # Every write to the inverter goes through here, one at a time. Applies
         # are fired from two independent sources -- every coordinator update
         # and every clock tick -- and a restore can be triggered from a third
@@ -141,6 +160,9 @@ class Executor:
         # by the apply's own write, which is the state this executor is meant
         # to be incapable of leaving behind.
         self._lock = asyncio.Lock()
+        # Set while a phase-guard re-apply is queued or running, so a meter
+        # reporting every second queues one apply rather than a pile of them.
+        self._phase_apply_pending = False
 
     # -- gates ----------------------------------------------------------------
 
@@ -215,13 +237,20 @@ class Executor:
                     f"{decision.action}→{resolved_action}: profile defines no "
                     f"'{decision.action}' action"
                 )
+            # A phase-guard cap is a ceiling on what is written, not just on
+            # what was decided: the profile's boost and rounding come after
+            # the clamp, and must not take the command back over it.
+            ceiling_w = decision.power_w if decision.phase_cut_w else None
             try:
                 battery_steps = render_action(
                     self.hass,
                     profile,
                     self.coordinator.config.inverter.options,
                     resolved_action,
-                    power_w=round(decision.power_w),
+                    power_w=math.floor(decision.power_w)
+                    if ceiling_w is not None
+                    else round(decision.power_w),
+                    ceiling_w=ceiling_w,
                     soc=self.coordinator.soc_percent,
                     soc_target=self.coordinator.config.battery.soc_target * 100,
                 )
@@ -256,9 +285,11 @@ class Executor:
         if not self.control_enabled:
             # Turning the gate off mid-session is a handover, not just a stop:
             # a persistent-register inverter would otherwise sit in whatever
-            # forced mode the last command left it in, indefinitely.
-            if self._control_was_enabled:
-                self._control_was_enabled = False
+            # forced mode the last command left it in, indefinitely. Asked on
+            # every gated cycle until it has gone through: a handover that
+            # failed once (the inverter was briefly unreachable) is exactly
+            # the one that still needs doing.
+            if self._held:
                 # Already holding _lock, so the unlocked body directly.
                 await self._async_restore("control switch turned off")
             decision.reason = f"{decision.reason} (control disabled, not applied)"
@@ -272,7 +303,6 @@ class Executor:
             _LOGGER.debug("Would apply %s: %s", decision.action, decision.reason)
             return decision
 
-        self._control_was_enabled = True
         await self._async_execute(
             decision, resolved_action, battery_steps, curtail_action, curtail_steps
         )
@@ -298,10 +328,11 @@ class Executor:
         restores run independently so a failure in one still lets the other
         through.
 
-        What it does check is whether this executor ever took control. Writing
-        to an inverter we have never written to would mean a dry run reaching
-        for the hardware on shutdown, and fighting whatever automation is
-        actually in charge.
+        What it does check is whether this executor may have written to each
+        axis since the last handover (``_held``) -- including a write that
+        raised partway. Writing to an inverter we have never written to would
+        mean a dry run reaching for the hardware on shutdown, and fighting
+        whatever automation is actually in charge.
 
         Serialised against ``async_apply`` (see ``_lock``): a handover that
         interleaves with an in-flight apply is a handover the apply's own
@@ -312,16 +343,19 @@ class Executor:
 
     async def _async_restore(self, reason: str) -> None:
         profile = self._inverter_profile()
-        if profile is None or (not self._last_applied and not self._prepared):
+        if profile is None or not self._held:
             return
 
         await self._async_restore_curtailment(profile, reason)
         await self._async_restore_battery(profile, reason)
 
     async def _async_restore_curtailment(self, profile: Profile, reason: str) -> None:
-        if AXIS_CURTAIL not in self._last_applied:
+        if AXIS_CURTAIL not in self._held:
             return
         if not (profile.defines(ACTION_CURTAIL) and profile.defines(ACTION_UNCURTAIL)):
+            # Nothing left to undo it with (the profile changed under us), and
+            # asking again every cycle would not change that.
+            self._held.discard(AXIS_CURTAIL)
             return
 
         try:
@@ -340,13 +374,23 @@ class Executor:
             _LOGGER.error("Could not restore curtailment (%s): %s", reason, err)
             return
 
-        del self._last_applied[AXIS_CURTAIL]
+        # pop, not del: a write that raised partway is held without ever
+        # having been recorded as applied.
+        self._last_applied.pop(AXIS_CURTAIL, None)
+        self._held.discard(AXIS_CURTAIL)
         _LOGGER.info("Restored curtailment: %s", reason)
 
     async def _async_restore_battery(self, profile: Profile, reason: str) -> None:
+        if AXIS_BATTERY not in self._held:
+            # Only curtailment was ever written. Handing back a battery we
+            # never commanded is a write nobody asked for -- and, with the
+            # handover retried until it goes through, one that would repeat
+            # every cycle a curtailment restore keeps failing.
+            return
         action = ACTION_RESTORE if profile.defines(ACTION_RESTORE) else MODE_SELF_CONSUME
         if not profile.defines(action):
             _LOGGER.debug("Profile %s defines no way to restore control", profile.key)
+            self._held.discard(AXIS_BATTERY)
             return
 
         try:
@@ -365,6 +409,7 @@ class Executor:
             return
 
         self._last_applied.pop(AXIS_BATTERY, None)
+        self._held.discard(AXIS_BATTERY)
         self._prepared = False
         _LOGGER.info("Restored inverter control: %s", reason)
 
@@ -436,10 +481,20 @@ class Executor:
                 rules=["plan has no battery power for this moment; uncurtailing"],
             )
 
+        # Self-consumption the phase guard forced is not the plan's choice, so
+        # it must not make leaving self-consumption harder once the phases
+        # clear -- that hysteresis is for the plan's own boundary chatter.
         in_self_consume = (
-            self.last_decision is not None and self.last_decision.action == MODE_SELF_CONSUME
+            self.last_decision is not None
+            and self.last_decision.action == MODE_SELF_CONSUME
+            and not self.last_decision.phase_cut_w
         )
         action, power, battery_rules = decide_battery(row, config, in_self_consume=in_self_consume)
+        planned_charge_w = power if action == MODE_FORCE_CHARGE else 0.0
+        phase_cut_w = 0.0
+        if planned_charge_w:
+            action, power, phase_cut_w, phase_rules = self._phase_clamp(planned_charge_w)
+            battery_rules.extend(phase_rules)
         curtail, curtail_w, curtail_rules = decide_curtailment(row)
         return Decision(
             action=action,
@@ -449,7 +504,112 @@ class Executor:
             curtail=curtail,
             curtail_w=curtail_w,
             rules=[*battery_rules, *curtail_rules],
+            planned_charge_w=planned_charge_w,
+            phase_cut_w=phase_cut_w,
         )
+
+    def _phase_clamp(self, planned_w: float) -> tuple[str, float, float, list[str]]:
+        """A planned forced charge, cut to what the main fuse's phases allow now.
+
+        Only a forced charge is ever touched. Discharge and self-consumption
+        both take load off the grid, and the plan's own import limit already
+        covers the aggregate -- what it cannot see is the worst phase between
+        two solves, which is what this is for.
+        """
+        guard = self.coordinator.phase_guard
+        if guard is None:
+            return MODE_FORCE_CHARGE, planned_w, 0.0, []
+        if blocker := self.phase_clamp_blocker():
+            return (
+                MODE_FORCE_CHARGE,
+                planned_w,
+                0.0,
+                [f"phase guard: clamp off ({blocker}); charge not limited"],
+            )
+        if not guard.available:
+            return (
+                MODE_FORCE_CHARGE,
+                planned_w,
+                0.0,
+                ["phase guard: phase readings unavailable; charge not limited"],
+            )
+        if not guard.charge_ready:
+            return (
+                MODE_FORCE_CHARGE,
+                planned_w,
+                0.0,
+                ["phase guard: battery power unavailable; charge not limited"],
+            )
+        return clamp_charge(planned_w, guard.charge_cap_w)
+
+    def phase_clamp_blocker(self) -> str | None:
+        """Why the phase clamp cannot run here, or None. See clamp_blocker."""
+        config = self.coordinator.config
+        profile = self._inverter_profile()
+        control = profile.control if profile is not None else {}
+        return clamp_blocker(
+            battery_enabled=config.battery.enabled,
+            battery_power_entity=config.battery_power_entity,
+            min_write_interval_s=float(control.get("min_write_interval_s", 0)),
+        )
+
+    # -- phase guard ----------------------------------------------------------
+
+    @callback
+    def async_phase_changed(self) -> None:
+        """React to a new phase reading between plans, if the clamp would move.
+
+        Runs on every meter update, so it is only a comparison until there is
+        something to do. A full apply rather than a battery-only write, so the
+        published decision, the rules trace and the inverter never disagree.
+        """
+        if self._phase_apply_pending or not self._phase_retarget_needed():
+            return
+        self._phase_apply_pending = True
+        self.coordinator.config_entry.async_create_background_task(
+            self.hass, self._async_phase_apply(), "emhass_phase_guard_apply", eager_start=False
+        )
+
+    async def _async_phase_apply(self) -> None:
+        try:
+            await self.async_apply()
+        finally:
+            self._phase_apply_pending = False
+
+    def _phase_retarget_needed(self) -> bool:
+        decision = self.last_decision
+        guard = self.coordinator.phase_guard
+        if guard is None or decision is None or not decision.planned_charge_w:
+            return False
+        if self.phase_clamp_blocker():
+            return False
+        if decision.action not in (MODE_FORCE_CHARGE, MODE_SELF_CONSUME):
+            # The plan has moved on (manual mode, stale plan) since this
+            # decision; the next regular apply owns it.
+            return False
+        cap = guard.charge_cap_w
+        action, power, _cut, _rules = clamp_charge(decision.planned_charge_w, cap)
+        deadband = self._deadband_w()
+        if action != decision.action or abs(power - decision.power_w) >= deadband:
+            return True
+        # Decided, but not yet written: a profile's minimum write interval can
+        # hold a cut back. Keep asking until it lands -- a change of action
+        # whatever the watts (150 W of charge still has to become
+        # self-consumption under a 200 W deadband), and a lowering by more
+        # than the deadband.
+        last = self._last_applied.get(AXIS_BATTERY)
+        if not self.control_enabled or last is None:
+            return False
+        profile = self._inverter_profile()
+        target = self._resolve_action(profile, action) if profile is not None else action
+        if last.action != target:
+            return True
+        return last.action == MODE_FORCE_CHARGE and last.power_w - power >= deadband
+
+    def _deadband_w(self) -> float:
+        profile = self._inverter_profile()
+        control = profile.control if profile is not None else {}
+        return float(control.get("deadband_w", DEFAULT_POWER_DEADBAND_W))
 
     def _plan_usable(self) -> bool:
         """Whether there is a plan worth reading rows out of.
@@ -469,6 +629,12 @@ class Executor:
         decisions: dict[str, bool] = {}
         for load in self.coordinator.loads.all():
             if not load.enabled:
+                # Parked, not abandoned: the same answer its Should run sensor
+                # gives (off, unless forced on). Skipping it instead left an
+                # appliance that was running when it was disabled switched on,
+                # and its commanded clock open -- an on-demand run went on
+                # being credited while the sensor said "off, disabled".
+                decisions[load.subentry_id] = resolve_should_run(load.mode, False)
                 continue
             scheduled = self._scheduled(load) if use_plan else False
             if load.armable and not load.requested:
@@ -528,6 +694,8 @@ class Executor:
         ):
             return
 
+        # Before the first step, not after the last: see `_held`.
+        self._held.add(AXIS_BATTERY)
         try:
             if profile is not None:
                 await self._async_prepare(profile, decision)
@@ -560,6 +728,7 @@ class Executor:
         ):
             return
 
+        self._held.add(AXIS_CURTAIL)
         try:
             await async_execute_steps(self.hass, steps)
         except Exception as err:  # noqa: BLE001 - one bad axis must not stop the other
@@ -656,24 +825,35 @@ class Executor:
             # this method, and must not be credited as run time -- nothing was
             # asked of the appliance. A load with no control entity still
             # counts: its own automation follows the same decision through the
-            # Should run binary sensor.
-            load.observe_command(should_run, now)
+            # Should run binary sensor, so the decision is the command.
             if not load.control_entity:
+                load.observe_command(should_run, now)
                 continue
-            await self._async_set_load(load, should_run, decision)
+            # A controlled one is credited with what the switch was actually
+            # left in, after the call: a turn_on that failed (the plug is
+            # offline) commanded nothing, and crediting it would let an
+            # on-demand run "complete" without the appliance ever starting.
+            running = await self._async_set_load(load, should_run, decision)
+            load.observe_command(running, now)
 
     async def _async_set_load(
         self, load: DeferrableRuntime, should_run: bool, decision: Decision
-    ) -> None:
+    ) -> bool:
+        """Switch one load, and say whether it is now commanded on.
+
+        ``should_run`` when the switch is (or was just put) where the decision
+        wants it; what the switch still says when the call failed; False when
+        there is no switch to command at all.
+        """
         entity_id = load.control_entity
         state = self.hass.states.get(entity_id)
         if state is None:
             _LOGGER.warning("Control entity %s for %s does not exist", entity_id, load.name)
-            return
+            return False
 
         is_on = state.state == "on"
         if is_on == should_run:
-            return
+            return should_run
 
         domain = entity_id.partition(".")[0]
         service = "turn_on" if should_run else "turn_off"
@@ -684,10 +864,11 @@ class Executor:
         except Exception as err:  # noqa: BLE001 - one bad load must not stop the rest
             decision.error = f"{load.name}: {err}"
             _LOGGER.error("Failed to switch %s: %s", load.name, err)
-            return
+            return is_on
 
         decision.applied = True
         _LOGGER.info("Turned %s %s", load.name, "on" if should_run else "off")
+        return should_run
 
     # -- profile --------------------------------------------------------------
 

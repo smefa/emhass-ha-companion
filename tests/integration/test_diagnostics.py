@@ -321,3 +321,42 @@ async def test_a_credential_a_profile_contributed_to_the_payload_is_redacted(
     assert diagnostics["last_payload"]["solcast_api_key"] == REDACTED
     # Redaction must not cost the payload's actual troubleshooting value.
     assert diagnostics["last_payload"]["optimization_time_step"] == 15
+
+
+async def test_an_infeasible_run_names_its_cause_in_triage(hass: HomeAssistant) -> None:
+    from custom_components.emhass_companion.infeasibility import Finding, Severity
+    from custom_components.emhass_companion.models import LastRun
+
+    entry = await _setup_entry(hass)
+    coordinator = entry.runtime_data.coordinator
+    coordinator.data.last_run = LastRun(status="ok", infeasible=True)
+    coordinator.data.last_infeasibility = [
+        Finding(
+            Severity.CRITICAL,
+            "timestep0_deficit",
+            "Timestep 0 cannot supply the loads pinned to it",
+            "Car 10.0 kW pinned against a 7.1 kW grid limit.",
+            {"pins": "Car 10.0 kW"},
+        )
+    ]
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+    assert diagnostics["last_infeasibility"][0]["code"] == "timestep0_deficit"
+    assert diagnostics["last_infeasibility"][0]["severity"] == "CRITICAL"
+    assert any(
+        "infeasible" in finding["message"] and "Timestep 0 cannot supply" in finding["message"]
+        for finding in diagnostics["triage"]
+    )
+
+
+async def test_an_infeasible_run_with_no_finding_points_at_the_script(
+    hass: HomeAssistant,
+) -> None:
+    from custom_components.emhass_companion.models import LastRun
+
+    entry = await _setup_entry(hass)
+    entry.runtime_data.coordinator.data.last_run = LastRun(status="ok", infeasible=True)
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+    assert diagnostics["last_infeasibility"] == []
+    assert any("check_infeasibility.py" in finding["message"] for finding in diagnostics["triage"])

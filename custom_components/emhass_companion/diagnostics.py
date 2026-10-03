@@ -39,6 +39,7 @@ from .const import CONF_URL, DOMAIN, ML_MIN_HISTORY_DAYS, USER_PROFILE_DIR
 from .coordinator import EmhassCoordinator
 from .deferrable import live_settings
 from .health import collect_entity_references
+from .infeasibility import headline
 
 # A down add-on must produce a finding, not a 30s hang -- api.py's own
 # READ_TIMEOUT is sized for a slow solve, not for a diagnostics download
@@ -131,6 +132,13 @@ async def async_get_config_entry_diagnostics(
         # of the user's own sensors disagree -- and none of those are visible
         # from the sensor's state alone.
         "savings": _savings_section(entry),
+        # Live readings and the two limits derived from them, so a "why did it
+        # stop charging" report carries the phase that did it.
+        "phase_guard": (
+            coordinator.phase_guard.as_attributes()
+            if coordinator.phase_guard is not None
+            else {"configured": False}
+        ),
         "end_soc": (
             {
                 "soc": data.end_soc.soc,
@@ -150,6 +158,10 @@ async def async_get_config_entry_diagnostics(
         "last_payload": _redact_config(data.payload or {}),
         "warnings": data.warnings,
         "deferrable_order": data.load_order,
+        # What the Companion's own checks found when the last run came back
+        # infeasible; empty otherwise. The same checks run from the bundle
+        # with scripts/check_infeasibility.py.
+        "last_infeasibility": [finding.as_dict() for finding in data.last_infeasibility],
         "environment": environment_section,
         "backend": backend_section,
         "subentries": subentries_section,
@@ -612,11 +624,16 @@ def _triage_section(
             detail = data.last_run.error_message or data.last_run.status
             findings.append({"severity": "error", "message": f"Last run did not succeed: {detail}"})
         elif data.last_run.infeasible:
+            top = headline(data.last_infeasibility)
+            cause = (
+                f"most likely: {top.title}. {top.detail}"
+                if top
+                else "no specific cause found -- see scripts/check_infeasibility.py"
+            )
             findings.append(
                 {
                     "severity": "warning",
-                    "message": "Last run reported the optimisation problem as infeasible -- "
-                    "see scripts/check_infeasibility.py",
+                    "message": "Last run reported the optimisation problem as infeasible, " + cause,
                 }
             )
 

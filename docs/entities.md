@@ -26,6 +26,8 @@
 | `sensor.*_period_peak` | The demand-charge aggregate incurred so far this billing period. Only if the network tariff defines a demand charge |
 | `sensor.*_peak_headroom` | How much more can be drawn before a new billing-period peak is set. Same condition as above |
 | `number.*_peak_target` | The manual fallback ceiling used while a windowed demand charge can't yet be priced directly. Same condition as above |
+| `sensor.*_phase_headroom` | Symmetric charging the main fuse's worst phase has room for right now, in W. Only if you configured a main fuse — see [Dynamic grid limits](grid_limits.md#three-phase-imbalance-the-phase-guard) |
+| `binary_sensor.*_phase_guard_active` | On while a forced charge is being held below the plan to protect the main fuse. Same condition as above |
 | `binary_sensor.*_plan_out_of_date` | The plan is too old to act on |
 | `binary_sensor.*_source_readings_unavailable` | One of the entities this integration reads has stopped reporting — see [Troubleshooting](troubleshooting.md#when-a-source-stops-reporting) |
 | `switch.*_control_enabled` | Master gate on acting. Ships **off** |

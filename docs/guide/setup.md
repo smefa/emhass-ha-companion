@@ -334,12 +334,19 @@ is under **Advanced settings**.
 - **Maximum import power** / **Maximum export power** — your connection's
   limits, in W.
 - **Import limit sensor** / **Export limit sensor** — leave empty unless your
-  usable limit moves. Point them at a sensor giving the limit in W right now
-  and it's used instead of the fixed number above. The common reason is a
-  three-phase connection with uneven phase loading, where the fixed number
-  overstates what you can actually draw — see
-  [Dynamic grid limits](../grid_limits.md) for the template. A sensor can only
-  ever lower the fixed limit, never raise it.
+  usable limit moves for a reason other than phase imbalance: load balancing,
+  a dynamic main fuse, a curtailment order from the network operator. Point
+  them at a sensor giving the limit in W right now and it's used instead of
+  the fixed number above. A sensor can only ever lower the fixed limit, never
+  raise it.
+- **Phase L1 / L2 / L3 reading**, **Main fuse per phase** — for a three-phase
+  house, fill these in instead of writing a limit template. The plan gets the
+  worst phase's limit, and a forced battery charge is cut within seconds if a
+  phase gets close to its fuse. **Fuse margin**, **Phase voltage** and
+  **Phase limit look-back** have sensible defaults. **Voltage sensor** is
+  optional: pick your meter's phase voltage if your phase readings are in
+  watts. See
+  [Dynamic grid limits](../grid_limits.md#three-phase-imbalance-the-phase-guard).
 - **Capacity (demand) charge** — only for network tariffs that bill your
   highest power draw, not just your energy. Enter the price per kW and the
   plan flattens its worst import peak instead of only chasing cheap hours.

@@ -2298,3 +2298,127 @@ def test_an_outdoor_temperature_forecast_is_sent_when_provided():
     forecast = result.payload["outdoor_temperature_forecast"]
     assert isinstance(forecast, dict)
     assert forecast["2026-07-28T10:00:00+00:00"] == 15.0
+
+
+# -- timestep-0 pins vs the grid import limit ------------------------------------
+
+
+def _running(name: str, *, power: float, nominal: float, **fields) -> DeferrableLoad:
+    return _load(
+        subentry_id=name.lower(),
+        name=name,
+        nominal_power_w=nominal,
+        current_state=True,
+        current_power_w=power,
+        **fields,
+    )
+
+
+def _pins(limit_w: float, house_w: float, *loads: DeferrableLoad) -> tuple[dict, list[str]]:
+    result = build_payload(
+        _inputs(loads=list(loads), grid_import_limit_w=limit_w, load_live_w=house_w)
+    )
+    return result.payload, result.warnings
+
+
+def test_pins_that_fit_the_import_limit_are_left_alone():
+    car = _running("Car", power=1400, nominal=11000, semi_continuous=False, minimum_power_w=1400)
+    payload, warnings = _pins(7102, 900, car)
+    assert payload["def_current_power"] == [1400]
+    assert not [w for w in warnings if "pinned" in w]
+
+
+def test_a_modulating_pin_is_shrunk_to_what_the_import_limit_leaves():
+    """2026-10-01 22:00: the car pinned at 10 kW against a 7.1 kW live fuse
+    limit with 900 W of house -- infeasible, the whole plan lost."""
+    car = _running("Car", power=10000, nominal=11000, semi_continuous=False, minimum_power_w=1400)
+    payload, warnings = _pins(7102, 900, car)
+    assert payload["def_current_power"] == [6202]
+    assert any(w.startswith("Car: pinned at 10000 W") and "6202 W instead" in w for w in warnings)
+
+
+def test_shrinking_shares_the_cut_and_leaves_an_on_off_load_whole():
+    """A semi-continuous load is forced on at nominal, not pinned to a wattage,
+    so it cannot give part of itself; the modulating one takes the cut."""
+    car = _running("Car", power=10000, nominal=11000, semi_continuous=False, minimum_power_w=1400)
+    dishwasher = _running("Dishwasher", power=1100, nominal=1100)
+    payload, _warnings = _pins(7102, 900, car, dishwasher)
+    assert payload["def_current_power"] == [5102, 1100]
+
+
+def test_a_pin_that_cannot_fit_even_at_its_minimum_is_released():
+    car = _running("Car", power=10000, nominal=11000, semi_continuous=False, minimum_power_w=1400)
+    dishwasher = _running("Dishwasher", power=1100, nominal=1100)
+    payload, warnings = _pins(2000, 900, car, dishwasher)
+    # 1100 W left: not enough for the car's 1400 W minimum, enough for the
+    # dishwasher -- which is released first (last load) and then taken back.
+    assert payload["def_current_power"] == [0.0, 1100]
+    assert any(w.startswith("Car:") and "not pinned this run" in w for w in warnings)
+    assert not any(w.startswith("Dishwasher:") for w in warnings)
+
+
+def test_nothing_left_pinned_sends_no_pins_at_all():
+    car = _running("Car", power=10000, nominal=11000, semi_continuous=False, minimum_power_w=1400)
+    payload, _warnings = _pins(1000, 900, car)
+    assert "def_current_power" not in payload
+
+
+def test_a_single_constant_pin_is_not_counted():
+    """EMHASS ignores def_current_power for a single-constant load, so it is
+    neither part of the deficit nor something to shrink."""
+    block = _running("Block", power=5000, nominal=5000, single_constant=True)
+    payload, warnings = _pins(3000, 900, block)
+    assert payload["def_current_power"] == [5000]
+    assert not [w for w in warnings if "pinned" in w]
+
+
+def test_day_ahead_pins_are_left_alone():
+    car = _running("Car", power=10000, nominal=11000, semi_continuous=False, minimum_power_w=1400)
+    result = build_payload(
+        _inputs(action=ACTION_DAYAHEAD, loads=[car], grid_import_limit_w=7102, load_live_w=900)
+    )
+    assert result.payload["def_current_power"] == [10000]
+
+
+def test_the_house_load_comes_from_the_forecast_covering_timestep_zero():
+    """The forecast goes out as a timestamp mapping, not a list. Read as a
+    list it was never found, and the house counted as nothing: a 7102 W pin
+    against a 7102 W limit, with 900 W of house on top, sailed through."""
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    car = _running("Car", power=7102, nominal=11000, semi_continuous=False, minimum_power_w=1400)
+    result = build_payload(
+        _inputs(loads=[car], grid_import_limit_w=7102, load=_series(now, 24, 900.0))
+    )
+    assert result.payload["def_current_power"] == [6202]
+
+
+def test_a_shrunk_pin_never_rounds_below_its_minimum():
+    """Pins go out in whole watts, rounded down. A 1400.5 W minimum must not
+    become a 1400 W pin -- below the minimum EMHASS holds the load to."""
+    car = _running("Car", power=10000, nominal=11000, semi_continuous=False, minimum_power_w=1400.5)
+    payload, warnings = _pins(2300, 900, car)  # 1400 W left: short of 1400.5
+    assert "def_current_power" not in payload
+    assert any(w.startswith("Car:") and "not pinned this run" in w for w in warnings)
+
+
+def test_a_running_single_constant_block_is_taken_off_the_budget_first():
+    """EMHASS holds a running single-constant load on at nominal from its
+    state alone. It cannot be shrunk, so the pins have to fit around it."""
+    block = _running("Block", power=0, nominal=3000, single_constant=True)
+    car = _running("Car", power=5000, nominal=11000, semi_continuous=False, minimum_power_w=1400)
+    payload, _warnings = _pins(7102, 900, block, car)
+    assert payload["def_current_power"] == [0.0, 3202]
+
+
+def test_what_is_held_on_beyond_the_limit_is_reported_not_hidden():
+    """A minimum on-time still owed keeps a load on at timestep 0 whatever its
+    pin says. If that alone overruns the limit there is nothing left to shrink,
+    and the warning says so instead of the plan just failing."""
+    car = _running("Car", power=10000, nominal=11000, semi_continuous=False, minimum_power_w=1400)
+    heater = _running(
+        "Heater", power=1100, nominal=1100, minimum_on_time_minutes=60, current_on_timesteps=0
+    )
+    payload, warnings = _pins(1500, 900, car, heater)
+    # Both pins released: the heater's own minimum on-time keeps it on anyway.
+    assert "def_current_power" not in payload
+    assert any("still needs 500 W" in w and "Heater 1100 W" in w for w in warnings)

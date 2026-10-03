@@ -196,6 +196,22 @@ CONF_GRID_EXPORT_MAX: Final = "grid_export_max_w"
 # payload.resolve_grid_limit.
 CONF_GRID_IMPORT_LIMIT_ENTITY: Final = "grid_import_limit_entity"
 CONF_GRID_EXPORT_LIMIT_ENTITY: Final = "grid_export_limit_entity"
+# The main fuse, per phase, and the meter readings it is checked against
+# (phase_guard.py). Together they replace the hand-written per-phase import
+# limit template: the plan gets the same worst-phase limit, smoothed towards
+# the safe side, and the executor gets a real-time clamp on grid charging that
+# the plan alone cannot provide. Each phase entity may report W, kW or A --
+# read from its unit. One entity means a single-phase connection; otherwise
+# all three are required.
+CONF_PHASE_ENTITIES: Final = ("phase_l1_entity", "phase_l2_entity", "phase_l3_entity")
+CONF_MAIN_FUSE_A: Final = "main_fuse_a"
+CONF_PHASE_MARGIN_A: Final = "phase_margin_a"
+CONF_PHASE_VOLTAGE_V: Final = "phase_voltage_v"
+# Optional live voltage, used in place of the fixed number above whenever it
+# reads as a plausible mains voltage. Matters most exactly when it is needed:
+# a heavily loaded phase sags, and the same watts are then more amps.
+CONF_PHASE_VOLTAGE_ENTITY: Final = "phase_voltage_entity"
+CONF_PHASE_LIMIT_WINDOW_MIN: Final = "phase_limit_window_min"
 # Demand (capacity) charge on the single highest import power over the horizon,
 # in currency per kW. A grid setting, not a battery one: EMHASS prices it off
 # `peak_import`, which exists whether or not a battery does -- deferrable loads
@@ -414,6 +430,49 @@ DEFAULT_GRID_EXPORT_MAX: Final = 9000
 # Executor
 DEFAULT_POWER_DEADBAND_W: Final = 100
 STALE_PLAN_FACTOR: Final = 2
+
+# --- Phase guard (phase_guard.py) ---------------------------------------------
+#
+# Sized for the gG fuses (Diazed/Neozed, NH) that protect most European mains:
+# a 16 A gG runs at 16 A indefinitely, holds 1.25x (20 A) for up to an hour,
+# and at 1.5-2x (24-32 A) blows within a few minutes down to one. So the guard
+# aims below the rating, may take seconds to react without risk, and only has
+# to be fast relative to minutes.
+#
+# Headroom kept below the fuse rating, per phase. Covers meter lag, the gap
+# between a power reading and the current the fuse actually sees at a poor
+# power factor, and a load switching on between two readings.
+DEFAULT_PHASE_MARGIN_A: Final = 1.0
+DEFAULT_PHASE_VOLTAGE_V: Final = 230.0
+# A voltage sensor reading further than this from the fixed voltage is treated
+# as unreadable and the fixed voltage is used instead -- a line-to-line 400 V
+# sensor picked by mistake, or a kV/V unit mix-up, must not quietly shrink
+# every current. Relative, so a 120 V supply works the same as a 230 V one.
+PHASE_VOLTAGE_TOLERANCE: Final = 0.2
+# The plan's import limit is the lowest the phases allowed over this window,
+# not the reading at the instant of the solve -- a dishwasher between heating
+# cycles otherwise hands the plan its whole fuse. See phase_guard.SlidingMin.
+DEFAULT_PHASE_LIMIT_WINDOW_MIN: Final = 30
+# The executor's charge cap is the lowest of this window: it drops at once,
+# and comes back up only after the phases have stayed clear this long, so a
+# heater cycling on and off does not drag the inverter up and down with it.
+PHASE_GUARD_RELEASE_S: Final = 60
+# Re-checked this often while the guard is holding charge down, so the cap is
+# released on time even if the meter stops reporting changes.
+PHASE_GUARD_RECHECK_S: Final = 10
+# Below this, a capped charge is not worth commanding: the battery is handed to
+# self-consumption instead, which on a hybrid also lets it cover the house and
+# take load off the overloaded phase.
+PHASE_GUARD_MIN_CHARGE_W: Final = 300
+# A profile that may not be written more often than this cannot carry a cut
+# fast enough to matter -- at 1.5x a gG fuse has minutes, and a cut held back
+# by iSolarCloud's 300 s interval uses all of them. The clamp is switched off
+# for such a profile and a repair says so; the plan's limit still applies.
+PHASE_GUARD_MAX_WRITE_INTERVAL_S: Final = 30
+# Overload as a multiple of the fuse rating. Above 1.0 a gG fuse is still
+# holding; above "light" it is a matter of minutes.
+PHASE_OVERLOAD_LIGHT: Final = 1.0
+PHASE_OVERLOAD_HEAVY: Final = 1.25
 
 # --- Source health -----------------------------------------------------------
 
@@ -756,6 +815,11 @@ NET_HOUSE_LOAD_KEY: Final = "net_house_load"
 NETWORK_TARIFF_BAND_KEY: Final = "network_tariff_band"
 PERIOD_PEAK_KEY: Final = "period_peak"
 PEAK_HEADROOM_KEY: Final = "peak_headroom"
+# The phase guard's two entities (phase_guard.py): how much symmetric charging
+# the worst phase leaves room for right now, and whether the executor is
+# currently holding the battery's charge below the plan to stay inside it.
+PHASE_HEADROOM_KEY: Final = "phase_headroom"
+PHASE_GUARD_ACTIVE_KEY: Final = "phase_guard_active"
 DEMAND_CHARGE_RATE_KEY: Final = "demand_charge_rate"
 
 # The EMHASS release ``current_period_peak`` shipped in -- see
@@ -1001,6 +1065,21 @@ ISSUE_THERMAL_UNREACHABLE: Final = "thermal_comfort_unreachable"
 # Whole-integration issue, not per-load: EMHASS reports infeasibility for the
 # problem as a whole, with no hint at which load caused it.
 ISSUE_OPTIMIZATION_INFEASIBLE: Final = "optimization_infeasible"
+# Finding codes from infeasibility.py that have their own translation,
+# `optimization_infeasible_<code>`, under the same issue id. Any other code,
+# or no finding at all, keeps the generic `optimization_infeasible` text.
+INFEASIBLE_CAUSE_CODES: Final = frozenset(
+    {
+        "timestep0_deficit",
+        "battery_energy",
+        "pin_vs_window",
+        "window_too_short",
+        "power_deficit",
+        "pv_surplus",
+        "array_length",
+        "forecast_nan",
+    }
+)
 # A run that errored outright (EMHASS unreachable, rejected the request, or
 # raised internally) rather than merely failing to find a feasible plan.
 ISSUE_RUN_FAILED: Final = "run_failed"
@@ -1044,6 +1123,9 @@ ISSUE_SOURCES_BLIND: Final = "sources_blind"
 # Companion ids and the user is told which ones and why -- silently leaving
 # half the option unapplied would look like it simply did not work.
 ISSUE_STANDARD_NAMES_TAKEN: Final = "standard_names_taken"
+# The phase guard's real-time clamp cannot run on this install. One issue id,
+# one translation per reason (see phase_guard.clamp_blocker).
+ISSUE_PHASE_CLAMP_OFF: Final = "phase_clamp_off"
 
 # Solcast's day sensors are named today / tomorrow / day_3..day_7 -- "tomorrow"
 # *is* day 2, there is no forecast_day_2. Day 3 is the first sensor past the

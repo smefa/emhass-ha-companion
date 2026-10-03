@@ -38,6 +38,7 @@ control switch says.
 | **SolaX X3-Hybrid G4 / X3-Ultra** — *untested* | `wills106/homeassistant-solax-modbus` (HACS) | The core `solax` integration is read-only. Every command needs the trigger button, and self-reverts when its autorepeat runs out |
 | **Growatt MOD / MID TL3-XH** — *untested* | `wills106/homeassistant-solax-modbus` (HACS) | No power setpoint; dedicates one time-of-use slot to the plan. Percentages, so it needs your rated power. No curtailment |
 | **Sigenergy SigenStor** — *untested* | `TypQxQ/Sigenergy-Local-Modbus` (HACS) | Turn off the integration's read-only mode and enable the control entities first — they ship disabled. Direction from the EMS mode, magnitude from the ESS limits |
+| **Ferroamp EnergyHub** — *untested* | `jonasbkarlsson/ferroamp_operation_settings` (HACS) | Cloud, through the Ferroamp Portal; every command ends by pressing the integration's Update button. Manual mode for forced charge, discharge and idle; Peak Shaving for self-consumption |
 | **Scripts (works with any inverter)** | any | The universal fallback — see below |
 
 **Fronius GEN24 owners:** there is deliberately no profile. The core Fronius

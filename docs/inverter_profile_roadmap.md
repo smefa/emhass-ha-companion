@@ -444,7 +444,7 @@ These seven need only **three** archetypes: `signed_power`,
 |---|---|---|---|
 | Deye SUN-5K–25K-SG01HP3-EU | `davidrapan/ha-solarman` | — | **shipped, untested.** Brought forward. The `tou_rewrite` lifecycle that made this the deferred case turned out to be avoidable: the profile steers work mode and the battery **current** limits, which act immediately, and never touches the user's six TOU programs. The cost is that the plan becomes a ceiling rather than a setpoint, and that the watts-to-amps conversion needs the pack voltage |
 | Growatt MOD / MID TL3-XH | `solax_modbus` | `tou_rewrite` | **shipped, untested.** Genuinely TOU-based — there is no setpoint register on this family — so it dedicates one slot to the plan and moves that slot's priority mode. Percentages of rated power, so it needs the nameplate rating. No curtailment: two candidate export-limit registers exist, in different units, and which one the family honours is unresolved |
-| Ferroamp EnergyHub | `henricm/ha-ferroamp` | service charge/discharge | Swedish and worth having, but the sign convention is undocumented and needs a live install |
+| Ferroamp EnergyHub | `jonasbkarlsson/ferroamp_operation_settings` | `mode_and_magnitude` | **shipped, untested.** Goes through the Portal's operation settings rather than `henricm/ha-ferroamp`'s charge/discharge services, which sidesteps the undocumented sign: direction is the Battery power mode select, magnitude an unsigned reference. Cloud, so a 30 s write floor. Modelled on a user's working scripts (Manual + Charge/Discharge/Off, Peak Shaving for self-consumption) |
 
 ### Not planned: Fronius GEN24
 
@@ -559,7 +559,7 @@ per profile:
 | SolaX | Whether a recent install's entity ids carry the "(mode 1)" suffix the current display names imply |
 | Growatt | Whether Battery First at a zero charge rate is a true idle; which of the two export-limit registers this family honours |
 | Sigenergy | Nothing load-bearing: the profile avoids the one undocumented fact (the signed setpoint's sign) rather than guessing it. Whether the per-inverter setpoint needs the plant-level enable is unconfirmed, but this profile uses the plant-level entities throughout |
-| Ferroamp | Charge/discharge sign (not yet shipped) |
+| Ferroamp | Nothing load-bearing. Confirmed on a live install: a Portal Update reported as successful reaches the EnergyHub, and the `henricm/ha-ferroamp` sensors read battery power positive = discharging and grid power positive = importing, both matching EMHASS. The profile itself has not run yet; the mapping comes from that install's working scripts |
 | Fronius GEN24 | Not shipped at all — see "Not planned" above. The register semantics are well confirmed; the delivery path is not. The [scripts recipe](fronius_gen24_scripts.md) documents the registers but has not been run against hardware, and `InOutWRte_RvrtTms` in particular is derived from the model 124 layout rather than read out of a working implementation |
 
 The earlier conclusion here — that shipping an unvalidated profile is worse

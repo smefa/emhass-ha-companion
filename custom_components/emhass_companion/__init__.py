@@ -40,6 +40,7 @@ from .const import (
     DOMAIN,
     ISSUE_BAD_PROFILE,
     ISSUE_EMHASS_VERSION,
+    ISSUE_PHASE_CLAMP_OFF,
     ISSUE_SCRIPT_CONTROL_ENTITY,
     LOAD_SUBENTRY_TYPES,
     MANUAL_DEMAND_PROFILE_KEY,
@@ -60,6 +61,7 @@ from .metering import (
 )
 from .naming import async_apply_standard_names
 from .peaks import PeakTracker
+from .phase_guard import PhaseGuard
 from .schedule import Scheduler
 from .services import async_register_services, async_unregister_services
 from .util import version_at_least
@@ -197,6 +199,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
 
     scheduler = Scheduler(hass, coordinator)
     executor = Executor(hass, coordinator)
+    if coordinator.config.grid.phase_guard_enabled:
+        # One set of phase readings feeds both the plan's import limit and the
+        # executor's charge clamp. Started further down, with the other
+        # trackers, once the sensors that show it exist.
+        phase_guard = PhaseGuard(
+            hass,
+            coordinator.config.grid,
+            battery_enabled=coordinator.config.battery.enabled,
+            battery_power_entity=coordinator.config.battery_power_entity,
+            battery_power_invert=coordinator.config.battery_power_invert,
+        )
+        coordinator.phase_guard = phase_guard
+    _report_phase_clamp(hass, coordinator, executor)
     # Built before the platforms are forwarded, because the sensor platform
     # decides which savings sensors this house can support from the meters it
     # resolved. Loaded (restoring yesterday's ledger and the meter baselines)
@@ -244,6 +259,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
     tracker.async_start()
     for peak in peak_trackers:
         peak.async_start()
+    if (phase_guard := coordinator.phase_guard) is not None:
+        entry.async_on_unload(phase_guard.async_add_listener(executor.async_phase_changed))
+        phase_guard.async_start()
+        entry.async_on_unload(phase_guard.async_stop)
 
     entry.async_on_unload(scheduler.async_stop)
     entry.async_on_unload(loads.async_stop)
@@ -400,6 +419,40 @@ def _check_version(hass: HomeAssistant, version: str | None) -> None:
         )
     else:
         ir.async_delete_issue(hass, DOMAIN, ISSUE_EMHASS_VERSION)
+
+
+@callback
+def _report_phase_clamp(
+    hass: HomeAssistant, coordinator: EmhassCoordinator, executor: Executor
+) -> None:
+    """Say so when the phase guard is configured but its clamp cannot run.
+
+    A fuse setting that silently protected only the plan would read as
+    protection it is not. Checked once per setup: both reasons are settings,
+    and every settings change reloads the entry.
+    """
+    blocker = executor.phase_clamp_blocker() if coordinator.phase_guard else None
+    if blocker is None:
+        ir.async_delete_issue(hass, DOMAIN, ISSUE_PHASE_CLAMP_OFF)
+        return
+    key = coordinator.config.inverter.key
+    profile = coordinator.profiles.get(key) if key else None
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        ISSUE_PHASE_CLAMP_OFF,
+        is_fixable=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key=f"{ISSUE_PHASE_CLAMP_OFF}_{blocker}",
+        translation_placeholders={
+            "profile": profile.name if profile is not None else "",
+            "interval": str(
+                round(float(profile.control.get("min_write_interval_s", 0)))
+                if profile is not None
+                else 0
+            ),
+        },
+    )
 
 
 @callback

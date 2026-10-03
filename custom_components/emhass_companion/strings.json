@@ -290,6 +290,14 @@
             "data": {
               "grid_import_limit_entity": "Import limit sensor (optional)",
               "grid_export_limit_entity": "Export limit sensor (optional)",
+              "phase_l1_entity": "Phase L1 reading (optional)",
+              "phase_l2_entity": "Phase L2 reading (optional)",
+              "phase_l3_entity": "Phase L3 reading (optional)",
+              "main_fuse_a": "Main fuse per phase (optional)",
+              "phase_margin_a": "Fuse margin",
+              "phase_voltage_v": "Phase voltage",
+              "phase_voltage_entity": "Voltage sensor (optional)",
+              "phase_limit_window_min": "Phase limit look-back",
               "compute_curtailment": "Let EMHASS optimise PV curtailment",
               "mpc_interval_minutes": "Recalculate every",
               "horizon_hours": "Planning horizon",
@@ -298,6 +306,14 @@
             "data_description": {
               "grid_import_limit_entity": "Leave empty unless your usable import limit moves. A sensor giving the limit in watts right now is used in place of the fixed number above — for a three-phase connection that is how you account for uneven phase loading, since the fuse that stops you is the worst phase's and the usable total is below the sum whenever the phases are unbalanced. Other uses: a load-balancing or dynamic-capacity system, a grid operator curtailment order. The sensor can only lower the fixed limit, never raise it, and the fixed number is used whenever it cannot be read. It is also raised back to the power the house is forecast to draw anyway if it ever falls below that, because no plan exists below that value.",
               "grid_export_limit_entity": "The same thing for export: a sensor giving the watts you may feed out right now, used in place of the fixed number above and only ever able to lower it. If EMHASS curtailment is off, be careful with a limit below your peak surplus solar — the optimiser then has nowhere to put that power and reports the problem as infeasible.",
+              "phase_l1_entity": "Your meter's live reading for each phase, in W, kW or A. Current is best, since that is what the fuse reacts to. Together with the main fuse below, this replaces a hand-written import limit template. The plan gets the worst phase's limit automatically. With a battery power sensor set on the battery step, a forced charge is also cut within seconds if any phase gets close to its fuse. Fill in all three phases, or only L1 for a single-phase connection.",
+              "phase_l2_entity": "The second phase. Any supported unit works, whatever L1 uses.",
+              "phase_l3_entity": "The third phase.",
+              "main_fuse_a": "The rating of each main fuse, for example 16, 20 or 25 A. Leave empty to turn the phase guard off.",
+              "phase_margin_a": "How far below the fuse rating every phase is kept. The default of 1 A covers meter delay, power factor, and a load switching on between two readings. A gG fuse (Diazed, Neozed) holds 1.25 times its rating for up to an hour, so a short overshoot while the guard reacts does no harm.",
+              "phase_voltage_v": "Used to convert watt readings to current, and whenever the voltage sensor below is missing or can't be read. 230 V in most of Europe.",
+              "phase_voltage_entity": "A live phase voltage from your meter, used instead of the fixed voltage above to convert watt readings to current. A heavily loaded phase sags, so the same watts are more amps. That is exactly when it matters. Use L1's voltage, or the lowest of the three if your meter has one. A reading more than 20% away from the fixed voltage is ignored and the fixed voltage is used instead, so a 400 V line-to-line sensor can't make the phases look emptier than they are. Not needed if your phase readings are in A.",
+              "phase_limit_window_min": "The plan uses the lowest phase limit seen over this period, not the reading at the moment it is calculated. A dishwasher between heating cycles would otherwise hand the plan the whole fuse. 0 uses the live reading.",
               "compute_curtailment": "Turns on EMHASS's own curtailment (its compute_curtailment setting), sent with every run so it overrides whatever the add-on has stored. The optimiser is then free to shed solar it cannot use — the plan gains a curtailment column, and an inverter profile that supports curtailment follows it. Off by default, and only worth turning on if something can actually act on it: with no curtailment-capable inverter profile the plan assumes solar was shed that in reality still flows to the grid.",
               "dayahead_fallback_time": "A full day-ahead plan is normally rebuilt automatically as soon as new prices arrive. This time is only used as a backstop if that never happens."
             }
@@ -322,7 +338,9 @@
       "ac_output_required": "A shared inverter needs a positive AC output limit. Zero would block PV and the battery from reaching the house.",
       "derating_not_ascending": "Charge-taper rows must list strictly increasing charge levels, each between 1 and 99%, with a charge rate of 1–100% of maximum.",
       "profile_required": "Pick a solar forecast source, or open Advanced settings for the other choices.",
-      "template_required": "Template mode needs a template. Enter it under Advanced settings, or pick another method."
+      "template_required": "Template mode needs a template. Enter it under Advanced settings, or pick another method.",
+      "phase_entities_incomplete": "The phase guard needs all three phases, or only L1 for a single-phase connection.",
+      "phase_margin_too_large": "The fuse margin must be smaller than the fuse rating."
     },
     "abort": {
       "single_instance_allowed": "EMHASS Companion is already configured.",
@@ -529,6 +547,14 @@
             "data": {
               "grid_import_limit_entity": "Import limit sensor (optional)",
               "grid_export_limit_entity": "Export limit sensor (optional)",
+              "phase_l1_entity": "Phase L1 reading (optional)",
+              "phase_l2_entity": "Phase L2 reading (optional)",
+              "phase_l3_entity": "Phase L3 reading (optional)",
+              "main_fuse_a": "Main fuse per phase (optional)",
+              "phase_margin_a": "Fuse margin",
+              "phase_voltage_v": "Phase voltage",
+              "phase_voltage_entity": "Voltage sensor (optional)",
+              "phase_limit_window_min": "Phase limit look-back",
               "compute_curtailment": "Let EMHASS optimise PV curtailment",
               "mpc_interval_minutes": "Recalculate every",
               "horizon_hours": "Planning horizon",
@@ -537,6 +563,14 @@
             "data_description": {
               "grid_import_limit_entity": "Leave empty unless your usable import limit moves. A sensor giving the limit in watts right now is used in place of the fixed number above — for a three-phase connection that is how you account for uneven phase loading, since the fuse that stops you is the worst phase's and the usable total is below the sum whenever the phases are unbalanced. Other uses: a load-balancing or dynamic-capacity system, a grid operator curtailment order. The sensor can only lower the fixed limit, never raise it, and the fixed number is used whenever it cannot be read. It is also raised back to the power the house is forecast to draw anyway if it ever falls below that, because no plan exists below that value.",
               "grid_export_limit_entity": "The same thing for export: a sensor giving the watts you may feed out right now, used in place of the fixed number above and only ever able to lower it. If EMHASS curtailment is off, be careful with a limit below your peak surplus solar — the optimiser then has nowhere to put that power and reports the problem as infeasible.",
+              "phase_l1_entity": "Your meter's live reading for each phase, in W, kW or A. Current is best, since that is what the fuse reacts to. Together with the main fuse below, this replaces a hand-written import limit template. The plan gets the worst phase's limit automatically. With a battery power sensor set on the battery step, a forced charge is also cut within seconds if any phase gets close to its fuse. Fill in all three phases, or only L1 for a single-phase connection.",
+              "phase_l2_entity": "The second phase. Any supported unit works, whatever L1 uses.",
+              "phase_l3_entity": "The third phase.",
+              "main_fuse_a": "The rating of each main fuse, for example 16, 20 or 25 A. Leave empty to turn the phase guard off.",
+              "phase_margin_a": "How far below the fuse rating every phase is kept. The default of 1 A covers meter delay, power factor, and a load switching on between two readings. A gG fuse (Diazed, Neozed) holds 1.25 times its rating for up to an hour, so a short overshoot while the guard reacts does no harm.",
+              "phase_voltage_v": "Used to convert watt readings to current, and whenever the voltage sensor below is missing or can't be read. 230 V in most of Europe.",
+              "phase_voltage_entity": "A live phase voltage from your meter, used instead of the fixed voltage above to convert watt readings to current. A heavily loaded phase sags, so the same watts are more amps. That is exactly when it matters. Use L1's voltage, or the lowest of the three if your meter has one. A reading more than 20% away from the fixed voltage is ignored and the fixed voltage is used instead, so a 400 V line-to-line sensor can't make the phases look emptier than they are. Not needed if your phase readings are in A.",
+              "phase_limit_window_min": "The plan uses the lowest phase limit seen over this period, not the reading at the moment it is calculated. A dishwasher between heating cycles would otherwise hand the plan the whole fuse. 0 uses the live reading.",
               "compute_curtailment": "Turns on EMHASS's own curtailment (its compute_curtailment setting), sent with every run so it overrides whatever the add-on has stored. The optimiser is then free to shed solar it cannot use — the plan gains a curtailment column, and an inverter profile that supports curtailment follows it. Off by default, and only worth turning on if something can actually act on it: with no curtailment-capable inverter profile the plan assumes solar was shed that in reality still flows to the grid."
             }
           }
@@ -676,7 +710,9 @@
       "ac_output_required": "A shared inverter needs a positive AC output limit. Zero would block PV and the battery from reaching the house.",
       "derating_not_ascending": "Charge-taper rows must list strictly increasing charge levels, each between 1 and 99%, with a charge rate of 1–100% of maximum.",
       "profile_required": "Pick a solar forecast source, or open Advanced settings for the other choices.",
-      "template_required": "Template mode needs a template. Enter it under Advanced settings, or pick another method."
+      "template_required": "Template mode needs a template. Enter it under Advanced settings, or pick another method.",
+      "phase_entities_incomplete": "The phase guard needs all three phases, or only L1 for a single-phase connection.",
+      "phase_margin_too_large": "The fuse margin must be smaller than the fuse rating."
     }
   },
   "selector": {
@@ -820,6 +856,9 @@
       },
       "demand_charge_rate": {
         "name": "Demand charge rate"
+      },
+      "phase_headroom": {
+        "name": "Phase headroom"
       }
     },
     "binary_sensor": {
@@ -837,6 +876,9 @@
       },
       "solar_surplus": {
         "name": "Spare solar"
+      },
+      "phase_guard_active": {
+        "name": "Phase guard active"
       }
     },
     "switch": {
@@ -1007,7 +1049,39 @@
     },
     "optimization_infeasible": {
       "title": "EMHASS could not find a feasible plan",
-      "description": "The last {action} run reported the optimisation problem as infeasible, even after EMHASS retried with relaxed constraints. The previous plan is being kept instead of an unusable one. This is almost always a deferrable load whose required run time does not fit inside the remaining horizon, or a comfort schedule a thermal load cannot reach -- check each load's duration and window against the plan horizon. This resolves automatically once a run solves successfully."
+      "description": "The last {action} run reported the optimisation problem as infeasible, even after EMHASS retried with relaxed constraints. The previous plan is being kept instead of an unusable one. EMHASS Companion's own checks found no specific cause. Download diagnostics from the integration's device page and run `scripts/check_infeasibility.py` on the file, and check the EMHASS add-on log. This resolves automatically once a run solves successfully."
+    },
+    "optimization_infeasible_timestep0_deficit": {
+      "title": "EMHASS plan infeasible: not enough power right now",
+      "description": "The last {action} run was infeasible: right now the plan needs at least {needed} ({pins} already running and held at that power, plus house {house}), but at most {available} is available (grid {grid}, solar {pv}, battery {battery}). EMHASS cannot move a running load out of the first timestep, so it finds no plan at all. Usually the grid import limit has just dropped (a live fuse-limit sensor) while the battery is empty. Turn off or lower one of the running loads, or check the grid import limit. The previous plan is being kept. {total} blocking cause(s) found in all; the Home Assistant log lists every finding. This resolves automatically once a run solves successfully."
+    },
+    "optimization_infeasible_battery_energy": {
+      "title": "EMHASS plan infeasible: battery too empty right now",
+      "description": "The last {action} run was infeasible: the battery is at {soc} (minimum {soc_min}), so over the next timestep it can deliver at most {battery}, not its rated {rated}. With the grid limited to {grid} and solar at {pv}, the house load of {house} cannot be covered. Check the grid import limit, and that the battery level sensor reads correctly. The previous plan is being kept. {total} blocking cause(s) found in all; the Home Assistant log lists every finding. This resolves automatically once a run solves successfully."
+    },
+    "optimization_infeasible_pin_vs_window": {
+      "title": "EMHASS plan infeasible: a load is both running and parked",
+      "description": "The last {action} run was infeasible: {name} was reported as running at {power} right now, but the same request asked for no run time at all for it. EMHASS cannot satisfy both. This is a bug in EMHASS Companion; please report it with a diagnostics download. Changing the load's mode or turning the load off usually clears it. The previous plan is being kept. {total} blocking cause(s) found in all; the Home Assistant log lists every finding. This resolves automatically once a run solves successfully."
+    },
+    "optimization_infeasible_window_too_short": {
+      "title": "EMHASS plan infeasible: {name} does not fit its window",
+      "description": "The last {action} run was infeasible: {name} needs {needed} timestep(s) to run {hours} h, but its window (timesteps {start} to {end}) only has {available}. Shorten its run time, move its deadline later, or widen its allowed hours. The previous plan is being kept. {total} blocking cause(s) found in all; the Home Assistant log lists every finding. This resolves automatically once a run solves successfully."
+    },
+    "optimization_infeasible_power_deficit": {
+      "title": "EMHASS plan infeasible: the house load cannot be supplied",
+      "description": "The last {action} run was infeasible: at {count} timestep(s) the forecast house load cannot be supplied even with grid import and battery discharge at their limits. Worst at timestep {timestep}: house {house}, solar {pv}, short by {short}. Check the grid import limit, the battery and inverter power limits, and the house load forecast. The previous plan is being kept. {total} blocking cause(s) found in all; the Home Assistant log lists every finding. This resolves automatically once a run solves successfully."
+    },
+    "optimization_infeasible_pv_surplus": {
+      "title": "EMHASS plan infeasible: solar surplus has nowhere to go",
+      "description": "The last {action} run was infeasible: at {count} timestep(s) the solar forecast exceeds what the battery, the house and grid export can absorb. Worst at timestep {timestep}: solar {pv}, house {house}, {excess} too much. Enable PV curtailment in EMHASS, or check the grid export limit and the inverter limits. The previous plan is being kept. {total} blocking cause(s) found in all; the Home Assistant log lists every finding. This resolves automatically once a run solves successfully."
+    },
+    "optimization_infeasible_array_length": {
+      "title": "EMHASS plan infeasible: request arrays do not match",
+      "description": "The last {action} run was infeasible: the request's arrays disagree on length ({details}). This is a bug in EMHASS Companion or in a data source profile; please report it with a diagnostics download. The previous plan is being kept. {total} blocking cause(s) found in all; the Home Assistant log lists every finding. This resolves automatically once a run solves successfully."
+    },
+    "optimization_infeasible_forecast_nan": {
+      "title": "EMHASS plan infeasible: a forecast has gaps",
+      "description": "The last {action} run was infeasible: {key} has {count} empty value(s), the first at timestep {first}. A data source returned nothing for part of the horizon; check the source behind that forecast. The previous plan is being kept. {total} blocking cause(s) found in all; the Home Assistant log lists every finding. This resolves automatically once a run solves successfully."
     },
     "run_failed": {
       "title": "The last {action} run failed",
@@ -1040,6 +1114,18 @@
     "standard_names_taken": {
       "title": "{count} EMHASS entity name(s) already taken",
       "description": "EMHASS Companion was asked to publish under EMHASS's own entity ids, but these are already in use:\n\n{details}\n\nAlmost always this is the EMHASS add-on publishing them itself. Those sensors keep their Companion names for now. To finish the switch, turn off publishing in EMHASS (unset `publish_prefix`, or stop calling its publish-data action), delete the leftover entities, then reload EMHASS Companion. To stop trying, turn the option off under Settings > Devices & services > EMHASS Companion > Configure > EMHASS entity names."
+    },
+    "phase_clamp_off": {
+      "title": "Phase guard can't cut battery charging",
+      "description": "A main fuse is set on the grid step, but forced battery charging can't be limited in real time on this install. The plan's import limit from the phases still applies. See Dynamic grid limits in the documentation for what the clamp needs."
+    },
+    "phase_clamp_off_no_battery_sensor": {
+      "title": "Phase guard can't cut battery charging",
+      "description": "A main fuse is set on the grid step, but the battery has no power sensor. The guard has to measure what the battery is actually drawing. A charge the inverter hasn't started yet, or a discharge, would otherwise make the house look lighter than it is, and the guard would allow too much. Until a battery power sensor is set under Configure → Battery, forced charging isn't limited in real time. The plan's import limit from the phases still applies."
+    },
+    "phase_clamp_off_slow_profile": {
+      "title": "Phase guard can't cut battery charging fast enough",
+      "description": "A main fuse is set on the grid step, but the inverter profile {profile} may only be written once every {interval} seconds. A cut held back that long can outlast what an overloaded fuse tolerates, so forced charging isn't limited in real time with this profile. The plan's import limit from the phases still applies. A profile that talks to the inverter locally, such as over Modbus, doesn't have this limit."
     }
   },
   "services": {

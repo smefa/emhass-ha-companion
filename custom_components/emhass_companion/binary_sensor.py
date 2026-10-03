@@ -14,7 +14,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from .const import LOAD_MODE_AUTO
+from .const import LOAD_MODE_AUTO, PHASE_GUARD_ACTIVE_KEY
 from .coordinator import EmhassCoordinator
 from .deferrable import DeferrableRuntime, resolve_should_run
 from .entity import EmhassEntity, EmhassLoadEntity
@@ -35,6 +35,8 @@ async def async_setup_entry(
             SolarSurplusBinarySensor(coordinator),
         ]
     )
+    if coordinator.phase_guard is not None:
+        async_add_entities([PhaseGuardActiveBinarySensor(coordinator)])
 
     for load in entry.runtime_data.loads.all():
         async_add_entities(
@@ -104,6 +106,43 @@ class SourcesBlindBinarySensor(EmhassEntity, BinarySensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return self.coordinator.health.report
+
+
+class PhaseGuardActiveBinarySensor(EmhassEntity, BinarySensorEntity):
+    """Whether the executor is holding the battery's charge below the plan.
+
+    On whenever the latest decision was cut to keep the main fuse's worst
+    phase inside its limit -- in dry-run too, so it can be watched before
+    control is handed over. Rides the executor's own notification for the
+    same reason the battery action sensor does: the coordinator's fires
+    before the decision it would be describing exists.
+    """
+
+    _attr_translation_key = PHASE_GUARD_ACTIVE_KEY
+
+    def __init__(self, coordinator: EmhassCoordinator) -> None:
+        super().__init__(coordinator, PHASE_GUARD_ACTIVE_KEY)
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        executor = self.coordinator.config_entry.runtime_data.executor
+        self.async_on_remove(executor.add_listener(self.async_write_ha_state))
+
+    @property
+    def is_on(self) -> bool:
+        decision = self.coordinator.config_entry.runtime_data.executor.last_decision
+        return decision is not None and decision.phase_cut_w > 0
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        decision = self.coordinator.config_entry.runtime_data.executor.last_decision
+        if decision is None:
+            return {}
+        return {
+            "planned_charge_w": round(decision.planned_charge_w),
+            "allowed_charge_w": round(decision.power_w) if decision.planned_charge_w else None,
+            "cut_w": round(decision.phase_cut_w),
+        }
 
 
 class SolarSurplusBinarySensor(EmhassEntity, BinarySensorEntity):

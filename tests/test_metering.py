@@ -327,3 +327,11 @@ def test_read_meters_splits_a_single_signed_battery_power_sensor():
     assert energy.battery_discharge == 0.0
     # 0.5 kW held for 6 minutes -> 0.05 kWh, measured directly this time.
     assert energy.house_load == pytest.approx(0.05)
+
+
+@pytest.mark.parametrize("raw", ["nan", "inf"])
+def test_a_non_finite_energy_reading_holds_the_baseline(raw: str):
+    meter = Meter("sensor.e", kind="energy")
+    meter.take_from(_energy_state(10.0), T0)
+    assert meter.take_from(State("sensor.e", raw, {"unit_of_measurement": "kWh"}), T0) == 0.0
+    assert meter.take_from(_energy_state(10.5), T0) == pytest.approx(0.5)
