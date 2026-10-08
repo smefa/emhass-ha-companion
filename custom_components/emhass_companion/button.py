@@ -123,4 +123,5 @@ class LoadRunNowButton(EmhassLoadEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         self.load.force_run()
+        self.load.invalidate_battery_lockout()
         self.load.notify()

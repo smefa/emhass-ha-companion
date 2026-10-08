@@ -14,7 +14,9 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock
 
-from custom_components.emhass_companion.api import EmhassClient
+import pytest
+
+from custom_components.emhass_companion.api import EmhassApiError, EmhassClient
 
 
 def _client() -> EmhassClient:
@@ -75,3 +77,41 @@ async def test_merge_fetches_before_it_writes():
     await client.async_set_config_merged({"x": 1})
 
     assert order == ["get", "set"]
+
+
+_INFEASIBLE_BODY = (
+    '["INFO - emhass.web_server - >> Performing naive-mpc-optim...",'
+    "\"WARNING - emhass.web_server - Optimization failed with status: 'infeasible'. "
+    'Retrying with relaxed constraints (Continuous LP)...",'
+    '"ERROR - emhass.web_server - Relaxed optimization also failed with status: infeasible"]'
+)
+
+
+async def test_infeasible_400_comes_back_as_an_infeasible_run():
+    """EMHASS 0.18 answers an infeasible solve with 400, not 200 + last-run."""
+    client = _client()
+    client.async_run_action = AsyncMock(
+        side_effect=EmhassApiError("returned 400", status=400, body=_INFEASIBLE_BODY)
+    )
+    client.async_get_last_run = AsyncMock()
+
+    last_run, plan = await client.async_optimize("naive-mpc-optim", {})
+
+    assert last_run.infeasible is True
+    # Same shape as the 200 path, so diagnostics and the cards say
+    # "infeasible" rather than "run failed".
+    assert last_run.ok
+    assert last_run.error_message is None
+    assert last_run.timestamp is not None
+    assert plan is None
+    client.async_get_last_run.assert_not_awaited()
+
+
+async def test_other_400s_still_raise():
+    client = _client()
+    client.async_run_action = AsyncMock(
+        side_effect=EmhassApiError("returned 400", status=400, body="KeyError: 'soc_init'")
+    )
+
+    with pytest.raises(EmhassApiError):
+        await client.async_optimize("naive-mpc-optim", {})

@@ -160,5 +160,6 @@ class LoadTime(EmhassLoadEntity, TimeEntity, RestoreEntity):
 
     async def async_set_value(self, value: time) -> None:
         self.entity_description.set_fn(self.load, value)
+        self.load.invalidate_battery_lockout()
         self.load.notify()
         await self.coordinator.async_request_refresh()

@@ -58,6 +58,10 @@ class LoadSwitchDescription(SwitchEntityDescription):
     restore_fn: Callable[[DeferrableRuntime, dict[str, Any]], None] | None = None
     """Rebuild that extra state from the restored attributes."""
 
+    invalidates_battery_lockout: bool = True
+    """Whether flipping this switch drops the load's held lockout window; see
+    ``DeferrableRuntime.invalidate_battery_lockout``."""
+
 
 def _set_enabled(load: DeferrableRuntime, value: bool) -> None:
     load.enabled = value
@@ -227,6 +231,9 @@ LOAD_SWITCHES: tuple[LoadSwitchDescription, ...] = (
         set_fn=_set_battery_lockout,
         default=False,
         attrs_fn=_battery_lockout_attrs,
+        # Turning it on should latch from the plan already in force, not wait
+        # a cycle for a new one; turning it off clears the window itself.
+        invalidates_battery_lockout=False,
     ),
     # Not a config switch: arming a load is a day-to-day action, not a
     # setup-time setting, so it belongs with the load's primary entities
@@ -421,5 +428,7 @@ class LoadSwitch(EmhassLoadEntity, SwitchEntity, RestoreEntity):
 
     async def _set(self, value: bool) -> None:
         self.entity_description.set_fn(self.load, value)
+        if self.entity_description.invalidates_battery_lockout:
+            self.load.invalidate_battery_lockout()
         self.load.notify()
         await self.coordinator.async_request_refresh()

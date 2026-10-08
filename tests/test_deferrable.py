@@ -7,6 +7,7 @@ long as it should.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, time, timedelta
 
 from homeassistant.core import State
@@ -325,10 +326,25 @@ def test_a_timestep_the_plan_already_asked_for_is_pinned():
     free to choose -- honouring it is what stops a block being re-litigated
     every 15 minutes. It cannot feed itself: the flag is only ever set from the
     previous plan, never from the pin it produces."""
-    load = _load(plan_scheduled_now=True)
+    load = _load(plan_scheduled_now=True, plan_power_now_w=2000.0)
     load.observe_power(1900, T0)
 
     assert load.to_load(T0 + timedelta(minutes=10), 30).current_power_w == 2000.0
+
+
+def test_a_planned_timestep_is_pinned_at_the_planned_power_not_nominal():
+    """A modulating car planned at its 1400 W minimum must not be pinned at
+    its 10 kW nominal: that demanded more than the live grid limit allowed at
+    timestep 0 and made the whole problem infeasible."""
+    load = _load(
+        nominal_power_w=10000.0,
+        minimum_power_w=1400.0,
+        semi_continuous=False,
+        plan_scheduled_now=True,
+        plan_power_now_w=1400.0,
+    )
+
+    assert load.to_load(T0, 15).current_power_w == 1400.0
 
 
 def test_an_idle_load_reports_no_current_power():
@@ -1148,9 +1164,10 @@ def _plan(*deferrables: float) -> Plan:
 
 def test_a_load_the_plan_asks_for_is_committed():
     load = _load()
-    _registry(load).adopt_plan_commitments(_plan(2000.0), ["abc"], T0, stale=False)
+    _registry(load).adopt_plan_commitments(_plan(1500.0), ["abc"], T0, stale=False)
 
     assert load.plan_scheduled_now is True
+    assert load.plan_power_now_w == 1500.0
 
 
 def test_a_load_the_plan_leaves_off_is_not():
@@ -1384,6 +1401,42 @@ def test_battery_lockout_held_window_does_not_jump_to_a_later_disjoint_block():
     registry.apply_battery_lockout(afternoon_only, ["abc"], T0, 15)
 
     assert load.battery_lockout == held_after_morning
+
+
+def test_battery_lockout_settings_change_relatches_from_the_first_plan_after_it(monkeypatch):
+    """A run_within edit that moves the block must move the latch with it.
+
+    Live failure 2026-09-30: latch held tomorrow's midday block, the edit
+    moved the car to tonight, and the disjoint-block rule kept the stale
+    latch until it expired -- so the battery fed the car all night.
+    """
+    load = _load(battery_lockout_enabled=True)
+    registry = _registry(load)
+    tomorrow = _rows_plan(15, 0.0, 0.0, 0.0, 0.0, 2000.0, 2000.0)
+    registry.apply_battery_lockout(tomorrow, ["abc"], T0, 15)
+    assert load.battery_lockout is not None
+
+    edited_at = T0 + timedelta(minutes=5)
+    monkeypatch.setattr(
+        "custom_components.emhass_companion.deferrable.dt_util.utcnow", lambda: edited_at
+    )
+    load.invalidate_battery_lockout()
+    assert load.battery_lockout is None
+
+    # The refresh the edit triggers still sees the pre-edit plan: no latch.
+    registry.apply_battery_lockout(tomorrow, ["abc"], edited_at, 15)
+    assert load.battery_lockout is None
+
+    tonight = replace(
+        _rows_plan(15, 2000.0, 2000.0, 0.0, 0.0, 0.0, 0.0),
+        generated_at=edited_at + timedelta(seconds=10),
+    )
+    registry.apply_battery_lockout(tonight, ["abc"], edited_at, 15)
+
+    assert load.battery_lockout is not None
+    assert load.battery_lockout.start == T0
+    assert load.battery_lockout.end == T0 + timedelta(minutes=30)
+    assert load.battery_lockout_stale_before is None
 
 
 def test_battery_lockout_latch_releases_once_now_reaches_its_end():

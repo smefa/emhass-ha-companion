@@ -356,12 +356,12 @@ class EmhassPlanCard extends HTMLElement {
 
       // Baselined at zero, not the panel's floor: solar is never negative, and
       // filling down to a floor set by grid export or battery charge painted
-      // the whole negative band solar orange. A curve rather than a staircase:
-      // these four are read as shapes, and a hard step at every timestep made
-      // the panel look broken.
+      // the whole negative band solar orange. Solar and house load are curves,
+      // read as shapes. Grid and battery are set points held for the interval,
+      // so they are drawn as steps, like the price lines.
       this._area(root, pv, x, y, COLORS.pv, y(0));
-      this._line(root, grid, x, y, COLORS.gridIn, 1.5);
-      this._line(root, battery, x, y, COLORS.battery, 1.5);
+      this._line(root, grid, x, y, COLORS.gridIn, 1.5, null, true);
+      this._line(root, battery, x, y, COLORS.battery, 1.5, null, true);
       this._line(root, houseLoad, x, y, COLORS.load, 2);
       top += powerH + gap;
     }

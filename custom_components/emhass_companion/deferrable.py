@@ -210,6 +210,10 @@ class DeferrableRuntime:
     # surplus_budget; see that method's docstring for why. The while_running
     # half needs no state of its own and is computed fresh in to_load.
     battery_lockout: BatteryLockout | None = field(default=None, repr=False)
+    # Set by invalidate_battery_lockout when a setting of this load changes: no
+    # plan generated before this instant may latch a held window, since it was
+    # solved against the settings the user just replaced.
+    battery_lockout_stale_before: datetime | None = field(default=None, repr=False)
     mode: str = LOAD_MODE_AUTO
     # When Run now was last pressed. Only a backstop for ending a forced run;
     # like ``mode`` itself it does not survive a restart, which already returns
@@ -323,6 +327,10 @@ class DeferrableRuntime:
     # that merely happened, and only the first may be pinned into EMHASS's
     # timestep 0. See to_load's current_power_w.
     plan_scheduled_now: bool = field(default=False, repr=False)
+    # The power that plan chose for this moment, alongside the flag. A
+    # modulating load may be planned well below nominal, and pinning nominal
+    # instead can demand more than the grid limit allows at timestep 0.
+    plan_power_now_w: float = field(default=0.0, repr=False)
 
     _listeners: list[Callable[[], None]] = field(default_factory=list, repr=False)
 
@@ -461,6 +469,21 @@ class DeferrableRuntime:
         if self.requested_at is None or self.run_within_hours <= 0:
             return None
         return self.requested_at + timedelta(hours=self.run_within_hours)
+
+    def invalidate_battery_lockout(self) -> None:
+        """Drop the held lockout window after a change to this load's settings.
+
+        The held window is only ever extended, never moved (see
+        :meth:`DeferrableRegistry.apply_battery_lockout`), so without this a
+        run_within or time-window edit that moves the load's block leaves the
+        latch pricing the old slot while the load runs unprotected in the new
+        one (seen live 2026-09-30: latch on tomorrow midday, car moved to
+        tonight). Clearing alone is not enough: the refresh the edit triggers
+        still derives from the *previous* plan, which predates the edit, so
+        that plan and any older one are barred from latching too.
+        """
+        self.battery_lockout = None
+        self.battery_lockout_stale_before = dt_util.utcnow()
 
     @property
     def running_threshold_w(self) -> float:
@@ -905,6 +928,21 @@ class DeferrableRuntime:
         """
         return self.mode == LOAD_MODE_FORCE_ON or self.plan_scheduled_now
 
+    def _pinned_power_w(self, nominal_power_w: float) -> float:
+        """The power to pin into EMHASS's timestep 0, argued in :meth:`to_load`.
+
+        A forced run pins nominal, because that is what the executor holds the
+        load at. A planned timestep pins what the plan chose -- for a modulating
+        load that can be its minimum, and pinning nominal instead once made
+        timestep 0 infeasible against a live grid limit. Capped at the nominal
+        this run sends, which a surplus budget may have clamped.
+        """
+        if self.mode == LOAD_MODE_FORCE_ON:
+            return nominal_power_w
+        if self.plan_scheduled_now:
+            return min(self.plan_power_now_w, nominal_power_w)
+        return 0.0
+
     def reported_on_timesteps(self, now: datetime, step_minutes: int) -> int:
         """The on-time streak to report as ``def_current_on_timesteps``.
 
@@ -1054,7 +1092,7 @@ class DeferrableRuntime:
             # continuing instead of being re-litigated every 15 minutes; a car
             # that started charging on its own satisfies neither, and stays the
             # optimiser's to schedule.
-            current_power_w=nominal_power_w if self.commanded_run else 0.0,
+            current_power_w=self._pinned_power_w(nominal_power_w),
             # Completed work is measured against an operating-hours target,
             # which a thermal load does not have -- its temperature *is* its
             # state, reported through start_temperature instead.
@@ -1408,6 +1446,12 @@ class DeferrableRegistry:
                 load.battery_lockout = None
             if plan is None:
                 continue
+            if load.battery_lockout_stale_before is not None:
+                # Solved against settings since replaced -- wait for a plan
+                # from after the edit; see invalidate_battery_lockout.
+                if plan.generated_at < load.battery_lockout_stale_before:
+                    continue
+                load.battery_lockout_stale_before = None
             try:
                 index = load_order.index(load.subentry_id)
             except ValueError:
@@ -1520,6 +1564,7 @@ class DeferrableRegistry:
         """
         for load in self._loads.values():
             load.plan_scheduled_now = False
+            load.plan_power_now_w = 0.0
         if plan is None or stale:
             return
         row = plan.row_at(now)
@@ -1532,6 +1577,8 @@ class DeferrableRegistry:
                 continue
             if index < len(row.deferrables):
                 load.plan_scheduled_now = row.deferrables[index] > load.running_threshold_w
+                if load.plan_scheduled_now:
+                    load.plan_power_now_w = row.deferrables[index]
 
     def check_auto_disarm(self, now: datetime, step_minutes: int = DEFAULT_TIME_STEP) -> None:
         """Clear every request and forced run that has had what it asked for.

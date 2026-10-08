@@ -1,24 +1,35 @@
-# EMHASS Companion
+# EMHASS Companion - The easier way
 
-A Home Assistant integration that makes [EMHASS](https://github.com/davidusb-geek/emhass) usable without writing YAML.
+**[EMHASS](https://github.com/davidusb-geek/emhass) is a powerful energy optimiser. Setting it up can be a nightmare.**
+
+**This integration makes it easy and helps you start using "AI\*" for your home solar and battery i minutes.** 
+
 
 EMHASS automatically analyzes your solar forecasts, household usage patterns, and dynamic grid pricing to schedule your batteries and heavy appliances for maximum financial savings.
 
-Join my [Discord](https://discord.gg/wvavNscm8) if you have questions or want to give input.
-
-
 📖 **[Full documentation](https://smefa.github.io/emhass-ha-companion/)**
+💬 **[Join the Discord](https://discord.gg/wvavNscm8)** for questions and feedback
 
-EMHASS is an excellent energy optimiser with a difficult front door. Using it today means hand-building the same pile everyone else builds: `input_number` helpers in package files, `rest_command` entries with sprawling Jinja2 payloads, and a fleet of automations to schedule runs and act on results.
-
-This integration answers that. Install the EMHASS add-on, install this, answer a short config flow, and get a working optimised home.
-
-
+\* (Not really AI but thats what everyone calls it. Rather MILP / MPC)
 > The docs site has a plain, screen-by-screen [User Guide](https://smefa.github.io/emhass-ha-companion/guide/) alongside the technical reference below.
 
 ---
 
 ![Plan graph](docs/assets/graph.png)
+
+## Installation
+
+1. Install and start EMHASS (the add-on, or a container).
+2. Add this repository to HACS as a custom repository (category: Integration), then install **EMHASS Companion**.
+
+   <a href="https://my.home-assistant.io/redirect/hacs_repository/?owner=smefa&repository=emhass-ha-companion&category=integration" target="_blank">
+     <img src="https://my.home-assistant.io/badges/hacs_repository.svg" alt="Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.">
+   </a>
+
+3. Restart Home Assistant.
+4. **Settings → Devices & Services → Add Integration → EMHASS Companion**.
+
+The add-on's address is filled in automatically if it is running.
 
 ## How it works
 
@@ -51,19 +62,6 @@ Three consequences worth knowing:
 
 Nothing else is required. No battery, no solar, no dynamic tariff and no supported inverter are each valid configurations.
 
-## Installation
-
-1. Install and start EMHASS (the add-on, or a container).
-2. Add this repository to HACS as a custom repository (category: Integration), then install **EMHASS Companion**.
-
-   <a href="https://my.home-assistant.io/redirect/hacs_repository/?owner=smefa&repository=emhass-ha-companion&category=integration" target="_blank">
-     <img src="https://my.home-assistant.io/badges/hacs_repository.svg" alt="Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.">
-   </a>
-
-3. Restart Home Assistant.
-4. **Settings → Devices & Services → Add Integration → EMHASS Companion**.
-
-The add-on's address is filled in automatically if it is running.
 
 ## Setup
 
@@ -95,7 +93,7 @@ Every source is a **YAML profile** — so adding support for another integration
 | Price | Nord Pool (core), Nord Pool (HACS), ENTSO-E, Amber, Tibber, Fixed tariff, Any entity attribute |
 | Solar | Solcast, EMHASS built-in (Open-Meteo), Any entity attribute, No solar |
 | Load | House load sensor, Any entity attribute, Typical household (no sensor needed) |
-| Inverter | Deye, Growatt, Sungrow, Sigenergy, Solax, Solis, Generic |
+| Inverter | Deye, Ferroamp, Growatt, Sungrow, Sigenergy, Solax, Solis, Generic |
 | Tariffs | Amber Electric, Göteborg Energi |
 
 

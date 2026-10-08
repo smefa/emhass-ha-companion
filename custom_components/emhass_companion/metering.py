@@ -12,15 +12,16 @@ The Home Assistant half of the savings feature: subscriptions, unit handling,
 persistence and the midnight rollover. All the money lives in :mod:`savings`,
 which knows nothing about any of this.
 
-Settling happens on **every state change of every source**, not on a timer.
-Two things depend on that resolution:
+Settling happens on **every state change of every source**, and on a
+five-minute clock tick besides (``SETTLE_MINUTES``). Two things depend on
+that resolution:
 
 * ``max(net, 0)`` is only exact when the interval is short. Over a
   quarter-hour bucket, a house that imported for five minutes and exported for
   ten nets out to a single direction and the other side's money vanishes.
 * Prices are piecewise constant per hour, so multiplying an interval's kWh by
-  the price at that instant *is* the exact integral -- as long as intervals are
-  short against an hour.
+  the price at the interval's start *is* the exact integral -- as long as no
+  interval straddles a price boundary, which the tick sees to.
 
 Writing four sensor states on every meter update would be a different problem,
 so publication is throttled separately (see ``_PUBLISH_INTERVAL``); the ledger
@@ -33,6 +34,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import logging
+import math
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -98,14 +100,30 @@ and left uncosted rather than priced at whatever the tariff happens to say now.
 """
 
 
+SETTLE_MINUTES = tuple(range(0, 60, 5))
+"""Minutes past the hour to settle on even when no source has moved.
+
+State changes alone are not enough. Home Assistant reports a change only when
+the value changes, so a steady load can leave a power sensor silent for longer
+than ``_RESTORE_MAX_GAP`` -- and that span is then discarded as an outage.
+And a boundary is only as sharp as the readings either side of it: every
+billing boundary in use (an hour, a quarter-hour price or demand interval,
+midnight) falls on one of these minutes, so a tick lands on each of them."""
+
+
 def _as_float(state: State | None) -> float | None:
-    """A numeric state, or None for anything that is not one."""
+    """A finite numeric state, or None for anything that is not one.
+
+    ``float()`` takes ``"nan"`` and ``"inf"`` too; either would poison every
+    total it is added to for the rest of the day.
+    """
     if state is None or state.state in ("unknown", "unavailable", "", "none", "None"):
         return None
     try:
-        return float(state.state)
+        value = float(state.state)
     except (TypeError, ValueError):
         return None
+    return value if math.isfinite(value) else None
 
 
 def _energy_kwh(state: State | None) -> float | None:
@@ -165,6 +183,15 @@ class Meter:
         self.invert = invert
         self._last_value: float | None = None
         self._last_time: datetime | None = None
+
+    @property
+    def last_time(self) -> datetime | None:
+        """When the reading the next :meth:`take` differences from was taken.
+
+        The start of the span the next take's energy covers -- what a caller
+        needs to split that energy across a boundary falling inside it.
+        """
+        return self._last_time
 
     # -- energy counters ------------------------------------------------------
 
@@ -611,6 +638,9 @@ class SavingsTracker:
         self._last_snapshot: tuple[float, ...] = ()
         self._pending_gap: PendingGapReplay | None = None
         self._gap_replay_unsub: CALLBACK_TYPE | None = None
+        # The prices in force at the previous settle: the start of the span
+        # the next settle records.
+        self._span_prices: Prices | None = None
 
     # -- lifecycle ------------------------------------------------------------
 
@@ -718,6 +748,10 @@ class SavingsTracker:
         self._unsubs.append(
             async_track_time_change(self.hass, self._async_midnight, hour=0, minute=0, second=5)
         )
+        # Settle on the clock as well as on the meters: see SETTLE_MINUTES.
+        self._unsubs.append(
+            async_track_time_change(self.hass, self._async_tick, minute=SETTLE_MINUTES, second=0)
+        )
         # One immediate settle so a restart's baselines are taken now rather
         # than whenever the first meter next happens to move.
         self._settle(dt_util.utcnow())
@@ -805,10 +839,25 @@ class SavingsTracker:
         self._settle(now)
         self._publish(force=True)
 
-    def _settle(self, now: datetime) -> None:
-        """Fold everything that moved since the last settle into the ledger."""
-        self._roll_over(now)
+    @callback
+    def _async_tick(self, _now: datetime) -> None:
+        # The live clock, not the scheduled instant handed in: a meter tick
+        # settled a moment after the boundary must not be followed by a take
+        # stamped before it.
+        self._settle(dt_util.utcnow())
 
+    def _settle(self, now: datetime) -> None:
+        """Fold everything that moved since the last settle into the ledger.
+
+        The energy taken here flowed *since the previous settle*, so it is
+        priced at the tariff that was in force then and booked to the day it
+        started in: the ledger rolls over only after it has been recorded.
+        Pricing at ``now`` and rolling over first put the last seconds before
+        every price boundary at the next period's price, and the last reading
+        before midnight on the wrong day. The clock tick (``SETTLE_MINUTES``)
+        puts a settle on every boundary, so no span straddles one by more
+        than the tick's own latency.
+        """
         # Read before recording, not after: the cost account opens itself on
         # the first priced interval and values whatever is already in the
         # battery at that moment, so it has to know how full the battery is
@@ -818,7 +867,17 @@ class SavingsTracker:
             if self.ledger.stored_start_kwh is None:
                 self.ledger.stored_start_kwh = stored
 
-        self.ledger.record(self._read_energy(now), self._prices(now))
+        # Looked up when the span opened, not now: by now the coordinator may
+        # have replaced the price series with one that starts at this very
+        # timestep, and no longer reaches back to the span's start. Only a
+        # span with no recorded start (the first after a restart) falls back
+        # to the price in force now -- the short-gap rule _RESTORE_MAX_GAP
+        # describes.
+        prices = self._span_prices if self._span_prices is not None else self._prices(now)
+        self.ledger.record(self._read_energy(now), prices)
+        self._span_prices = self._prices(now)
+
+        self._roll_over(now)
 
         self._store.async_delay_save(self._data_to_save, _SAVE_DELAY)
         self._publish()

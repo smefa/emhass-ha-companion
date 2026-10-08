@@ -93,7 +93,7 @@ function toggleRow(parent, label, sublabel) {
  * house, and writing the slider on each one would drag the thumb out from
  * under a finger mid-gesture.
  */
-function sliderRow(parent, label, format) {
+function sliderRow(parent, label, format, step) {
   const row = tag("div", "row", parent);
   const text = tag("div", "label", row);
   tag("span", null, text, label);
@@ -122,13 +122,21 @@ function sliderRow(parent, label, format) {
   // `floor` lets a caller raise the minimum past the entity's own `min`
   // attribute -- e.g. "Run within" should never go below the hours the load
   // still needs, even though the number entity itself allows a lower value.
+  // `step` overrides the entity's own step; min and max are then pulled onto
+  // that grid, since a range input counts its steps from `min`.
   row.setState = (stateObj, floor) => {
     if (!stateObj) return;
     const attrs = stateObj.attributes || {};
     const attrMin = attrs.min !== undefined ? attrs.min : 0;
-    input.min = Number.isFinite(floor) ? Math.max(attrMin, floor) : attrMin;
-    input.max = attrs.max !== undefined ? attrs.max : 100;
-    input.step = attrs.step !== undefined ? attrs.step : 1;
+    let min = Number.isFinite(floor) ? Math.max(attrMin, floor) : attrMin;
+    let max = attrs.max !== undefined ? attrs.max : 100;
+    if (step) {
+      min = Math.ceil(min / step) * step;
+      max = Math.max(min, Math.floor(max / step) * step);
+    }
+    input.min = min;
+    input.max = max;
+    input.step = step || (attrs.step !== undefined ? attrs.step : 1);
     if (dragging) return;
     const current = num(stateObj);
     // Setting a value below input.min clamps it to min, so re-read it.
@@ -750,7 +758,7 @@ class EmhassDeferrableSwipeCard extends LiveCard {
     /* page 2: the controls */
     ui.requestRow = toggleRow(ui.pages[1], "Requested", "Ask for a run");
     ui.requestRow.button.addEventListener("click", () => this._toggle("load_requested"));
-    ui.withinRow = sliderRow(ui.pages[1], "Run within", (value) => `${value} h`);
+    ui.withinRow = sliderRow(ui.pages[1], "Run within", (value) => `${value} h`, 0.5);
     ui.withinRow.onCommit = (value) => this._setNumber("run_within", value);
     ui.energyRow = sliderRow(ui.pages[1], "Energy needed", (value) => `${value} kWh`);
     ui.energyRow.onCommit = (value) => this._setNumber("energy_needed", value);
@@ -954,7 +962,7 @@ class EmhassDeferrableStripCard extends LiveCard {
     ui.drawerBody = tag("div", "drawer-body", ui.drawer);
     ui.requestRow = toggleRow(ui.drawerBody, "Requested", "Ask for a run");
     ui.requestRow.button.addEventListener("click", () => this._toggle("load_requested"));
-    ui.withinRow = sliderRow(ui.drawerBody, "Run within", (value) => `${value} h`);
+    ui.withinRow = sliderRow(ui.drawerBody, "Run within", (value) => `${value} h`, 0.5);
     ui.withinRow.onCommit = (value) => {
       const entityId = this._entity("run_within");
       if (entityId) setNumber(this._hass, entityId, value);

@@ -73,6 +73,7 @@ from .const import (
     CONF_INVERTER_EFFICIENCY_DC_AC,
     CONF_LATEST_END,
     CONF_LOAD,
+    CONF_MAIN_FUSE_A,
     CONF_MAX_STARTUPS,
     CONF_MAX_TEMPERATURE,
     CONF_METERING,
@@ -87,6 +88,11 @@ from .const import (
     CONF_NETWORK,
     CONF_NOMINAL_POWER,
     CONF_OPERATING_HOURS,
+    CONF_PHASE_ENTITIES,
+    CONF_PHASE_LIMIT_WINDOW_MIN,
+    CONF_PHASE_MARGIN_A,
+    CONF_PHASE_VOLTAGE_ENTITY,
+    CONF_PHASE_VOLTAGE_V,
     CONF_POWER_SENSOR,
     CONF_PRICE,
     CONF_PROFILE,
@@ -130,6 +136,9 @@ from .const import (
     DEFAULT_HORIZON_HOURS,
     DEFAULT_INVERTER_EFFICIENCY,
     DEFAULT_MPC_INTERVAL,
+    DEFAULT_PHASE_LIMIT_WINDOW_MIN,
+    DEFAULT_PHASE_MARGIN_A,
+    DEFAULT_PHASE_VOLTAGE_V,
     DEFAULT_SELF_CONSUME_THRESHOLD_W,
     DEFAULT_SOC_MAX,
     DEFAULT_SOC_MIN,
@@ -706,7 +715,34 @@ def _collect_grid(user_input: dict[str, Any]) -> dict[str, Any]:
         # actually clears it instead of leaving the old entity in place.
         CONF_GRID_IMPORT_LIMIT_ENTITY: user_input.get(CONF_GRID_IMPORT_LIMIT_ENTITY) or None,
         CONF_GRID_EXPORT_LIMIT_ENTITY: user_input.get(CONF_GRID_EXPORT_LIMIT_ENTITY) or None,
+        # Same "None, not absent" rule, for the same reason: clearing the fuse
+        # in the options flow is how the phase guard is turned off.
+        **{key: user_input.get(key) or None for key in CONF_PHASE_ENTITIES},
+        CONF_MAIN_FUSE_A: user_input.get(CONF_MAIN_FUSE_A) or None,
+        CONF_PHASE_MARGIN_A: user_input.get(CONF_PHASE_MARGIN_A, DEFAULT_PHASE_MARGIN_A),
+        CONF_PHASE_VOLTAGE_V: user_input.get(CONF_PHASE_VOLTAGE_V, DEFAULT_PHASE_VOLTAGE_V),
+        CONF_PHASE_VOLTAGE_ENTITY: user_input.get(CONF_PHASE_VOLTAGE_ENTITY) or None,
+        CONF_PHASE_LIMIT_WINDOW_MIN: user_input.get(
+            CONF_PHASE_LIMIT_WINDOW_MIN, DEFAULT_PHASE_LIMIT_WINDOW_MIN
+        ),
     }
+
+
+def _grid_errors(user_input: dict[str, Any]) -> dict[str, str]:
+    """With a fuse set, the phase guard needs one phase or all three.
+
+    The fuse is the switch: empty turns the guard off, and phase readings
+    left in place then do nothing (and no guard entities exist to suggest
+    otherwise). With a fuse, two phases out of three would leave the third
+    unguarded, so that is refused rather than quietly accepted.
+    """
+    phases = [key for key in CONF_PHASE_ENTITIES if user_input.get(key)]
+    fuse = user_input.get(CONF_MAIN_FUSE_A)
+    if fuse and len(phases) not in (1, 3):
+        return {"base": "phase_entities_incomplete"}
+    if fuse and fuse <= user_input.get(CONF_PHASE_MARGIN_A, DEFAULT_PHASE_MARGIN_A):
+        return {"base": "phase_margin_too_large"}
+    return {}
 
 
 class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -1022,8 +1058,12 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_grid(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        errors: dict[str, str] = {}
+        submitted: dict[str, Any] = {}
         if user_input is not None:
-            user_input = _flatten_sections(user_input)
+            submitted = user_input = _flatten_sections(user_input)
+            errors = _grid_errors(user_input)
+        if user_input is not None and not errors:
             self._options["grid"] = _collect_grid(user_input)
             self._options.update(
                 {
@@ -1044,7 +1084,10 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
         defaults = {CONF_TIME_STEP: detected} if detected else {}
         return self.async_show_form(
             step_id="grid",
-            data_schema=vol.Schema(grid_schema(defaults)),
+            data_schema=vol.Schema(
+                grid_schema({**defaults, **submitted}, advanced_open=bool(errors))
+            ),
+            errors=errors,
             description_placeholders={
                 "detected_resolution": (
                     f"\n\nDetected {detected}-minute resolution from your price "
@@ -2474,7 +2517,7 @@ def _time_step_options(defaults: dict[str, Any]) -> list[str]:
     return sorted(options, key=int)
 
 
-def grid_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
+def grid_schema(defaults: dict[str, Any], *, advanced_open: bool = False) -> dict[Any, Any]:
     basic: dict[Any, Any] = {
         vol.Required(
             "grid_import_max_w",
@@ -2525,6 +2568,53 @@ def grid_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
         _optional_blank(CONF_GRID_EXPORT_LIMIT_ENTITY, defaults): selector.EntitySelector(
             selector.EntitySelectorConfig(domain="sensor")
         ),
+        # The phase guard (phase_guard.py): the main fuse and the per-phase
+        # readings it is checked against. Replaces the hand-written import
+        # limit template above for a three-phase house, and adds the real-time
+        # charge clamp a template cannot. Unfiltered by device class for the
+        # same reason as the limit sensors -- and because W, kW and A are all
+        # accepted, which no single device class covers.
+        **{
+            _optional_blank(key, defaults): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            )
+            for key in CONF_PHASE_ENTITIES
+        },
+        _optional_blank(CONF_MAIN_FUSE_A, defaults): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=1, max=400, step=1, unit_of_measurement="A", mode="box"
+            )
+        ),
+        vol.Required(
+            CONF_PHASE_MARGIN_A,
+            default=defaults.get(CONF_PHASE_MARGIN_A, DEFAULT_PHASE_MARGIN_A),
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0, max=10, step=0.1, unit_of_measurement="A", mode="box"
+            )
+        ),
+        vol.Required(
+            CONF_PHASE_VOLTAGE_V,
+            default=defaults.get(CONF_PHASE_VOLTAGE_V, DEFAULT_PHASE_VOLTAGE_V),
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=100, max=260, step=1, unit_of_measurement="V", mode="box"
+            )
+        ),
+        # Filtered on device class, unlike the phase readings: every meter
+        # integration that publishes a voltage declares it, and an
+        # unfiltered picker is a long list to find one sensor in.
+        _optional_blank(CONF_PHASE_VOLTAGE_ENTITY, defaults): selector.EntitySelector(
+            selector.EntitySelectorConfig(domain="sensor", device_class="voltage")
+        ),
+        vol.Required(
+            CONF_PHASE_LIMIT_WINDOW_MIN,
+            default=defaults.get(CONF_PHASE_LIMIT_WINDOW_MIN, DEFAULT_PHASE_LIMIT_WINDOW_MIN),
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0, max=120, step=5, unit_of_measurement="min", mode="box"
+            )
+        ),
         # The only curtailment question there is: without this, no run ever
         # produces a P_PV_curtailment column, and strategy.decide_curtailment
         # has nothing to act on.
@@ -2553,7 +2643,7 @@ def grid_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
             default=defaults.get(CONF_DAYAHEAD_FALLBACK_TIME, DEFAULT_DAYAHEAD_FALLBACK_TIME),
         ): selector.TimeSelector(),
     }
-    return _with_advanced(basic, advanced)
+    return _with_advanced(basic, advanced, collapsed=not advanced_open)
 
 
 class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
@@ -3160,8 +3250,12 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
     async def async_step_grid(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         options = dict(self.config_entry.options)
         stored = options.get("grid", {})
+        errors: dict[str, str] = {}
+        submitted: dict[str, Any] = {}
         if user_input is not None:
-            user_input = _flatten_sections(user_input)
+            submitted = user_input = _flatten_sections(user_input)
+            errors = _grid_errors(user_input)
+        if user_input is not None and not errors:
             options["grid"] = _collect_grid(user_input)
             options.update(
                 {
@@ -3178,7 +3272,10 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
 
         return self.async_show_form(
             step_id="grid",
-            data_schema=vol.Schema(grid_schema({**options, **stored})),
+            data_schema=vol.Schema(
+                grid_schema({**options, **stored, **submitted}, advanced_open=bool(errors))
+            ),
+            errors=errors,
         )
 
     async def async_step_tariff(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:

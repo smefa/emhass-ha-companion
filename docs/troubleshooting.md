@@ -173,20 +173,40 @@ Setting *Energy needed* to less than the day's surplus gives the clamp something
 firmer to work with — and it is delivered in full, never derated. See
 [Surplus loads](surplus_loads.md#the-modulation-margin).
 
-**"The optimisation problem is infeasible."** Download diagnostics (or grab
-the `payload` attribute off the *Last request to EMHASS* sensor) and run
-[`scripts/check_infeasibility.py`](https://github.com/smefa/emhass-ha-companion/blob/main/scripts/check_infeasibility.py) against
-it:
+**"The optimisation problem is infeasible."** EMHASS itself only says
+"infeasible", for the whole problem. When that happens, the integration checks
+the request it just sent and the repair issue names the most likely cause,
+with the numbers. For example: right now the plan needs at least 11.1 kW (Car
+10.0 kW and Dishwasher 1.1 kW already running and held at that power), but at
+most 8.0 kW is available (grid 7.1 kW, solar 0 W, battery 893 W at 1 %
+charge). The Home Assistant log lists every finding, and so do diagnostics
+(`last_infeasibility`, plus a line in `triage`) and the *Last request to
+EMHASS* sensor's `infeasibility` attribute. The issue clears itself on the
+next run that solves.
+
+The checks look for the patterns that actually turn out to cause this:
+
+- loads held at their running power at the first timestep that the grid,
+  solar and the battery's *stored* energy cannot supply,
+- a battery too empty to cover the house load right now,
+- a load that is reported as running but asked for no run time,
+- a deferrable load whose window is narrower than its own run time,
+- forecast arrays that disagree on length or have gaps,
+- power deficits or surpluses that no combination of grid, battery and
+  inverter limits can cover.
+
+Each check names the EMHASS constraint it mirrors. They cannot prove a plan
+*is* feasible, only find reasons it might not be.
+
+When the issue says no specific cause was found, run the same checks yourself
+on a diagnostics download (or on the `payload` attribute of the *Last request
+to EMHASS* sensor) to see the full report:
 
 ```sh
 python3 scripts/check_infeasibility.py diagnostics.json
 ```
 
-It's a standalone, dependency-free script, so it also runs fine on a plain
-`python3` outside a full checkout. It checks for the patterns that actually
-turn out to cause this — a deferrable load whose window is narrower than
-its own run time, a battery that can only be charged by PV and never the
-grid, forecast arrays that disagree on length, and power deficits/surpluses
-no combination of grid, battery and inverter limits can cover — and explains
-which EMHASS constraint each one mirrors. It cannot prove a plan *is*
-feasible, only find reasons it might not be.
+The checks live in one standalone, dependency-free file,
+[`custom_components/emhass_companion/infeasibility.py`](https://github.com/smefa/emhass-ha-companion/blob/main/custom_components/emhass_companion/infeasibility.py).
+Outside a checkout, download that file alone and run it the same way:
+`python3 infeasibility.py diagnostics.json`.

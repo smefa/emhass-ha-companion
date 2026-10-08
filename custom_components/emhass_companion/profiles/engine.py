@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 import logging
+import math
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -324,6 +325,8 @@ def convert_power(
     options: dict[str, Any],
     action: str,
     power_w: float,
+    *,
+    ceiling_w: float | None = None,
 ) -> float:
     """Turn EMHASS's signed watts into the number this profile's action writes.
 
@@ -333,14 +336,23 @@ def convert_power(
     something the hardware has rather than something the author should compute.
 
     EMHASS's convention on the way in is positive = discharge.
+
+    ``ceiling_w`` is a hard limit on a charge, in watts, for the phase guard:
+    applied *after* the boost, and with the final rounding taken towards
+    zero instead of to the nearest step, so the number written can never
+    ask for more than the guard allowed. A 2550 W cap on a 100 W step is
+    2500, not 2600.
     """
     control = profile.control
     magnitude = abs(float(power_w))
+    capped = ceiling_w is not None and action == MODE_FORCE_CHARGE
 
     # Charging loses something between the meter and the cells; a profile can
     # ask for proportionally more so that what arrives matches the plan.
     if action == MODE_FORCE_CHARGE:
         magnitude *= float(control["charge_boost"])
+    if capped:
+        magnitude = min(magnitude, max(float(ceiling_w), 0.0))
 
     if control["signed"]:
         if action == MODE_FORCE_CHARGE:
@@ -368,7 +380,11 @@ def convert_power(
         value = max(-span, min(span, value))
 
     step = float(control["round_to"])
-    if step > 0:
+    if step > 0 and capped:
+        # The epsilon keeps 2500.0000001 W on a 100 W step from flooring to
+        # 2400 -- float noise from the unit conversion, not real headroom.
+        value = math.copysign(math.floor(abs(value) / step + 1e-9) * step, value)
+    elif step > 0:
         value = round(value / step) * step
     return int(value) if step >= 1 and value == int(value) else value
 
@@ -411,6 +427,7 @@ def action_variables(
     *,
     power_w: float = 0.0,
     curtail_w: float = 0.0,
+    ceiling_w: float | None = None,
     **extra: Any,
 ) -> dict[str, Any]:
     """The template scope one inverter action is rendered against."""
@@ -419,7 +436,7 @@ def action_variables(
         "action": action,
         # Ready to write: converted to this profile's unit, signed if the
         # hardware wants a signed value, boosted and rounded. Use this one.
-        "power": convert_power(hass, profile, options, action, power_w),
+        "power": convert_power(hass, profile, options, action, power_w, ceiling_w=ceiling_w),
         # The raw plan value, EMHASS's convention, always watts and always
         # signed. For anything the conversion above cannot express.
         "power_w": round(float(power_w)),

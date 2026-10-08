@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 import logging
 from typing import Any
 
@@ -37,6 +38,21 @@ class EmhassConnectionError(EmhassError):
 
 class EmhassApiError(EmhassError):
     """EMHASS rejected a request."""
+
+    def __init__(self, message: str, *, status: int | None = None, body: str = "") -> None:
+        super().__init__(message)
+        self.status = status
+        self.body = body
+
+    @property
+    def infeasible(self) -> bool:
+        """Whether this rejection is EMHASS reporting an infeasible solve.
+
+        EMHASS 0.18 answers one with HTTP 400 and its action log, once its
+        relaxed-LP retry has failed too, where older versions answered 200 and
+        left ``infeasible`` in last-run.
+        """
+        return self.status == 400 and "infeasible" in self.body.lower()
 
 
 class EmhassClient:
@@ -73,7 +89,9 @@ class EmhassClient:
                 body = await response.text()
                 if response.status >= 400:
                     raise EmhassApiError(
-                        f"{method} {path} returned {response.status}: {body.strip()[:300]}"
+                        f"{method} {path} returned {response.status}: {body.strip()[:300]}",
+                        status=response.status,
+                        body=body,
                     )
                 if not expect_json:
                     return body
@@ -179,8 +197,27 @@ class EmhassClient:
 
         The action endpoint reports transport success; ``last-run`` reports
         whether the solve actually produced anything usable. Both are needed --
-        an infeasible solve returns a perfectly successful HTTP 200.
+        an infeasible solve returns a perfectly successful HTTP 200. From
+        EMHASS 0.18 it returns 400 instead, which is turned back into the same
+        infeasible last-run here, so the caller keeps one path for both.
         """
-        await self.async_run_action(action, runtime_params)
+        try:
+            await self.async_run_action(action, runtime_params)
+        except EmhassApiError as err:
+            if not err.infeasible:
+                raise
+            _LOGGER.debug("EMHASS %s was infeasible: %s", action, err)
+            # Shaped like the 200 path's last-run: status "ok", no
+            # error_message. Diagnostics and the cards treat either of those
+            # as a failed run and would never show the run as infeasible.
+            return (
+                LastRun(
+                    status="ok",
+                    timestamp=datetime.now(UTC),
+                    action=action,
+                    infeasible=True,
+                ),
+                None,
+            )
         last_run, plan = await asyncio.gather(self.async_get_last_run(), self.async_get_plan())
         return last_run, plan

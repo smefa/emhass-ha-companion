@@ -604,6 +604,238 @@ def _import_floor_w(inputs: PayloadInputs, horizon_end: datetime) -> float:
     return max(candidates)
 
 
+@dataclass(slots=True)
+class _Pin:
+    """One load's timestep-0 pin, as EMHASS will actually enforce it."""
+
+    index: int
+    draw_w: float
+    """What the pin makes the load draw: the pin itself, or the nominal power
+    for a semi-continuous load, which EMHASS forces on at nominal rather than
+    pinning to a wattage."""
+    floor_w: float
+    """The least it can be pinned to: its minimum power rounded up to a whole
+    watt if it modulates (pins are sent in whole watts, rounded down, so a
+    floor of 1400.5 W would otherwise go out as 1400 W, below the minimum),
+    all of it if it is semi-continuous."""
+    forced_w: float
+    """What it still draws with no pin at all: a minimum on-time that
+    ``def_current_state`` keeps in force (see :func:`_forced_on_w`), else 0."""
+    kept_w: float = 0.0
+
+
+def _numeric(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _value_covering(series: Any, at: datetime) -> float | None:
+    """A payload forecast's value in force at ``at``.
+
+    ``Series.to_payload`` sends a timestamp-to-value mapping, hold-last like
+    :meth:`Series.value_at`; a bare list (from a profile's extra settings)
+    starts at timestep 0. None when neither answers for ``at``.
+    """
+    if isinstance(series, list):
+        return _numeric(series[0]) if series else None
+    if not isinstance(series, dict):
+        return None
+    best: tuple[datetime, Any] | None = None
+    for key, value in series.items():
+        when = dt_util.parse_datetime(key) if isinstance(key, str) else None
+        if when is None or when > at:
+            continue
+        if best is None or when > best[0]:
+            best = (when, value)
+    return None if best is None else _numeric(best[1])
+
+
+def _forced_on_w(payload: dict[str, Any], k: int, *, state: bool) -> float:
+    """What EMHASS forces load ``k`` to draw at timestep 0 from its current
+    state alone, with no ``def_current_power`` pin.
+
+    Mirrors the two blocks of EMHASS's ``optimization.py`` that turn a load
+    reported as running into a forced-on timestep 0: a single-constant load
+    with run time still owed is held on (block A), and any other load whose
+    on-streak is short of its minimum on-time is held on for the remainder
+    (block B). Neither is a pin, so neither can be shrunk -- releasing one
+    would mean misreporting the load's state, or cutting a compressor's
+    minimum run short. They can only be counted.
+    """
+    if not state:
+        return 0.0
+
+    def _get(key: str, default: Any = 0) -> Any:
+        values = payload.get(key)
+        return values[k] if isinstance(values, list) and k < len(values) else default
+
+    required = _numeric(_get("operating_timesteps_of_each_deferrable_load", None))
+    completed = _numeric(_get("def_current_operating_timesteps")) or 0.0
+    if required is not None and required - completed <= 0:
+        return 0.0  # target met: EMHASS releases the load (cots-satisfied)
+    if required is None and not _numeric(_get("operating_hours_of_each_deferrable_load")):
+        return 0.0
+    nominal = _numeric(_get("nominal_power_of_deferrable_loads")) or 0.0
+    if _get("set_deferrable_load_single_constant", False):
+        return nominal
+    minimum_on = _numeric(_get("def_minimum_on_time")) or 0.0
+    on_steps = _numeric(_get("def_current_on_timesteps")) or 0.0
+    if minimum_on <= 0 or on_steps >= minimum_on:
+        return 0.0
+    if _get("treat_deferrable_load_as_semi_cont", False):
+        return nominal
+    return min(_numeric(_get("minimum_power_of_deferrable_loads")) or 0.0, nominal)
+
+
+def _fit_pins_to_import_limit(
+    payload: dict[str, Any], names: Sequence[str], house_live_w: float | None, now: datetime
+) -> list[str]:
+    """Shrink or release timestep-0 pins the grid import limit cannot carry.
+
+    ``def_current_power`` is a hard equality on timestep 0 (a forced-on
+    timestep for a semi-continuous load), so a pin is not something EMHASS
+    can move out of the way. Pinned loads plus the house beyond the import
+    limit at timestep 0 is an infeasible problem -- the whole plan lost, not
+    just this load's. The live fuse limit falling while a car charges is
+    exactly that (2026-10-01 22:00).
+
+    The budget is grid import only: PV and the battery may cover a pin, but
+    neither is guaranteed (an empty battery, night), and a controllable
+    charger is what is meant to back off. Raising the import floor instead
+    would override the fuse limit for the whole horizon to protect one
+    timestep. Loads EMHASS forces on from their current state alone
+    (:func:`_forced_on_w`) are taken off the budget first, since nothing here
+    can move them.
+
+    Modulating pins come down first, toward their minimum power and in
+    proportion to their room above it. If that is still not enough, pins are
+    released -- sent as 0, which EMHASS reads as "no pin" -- last load first,
+    down to whatever their state still forces; any released pin that then
+    fits again is taken back, and whatever is still spare goes back to the
+    modulating pins still held. A released load may be rescheduled; a shrunk
+    one keeps running at less. Single-constant and thermal loads are not
+    pinned (EMHASS ignores their pins), only counted.
+
+    Mutates ``payload["def_current_power"]`` in place and returns a warning
+    per load it changed, plus one if what is forced still does not fit.
+    MPC only -- see the caller.
+    """
+    powers = payload.get("def_current_power")
+    if not isinstance(powers, list):
+        powers = []
+    limit = payload.get("maximum_power_from_grid")
+    grid_w = _numeric(limit[0] if isinstance(limit, list) and limit else limit)
+    if grid_w is None:
+        return []
+    house_w = _value_covering(payload.get("load_power_forecast"), now)
+    if house_w is None:
+        house_w = house_live_w
+    house_w = max(house_w or 0.0, 0.0)
+
+    def _flag(key: str, k: int) -> Any:
+        values = payload.get(key)
+        return values[k] if isinstance(values, list) and k < len(values) else None
+
+    states = payload.get("def_current_state")
+    count = len(states) if isinstance(states, list) else 0
+    pins: list[_Pin] = []
+    fixed: list[tuple[int, float]] = []
+    for k in range(count):
+        if _flag("def_load_config", k):
+            continue  # thermal: governed by its temperature, neither pinned nor forced
+        nominal = _numeric(_flag("nominal_power_of_deferrable_loads", k))
+        if nominal is None:
+            continue  # a sequence load's list-valued power: not pinned either
+        state = bool(states[k])
+        forced = _forced_on_w(payload, k, state=state)
+        sent = _numeric(powers[k]) if k < len(powers) else None
+        if not sent or sent <= 0 or _flag("set_deferrable_load_single_constant", k):
+            if forced > 0:
+                fixed.append((k, forced))
+            continue
+        if _flag("treat_deferrable_load_as_semi_cont", k):
+            pins.append(_Pin(k, nominal, nominal, forced))
+        else:
+            minimum = _numeric(_flag("minimum_power_of_deferrable_loads", k)) or 0.0
+            floor = min(float(math.ceil(minimum)), sent)
+            pins.append(_Pin(k, sent, floor, min(forced, floor)))
+
+    def _name(k: int) -> str:
+        return names[k] if k < len(names) else f"deferrable{k}"
+
+    fixed_w = sum(watts for _k, watts in fixed)
+    budget_w = grid_w - house_w - fixed_w
+    excess = sum(pin.draw_w for pin in pins) - budget_w
+    if excess <= 0.5:
+        return []
+
+    for pin in pins:
+        pin.kept_w = pin.draw_w
+    room = sum(pin.draw_w - pin.floor_w for pin in pins)
+    if room > 0:
+        cut = min(excess, room)
+        for pin in pins:
+            pin.kept_w -= cut * (pin.draw_w - pin.floor_w) / room
+        excess -= cut
+    released: set[int] = set()
+    for pin in reversed(pins):
+        if excess <= 0.5:
+            break
+        excess -= pin.kept_w - pin.forced_w
+        pin.kept_w = pin.forced_w
+        released.add(pin.index)
+    spare = -excess
+    # Releasing last-first can free more than was needed: a big pin released
+    # after a small one leaves room the small one fits in again.
+    for pin in pins:
+        if pin.index in released and pin.floor_w - pin.forced_w <= spare:
+            spare -= pin.floor_w - pin.forced_w
+            pin.kept_w = pin.floor_w
+            released.discard(pin.index)
+    for pin in pins:
+        if spare <= 0:
+            break
+        if pin.index not in released and pin.floor_w < pin.draw_w:
+            give = min(spare, pin.draw_w - pin.kept_w)
+            pin.kept_w += give
+            spare -= give
+
+    warnings: list[str] = []
+    budget_text = (
+        f"timestep 0 has only {max(budget_w, 0.0):.0f} W of grid import left after the "
+        f"house's {house_w:.0f} W" + (f" and {fixed_w:.0f} W of loads held on" if fixed_w else "")
+    )
+    for pin in pins:
+        prefix = (
+            f"{_name(pin.index)}: pinned at {pin.draw_w:.0f} W as already running, "
+            f"but {budget_text}"
+        )
+        if pin.index in released:
+            powers[pin.index] = 0.0
+            warnings.append(f"{prefix}; not pinned this run, so EMHASS may reschedule it.")
+        elif pin.kept_w < pin.draw_w - 0.5:
+            # Whole watts, rounded down to stay inside the budget. floor_w is
+            # already a whole watt, so this can never land below the minimum.
+            powers[pin.index] = float(math.floor(pin.kept_w))
+            warnings.append(f"{prefix}; pinned at {powers[pin.index]:.0f} W instead.")
+    if spare < -0.5:
+        held = ", ".join(
+            f"{_name(k)} {watts:.0f} W"
+            for k, watts in [*fixed, *((p.index, p.forced_w) for p in pins if p.forced_w)]
+        )
+        warnings.append(
+            f"Timestep 0 still needs {-spare:.0f} W more than the grid import limit "
+            f"allows after releasing every pin: loads held on by their current state "
+            f"(single-constant run or minimum on-time) cannot be moved: {held or 'none'}."
+        )
+    if "def_current_power" in payload and not any(_numeric(value) for value in powers):
+        # Nothing left pinned: say so by omission, the shape every request
+        # with no running load already has.
+        del payload["def_current_power"]
+    return warnings
+
+
 def build_payload(inputs: PayloadInputs) -> PayloadResult:
     """Assemble the runtime parameters for one EMHASS request."""
     step = timedelta(minutes=inputs.time_step_minutes)
@@ -804,7 +1036,7 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
         and inputs.grid_import_limit_w < import_floor <= inputs.grid.import_max_w
     ):
         warnings.append(
-            f"The grid import limit sensor read "
+            f"The live grid import limit (limit sensor or phase guard) read "
             f"{inputs.grid_import_limit_w:.0f} W, below the "
             f"{import_floor:.0f} W the house is forecast to draw anyway. Raised "
             "to that value, since a lower limit has no feasible plan."
@@ -916,6 +1148,16 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
 
     thermal = _thermal_settings(inputs, step, len(load_order))
     payload.update(thermal)
+
+    # After everything the check reads is in place: the import limit, the
+    # blended house load, and def_load_config for which loads are thermal.
+    # MPC only, since only there is timestep 0 "now" and a pin a fact.
+    if inputs.action == ACTION_MPC:
+        warnings.extend(
+            _fit_pins_to_import_limit(
+                payload, [load.name for load in inputs.loads], inputs.load_live_w, inputs.now
+            )
+        )
 
     # Profile-contributed settings last, so a profile can override a default
     # (a "no solar" profile turning PV modelling off, for instance).

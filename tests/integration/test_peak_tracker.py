@@ -90,6 +90,19 @@ async def _spike(hass: HomeAssistant, freezer, total: float, kwh: float) -> floa
     return total
 
 
+async def _jump(hass: HomeAssistant, freezer, when: datetime, total: float) -> None:
+    """Move the clock to ``when`` with nothing used in between, and settle there.
+
+    Stands in for the clock ticks (``SETTLE_MINUTES``) a running Home
+    Assistant would have fired all along. Without them, the next reading's
+    energy would span the whole jump, and only the share of it that falls
+    inside the bucket it lands in would count -- spread over days, nearly none.
+    """
+    freezer.move_to(when)
+    _set_energy(hass, total)
+    await hass.async_block_till_done()
+
+
 # -- basic accumulation: max aggregate -------------------------------------------
 
 
@@ -141,11 +154,11 @@ async def test_mean_top_n_distinct_days_and_the_today_floor_case(
     total = await _spike(hass, freezer, 0.0, 7.0)  # day 1: 7 kW
     assert tracker.floor_kw == 0.0  # only 1 of 3 days qualifies yet: nothing to beat
 
-    freezer.move_to(datetime(2026, 8, 2, 10, 0, tzinfo=UTC))
+    await _jump(hass, freezer, datetime(2026, 8, 2, 10, 0, tzinfo=UTC), total)
     total = await _spike(hass, freezer, total, 8.0)  # day 2: 8 kW
     assert tracker.floor_kw == 0.0  # still only 2 of 3
 
-    freezer.move_to(datetime(2026, 8, 3, 10, 0, tzinfo=UTC))
+    await _jump(hass, freezer, datetime(2026, 8, 3, 10, 0, tzinfo=UTC), total)
     total = await _spike(hass, freezer, total, 9.0)  # day 3: 9 kW, and "today"
     assert tracker.current_aggregate_kw == pytest.approx((7.0 + 8.0 + 9.0) / 3)
     # "Today" (day 3) already holds the *highest* of the top three. The naive
@@ -157,7 +170,7 @@ async def test_mean_top_n_distinct_days_and_the_today_floor_case(
 
     # A fourth day, too low to enter the top three: the floor falls back to
     # the plain displacement value, because today no longer holds an entry.
-    freezer.move_to(datetime(2026, 8, 4, 10, 0, tzinfo=UTC))
+    await _jump(hass, freezer, datetime(2026, 8, 4, 10, 0, tzinfo=UTC), total)
     await _spike(hass, freezer, total, 2.0)
     assert tracker.current_aggregate_kw == pytest.approx((7.0 + 8.0 + 9.0) / 3)  # unchanged
     assert tracker.floor_kw == pytest.approx(7.0)
@@ -186,9 +199,9 @@ async def test_headroom_is_measured_against_the_floor_not_the_raw_aggregate(
     await hass.async_block_till_done()
 
     total = await _spike(hass, freezer, 0.0, 7.0)
-    freezer.move_to(datetime(2026, 8, 2, 10, 0, tzinfo=UTC))
+    await _jump(hass, freezer, datetime(2026, 8, 2, 10, 0, tzinfo=UTC), total)
     total = await _spike(hass, freezer, total, 8.0)
-    freezer.move_to(datetime(2026, 8, 3, 10, 0, tzinfo=UTC))
+    await _jump(hass, freezer, datetime(2026, 8, 3, 10, 0, tzinfo=UTC), total)
     await _spike(hass, freezer, total, 9.0)
 
     assert tracker.current_aggregate_kw == pytest.approx(8.0)
@@ -214,7 +227,7 @@ async def test_monthly_rollover_starts_a_fresh_record(hass: HomeAssistant, freez
     assert tracker.period_key == "2026-08"
     assert tracker.current_aggregate_kw == pytest.approx(5.0)
 
-    freezer.move_to(datetime(2026, 9, 1, 10, 0, tzinfo=UTC))
+    await _jump(hass, freezer, datetime(2026, 9, 1, 10, 0, tzinfo=UTC), total)
     await _spike(hass, freezer, total, 2.0)  # a much smaller September peak
 
     assert tracker.period_key == "2026-09"

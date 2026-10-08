@@ -33,6 +33,12 @@ from .const import (
     CONF_INVERTER_AC_OUTPUT_MAX,
     CONF_INVERTER_EFFICIENCY_AC_DC,
     CONF_INVERTER_EFFICIENCY_DC_AC,
+    CONF_MAIN_FUSE_A,
+    CONF_PHASE_ENTITIES,
+    CONF_PHASE_LIMIT_WINDOW_MIN,
+    CONF_PHASE_MARGIN_A,
+    CONF_PHASE_VOLTAGE_ENTITY,
+    CONF_PHASE_VOLTAGE_V,
     CONF_WEIGHT_BATTERY_CHARGE,
     CONF_WEIGHT_BATTERY_DISCHARGE,
     DEFAULT_BATTERY_DYNAMIC_MAX,
@@ -49,6 +55,9 @@ from .const import (
     DEFAULT_GRID_EXPORT_MAX,
     DEFAULT_GRID_IMPORT_MAX,
     DEFAULT_INVERTER_EFFICIENCY,
+    DEFAULT_PHASE_LIMIT_WINDOW_MIN,
+    DEFAULT_PHASE_MARGIN_A,
+    DEFAULT_PHASE_VOLTAGE_V,
     DEFAULT_SELF_CONSUME_THRESHOLD_W,
     DEFAULT_SOC_MAX,
     DEFAULT_SOC_MIN,
@@ -596,11 +605,32 @@ class GridConfig:
     number -- that stays the physical ceiling. Held here rather than beside
     ``soc_entity`` on EmhassConfig so that everything the grid step collects
     travels together into ``payload.resolve_grid_limit``."""
+    phase_entities: tuple[str, ...] = ()
+    """Per-phase meter readings (W, kW or A), L1 first. Empty, one (a
+    single-phase connection) or three -- never two; the form refuses that."""
+    main_fuse_a: float | None = None
+    """The main fuse's rating per phase. None leaves the phase guard off."""
+    phase_margin_a: float = DEFAULT_PHASE_MARGIN_A
+    phase_voltage_v: float = DEFAULT_PHASE_VOLTAGE_V
+    phase_voltage_entity: str | None = None
+    """Live voltage, preferred over ``phase_voltage_v`` while it reads sanely."""
+    phase_limit_window_min: float = DEFAULT_PHASE_LIMIT_WINDOW_MIN
+
+    @property
+    def phase_guard_enabled(self) -> bool:
+        """Whether there is a fuse to guard and the readings to guard it with."""
+        return bool(self.main_fuse_a) and len(self.phase_entities) in (1, 3)
+
+    @property
+    def phase_limit_a(self) -> float:
+        """The current every phase is held below: the rating less the margin."""
+        return max((self.main_fuse_a or 0.0) - self.phase_margin_a, 0.0)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> GridConfig:
         data = data or {}
         compute_curtailment = data.get(CONF_COMPUTE_CURTAILMENT)
+        fuse = data.get(CONF_MAIN_FUSE_A)
         return cls(
             import_max_w=float(data.get("grid_import_max_w", DEFAULT_GRID_IMPORT_MAX)),
             export_max_w=float(data.get("grid_export_max_w", DEFAULT_GRID_EXPORT_MAX)),
@@ -608,6 +638,16 @@ class GridConfig:
             export_limit_entity=data.get(CONF_GRID_EXPORT_LIMIT_ENTITY) or None,
             compute_curtailment=(
                 None if compute_curtailment is None else bool(compute_curtailment)
+            ),
+            phase_entities=tuple(
+                entity for key in CONF_PHASE_ENTITIES if (entity := data.get(key))
+            ),
+            main_fuse_a=float(fuse) if fuse else None,
+            phase_margin_a=float(data.get(CONF_PHASE_MARGIN_A, DEFAULT_PHASE_MARGIN_A)),
+            phase_voltage_v=float(data.get(CONF_PHASE_VOLTAGE_V) or DEFAULT_PHASE_VOLTAGE_V),
+            phase_voltage_entity=data.get(CONF_PHASE_VOLTAGE_ENTITY) or None,
+            phase_limit_window_min=float(
+                data.get(CONF_PHASE_LIMIT_WINDOW_MIN, DEFAULT_PHASE_LIMIT_WINDOW_MIN)
             ),
         )
 
