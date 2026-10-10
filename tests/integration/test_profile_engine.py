@@ -902,6 +902,12 @@ def test_a_charge_ceiling_holds_after_boost_and_rounding(
     assert value == pytest.approx(expected)
 
 
-def test_a_ceiling_does_not_touch_discharge(hass: HomeAssistant) -> None:
+def test_a_ceiling_holds_for_a_guard_discharge_too(hass: HomeAssistant) -> None:
     profile = _control_profile({"round_to": 100})
-    assert convert_power(hass, profile, {}, "force_discharge", 2550, ceiling_w=1000) == 2600
+    assert convert_power(hass, profile, {}, "force_discharge", 2550, ceiling_w=2550) == 2500
+    assert convert_power(hass, profile, {}, "force_discharge", 2550, ceiling_w=1000) == 1000
+
+
+def test_without_a_ceiling_discharge_rounds_to_the_nearest_step(hass: HomeAssistant) -> None:
+    profile = _control_profile({"round_to": 100})
+    assert convert_power(hass, profile, {}, "force_discharge", 2550) == 2600

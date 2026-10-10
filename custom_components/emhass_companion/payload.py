@@ -417,6 +417,10 @@ class PayloadInputs:
     """Whether this backend accepts ``battery_charge_power_derating``
     (EMHASS 0.18.3+). The table still lives on :attr:`battery`; this only
     gates sending it. Unknown/older backends keep the flat charge-power max."""
+    send_soc_final_reward: bool = True
+    """Whether this backend accepts ``battery_soc_final_reward_factor``
+    (EMHASS 0.18.5+). The factor still lives on :attr:`battery`; this only
+    gates sending it. Unknown/older backends keep the two-sided soft target."""
 
 
 @dataclass(slots=True)
@@ -982,7 +986,11 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
 
     # -- settings -------------------------------------------------------------
     payload.update(
-        _battery_settings(inputs.battery, send_derating=inputs.send_charge_power_derating)
+        _battery_settings(
+            inputs.battery,
+            send_derating=inputs.send_charge_power_derating,
+            send_soc_final_reward=inputs.send_soc_final_reward,
+        )
     )
     payload.update(
         _battery_lockout_weights(
@@ -1202,7 +1210,12 @@ def _thermal_settings(inputs: PayloadInputs, step: timedelta, load_count: int) -
     return {} if config is None else {"def_load_config": config}
 
 
-def _battery_settings(battery: BatteryConfig, *, send_derating: bool = True) -> dict[str, Any]:
+def _battery_settings(
+    battery: BatteryConfig,
+    *,
+    send_derating: bool = True,
+    send_soc_final_reward: bool = True,
+) -> dict[str, Any]:
     if not battery.enabled:
         return {"set_use_battery": False}
     settings: dict[str, Any] = {
@@ -1244,6 +1257,11 @@ def _battery_settings(battery: BatteryConfig, *, send_derating: bool = True) -> 
         settings["battery_charge_power_derating"] = [
             [round(soc, 4), round(fraction, 4)] for soc, fraction in battery.charge_power_derating
         ]
+    # Sent even at 0 (EMHASS's own default) so no value left in the add-on's
+    # persisted config can silently decide the answer. Only an older backend
+    # is skipped: it would see an unknown optim_conf key.
+    if send_soc_final_reward:
+        settings["battery_soc_final_reward_factor"] = round(battery.soc_final_reward_factor, 4)
     return settings
 
 

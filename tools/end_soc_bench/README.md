@@ -72,3 +72,25 @@ read.
   question the candidates disagree about.
 
 See `PROPOSALS.md` for how to add a candidate without touching the integration.
+
+## Scoring the End SOC reward factor
+
+    ./.venv-test/bin/python -m tools.end_soc_bench.bench --rewards 0.3,0.5,0.8,1.0 --by calendar
+
+For the active rule, `same_as_start` and `fixed_reserve`, this adds a
+`<rule>@<factor>` row per factor. It models EMHASS 0.18.5's
+`battery_soc_final_reward_factor`: the pin becomes a floor, each kWh above it
+earns `factor x` the last visible import price, and the SOC the optimiser then
+picks is charged its real cost-to-go (`Dispatcher.evaluate_with_reward`).
+
+2026-10-10, 1620 decisions over 540 days, mean regret in SEK:
+
+| | 0 | 0.3 | 0.5 | 0.8 | 1.0 |
+|---|---|---|---|---|---|
+| `shadow_centred` (shipped) | 0.68 | 0.70 | 0.88 | 1.34 | 2.55 |
+| `same_as_start` | 1.38 | 1.16 | 1.17 | 1.50 | 2.61 |
+| `fixed_reserve` | 1.91 | 1.18 | 1.03 | 1.37 | 2.56 |
+
+No factor beats 0 for the shipped rule, so the default stays 0 and the field
+is a manual knob. A factor of 1 is always bad: it pays the full import price
+for energy that is only worth that if the house will certainly import it.

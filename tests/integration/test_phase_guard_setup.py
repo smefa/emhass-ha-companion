@@ -98,6 +98,33 @@ async def test_meter_changes_reach_the_guard_and_its_sensor(hass: HomeAssistant)
     assert guard_active_id is not None
 
 
+async def test_the_guard_sensor_reports_a_discharge_as_a_discharge(hass: HomeAssistant) -> None:
+    """A 5000 W charge turned into a 3150 W discharge allows no charging at all."""
+    from custom_components.emhass_companion.const import MODE_FORCE_DISCHARGE, MODE_IDLE
+    from custom_components.emhass_companion.executor import Decision
+
+    _set_phases(hass, 400)
+    entry = await _setup_entry(hass, PHASE_GRID)
+    executor = entry.runtime_data.executor
+    guard_active_id = _entity_id(hass, entry, "binary_sensor", "phase_guard_active")
+
+    executor._record(
+        Decision(action=MODE_FORCE_DISCHARGE, power_w=3150, planned_charge_w=5000, phase_cut_w=8150)
+    )
+    await hass.async_block_till_done()
+    attributes = hass.states.get(guard_active_id).attributes
+    assert hass.states.get(guard_active_id).state == "on"
+    assert attributes["allowed_charge_w"] == 0
+    assert attributes["discharge_w"] == 3150
+    assert attributes["cut_w"] == 8150
+
+    executor._record(Decision(action=MODE_IDLE, power_w=0, planned_charge_w=5000, phase_cut_w=5000))
+    await hass.async_block_till_done()
+    attributes = hass.states.get(guard_active_id).attributes
+    assert attributes["allowed_charge_w"] == 0
+    assert attributes["discharge_w"] == 0
+
+
 async def test_unloading_stops_listening_to_the_meter(hass: HomeAssistant) -> None:
     _set_phases(hass, 400)
     entry = await _setup_entry(hass, PHASE_GRID)

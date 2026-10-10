@@ -15,8 +15,10 @@ import pytest
 
 from custom_components.emhass_companion.const import (
     MODE_FORCE_CHARGE,
-    MODE_SELF_CONSUME,
+    MODE_FORCE_DISCHARGE,
+    MODE_IDLE,
     PHASE_GUARD_MIN_CHARGE_W,
+    PHASE_GUARD_MIN_DISCHARGE_W,
 )
 from custom_components.emhass_companion.models import GridConfig
 from custom_components.emhass_companion.phase_guard import (
@@ -27,6 +29,7 @@ from custom_components.emhass_companion.phase_guard import (
     charge_headroom_w,
     clamp_blocker,
     clamp_charge,
+    discharge_room_w,
     overload_level,
     phase_import_limit_w,
     reading,
@@ -179,10 +182,63 @@ def test_a_charge_over_the_cap_is_cut_to_it() -> None:
     assert "8610W→2550W" in rules[0]
 
 
-def test_too_little_room_hands_the_battery_to_self_consumption() -> None:
+def test_too_little_room_holds_the_battery_at_zero() -> None:
     action, power, cut, rules = clamp_charge(5000, PHASE_GUARD_MIN_CHARGE_W - 1)
-    assert (action, power, cut) == (MODE_SELF_CONSUME, 0.0, 5000)
-    assert "self-consumption" in rules[0]
+    assert (action, power, cut) == (MODE_IDLE, 0.0, 5000)
+    assert "holding the battery at 0W" in rules[0]
+
+
+def test_no_room_at_all_still_only_holds() -> None:
+    """Exactly at the limit, or slightly over it: holding is enough."""
+    assert clamp_charge(5000, 0.0)[:3] == (MODE_IDLE, 0.0, 5000)
+    assert clamp_charge(5000, -(PHASE_GUARD_MIN_DISCHARGE_W - 1))[:3] == (MODE_IDLE, 0.0, 5000)
+
+
+def test_the_guard_never_chooses_self_consumption() -> None:
+    for room in (None, 6000, 2500, 299, 0, -100, -299, -300, -4000):
+        assert clamp_charge(5000, room)[0] in (MODE_FORCE_CHARGE, MODE_IDLE, MODE_FORCE_DISCHARGE)
+
+
+def test_a_phase_well_over_its_limit_discharges_by_the_overage() -> None:
+    """Holding is not enough: 1200 W over with the battery idle."""
+    action, power, cut, rules = clamp_charge(5000, -1200)
+    assert (action, power, cut) == (MODE_FORCE_DISCHARGE, 1200, 5000 + 1200)
+    assert "discharging 1200W" in rules[0]
+
+
+def test_the_discharge_starts_at_its_threshold() -> None:
+    action, power, _cut, _rules = clamp_charge(5000, -PHASE_GUARD_MIN_DISCHARGE_W)
+    assert (action, power) == (MODE_FORCE_DISCHARGE, PHASE_GUARD_MIN_DISCHARGE_W)
+
+
+def test_an_inverter_that_cannot_discharge_is_held_instead() -> None:
+    assert clamp_charge(5000, -1200, max_discharge_w=0.0)[:3] == (MODE_IDLE, 0.0, 5000)
+
+
+def test_the_discharge_is_bounded_by_what_the_exporting_phases_can_take() -> None:
+    action, power, cut, _rules = clamp_charge(5000, -3150, max_discharge_w=1350)
+    assert (action, power, cut) == (MODE_FORCE_DISCHARGE, 1350, 5000 + 1350)
+
+
+def test_a_bound_under_the_threshold_is_a_hold_not_a_token_discharge() -> None:
+    bound = PHASE_GUARD_MIN_DISCHARGE_W - 1
+    assert clamp_charge(5000, -3150, max_discharge_w=bound)[:3] == (MODE_IDLE, 0.0, 5000)
+
+
+def test_export_room_is_what_the_most_exporting_phase_can_still_take() -> None:
+    """15 A limit (3450 W): L2 and L3 already export 3000 W each, 450 W of room each."""
+    room = discharge_room_w(_amps(4500, -3000, -3000), 15.0, V, 0.0)
+    assert room == pytest.approx(3 * 450)
+
+
+def test_export_room_takes_the_batterys_own_share_out_first() -> None:
+    """Battery discharging 3000 W: the phases would be 1000 W heavier without it."""
+    room = discharge_room_w(_amps(3500, 0, 0), 15.0, V, -3000)
+    assert room == pytest.approx(3 * (3450 + 1000))
+
+
+def test_export_room_is_zero_once_a_phase_is_exporting_at_the_limit() -> None:
+    assert discharge_room_w(_amps(4500, -3600, 100), 15.0, V, 0.0) == 0.0
 
 
 # -- the sliding minimum ----------------------------------------------------------

@@ -34,6 +34,7 @@ from .const import (
     LIFETIME_PERSISTENT,
     MODE_AUTO,
     MODE_FORCE_CHARGE,
+    MODE_FORCE_DISCHARGE,
     MODE_IDLE,
     MODE_SELF_CONSUME,
 )
@@ -98,7 +99,8 @@ class Decision:
     knows there is nothing of this decision for it to revisit."""
 
     phase_cut_w: float = 0.0
-    """How much of ``planned_charge_w`` the phase guard took away."""
+    """How much of ``planned_charge_w`` the phase guard took away: the whole of
+    it for a hold, and more than it for a discharge."""
 
     def as_attributes(self) -> dict[str, Any]:
         return {
@@ -481,13 +483,8 @@ class Executor:
                 rules=["plan has no battery power for this moment; uncurtailing"],
             )
 
-        # Self-consumption the phase guard forced is not the plan's choice, so
-        # it must not make leaving self-consumption harder once the phases
-        # clear -- that hysteresis is for the plan's own boundary chatter.
         in_self_consume = (
-            self.last_decision is not None
-            and self.last_decision.action == MODE_SELF_CONSUME
-            and not self.last_decision.phase_cut_w
+            self.last_decision is not None and self.last_decision.action == MODE_SELF_CONSUME
         )
         action, power, battery_rules = decide_battery(row, config, in_self_consume=in_self_consume)
         planned_charge_w = power if action == MODE_FORCE_CHARGE else 0.0
@@ -515,6 +512,10 @@ class Executor:
         both take load off the grid, and the plan's own import limit already
         covers the aggregate -- what it cannot see is the worst phase between
         two solves, which is what this is for.
+
+        The result is a charge as planned, a lower charge, a hold at 0 W, or
+        -- only when a phase is over its limit with the battery held -- a
+        discharge. Never self-consumption: see ``clamp_charge``.
         """
         guard = self.coordinator.phase_guard
         if guard is None:
@@ -540,7 +541,13 @@ class Executor:
                 0.0,
                 ["phase guard: battery power unavailable; charge not limited"],
             )
-        return clamp_charge(planned_w, guard.charge_cap_w)
+        profile = self._inverter_profile()
+        max_discharge_w = (
+            min(self.coordinator.config.battery.discharge_power_max_w, guard.discharge_limit_w)
+            if profile is not None and profile.defines(MODE_FORCE_DISCHARGE)
+            else 0.0
+        )
+        return clamp_charge(planned_w, guard.charge_room_w, max_discharge_w=max_discharge_w)
 
     def phase_clamp_blocker(self) -> str | None:
         """Why the phase clamp cannot run here, or None. See clamp_blocker."""
@@ -583,12 +590,11 @@ class Executor:
             return False
         if self.phase_clamp_blocker():
             return False
-        if decision.action not in (MODE_FORCE_CHARGE, MODE_SELF_CONSUME):
+        if decision.action not in (MODE_FORCE_CHARGE, MODE_IDLE, MODE_FORCE_DISCHARGE):
             # The plan has moved on (manual mode, stale plan) since this
             # decision; the next regular apply owns it.
             return False
-        cap = guard.charge_cap_w
-        action, power, _cut, _rules = clamp_charge(decision.planned_charge_w, cap)
+        action, power, _cut, _rules = self._phase_clamp(decision.planned_charge_w)
         deadband = self._deadband_w()
         if action != decision.action or abs(power - decision.power_w) >= deadband:
             return True
@@ -596,7 +602,8 @@ class Executor:
         # hold a cut back. Keep asking until it lands -- a change of action
         # whatever the watts (150 W of charge still has to become
         # self-consumption under a 200 W deadband), and a lowering by more
-        # than the deadband.
+        # than the deadband (a discharge in either direction: too much of one
+        # pushes the exporting phases over, too little leaves the overload).
         last = self._last_applied.get(AXIS_BATTERY)
         if not self.control_enabled or last is None:
             return False
@@ -604,7 +611,9 @@ class Executor:
         target = self._resolve_action(profile, action) if profile is not None else action
         if last.action != target:
             return True
-        return last.action == MODE_FORCE_CHARGE and last.power_w - power >= deadband
+        if last.action == MODE_FORCE_CHARGE:
+            return last.power_w - power >= deadband
+        return last.action == MODE_FORCE_DISCHARGE and abs(power - last.power_w) >= deadband
 
     def _deadband_w(self) -> float:
         profile = self._inverter_profile()

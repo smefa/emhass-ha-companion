@@ -37,6 +37,7 @@ from .const import (
     CONF_BATTERY_POWER_INVERT,
     CONF_BATTERY_SOC_DEFICIT_COST,
     CONF_BATTERY_SOC_DEFICIT_THRESHOLD,
+    CONF_BATTERY_SOC_FINAL_REWARD_FACTOR,
     CONF_BATTERY_SOC_SURPLUS_COST,
     CONF_BATTERY_SOC_SURPLUS_THRESHOLD,
     CONF_BATTERY_STRESS_COST,
@@ -122,6 +123,7 @@ from .const import (
     DEFAULT_BATTERY_DYNAMIC_MIN,
     DEFAULT_BATTERY_SOC_DEFICIT_COST,
     DEFAULT_BATTERY_SOC_DEFICIT_THRESHOLD,
+    DEFAULT_BATTERY_SOC_FINAL_REWARD_FACTOR,
     DEFAULT_BATTERY_SOC_SURPLUS_COST,
     DEFAULT_BATTERY_SOC_SURPLUS_THRESHOLD,
     DEFAULT_BATTERY_STRESS_COST,
@@ -2000,6 +2002,7 @@ BATTERY_ADVANCED_KEYS: Final = frozenset(
         CONF_BATTERY_SOC_DEFICIT_COST,
         CONF_BATTERY_SOC_SURPLUS_THRESHOLD,
         CONF_BATTERY_SOC_SURPLUS_COST,
+        CONF_BATTERY_SOC_FINAL_REWARD_FACTOR,
         CONF_BATTERY_STRESS_SEGMENTS,
         CONF_BATTERY_STRESS_COST,
         CONF_END_SOC_MODE,
@@ -2180,6 +2183,14 @@ def _battery_fields(defaults: dict[str, Any]) -> dict[Any, Any]:
             default=defaults.get(CONF_BATTERY_SOC_SURPLUS_COST, DEFAULT_BATTERY_SOC_SURPLUS_COST),
         ): selector.NumberSelector(
             selector.NumberSelectorConfig(min=0, max=10, step=0.001, mode="box")
+        ),
+        vol.Optional(
+            CONF_BATTERY_SOC_FINAL_REWARD_FACTOR,
+            default=defaults.get(
+                CONF_BATTERY_SOC_FINAL_REWARD_FACTOR, DEFAULT_BATTERY_SOC_FINAL_REWARD_FACTOR
+            ),
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(min=0, max=1, step=0.05, mode="box")
         ),
         # C-rate penalty. Segments is a solver knob rather than a plant
         # property -- bounded well below EMHASS's unbounded read because each

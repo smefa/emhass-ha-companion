@@ -19,6 +19,7 @@ from typing import Any, Self
 from .const import (
     CONF_BATTERY_SOC_DEFICIT_COST,
     CONF_BATTERY_SOC_DEFICIT_THRESHOLD,
+    CONF_BATTERY_SOC_FINAL_REWARD_FACTOR,
     CONF_BATTERY_SOC_SURPLUS_COST,
     CONF_BATTERY_SOC_SURPLUS_THRESHOLD,
     CONF_BATTERY_STRESS_COST,
@@ -45,6 +46,7 @@ from .const import (
     DEFAULT_BATTERY_DYNAMIC_MIN,
     DEFAULT_BATTERY_SOC_DEFICIT_COST,
     DEFAULT_BATTERY_SOC_DEFICIT_THRESHOLD,
+    DEFAULT_BATTERY_SOC_FINAL_REWARD_FACTOR,
     DEFAULT_BATTERY_SOC_SURPLUS_COST,
     DEFAULT_BATTERY_SOC_SURPLUS_THRESHOLD,
     DEFAULT_BATTERY_STRESS_COST,
@@ -383,6 +385,21 @@ class Series:
 # --- Configuration models ----------------------------------------------------
 
 
+def parse_soc_final_reward_factor(raw: Any) -> float:
+    """Read the stored End SOC reward factor, clamped to 0..1.
+
+    Junk (missing, non-numeric, NaN) reads as the default, which sends nothing.
+    Above 1 would pay more for a kWh than buying it costs, so it is capped.
+    """
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_BATTERY_SOC_FINAL_REWARD_FACTOR
+    if not math.isfinite(value):
+        return DEFAULT_BATTERY_SOC_FINAL_REWARD_FACTOR
+    return min(1.0, max(0.0, value))
+
+
 def parse_charge_power_derating(raw: Any) -> tuple[tuple[float, float], ...]:
     """Normalise a charge-taper table to ``((soc, fraction), ...)``.
 
@@ -463,6 +480,10 @@ class BatteryConfig:
     """Dwell costs, per kWh past a threshold per hour held there -- a soft
     preference for the middle of the range, unlike the hard soc_min/soc_max
     bounds. Each half stays inert until its own cost goes above zero."""
+    soc_final_reward_factor: float = DEFAULT_BATTERY_SOC_FINAL_REWARD_FACTOR
+    """Value of each kWh left above the End SOC target, as a share of the last
+    step's import price (EMHASS 0.18.5+). 0 keeps the two-sided soft target,
+    where ending above it is penalised like ending below. Clamped to 0..1."""
     stress_cost: float = DEFAULT_BATTERY_STRESS_COST
     stress_segments: int = DEFAULT_BATTERY_STRESS_SEGMENTS
     """Quadratic penalty on charge/discharge power, and the piecewise-linear
@@ -566,6 +587,11 @@ class BatteryConfig:
             ),
             soc_surplus_cost=float(
                 data.get(CONF_BATTERY_SOC_SURPLUS_COST, DEFAULT_BATTERY_SOC_SURPLUS_COST)
+            ),
+            soc_final_reward_factor=parse_soc_final_reward_factor(
+                data.get(
+                    CONF_BATTERY_SOC_FINAL_REWARD_FACTOR, DEFAULT_BATTERY_SOC_FINAL_REWARD_FACTOR
+                )
             ),
             stress_cost=float(data.get(CONF_BATTERY_STRESS_COST, DEFAULT_BATTERY_STRESS_COST)),
             # Segment count is a solver knob, so it must reach EMHASS as an int

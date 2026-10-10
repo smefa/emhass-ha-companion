@@ -142,6 +142,17 @@ hand-edited `.storage` or a backup restored from a different version. The
 default is used meanwhile; open the relevant options or load form, set the time
 again, and the repair clears itself.
 
+**"EMHASS's heat topology replaces the Companion's loads."** The EMHASS add-on
+has a `heat_topology` saved in its own configuration, in EMHASS's default
+replace mode. On every run EMHASS then overwrites the loads the Companion sends
+with the ones the topology builds, so your deferrable and thermal loads stop
+being planned, with no error anywhere else. The check runs when the integration
+loads and only fires if you have at least one Companion load. To fix it, add
+`"extend_deferrable_loads": true` at the top level of the topology (EMHASS
+0.18.5 or newer; older versions ignore the flag, and the repair then asks you to
+update the add-on), or clear the topology in the add-on configuration. Then
+reload the integration. See [Thermal loads](thermal_loads.md#emhass-heat-topology).
+
 **A plan looks wrong.** Enable the *Last request to EMHASS* sensor (disabled
 by default) — its `payload` attribute is precisely what EMHASS was asked to
 solve, and its `warnings` attribute flags problems such as a forecast that

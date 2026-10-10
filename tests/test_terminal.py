@@ -57,6 +57,7 @@ from custom_components.emhass_companion.terminal import (
     TEST_CENTRED,
     TEST_PRICED_COVER,
     TEST_SHADOW_PLAN,
+    annotate_final_reward,
     decide_end_soc,
 )
 
@@ -768,3 +769,29 @@ def test_the_raw_answer_is_kept_when_hysteresis_holds_the_pin_back(active):
 
     assert second.soc == first.soc
     assert second.details["raw_target"] == pytest.approx(0.51)
+
+
+def test_a_sent_reward_factor_turns_the_target_into_a_floor():
+    decision = _decide(mode=END_SOC_FIXED_50)
+    annotate_final_reward(decision, 0.7, sent=True, min_version="0.18.5")
+
+    assert decision.details["reward_factor"] == 0.7
+    assert "At least this" in decision.reason
+    assert "reward_inactive" not in decision.details
+
+
+def test_a_reward_factor_the_backend_cannot_take_is_flagged_inert():
+    decision = _decide(mode=END_SOC_FIXED_50)
+    reason = decision.reason
+    annotate_final_reward(decision, 0.7, sent=False, min_version="0.18.5")
+
+    assert decision.details["reward_inactive"] == "needs EMHASS 0.18.5"
+    assert "reward_factor" not in decision.details
+    assert decision.reason == reason
+
+
+def test_a_zero_reward_factor_leaves_the_decision_alone():
+    decision = _decide(mode=END_SOC_FIXED_50)
+    before = (decision.reason, dict(decision.details))
+    annotate_final_reward(decision, 0.0, sent=True, min_version="0.18.5")
+    assert (decision.reason, decision.details) == before

@@ -132,6 +132,7 @@ The inverter's own limits and the live PV sensor are on the
 | Minimum / maximum charge level | The optimiser will not plan the battery outside this range |
 | Target charge level | Where the optimiser aims to leave the battery at the end of the horizon. What it means depends on End SOC below |
 | End SOC | How that end-of-horizon level is chosen. See below |
+| Value of leftover energy | Optional, in Advanced. How much a kWh left above the End SOC target is worth, as a share of the import price at the end of the plan. 0 keeps the old behaviour. Needs EMHASS 0.18.5+ |
 | Discharge / charge cycle cost | What a kWh through the battery costs in wear. See below |
 | Low / high charge comfort level | Levels the plan prefers to stay between, softly. See below |
 | Cost of sitting below / above it | What that preference is worth, per kWh past the level per hour |
@@ -203,6 +204,14 @@ tomorrow. Three modes:
 Requires EMHASS 0.18 or newer. The resulting target, and the reasoning behind
 it, is published on the **End SOC target** sensor. See
 [End SOC](end_soc.md) for how *Optimized* decides.
+
+**Value of leftover energy.** Optional, in the collapsed Advanced section, 0 by
+default. With 0 the plan is penalised for ending above the End SOC target as
+well as below it, so it sells spare energy to land on the target. Above 0, each
+kWh left above the target is rewarded at that share of the import price in the
+plan's last timestep, and the target becomes the least the plan ends at. Needs
+EMHASS 0.18.5 or newer; on an older add-on the value is kept but not sent. See
+[Value of leftover energy](end_soc.md#value-of-leftover-energy).
 
 **Self-consumption handoff threshold.** When the plan's grid power is within
 this many watts of zero, the battery is handed to the inverter's own

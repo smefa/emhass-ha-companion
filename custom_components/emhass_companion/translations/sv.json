@@ -192,6 +192,7 @@
               "battery_soc_deficit_cost": "Kostnad för att ligga under den",
               "battery_soc_surplus_threshold": "Bekväm högsta laddningsnivå",
               "battery_soc_surplus_cost": "Kostnad för att ligga över den",
+              "battery_soc_final_reward_factor": "Värde på överbliven energi",
               "battery_stress_segments": "Detaljnivå för effektkostnaden",
               "battery_stress_cost": "Kostnad för hög effekt",
               "end_soc_mode": "Slutladdningsnivå",
@@ -211,6 +212,7 @@
               "battery_soc_deficit_cost": "Debiteras per kWh under den bekväma nivån, per timme där, i din prisvaluta. Får planen att hålla en reserv i stället för att ligga nära tomt. 0 stänger av detta, vilket är standard.",
               "battery_soc_surplus_threshold": "Nivån över vilken batteriet debiteras en hållkostnad, om en sådan är satt nedan. Att stå fulladdat åldrar ett litiumbatteri snabbare, så detta motverkar att det parkeras där i timmar.",
               "battery_soc_surplus_cost": "Debiteras per kWh över den bekväma nivån, per timme där. Använd det för att få planen att fylla batteriet sent i stället för tidigt när båda kostar lika mycket. 0 stänger av detta, vilket är standard.",
+              "battery_soc_final_reward_factor": "Hur mycket en kWh som finns kvar i batteriet när planen slutar är värd, som en andel av importpriset vid den tidpunkten. 0 behåller standardbeteendet: planen siktar på slutnivån för laddning och säljer allt över den. Höj värdet för att låta planen spara överskottsenergi i stället; slutnivån blir då ett minimum. Kräver EMHASS 0.18.5 eller nyare.",
               "battery_stress_segments": "Hur fint den kvadratiska kostnadskurvan nedan approximeras. Högre följer den verkliga kostnaden närmare men gör varje optimering något långsammare; 10 är en bra avvägning och spelar bara roll när en effektkostnad är satt nedan.",
               "battery_stress_cost": "Motverkar snabb laddning och urladdning. Kostnaden växer med effekten i kvadrat, så halv effekt kostar en fjärdedel, och planen sprider en laddning över flera timmar i stället för att pressa in den i den billigaste. Prissatt per kW vid full effekt, per timme. 0 stänger av detta, vilket är standard.",
               "end_soc_mode": "Hur batterinivån som planen siktar på vid horisontens slut väljs. \"Optimerad\" beräknas varje körning ur sol-, pris- och lastprognoserna bortom horisonten; \"Samma som start\" planerar alltid tillbaka till nuvarande nivå; \"Fast %-reglage\" siktar alltid på önskad laddningsnivå ovan. Kräver EMHASS 0.18 eller nyare.",
@@ -474,6 +476,7 @@
               "battery_soc_deficit_cost": "Kostnad för att ligga under den",
               "battery_soc_surplus_threshold": "Bekväm högsta laddningsnivå",
               "battery_soc_surplus_cost": "Kostnad för att ligga över den",
+              "battery_soc_final_reward_factor": "Värde på överbliven energi",
               "battery_stress_segments": "Detaljnivå för effektkostnaden",
               "battery_stress_cost": "Kostnad för hög effekt",
               "end_soc_mode": "Slutladdningsnivå",
@@ -493,6 +496,7 @@
               "battery_soc_deficit_cost": "Debiteras per kWh under den bekväma nivån, per timme där, i din prisvaluta. Får planen att hålla en reserv i stället för att ligga nära tomt. 0 stänger av detta, vilket är standard.",
               "battery_soc_surplus_threshold": "Nivån över vilken batteriet debiteras en hållkostnad, om en sådan är satt nedan. Att stå fulladdat åldrar ett litiumbatteri snabbare, så detta motverkar att det parkeras där i timmar.",
               "battery_soc_surplus_cost": "Debiteras per kWh över den bekväma nivån, per timme där. Använd det för att få planen att fylla batteriet sent i stället för tidigt när båda kostar lika mycket. 0 stänger av detta, vilket är standard.",
+              "battery_soc_final_reward_factor": "Hur mycket en kWh som finns kvar i batteriet när planen slutar är värd, som en andel av importpriset vid den tidpunkten. 0 behåller standardbeteendet: planen siktar på slutnivån för laddning och säljer allt över den. Höj värdet för att låta planen spara överskottsenergi i stället; slutnivån blir då ett minimum. Kräver EMHASS 0.18.5 eller nyare.",
               "battery_stress_segments": "Hur fint den kvadratiska kostnadskurvan nedan approximeras. Högre följer den verkliga kostnaden närmare men gör varje optimering något långsammare; 10 är en bra avvägning och spelar bara roll när en effektkostnad är satt nedan.",
               "battery_stress_cost": "Motverkar snabb laddning och urladdning. Kostnaden växer med effekten i kvadrat, så halv effekt kostar en fjärdedel, och planen sprider en laddning över flera timmar i stället för att pressa in den i den billigaste. Prissatt per kW vid full effekt, per timme. 0 stänger av detta, vilket är standard.",
               "end_soc_mode": "Hur batterinivån som planen siktar på vid horisontens slut väljs. \"Optimerad\" beräknas varje körning ur sol-, pris- och lastprognoserna bortom horisonten; \"Samma som start\" planerar alltid tillbaka till nuvarande nivå; \"Fast %-reglage\" siktar alltid på önskad laddningsnivå ovan. Kräver EMHASS 0.18 eller nyare.",
@@ -1130,6 +1134,14 @@
     "phase_clamp_off_slow_profile": {
       "title": "Fasvakten kan inte sänka batteriladdningen tillräckligt snabbt",
       "description": "En huvudsäkring är angiven i nätsteget, men växelriktarprofilen {profile} får bara skrivas en gång var {interval}:e sekund. En sänkning som hålls tillbaka så länge kan vara längre än en överbelastad säkring tål, så tvångsladdning begränsas inte i realtid med den här profilen. Planens importgräns från faserna gäller fortfarande. En profil som pratar direkt med växelriktaren, till exempel över Modbus, har inte den begränsningen."
+    },
+    "heat_topology_replaces_loads": {
+      "title": "EMHASS värmetopologi ersätter Companions laster",
+      "description": "EMHASS-tillägget har en värmetopologi sparad i sin egen konfiguration. EMHASS ersätter då alla laster som Companion skickar med de som topologin bygger, så Companions laster planeras inte. Lägg till \"extend_deferrable_loads\": true överst i topologin (kräver EMHASS {required} eller nyare), eller töm topologin i tilläggets konfiguration. Ladda sedan om den här integrationen."
+    },
+    "heat_topology_replaces_loads_upgrade": {
+      "title": "EMHASS värmetopologi ersätter Companions laster",
+      "description": "EMHASS-tillägget har en värmetopologi sparad i sin egen konfiguration. EMHASS ersätter då alla laster som Companion skickar med de som topologin bygger, så Companions laster planeras inte. Den här EMHASS är äldre än {required}, den första versionen som kan behålla Companions laster bredvid en topologi. Uppdatera tillägget och lägg till \"extend_deferrable_loads\": true överst i topologin, eller töm topologin i tilläggets konfiguration. Ladda sedan om den här integrationen."
     }
   },
   "services": {

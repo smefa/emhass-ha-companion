@@ -874,3 +874,30 @@ def test_replacing_a_plan_rows_invalidates_the_caches():
 
     assert plan.series("p_load").values == (1.0,)
     assert plan.row_at(later).p_load == 1.0
+
+
+def test_soc_final_reward_factor_defaults_to_off():
+    assert BatteryConfig.from_dict({"use_battery": True}).soc_final_reward_factor == 0.0
+
+
+def test_soc_final_reward_factor_reads_the_stored_value_through_the_form_path():
+    stored = _battery_storage_from_input(
+        {"use_battery": True, "battery_soc_final_reward_factor": 0.7}
+    )
+    assert stored["battery_soc_final_reward_factor"] == 0.7
+    assert BatteryConfig.from_dict(stored).soc_final_reward_factor == 0.7
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [(-0.5, 0.0), (0.0, 0.0), (0.35, 0.35), (1.0, 1.0), (4.0, 1.0)],
+)
+def test_soc_final_reward_factor_is_clamped_to_zero_to_one(raw, expected):
+    config = BatteryConfig.from_dict({"use_battery": True, "battery_soc_final_reward_factor": raw})
+    assert config.soc_final_reward_factor == expected
+
+
+@pytest.mark.parametrize("junk", ["abc", None, float("nan"), float("inf"), [1]])
+def test_soc_final_reward_factor_junk_reads_as_off(junk):
+    config = BatteryConfig.from_dict({"use_battery": True, "battery_soc_final_reward_factor": junk})
+    assert config.soc_final_reward_factor == 0.0

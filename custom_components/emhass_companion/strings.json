@@ -192,6 +192,7 @@
               "battery_soc_deficit_cost": "Cost of sitting below it",
               "battery_soc_surplus_threshold": "High charge comfort level",
               "battery_soc_surplus_cost": "Cost of sitting above it",
+              "battery_soc_final_reward_factor": "Value of leftover energy",
               "battery_stress_segments": "Stress cost detail",
               "battery_stress_cost": "High-power stress cost",
               "end_soc_mode": "End SOC",
@@ -211,6 +212,7 @@
               "battery_soc_deficit_cost": "Charged per kWh below the comfort level, per hour spent there, in your price currency. Nudges the plan to keep a reserve rather than sitting near empty. 0 turns this off, which is the default.",
               "battery_soc_surplus_threshold": "The level above which the battery is charged a holding cost, if one is set below. Sitting at full charge ages a lithium battery faster, so this discourages parking there for hours.",
               "battery_soc_surplus_cost": "Charged per kWh above the comfort level, per hour spent there. Use it to make the plan fill the battery late rather than early when both cost the same. 0 turns this off, which is the default.",
+              "battery_soc_final_reward_factor": "How much a kWh left in the battery at the end of the plan is worth, as a share of the import price at that moment. 0 keeps the default: the plan aims for the End SOC target and sells anything above it. Raise it to let the plan keep spare energy instead; the End SOC target then becomes a minimum. Needs EMHASS 0.18.5 or newer.",
               "battery_stress_segments": "How finely the squared cost curve below is approximated. Higher tracks the true cost more closely but makes every optimisation a little slower; 10 is a good balance and only matters when a stress cost is set below.",
               "battery_stress_cost": "Discourages fast charging and discharging. The cost grows with the square of the power, so running at half power costs a quarter as much, and the plan spreads a charge over several hours instead of forcing it into the single cheapest one. Priced per kW at full power, per hour. 0 turns this off, which is the default.",
               "end_soc_mode": "How the battery level the plan aims for at the end of the horizon is chosen. \"Optimized\" computes it each run from the solar, price and load forecasts beyond the horizon; \"Same as start\" always plans back to the current level; \"Fixed % slider\" always aims for the Target charge level above. Requires EMHASS 0.18 or newer.",
@@ -474,6 +476,7 @@
               "battery_soc_deficit_cost": "Cost of sitting below it",
               "battery_soc_surplus_threshold": "High charge comfort level",
               "battery_soc_surplus_cost": "Cost of sitting above it",
+              "battery_soc_final_reward_factor": "Value of leftover energy",
               "battery_stress_segments": "Stress cost detail",
               "battery_stress_cost": "High-power stress cost",
               "end_soc_mode": "End SOC",
@@ -493,6 +496,7 @@
               "battery_soc_deficit_cost": "Charged per kWh below the comfort level, per hour spent there, in your price currency. Nudges the plan to keep a reserve rather than sitting near empty. 0 turns this off, which is the default.",
               "battery_soc_surplus_threshold": "The level above which the battery is charged a holding cost, if one is set below. Sitting at full charge ages a lithium battery faster, so this discourages parking there for hours.",
               "battery_soc_surplus_cost": "Charged per kWh above the comfort level, per hour spent there. Use it to make the plan fill the battery late rather than early when both cost the same. 0 turns this off, which is the default.",
+              "battery_soc_final_reward_factor": "How much a kWh left in the battery at the end of the plan is worth, as a share of the import price at that moment. 0 keeps the default: the plan aims for the End SOC target and sells anything above it. Raise it to let the plan keep spare energy instead; the End SOC target then becomes a minimum. Needs EMHASS 0.18.5 or newer.",
               "battery_stress_segments": "How finely the squared cost curve below is approximated. Higher tracks the true cost more closely but makes every optimisation a little slower; 10 is a good balance and only matters when a stress cost is set below.",
               "battery_stress_cost": "Discourages fast charging and discharging. The cost grows with the square of the power, so running at half power costs a quarter as much, and the plan spreads a charge over several hours instead of forcing it into the single cheapest one. Priced per kW at full power, per hour. 0 turns this off, which is the default.",
               "end_soc_mode": "How the battery level the plan aims for at the end of the horizon is chosen. \"Optimized\" computes it each run from the solar, price and load forecasts beyond the horizon; \"Same as start\" always plans back to the current level; \"Fixed % slider\" always aims for the Target charge level above. Requires EMHASS 0.18 or newer.",
@@ -1130,6 +1134,14 @@
     "phase_clamp_off_slow_profile": {
       "title": "Phase guard can't cut battery charging fast enough",
       "description": "A main fuse is set on the grid step, but the inverter profile {profile} may only be written once every {interval} seconds. A cut held back that long can outlast what an overloaded fuse tolerates, so forced charging isn't limited in real time with this profile. The plan's import limit from the phases still applies. A profile that talks to the inverter locally, such as over Modbus, doesn't have this limit."
+    },
+    "heat_topology_replaces_loads": {
+      "title": "EMHASS's heat topology replaces the Companion's loads",
+      "description": "The EMHASS add-on has a heat topology saved in its own configuration. EMHASS then replaces every load the Companion sends with the ones the topology builds, so the Companion's loads are not planned. Add \"extend_deferrable_loads\": true at the top level of the topology (needs EMHASS {required} or newer), or clear the topology in the add-on configuration. Then reload this integration."
+    },
+    "heat_topology_replaces_loads_upgrade": {
+      "title": "EMHASS's heat topology replaces the Companion's loads",
+      "description": "The EMHASS add-on has a heat topology saved in its own configuration. EMHASS then replaces every load the Companion sends with the ones the topology builds, so the Companion's loads are not planned. This EMHASS is older than {required}, the first version that can keep the Companion's loads next to a topology. Update the add-on and add \"extend_deferrable_loads\": true at the top level of the topology, or clear the topology in the add-on configuration. Then reload this integration."
     }
   },
   "services": {

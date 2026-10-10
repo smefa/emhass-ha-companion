@@ -40,6 +40,7 @@ from .const import (
     EMHASS_CONF_VAR_MODEL,
     END_SOC_OPTIMIZED,
     INFEASIBLE_CAUSE_CODES,
+    ISSUE_HEAT_TOPOLOGY_REPLACES,
     ISSUE_LOAD_NEVER_STARTED,
     ISSUE_ML_FORECASTER_NOT_READY,
     ISSUE_OPTIMIZATION_INFEASIBLE,
@@ -56,6 +57,8 @@ from .const import (
     MIN_EMHASS_VERSION_DEMAND_CHARGE,
     MIN_EMHASS_VERSION_DEMAND_COMPONENTS,
     MIN_EMHASS_VERSION_DEMAND_WINDOW,
+    MIN_EMHASS_VERSION_HEAT_TOPOLOGY_EXTEND,
+    MIN_EMHASS_VERSION_SOC_FINAL_REWARD,
     ML_MIN_HISTORY_DAYS,
     MODE_AUTO,
     PROFILE_KEY_LOAD_SENSOR,
@@ -70,6 +73,7 @@ from .const import (
 )
 from .deferrable import DeferrableRegistry, state_to_watts
 from .health import SourceHealth
+from .heat import topology_replaces_loads
 from .infeasibility import Finding, Severity, diagnose, headline
 from .models import (
     DeferrableLoad,
@@ -99,6 +103,7 @@ from .terminal import (
     LOAD_SOURCE_LAST_PLAN,
     LOAD_SOURCE_PROFILE,
     EndSocDecision,
+    annotate_final_reward,
     decide_end_soc,
 )
 from .util import schema_major, version_at_least
@@ -634,6 +639,17 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         self.async_update_listeners()
 
     @property
+    def soc_final_reward_supported(self) -> bool:
+        """Whether the backend accepts ``battery_soc_final_reward_factor``.
+
+        An unknown version counts as unsupported: sending an unknown
+        optim_conf key to an older EMHASS is worse than leaving the knob inert.
+        """
+        return self.backend_version is not None and version_at_least(
+            self.backend_version, MIN_EMHASS_VERSION_SOC_FINAL_REWARD
+        )
+
+    @property
     def blind_sources(self) -> tuple[str, ...]:
         """Critical readings gone long enough that control must stand down."""
         return self.health.blind_critical
@@ -1000,6 +1016,53 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
                 "succeeds -- reloading the integration will retry it.",
                 err,
             )
+
+    async def async_check_heat_topology(self) -> None:
+        """Say so when EMHASS's own config would wipe the Companion's loads.
+
+        A ``heat_topology`` saved in the add-on's configuration, in EMHASS's
+        default replace mode, overwrites ``number_of_deferrable_loads``,
+        ``def_load_config`` and every per-load array on each run, whatever the
+        Companion sends. The loads then silently stop being planned. With no
+        Companion load configured there is nothing to wipe, and the topology is
+        the user's own business.
+
+        Checked once per setup: it is a setting in the add-on, and nothing the
+        Companion does changes it. Non-fatal and silent when EMHASS cannot be
+        read; any existing issue is left as it was, since nothing new is known.
+        """
+        try:
+            config = await self.client.async_get_config()
+        except EmhassError as err:
+            _LOGGER.debug("Could not read EMHASS's heat_topology setting: %s", err)
+            return
+        if not isinstance(config, dict):
+            return
+
+        # `extend_deferrable_loads` is the fix, and older backends do not read it:
+        # on one the flag is ignored and the topology still replaces the loads.
+        can_extend = self.backend_version is None or version_at_least(
+            self.backend_version, MIN_EMHASS_VERSION_HEAT_TOPOLOGY_EXTEND
+        )
+        if not self.loads.all() or not topology_replaces_loads(
+            config, extend_supported=can_extend
+        ):
+            ir.async_delete_issue(self.hass, DOMAIN, ISSUE_HEAT_TOPOLOGY_REPLACES)
+            return
+
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            ISSUE_HEAT_TOPOLOGY_REPLACES,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=(
+                ISSUE_HEAT_TOPOLOGY_REPLACES
+                if can_extend
+                else f"{ISSUE_HEAT_TOPOLOGY_REPLACES}_upgrade"
+            ),
+            translation_placeholders={"required": MIN_EMHASS_VERSION_HEAT_TOPOLOGY_EXTEND},
+        )
 
     # -- deferrable loads -----------------------------------------------------
 
@@ -1639,6 +1702,12 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
                 previous=self._end_soc,
             )
             self._track_pv_tail_issue(end_soc, pv or None, horizon_end)
+            annotate_final_reward(
+                end_soc,
+                config.battery.soc_final_reward_factor,
+                sent=self.soc_final_reward_supported,
+                min_version=MIN_EMHASS_VERSION_SOC_FINAL_REWARD,
+            )
         self._end_soc = end_soc
 
         demand_pricing = self.demand_charge_pricing(now)
@@ -1792,6 +1861,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
                 self.backend_version is not None
                 and version_at_least(self.backend_version, MIN_EMHASS_VERSION_CHARGE_DERATING)
             ),
+            send_soc_final_reward=self.soc_final_reward_supported,
         )
         built = build_payload(inputs)
         if network_warnings:

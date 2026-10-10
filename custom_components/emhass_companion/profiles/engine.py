@@ -337,15 +337,15 @@ def convert_power(
 
     EMHASS's convention on the way in is positive = discharge.
 
-    ``ceiling_w`` is a hard limit on a charge, in watts, for the phase guard:
-    applied *after* the boost, and with the final rounding taken towards
-    zero instead of to the nearest step, so the number written can never
-    ask for more than the guard allowed. A 2550 W cap on a 100 W step is
+    ``ceiling_w`` is a hard limit on a charge or a discharge, in watts, for the
+    phase guard: applied *after* the boost, and with the final rounding taken
+    towards zero instead of to the nearest step, so the number written can
+    never ask for more than the guard allowed. A 2550 W cap on a 100 W step is
     2500, not 2600.
     """
     control = profile.control
     magnitude = abs(float(power_w))
-    capped = ceiling_w is not None and action == MODE_FORCE_CHARGE
+    capped = ceiling_w is not None and action in (MODE_FORCE_CHARGE, MODE_FORCE_DISCHARGE)
 
     # Charging loses something between the meter and the cells; a profile can
     # ask for proportionally more so that what arrives matches the plan.

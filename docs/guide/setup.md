@@ -276,6 +276,13 @@ the dynamic limits. The inverter's own settings are on the next screen.
 
     Requires EMHASS 0.18 or newer. See **[End SOC](../end_soc.md)** for
     how *Optimized* decides.
+- **Value of leftover energy** — optional, in the collapsed *Advanced*
+  section. By default the plan sells any energy above the End SOC target to
+  land on it. Raise this (0 to 1) to let the plan keep spare energy instead,
+  valued at that share of the import price at the end of the plan; the End
+  SOC target then becomes the least it ends at. 0 keeps today's behaviour.
+  Needs EMHASS 0.18.5 or newer; on an older add-on the value is kept but not
+  sent. See [End SOC](../end_soc.md#value-of-leftover-energy).
 - **Self-consumption handoff threshold** — how close to zero the grid power
   needs to be before the battery is handed back to plain self-consumption
   instead of a forced charge/discharge. Once handed over, grid power must

@@ -14,7 +14,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from .const import LOAD_MODE_AUTO, PHASE_GUARD_ACTIVE_KEY
+from .const import LOAD_MODE_AUTO, MODE_FORCE_CHARGE, MODE_FORCE_DISCHARGE, PHASE_GUARD_ACTIVE_KEY
 from .coordinator import EmhassCoordinator
 from .deferrable import DeferrableRuntime, resolve_should_run
 from .entity import EmhassEntity, EmhassLoadEntity
@@ -138,9 +138,17 @@ class PhaseGuardActiveBinarySensor(EmhassEntity, BinarySensorEntity):
         decision = self.coordinator.config_entry.runtime_data.executor.last_decision
         if decision is None:
             return {}
+        charging = decision.action == MODE_FORCE_CHARGE
         return {
             "planned_charge_w": round(decision.planned_charge_w),
-            "allowed_charge_w": round(decision.power_w) if decision.planned_charge_w else None,
+            # What the guard lets the battery charge with: zero for a hold or a
+            # discharge, which is reported on its own so the direction is clear.
+            "allowed_charge_w": (
+                (round(decision.power_w) if charging else 0) if decision.planned_charge_w else None
+            ),
+            "discharge_w": round(decision.power_w)
+            if decision.planned_charge_w and decision.action == MODE_FORCE_DISCHARGE
+            else 0,
             "cut_w": round(decision.phase_cut_w),
         }
 

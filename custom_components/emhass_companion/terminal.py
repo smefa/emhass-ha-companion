@@ -193,6 +193,28 @@ class EndSocDecision:
     """Structured attributes for the End SOC target sensor."""
 
 
+def annotate_final_reward(
+    decision: EndSocDecision, factor: float, *, sent: bool, min_version: str
+) -> None:
+    """Say on the End SOC sensor whether the target is a floor or an aim.
+
+    With a reward factor sent, EMHASS keeps energy above ``soc_final`` when it
+    beats selling it, so the target is the least the plan ends at, not where it
+    ends. A factor that is set but not sent (backend too old) is flagged as
+    inert rather than raised as a fault: it is a tuning knob.
+    """
+    if factor <= 0:
+        return
+    if sent:
+        decision.details["reward_factor"] = round(factor, 4)
+        decision.reason = (
+            f"{decision.reason} At least this: leftover energy is valued at "
+            f"{factor:.0%} of the last import price, so the plan may end higher."
+        )
+    else:
+        decision.details["reward_inactive"] = f"needs EMHASS {min_version}"
+
+
 @dataclass(slots=True)
 class _Sample:
     """One timestep of the world past the horizon."""
