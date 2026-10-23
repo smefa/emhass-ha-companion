@@ -1,0 +1,2020 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A Home Assistant integration that makes EMHASS usable without writing YAML.">
+      
+      
+      
+        <link rel="canonical" href="https://smefa.github.io/emhass-ha-companion/grid_limits/">
+      
+      
+        <link rel="prev" href="../data_sources/">
+      
+      
+        <link rel="next" href="../network_tariffs/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/icon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Dynamic grid limits - EMHASS Companion</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#dynamic-grid-limits" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="EMHASS Companion" class="md-header__button md-logo" aria-label="EMHASS Companion" data-md-component="logo">
+      
+  <img src="../assets/logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            EMHASS Companion
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Dynamic grid limits
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="teal" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/smefa/emhass-ha-companion" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    smefa/emhass-ha-companion
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="EMHASS Companion" class="md-nav__button md-logo" aria-label="EMHASS Companion" data-md-component="logo">
+      
+  <img src="../assets/logo.png" alt="logo">
+
+    </a>
+    EMHASS Companion
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/smefa/emhass-ha-companion" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    smefa/emhass-ha-companion
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    User Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/deferrable_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deferrable loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/thermal_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Thermal loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/surplus_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Surplus loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/inverter_control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inverter control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/hub_controls/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hub controls
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/network_tariffs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Network tariffs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/dashboard_cards/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dashboard cards
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Technical reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Technical reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_2" id="__nav_3_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Loads
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Loads
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deferrable_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deferrable loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../thermal_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Thermal loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../surplus_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Surplus loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../on_demand_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    On-demand loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../load_groups/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Load groups
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../battery_lockout/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Battery lockout
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../request_run_service/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Request-run service (planned)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dashboard_cards/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dashboard cards
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../lab_cards/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Lab cards (experimental)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../entities/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Entities
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../savings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cost and savings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../end_soc/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    End SOC
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../handing_over_control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Handing over control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../inverter_control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inverter control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fronius_gen24_scripts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fronius GEN24 scripts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data_sources/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data sources
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dynamic grid limits
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dynamic grid limits
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#how-the-sensor-is-used" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How the sensor is used
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#three-phase-imbalance-the-phase-guard" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Three-phase imbalance: the phase guard
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Three-phase imbalance: the phase guard">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#setting-it-up" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setting it up
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-plans-limit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The plan's limit
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-real-time-clamp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The real-time clamp
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-you-see" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What you see
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-it-doesnt-cover-yet" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it doesn't cover yet
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#smoothing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Smoothing
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../network_tariffs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Network tariffs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../template_additions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Template additions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../profiles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Writing a profile
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../inverter_profile_roadmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inverter profile roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#how-the-sensor-is-used" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How the sensor is used
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#three-phase-imbalance-the-phase-guard" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Three-phase imbalance: the phase guard
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Three-phase imbalance: the phase guard">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#setting-it-up" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setting it up
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-plans-limit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The plan's limit
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-real-time-clamp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The real-time clamp
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-you-see" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What you see
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-it-doesnt-cover-yet" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it doesn't cover yet
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#smoothing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Smoothing
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/smefa/emhass-ha-companion/edit/main/docs/grid_limits.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="dynamic-grid-limits">Dynamic grid limits<a class="headerlink" href="#dynamic-grid-limits" title="Permanent link">&para;</a></h1>
+<p>The grid step asks for <strong>Maximum import power</strong> and <strong>Maximum export power</strong>,
+and those two numbers go straight to EMHASS as <code>maximum_power_from_grid</code> and
+<code>maximum_power_to_grid</code>. For most plants a constant is the right answer.</p>
+<p>It isn't when the usable limit moves:</p>
+<ul>
+<li><strong>An unbalanced three-phase connection.</strong> There is no single fuse rated at
+  the sum of the phases — there are three fuses, one per phase, and each only
+  sees its own. The connection delivers its full rating only when all three
+  phases are loaded equally. This case is built in: see
+  <a href="#three-phase-imbalance-the-phase-guard">the phase guard</a> below, which
+  needs no sensor of your own.</li>
+<li><strong>Load balancing or a dynamic main fuse.</strong> Anything that hands out a
+  capacity allowance that changes minute to minute.</li>
+<li><strong>A curtailment order from the network operator</strong>, typically on the export
+  side.</li>
+</ul>
+<p>For these, the grid step also takes an optional <strong>Import limit sensor</strong> and
+<strong>Export limit sensor</strong>. When set, the sensor's value — plain watts — is used
+in place of the fixed number on every run.</p>
+<h2 id="how-the-sensor-is-used">How the sensor is used<a class="headerlink" href="#how-the-sensor-is-used" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>It can only lower the fixed limit, never raise it.</strong> The number you typed
+  stays the connection's physical rating. A template built on the wrong fuse
+  size can make the plan needlessly cautious; it cannot invite EMHASS to plan
+  through a fuse.</li>
+<li><strong>Unreadable means unchanged.</strong> Unavailable, non-numeric, or negative, and
+  the fixed number is used for that run, with a warning in the log. A broken
+  template never stops the plan.</li>
+<li><strong>The import limit is floored at the load that flows regardless.</strong> Below the
+  house's own forecast draw, EMHASS answers <em>infeasible</em> rather than answering
+  with a smaller plan — so a limit under that value is raised back to it and
+  the run reports that it did. The floor comes from the load forecast's peak
+  over the horizon, or from the live load reading when the load profile leaves
+  EMHASS to build its own forecast.</li>
+<li><strong>The export limit has no floor.</strong> Nothing has to leave the property the way
+  the house load has to be served. One exception: with <strong>Let EMHASS optimise
+  PV curtailment</strong> off, surplus solar has nowhere else to go, so an export
+  limit below your peak surplus makes the problem infeasible. Turn curtailment
+  on if you're going to constrain export.</li>
+</ul>
+<p>Both limits sent from the grid step and the sensors above are single values
+per run, applied to every timestep alike — a day-ahead run therefore applies
+one instant's reading across the whole horizon. See <a href="#smoothing">Smoothing</a>
+below.</p>
+<p>That is not, however, "all EMHASS accepts": <code>maximum_power_from_grid</code> also
+takes a per-timestep list, and this integration sends one when a network
+tariff's <code>capacity_limit</code> (or its windowed-demand-charge fallback) is
+configured — see
+<a href="../network_tariffs/#the-windowed-hard-cap">Network tariffs, "The windowed hard cap"</a>.
+When it does, the scalar described above still sets the ceiling for every
+timestep <em>outside</em> that window; the array only ever lowers timesteps inside
+it, never raises anything past what the grid step and the sensors already
+allow.</p>
+<h2 id="three-phase-imbalance-the-phase-guard">Three-phase imbalance: the phase guard<a class="headerlink" href="#three-phase-imbalance-the-phase-guard" title="Permanent link">&para;</a></h2>
+<p>There is no single fuse rated at the sum of the phases. There are three fuses,
+one per phase, and each sees only its own current. A battery charging evenly
+across the phases while a 2.2 kW dishwasher heater runs on L1 can put L1 far
+past its fuse while the total is still well inside the connection:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>L1</th>
+<th>L2</th>
+<th>L3</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>House</td>
+<td>400</td>
+<td>300</td>
+<td>300</td>
+</tr>
+<tr>
+<td>Battery charge</td>
+<td>2870</td>
+<td>2870</td>
+<td>2870</td>
+</tr>
+<tr>
+<td>Dishwasher heater</td>
+<td>2200</td>
+<td>–</td>
+<td>–</td>
+</tr>
+<tr>
+<td><strong>Total</strong></td>
+<td><strong>5470 W ≈ 24 A</strong></td>
+<td>3170</td>
+<td>3170</td>
+</tr>
+</tbody>
+</table>
+<p>On a 16 A gG fuse (Diazed, Neozed), that is a fuse that blows within minutes.
+A gG fuse runs at its rating indefinitely and holds 1.25× its rating (20 A on
+16 A) for up to an hour. At 1.5–2× (24–32 A) it blows within a few minutes,
+and at the top of that range within about a minute.</p>
+<p>The plan can't prevent this on its own. It sees the phases only when it
+solves, it assumes added load spreads evenly over the phases, and it sees an
+appliance's average power, not its bursts. So the integration guards the fuse
+itself, from your meter's per-phase readings.</p>
+<h3 id="setting-it-up">Setting it up<a class="headerlink" href="#setting-it-up" title="Permanent link">&para;</a></h3>
+<p>Under <strong>Advanced settings</strong> on the grid step:</p>
+<ul>
+<li><strong>Phase L1 / L2 / L3 reading</strong> — your meter's live reading for each phase,
+  in W, kW or A. The unit is taken from the sensor. Current is best, since
+  that is what the fuse responds to; watts are converted at the phase voltage
+  below. Fill in all three phases, or only L1 for a single-phase connection.
+  A sensor whose unit can't be read as power or current counts as unreadable.
+  It is never guessed at, because amps read as watts would make the phase look
+  230 times emptier than it is.</li>
+<li><strong>Main fuse per phase</strong> — the fuse rating in A: 16, 20, 25… Leaving it
+  empty turns the guard off, even with the phase readings still filled in.</li>
+<li><strong>Fuse margin</strong> — how far below the rating every phase is kept. Default
+  1 A. It covers meter lag, power factor, and a load that switches on between
+  two readings. Because a gG fuse holds a modest overload for a long time,
+  the margin doesn't have to absorb the seconds the guard takes to react.</li>
+<li><strong>Phase voltage</strong> — for converting watt readings to current. Default 230 V.</li>
+<li><strong>Voltage sensor</strong> — optional. A live phase voltage from your meter, used
+  in place of the fixed voltage while it reads within 20% of it. A heavily
+  loaded phase sags, and the same watts are then more amps, which is exactly
+  when it matters. Use L1's voltage, or the lowest of the three if your meter
+  publishes one. A reading further off than that (a 400 V line-to-line sensor
+  picked by mistake, a unit mix-up) is ignored with a warning in the log, and
+  the fixed voltage is used instead. Not needed if your phase readings are
+  already in A. The voltage in use shows in <code>sensor.*_phase_headroom</code>'s
+  <code>voltage_v</code> / <code>voltage_measured</code> attributes.</li>
+<li><strong>Phase limit look-back</strong> — see <a href="#the-plans-limit">The plan's limit</a>.
+  Default 30 minutes.</li>
+</ul>
+<p>If you were using a hand-written import limit template for this, clear it
+from <strong>Import limit sensor</strong> and delete it. If you keep both, the plan uses
+the lower of the two.</p>
+<h3 id="the-plans-limit">The plan's limit<a class="headerlink" href="#the-plans-limit" title="Permanent link">&para;</a></h3>
+<p>The plan gets an aggregate import limit worked out from the worst phase. Load
+added symmetrically puts a third of its power on each phase, so the worst
+phase reaches its limit after <code>n · (limit − worst)</code> more:</p>
+<div class="highlight"><pre><span></span><code>limit = (I1 + I2 + I3) + 3 · I_limit − 3 · max(I1, I2, I3)        × voltage
+</code></pre></div>
+<p><code>I_limit</code> is the fuse rating minus the margin. The phase readings are not
+clamped at zero: a phase that is exporting really does lower what the others
+may import. The result is clamped at zero instead, because it only goes
+negative once a phase is already over its limit.</p>
+<p>The plan doesn't use the reading from the moment it solves. It uses the
+<strong>lowest</strong> value over the look-back window. Otherwise a dishwasher that
+happens to be between heating cycles at 22:00 hands the plan the whole fuse
+for the night. Worst case of the last half hour is the right model for a
+thermal fuse. Set the look-back to 0 to use the live reading.</p>
+<p>The value then goes through the same rules as any
+<a href="#how-the-sensor-is-used">import limit sensor</a>. It never raises the fixed
+maximum, and it is lifted back to the house's own forecast draw if it falls
+below it.</p>
+<h3 id="the-real-time-clamp">The real-time clamp<a class="headerlink" href="#the-real-time-clamp" title="Permanent link">&para;</a></h3>
+<p>The plan's limit is a single value per run, and the plan only runs every
+15–30 minutes. Real protection has to react between runs, so the executor
+checks every meter update.</p>
+<p>It needs two things, and without either one the clamp stays off. A repair
+in <strong>Settings → Repairs</strong> says which one is missing. The plan's limit doesn't
+depend on either and still applies.</p>
+<ul>
+<li><strong>A battery power sensor</strong>, set on the battery step. The guard has to
+  <em>measure</em> what the battery is doing. A charge the inverter hasn't started
+  yet (ramping, a BMS taper, solar covering it on the DC side) or a battery
+  that is discharging would otherwise make the house look lighter than it
+  is, and the guard would allow too much.</li>
+<li><strong>An inverter profile that can be written within 30 seconds.</strong> A profile
+  that allows a write only every few minutes (the iSolarCloud cloud profile
+  waits 300 s) can't carry a cut before an overloaded fuse runs out of time.
+  Local profiles over Modbus have no such delay.</li>
+</ul>
+<p>How it works:</p>
+<ul>
+<li><strong>Only a planned forced charge is touched.</strong> That is the one battery action
+  that adds load to every phase on purpose. A planned discharge or
+  self-consumption takes load off the grid and is left alone.</li>
+<li><strong>The battery's own share is taken out first.</strong> From the measured battery
+  power, the guard works out what each phase would carry with the battery
+  idle: it subtracts a charge, and adds a discharge back. Then it allows as
+  much symmetric charging as fits under the worst phase's limit.</li>
+<li><strong>The command never goes over the cut.</strong> The inverter profile's charge
+  boost and rounding are applied before the cap, and rounding goes down: a
+  2,550 W cap on a profile that writes in steps of 100 W sends 2,500 W.</li>
+<li><strong>The cut is immediate. The release waits.</strong> A climbing phase cuts the
+  charge on the next reading. The charge comes back only after every phase
+  has stayed clear for 60 seconds, so a heater cycling on and off doesn't drag
+  the inverter up and down with it.</li>
+<li><strong>The plan's charge is always the aim.</strong> The guard gives way only as far
+  as the phases force it to, and never switches the battery to
+  self-consumption. On a hybrid inverter that would let the battery cover the
+  house, feeding the very load (a car, a dishwasher) that is overloading the
+  phase with energy the plan meant to keep. In order of preference:<ol>
+<li><strong>Lower the charge</strong> to what fits, when at least 300 W fits.</li>
+<li><strong>Hold the battery at 0 W</strong> (the profile's <code>idle</code> action) when less than
+   300 W fits. A token charge isn't worth commanding.</li>
+<li><strong>Discharge</strong> only in the worst case: a phase more than 300 W over its
+   limit even with the battery held. The discharge is exactly the
+   overage, which brings the worst phase back to its limit and no
+   further. Three limits keep it safe:<ul>
+<li>It never exceeds the battery's maximum discharge power, or what the
+  most exporting phase can take on top of what it already carries. A
+  symmetric discharge pushes the other phases the other way, and the
+  fuse doesn't care which way the current runs. If that leaves less
+  than 300 W, the battery is held instead.</li>
+<li>The overload has to hold for 10 seconds first. The phase meter and
+  the battery sensor update independently, so a battery that has just
+  stopped discharging can briefly look like a house 3 kW heavier than
+  it is. Once a discharge has started, the 60 second release window
+  keeps it going.</li>
+<li>A profile with no <code>force_discharge</code> action is held instead, and so
+  is an install that reads its phases from current (A) sensors: those
+  usually carry no direction, so what an exporting phase can still
+  take isn't known.
+  The planned charge returns on its own once every phase has stayed clear for
+  60 seconds. A profile with no <code>idle</code> action falls back to self-consumption
+  for the hold, as it does for any other idle. A profile whose idle step is
+  aimed at an option left unset (the generic script profile without an idle
+  script) does nothing for the hold either, and the charge carries on.</li>
+</ul>
+</li>
+</ol>
+</li>
+<li><strong>The guard fails open.</strong> If a phase reading or the battery power reading
+  goes unavailable, charging follows the plan unlimited until it is back,
+  with a warning in the log.
+  That matches how the import limit sensor behaves: a meter integration
+  restarting must not stop the battery charging.</li>
+</ul>
+<p>The clamp also runs while <strong>Control</strong> is off, so you can watch what it would
+have done before you hand over.</p>
+<h3 id="what-you-see">What you see<a class="headerlink" href="#what-you-see" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Entity</th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>sensor.*_phase_headroom</code></td>
+<td>Symmetric charging the worst phase has room for right now, in W, with the battery's own charge taken out. It reads the same whether the battery is charging or not. Negative means a phase is over its limit before any charging. The attributes hold each phase's current, the worst phase, the fuse, the planner limit and the overload state</td>
+</tr>
+<tr>
+<td><code>binary_sensor.*_phase_guard_active</code></td>
+<td>On while the executor is holding the charge below the plan. The attributes hold the planned charge, the allowed charge (0 for a hold or a discharge), the discharge the guard is commanding, and the watts cut</td>
+</tr>
+</tbody>
+</table>
+<p><code>sensor.*_battery_action</code> also shows the cut in its <code>rules</code> trace and in
+<code>planned_charge_w</code> / <code>phase_cut_w</code>. A phase above the fuse rating is logged
+as a warning, marked <em>light</em> up to 1.25× the rating and <em>heavy</em> beyond.</p>
+<p><code>phase_headroom</code> is also meant for automations. A three-phase EV charger the
+integration doesn't drive can hold back by it. The battery gives way first,
+because the guard cuts the battery's charge before the charger has to slow
+down.</p>
+<h3 id="what-it-doesnt-cover-yet">What it doesn't cover yet<a class="headerlink" href="#what-it-doesnt-cover-yet" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Only the battery is throttled.</strong> Deferrable loads are switched on and
+  off, not modulated, and a car charger isn't driven by power setpoint yet.
+  If the house alone is over the fuse, the guard can't do more than stop
+  charging. You will see a <em>heavy</em> warning in the log.</li>
+<li><strong>It assumes the inverter charges symmetrically.</strong> That holds for
+  three-phase hybrids such as Sungrow SH-RT. An inverter that can load phases
+  unevenly would need its own model.</li>
+<li><strong>The plan still doesn't know which phase a load is on.</strong> A single-phase
+  appliance on the worst phase costs three times its power in aggregate
+  headroom. The look-back window catches it after it has been seen. Planning
+  around a known single-phase load before it starts is future work. See
+  <a href="plan/phase_imbalance_safety.md">docs/plan/phase_imbalance_safety.md</a>.</li>
+</ul>
+<h2 id="smoothing">Smoothing<a class="headerlink" href="#smoothing" title="Permanent link">&para;</a></h2>
+<p>A day-ahead run applies one value across the entire horizon, and a single
+kettle can move a live reading by a kilowatt. The phase guard does its own
+smoothing (see <a href="#the-plans-limit">The plan's limit</a>). For any other import or
+export limit sensor, smooth at the source rather than feeding in a raw
+instantaneous value. The integration deliberately doesn't average those
+itself, so that a sensor that already smooths isn't smoothed twice. Prefer the
+lowest value of the window to its mean:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">sensor</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">platform</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">statistics</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Grid import limit smoothed</span>
+<span class="w">    </span><span class="nt">entity_id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sensor.grid_import_limit</span>
+<span class="w">    </span><span class="nt">state_characteristic</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">value_min</span>
+<span class="w">    </span><span class="nt">max_age</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">minutes</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">30</span>
+</code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "navigation.tracking", "search.suggest", "search.highlight", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
