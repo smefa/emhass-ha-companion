@@ -8,7 +8,8 @@
 - **EMHASS version 0.17.9 or newer.** A network tariff's demand charge needs
   0.18.0+ to price at all, 0.18.1+ for a windowed charge, and 0.18.2+ to price
   it on the tariff's own measurement interval rather than the optimizer
-  timestep.
+  timestep. The battery charge taper needs 0.18.3+, and the End SOC *Value of
+  leftover energy* needs 0.18.5+. Tested up to EMHASS 0.18.6.
 - [HACS](https://hacs.xyz/), to install the integration.
 
 Nothing else is required. No battery, no solar panels and no dynamic

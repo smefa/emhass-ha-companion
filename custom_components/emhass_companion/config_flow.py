@@ -31,12 +31,15 @@ from .api import EmhassClient, EmhassError
 from .configuration import EmhassConfig
 from .const import (
     CONF_ADDER,
+    CONF_API_KEY,
+    CONF_AREA,
     CONF_BATTERY_CHARGE_ENERGY_ENTITY,
     CONF_BATTERY_DISCHARGE_ENERGY_ENTITY,
     CONF_BATTERY_POWER_ENTITY,
     CONF_BATTERY_POWER_INVERT,
     CONF_BATTERY_SOC_DEFICIT_COST,
     CONF_BATTERY_SOC_DEFICIT_THRESHOLD,
+    CONF_BATTERY_SOC_FINAL_REWARD_FACTOR,
     CONF_BATTERY_SOC_SURPLUS_COST,
     CONF_BATTERY_SOC_SURPLUS_THRESHOLD,
     CONF_BATTERY_STRESS_COST,
@@ -95,8 +98,10 @@ from .const import (
     CONF_PHASE_VOLTAGE_V,
     CONF_POWER_SENSOR,
     CONF_PRICE,
+    CONF_PRICE_FORECAST,
     CONF_PROFILE,
     CONF_PROFILE_OPTIONS,
+    CONF_PROVIDER,
     CONF_PV,
     CONF_PV_ENERGY_ENTITY,
     CONF_PV_ENTITY,
@@ -122,6 +127,7 @@ from .const import (
     DEFAULT_BATTERY_DYNAMIC_MIN,
     DEFAULT_BATTERY_SOC_DEFICIT_COST,
     DEFAULT_BATTERY_SOC_DEFICIT_THRESHOLD,
+    DEFAULT_BATTERY_SOC_FINAL_REWARD_FACTOR,
     DEFAULT_BATTERY_SOC_SURPLUS_COST,
     DEFAULT_BATTERY_SOC_SURPLUS_THRESHOLD,
     DEFAULT_BATTERY_STRESS_COST,
@@ -188,6 +194,7 @@ from .forms import (
 from .metering import async_energy_dashboard_defaults
 from .models import parse_charge_power_derating
 from .naming import async_taken_standard_ids
+from .price_forecast import PROVIDER_NONE, PROVIDERS
 from .profiles import (
     Profile,
     ProfileError,
@@ -642,8 +649,16 @@ def _tariff_side_schema(prefix: str, defaults: dict[str, Any]) -> dict[Any, Any]
     }
 
 
-TARIFF_ADVANCED_KEYS: Final = frozenset({f"{side}_{CONF_TEMPLATE}" for side in ("buy", "sell")})
-"""The two price templates. Blank unless a side is in Template mode."""
+FORECAST_PROVIDER_FIELD: Final = "forecast_provider"
+FORECAST_API_KEY_FIELD: Final = "forecast_api_key"
+FORECAST_AREA_FIELD: Final = "forecast_area"
+
+TARIFF_ADVANCED_KEYS: Final = frozenset(
+    {f"{side}_{CONF_TEMPLATE}" for side in ("buy", "sell")}
+    | {FORECAST_PROVIDER_FIELD, FORECAST_API_KEY_FIELD, FORECAST_AREA_FIELD}
+)
+"""The two price templates (blank unless a side is in Template mode) and the
+optional price-forecast key and area (blank turns the forecast fill off)."""
 
 
 def tariff_schema(
@@ -651,11 +666,30 @@ def tariff_schema(
     *,
     advanced_open: bool = False,
     sell_defaults: dict[str, Any] | None = None,
+    forecast: dict[str, Any] | None = None,
 ) -> dict[Any, Any]:
     """The buy and sell price form: methods and markups, templates under Advanced."""
+    forecast = forecast or {}
     fields = {
         **_tariff_side_schema("buy", tariff.get("buy", {})),
         **_tariff_side_schema("sell", tariff.get("sell", sell_defaults or {})),
+        vol.Optional(
+            FORECAST_PROVIDER_FIELD, default=forecast.get(CONF_PROVIDER) or PROVIDER_NONE
+        ): selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                mode=selector.SelectSelectorMode.DROPDOWN,
+                translation_key="price_forecast_provider",
+                options=[PROVIDER_NONE, *PROVIDERS],
+            )
+        ),
+        vol.Optional(
+            FORECAST_API_KEY_FIELD, default=forecast.get(CONF_API_KEY) or ""
+        ): selector.TextSelector(
+            selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
+        ),
+        vol.Optional(
+            FORECAST_AREA_FIELD, default=forecast.get(CONF_AREA) or ""
+        ): selector.TextSelector(),
     }
     basic = {k: v for k, v in fields.items() if str(k) not in TARIFF_ADVANCED_KEYS}
     advanced = {k: v for k, v in fields.items() if str(k) in TARIFF_ADVANCED_KEYS}
@@ -698,6 +732,16 @@ def _collect_tariff(user_input: dict[str, Any]) -> dict[str, Any]:
         if template := user_input.get(f"{side}_{CONF_TEMPLATE}"):
             tariff[side][CONF_TEMPLATE] = template
     return tariff
+
+
+def _collect_price_forecast(user_input: dict[str, Any]) -> dict[str, str]:
+    """The optional forecast provider, key and zone; empty unless all three are set."""
+    provider = str(user_input.get(FORECAST_PROVIDER_FIELD) or PROVIDER_NONE)
+    api_key = str(user_input.get(FORECAST_API_KEY_FIELD) or "").strip()
+    area = str(user_input.get(FORECAST_AREA_FIELD) or "").strip().upper()
+    if provider not in PROVIDERS or not api_key or not area:
+        return {}
+    return {CONF_PROVIDER: provider, CONF_API_KEY: api_key, CONF_AREA: area}
 
 
 def _collect_grid(user_input: dict[str, Any]) -> dict[str, Any]:
@@ -839,6 +883,7 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
             errors = _tariff_errors(user_input)
             if not errors:
                 self._options["tariff"] = _collect_tariff(user_input)
+                self._options[CONF_PRICE_FORECAST] = _collect_price_forecast(user_input)
                 return await self.async_step_pv()
 
         return self.async_show_form(
@@ -2000,6 +2045,7 @@ BATTERY_ADVANCED_KEYS: Final = frozenset(
         CONF_BATTERY_SOC_DEFICIT_COST,
         CONF_BATTERY_SOC_SURPLUS_THRESHOLD,
         CONF_BATTERY_SOC_SURPLUS_COST,
+        CONF_BATTERY_SOC_FINAL_REWARD_FACTOR,
         CONF_BATTERY_STRESS_SEGMENTS,
         CONF_BATTERY_STRESS_COST,
         CONF_END_SOC_MODE,
@@ -2180,6 +2226,14 @@ def _battery_fields(defaults: dict[str, Any]) -> dict[Any, Any]:
             default=defaults.get(CONF_BATTERY_SOC_SURPLUS_COST, DEFAULT_BATTERY_SOC_SURPLUS_COST),
         ): selector.NumberSelector(
             selector.NumberSelectorConfig(min=0, max=10, step=0.001, mode="box")
+        ),
+        vol.Optional(
+            CONF_BATTERY_SOC_FINAL_REWARD_FACTOR,
+            default=defaults.get(
+                CONF_BATTERY_SOC_FINAL_REWARD_FACTOR, DEFAULT_BATTERY_SOC_FINAL_REWARD_FACTOR
+            ),
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(min=0, max=1, step=0.05, mode="box")
         ),
         # C-rate penalty. Segments is a solver knob rather than a plant
         # property -- bounded well below EMHASS's unbounded read because each
@@ -3286,12 +3340,17 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
             errors = _tariff_errors(user_input)
             if not errors:
                 options["tariff"] = _collect_tariff(user_input)
+                options[CONF_PRICE_FORECAST] = _collect_price_forecast(user_input)
                 return self.async_create_entry(data=options)
 
         return self.async_show_form(
             step_id="tariff",
             data_schema=vol.Schema(
-                tariff_schema(options.get("tariff", {}), advanced_open=bool(errors))
+                tariff_schema(
+                    options.get("tariff", {}),
+                    advanced_open=bool(errors),
+                    forecast=options.get(CONF_PRICE_FORECAST),
+                )
             ),
             errors=errors,
         )

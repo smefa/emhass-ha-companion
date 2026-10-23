@@ -14,7 +14,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from .const import LOAD_MODE_AUTO, PHASE_GUARD_ACTIVE_KEY
+from .const import LOAD_MODE_AUTO, MODE_FORCE_CHARGE, MODE_FORCE_DISCHARGE, PHASE_GUARD_ACTIVE_KEY
 from .coordinator import EmhassCoordinator
 from .deferrable import DeferrableRuntime, resolve_should_run
 from .entity import EmhassEntity, EmhassLoadEntity
@@ -119,6 +119,7 @@ class PhaseGuardActiveBinarySensor(EmhassEntity, BinarySensorEntity):
     """
 
     _attr_translation_key = PHASE_GUARD_ACTIVE_KEY
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(self, coordinator: EmhassCoordinator) -> None:
         super().__init__(coordinator, PHASE_GUARD_ACTIVE_KEY)
@@ -138,9 +139,17 @@ class PhaseGuardActiveBinarySensor(EmhassEntity, BinarySensorEntity):
         decision = self.coordinator.config_entry.runtime_data.executor.last_decision
         if decision is None:
             return {}
+        charging = decision.action == MODE_FORCE_CHARGE
         return {
             "planned_charge_w": round(decision.planned_charge_w),
-            "allowed_charge_w": round(decision.power_w) if decision.planned_charge_w else None,
+            # What the guard lets the battery charge with: zero for a hold or a
+            # discharge, which is reported on its own so the direction is clear.
+            "allowed_charge_w": (
+                (round(decision.power_w) if charging else 0) if decision.planned_charge_w else None
+            ),
+            "discharge_w": round(decision.power_w)
+            if decision.planned_charge_w and decision.action == MODE_FORCE_DISCHARGE
+            else 0,
             "cut_w": round(decision.phase_cut_w),
         }
 
@@ -221,6 +230,8 @@ class LoadShouldRunBinarySensor(EmhassLoadEntity, BinarySensorEntity):
             return "no plan yet"
         if self.coordinator.plan_is_stale:
             return "plan is out of date"
+        if self.coordinator.plan_is_degraded:
+            return "plan is a fallback solve"
         if self.plan_index is None:
             return "not in the last optimisation"
         if self._scheduled_power() is None:
@@ -229,7 +240,12 @@ class LoadShouldRunBinarySensor(EmhassLoadEntity, BinarySensorEntity):
 
     def _scheduled_power(self) -> float | None:
         data = self.coordinator.data
-        if not data or data.plan is None or self.coordinator.plan_is_stale:
+        if (
+            not data
+            or data.plan is None
+            or self.coordinator.plan_is_stale
+            or self.coordinator.plan_is_degraded
+        ):
             return None
         if (index := self.plan_index) is None:
             return None

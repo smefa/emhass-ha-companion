@@ -2,12 +2,43 @@
 
 from __future__ import annotations
 
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import EmhassCoordinator
 from .deferrable import DeferrableRuntime
+
+# via_device is deprecated in favour of via_device_id; fall back on a Home
+# Assistant too old to know the new key.
+_HAS_VIA_DEVICE_ID = "via_device_id" in DeviceInfo.__annotations__
+
+
+def _main_device_info(coordinator: EmhassCoordinator) -> DeviceInfo:
+    entry = coordinator.config_entry
+    return DeviceInfo(
+        identifiers={(DOMAIN, entry.entry_id)},
+        name="EMHASS Companion",
+        manufacturer="EMHASS",
+        configuration_url=coordinator.client.base_url,
+    )
+
+
+def _main_device_id(hass: HomeAssistant, coordinator: EmhassCoordinator) -> str:
+    """Id of the main device, registering it if no entity has yet."""
+    entry = coordinator.config_entry
+    return (
+        dr.async_get(hass)
+        .async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={(DOMAIN, entry.entry_id)},
+            name="EMHASS Companion",
+            manufacturer="EMHASS",
+        )
+        .id
+    )
 
 
 class EmhassEntity(CoordinatorEntity[EmhassCoordinator]):
@@ -19,12 +50,7 @@ class EmhassEntity(CoordinatorEntity[EmhassCoordinator]):
         super().__init__(coordinator)
         entry = coordinator.config_entry
         self._attr_unique_id = f"{entry.entry_id}_{key}"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name="EMHASS Companion",
-            manufacturer="EMHASS",
-            configuration_url=coordinator.client.base_url,
-        )
+        self._attr_device_info = _main_device_info(coordinator)
 
     @property
     def available(self) -> bool:
@@ -48,13 +74,17 @@ class EmhassLoadEntity(CoordinatorEntity[EmhassCoordinator]):
         entry = coordinator.config_entry
         self.load = load
         self._attr_unique_id = f"{entry.entry_id}_{load.subentry_id}_{key}"
-        self._attr_device_info = DeviceInfo(
+        info = DeviceInfo(
             identifiers={(DOMAIN, f"{entry.entry_id}_{load.subentry_id}")},
             name=load.name,
             manufacturer="EMHASS",
             model="Thermal load" if load.is_thermal else "Deferrable load",
-            via_device=(DOMAIN, entry.entry_id),
         )
+        if _HAS_VIA_DEVICE_ID:
+            info["via_device_id"] = _main_device_id(coordinator.hass, coordinator)
+        else:
+            info["via_device"] = (DOMAIN, entry.entry_id)  # type: ignore[typeddict-unknown-key]
+        self._attr_device_info = info
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()

@@ -14,6 +14,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import Event, EventStateChangedData, HomeAssistant, State, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_track_state_change_event, async_track_time_interval
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -32,6 +33,7 @@ from .const import (
     DEFAULT_COST_FUN,
     DEFAULT_MIX_BETA,
     DEFAULT_SURPLUS_THRESHOLD_W,
+    DEGRADED_OPTIM_STATUSES,
     DOMAIN,
     EMHASS_CONF_LOAD_FORECAST_METHOD,
     EMHASS_CONF_NUM_LAGS,
@@ -40,9 +42,11 @@ from .const import (
     EMHASS_CONF_VAR_MODEL,
     END_SOC_OPTIMIZED,
     INFEASIBLE_CAUSE_CODES,
+    ISSUE_HEAT_TOPOLOGY_REPLACES,
     ISSUE_LOAD_NEVER_STARTED,
     ISSUE_ML_FORECASTER_NOT_READY,
     ISSUE_OPTIMIZATION_INFEASIBLE,
+    ISSUE_PLAN_DEGRADED,
     ISSUE_PLAN_SCHEMA,
     ISSUE_PV_TAIL_SHORT,
     ISSUE_RUN_FAILED,
@@ -56,6 +60,8 @@ from .const import (
     MIN_EMHASS_VERSION_DEMAND_CHARGE,
     MIN_EMHASS_VERSION_DEMAND_COMPONENTS,
     MIN_EMHASS_VERSION_DEMAND_WINDOW,
+    MIN_EMHASS_VERSION_HEAT_TOPOLOGY_EXTEND,
+    MIN_EMHASS_VERSION_SOC_FINAL_REWARD,
     ML_MIN_HISTORY_DAYS,
     MODE_AUTO,
     PROFILE_KEY_LOAD_SENSOR,
@@ -70,6 +76,7 @@ from .const import (
 )
 from .deferrable import DeferrableRegistry, state_to_watts
 from .health import SourceHealth
+from .heat import topology_replaces_loads
 from .infeasibility import Finding, Severity, diagnose, headline
 from .models import (
     DeferrableLoad,
@@ -85,6 +92,12 @@ from .network_calendar import HolidayCache, NetworkCalendar, NetworkCalendarErro
 from .payload import PayloadInputs, PayloadResult, build_payload
 from .peaks import PeakTracker, days_in_current_period, effective_rate_per_kw
 from .phase_guard import PhaseGuard
+from .price_forecast import (
+    PROVIDERS,
+    PriceForecastClient,
+    PriceForecastError,
+    fill_with_forecast,
+)
 from .profiles import (
     Profile,
     ProfileError,
@@ -99,7 +112,11 @@ from .terminal import (
     LOAD_SOURCE_LAST_PLAN,
     LOAD_SOURCE_PROFILE,
     EndSocDecision,
+    annotate_final_reward,
     decide_end_soc,
+)
+from .terminal import (
+    LOOKAHEAD as END_SOC_LOOKAHEAD,
 )
 from .util import schema_major, version_at_least
 
@@ -406,6 +423,12 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         # day" fact, and re-resolving it twice would double the
         # workday.check_date traffic for no benefit.
         self.holiday_cache = HolidayCache()
+        # Only built when the user entered an eupowerprices.com key and zone.
+        self.price_forecast: PriceForecastClient | None = (
+            PriceForecastClient(async_get_clientsession(hass), self.config.price_forecast)
+            if self.config.price_forecast
+            else None
+        )
         # Set once, right after the version probe in __init__.async_setup_entry
         # -- the same string _check_version already gates MIN_EMHASS_VERSION
         # against. None only for a coordinator built without going through
@@ -632,6 +655,17 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
     def _async_health_changed(self) -> None:
         self._track_blind_sources_issue()
         self.async_update_listeners()
+
+    @property
+    def soc_final_reward_supported(self) -> bool:
+        """Whether the backend accepts ``battery_soc_final_reward_factor``.
+
+        An unknown version counts as unsupported: sending an unknown
+        optim_conf key to an older EMHASS is worse than leaving the knob inert.
+        """
+        return self.backend_version is not None and version_at_least(
+            self.backend_version, MIN_EMHASS_VERSION_SOC_FINAL_REWARD
+        )
 
     @property
     def blind_sources(self) -> tuple[str, ...]:
@@ -1001,6 +1035,51 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
                 err,
             )
 
+    async def async_check_heat_topology(self) -> None:
+        """Say so when EMHASS's own config would wipe the Companion's loads.
+
+        A ``heat_topology`` saved in the add-on's configuration, in EMHASS's
+        default replace mode, overwrites ``number_of_deferrable_loads``,
+        ``def_load_config`` and every per-load array on each run, whatever the
+        Companion sends. The loads then silently stop being planned. With no
+        Companion load configured there is nothing to wipe, and the topology is
+        the user's own business.
+
+        Checked once per setup: it is a setting in the add-on, and nothing the
+        Companion does changes it. Non-fatal and silent when EMHASS cannot be
+        read; any existing issue is left as it was, since nothing new is known.
+        """
+        try:
+            config = await self.client.async_get_config()
+        except EmhassError as err:
+            _LOGGER.debug("Could not read EMHASS's heat_topology setting: %s", err)
+            return
+        if not isinstance(config, dict):
+            return
+
+        # `extend_deferrable_loads` is the fix, and older backends do not read it:
+        # on one the flag is ignored and the topology still replaces the loads.
+        can_extend = self.backend_version is None or version_at_least(
+            self.backend_version, MIN_EMHASS_VERSION_HEAT_TOPOLOGY_EXTEND
+        )
+        if not self.loads.all() or not topology_replaces_loads(config, extend_supported=can_extend):
+            ir.async_delete_issue(self.hass, DOMAIN, ISSUE_HEAT_TOPOLOGY_REPLACES)
+            return
+
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            ISSUE_HEAT_TOPOLOGY_REPLACES,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=(
+                ISSUE_HEAT_TOPOLOGY_REPLACES
+                if can_extend
+                else f"{ISSUE_HEAT_TOPOLOGY_REPLACES}_upgrade"
+            ),
+            translation_placeholders={"required": MIN_EMHASS_VERSION_HEAT_TOPOLOGY_EXTEND},
+        )
+
     # -- deferrable loads -----------------------------------------------------
 
     def deferrable_loads(self, now: datetime) -> list[DeferrableLoad]:
@@ -1140,6 +1219,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
 
         if plan is not None and not self._schema_supported(plan):
             plan = None
+        self._track_degraded_plan_issue(action, plan)
 
         # Trimmed to the horizon that was actually requested: profiles fetch
         # whatever their source publishes (a day-ahead tariff commonly hands
@@ -1188,7 +1268,8 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             soc_day_range=self._soc_day_range,
             last_action=action,
             # Before the trim above, deliberately -- see the field's docstring.
-            price_source_end=inputs.buy_price.end if inputs.buy_price else None,
+            price_source_end=inputs.price_source_end
+            or (inputs.buy_price.end if inputs.buy_price else None),
             # Only a genuinely successful solve counts. "no-run" trips the
             # staleness watchdog outright; infeasible leaves it counting down
             # from the kept plan's own solve (above). Either way the executor
@@ -1442,6 +1523,27 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             translation_placeholders={"action": action, "error": message},
         )
 
+    def _track_degraded_plan_issue(self, action: str, plan: Plan | None) -> None:
+        """Raise or clear the repair for a plan EMHASS solved only in part.
+
+        EMHASS answers a time-limited solve and a relaxed fallback with status
+        "ok", so nothing else would notice them. The repair says why the
+        executor is not acting on the plan, and clears on the next full solve.
+        """
+        status = plan.optim_status if plan is not None else None
+        if status is None or status not in DEGRADED_OPTIM_STATUSES:
+            ir.async_delete_issue(self.hass, DOMAIN, ISSUE_PLAN_DEGRADED)
+            return
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            ISSUE_PLAN_DEGRADED,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=ISSUE_PLAN_DEGRADED,
+            translation_placeholders={"action": action, "status": status},
+        )
+
     def _track_pv_tail_issue(
         self, end_soc: EndSocDecision, pv: Series | None, horizon_end: datetime
     ) -> None:
@@ -1523,6 +1625,16 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
 
         buy = sell = None
         network_warnings: list[str] = []
+        price_warnings: list[str] = []
+        price_source_end: datetime | None = None
+        # Past the horizon too: the end-SOC lookahead reads the day beyond it.
+        fill_until = horizon_end + END_SOC_LOOKAHEAD
+        if spot and self.price_forecast is not None and not spot.covers(fill_until):
+            spot, price_source_end, forecast_warning = await self._fill_spot_from_forecast(
+                spot, now, fill_until
+            )
+            if forecast_warning:
+                price_warnings.append(forecast_warning)
         if spot:
             buy, sell = config.tariff.compose(self.hass, spot)
             if self.network_calendar is not None and buy:
@@ -1581,7 +1693,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             self.data.plan if self.data else None,
             self.data.load_order if self.data else [],
             now,
-            stale=self.plan_is_stale,
+            untrusted=self.plan_is_stale or self.plan_is_degraded,
         )
         # Every load, every cycle. Deliberately outside the branch above and
         # not folded back into assume_from_plan: a request or forced run that
@@ -1637,8 +1749,15 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
                 sell_price=sell,
                 grid=config.grid,
                 previous=self._end_soc,
+                price_real_end=price_source_end,
             )
             self._track_pv_tail_issue(end_soc, pv or None, horizon_end)
+            annotate_final_reward(
+                end_soc,
+                config.battery.soc_final_reward_factor,
+                sent=self.soc_final_reward_supported,
+                min_version=MIN_EMHASS_VERSION_SOC_FINAL_REWARD,
+            )
         self._end_soc = end_soc
 
         demand_pricing = self.demand_charge_pricing(now)
@@ -1765,6 +1884,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             load=load or None,
             buy_price=buy,
             sell_price=sell,
+            price_source_end=price_source_end,
             outdoor_temperature=outdoor or None,
             soc_init=soc_init,
             soc_final=end_soc.soc if end_soc else None,
@@ -1792,13 +1912,38 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
                 self.backend_version is not None
                 and version_at_least(self.backend_version, MIN_EMHASS_VERSION_CHARGE_DERATING)
             ),
+            send_soc_final_reward=self.soc_final_reward_supported,
         )
         built = build_payload(inputs)
-        if network_warnings:
-            built.warnings = [*network_warnings, *built.warnings]
+        if network_warnings or price_warnings:
+            built.warnings = [*price_warnings, *network_warnings, *built.warnings]
         return inputs, built
 
     # -- input gathering ------------------------------------------------------
+
+    async def _fill_spot_from_forecast(
+        self, spot: Series, now: datetime, until: datetime
+    ) -> tuple[Series, datetime | None, str | None]:
+        """Stretch ``spot`` to the horizon with the price forecast, if it can.
+
+        Returns ``(series, real_end, warning)``. ``real_end`` is where the real
+        source stopped, set only when a forecast was actually used, so the
+        price-horizon observation keeps measuring the source and not the fill.
+        Any failure leaves ``spot`` untouched: the payload builder then repeats
+        the previous day as it always did, and the reason is shown as a warning.
+        """
+        assert self.price_forecast is not None
+        try:
+            forecast = await self.price_forecast.async_get(now)
+            fill = fill_with_forecast(spot, forecast, until)
+        except PriceForecastError as err:
+            return spot, None, f"Price forecast not used: {err}."
+        return (
+            fill.series,
+            spot.end,
+            f"Prices after {dt_util.as_local(spot.end + (spot.step() or timedelta())):%H:%M} come from the "
+            f"{PROVIDERS[self.price_forecast.config.provider].name} forecast.",
+        )
 
     async def _series(self, selection: ProfileSelection, kind: str) -> Series:
         profile = self._profile(selection, kind)
@@ -2295,3 +2440,9 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         if not self.data or self.data.last_success is None:
             return True
         return dt_util.utcnow() - self.data.last_success > self.config.stale_after
+
+    @property
+    def plan_is_degraded(self) -> bool:
+        """Whether the plan on hand is a fallback solve the executor must not act on."""
+        plan = self.data.plan if self.data else None
+        return plan is not None and plan.optim_status in DEGRADED_OPTIM_STATUSES

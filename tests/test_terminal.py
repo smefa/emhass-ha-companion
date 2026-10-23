@@ -45,6 +45,7 @@ from custom_components.emhass_companion.terminal import (
     LOAD_SOURCE_PROFILE,
     PRICE_MODEL_TARIFF,
     PRICE_MODEL_UNTRUSTED,
+    PRICE_TAIL_FORECAST,
     PRICE_TAIL_PROXY,
     PV_TAIL_PROXY,
     PV_TAIL_ZERO,
@@ -57,6 +58,7 @@ from custom_components.emhass_companion.terminal import (
     TEST_CENTRED,
     TEST_PRICED_COVER,
     TEST_SHADOW_PLAN,
+    annotate_final_reward,
     decide_end_soc,
 )
 
@@ -182,6 +184,22 @@ def test_a_weak_pv_blip_does_not_preempt_the_cheap_price_fallback(active):
     assert decision.details["replenishment_kind"] == REPLENISH_CHEAP_GRID
     assert decision.soc == pytest.approx(0.50)
     assert decision.details["cover_energy_wh"] == 2000
+
+
+def test_a_forecast_priced_tail_is_reported_as_forecast(active):
+    """Prices past the real source's end, stretched by the forecast, are not "known"."""
+    active(TEST_PRICED_COVER)
+    prices = [1.0] * 6 + [2.0] * 42
+    decision = _decide(buy_price=_series(prices), price_real_end=T0 + 24 * HOUR)
+
+    assert decision.details["price_tail"] == PRICE_TAIL_FORECAST
+
+
+def test_a_real_price_tail_stays_known_with_a_forecast_configured(active):
+    active(TEST_PRICED_COVER)
+    decision = _decide(buy_price=_series([2.0] * 60), price_real_end=T0 + 59 * HOUR)
+
+    assert decision.details["price_tail"] == "known"
 
 
 def test_a_missing_price_tail_borrows_todays_curve_and_says_so(active):
@@ -768,3 +786,29 @@ def test_the_raw_answer_is_kept_when_hysteresis_holds_the_pin_back(active):
 
     assert second.soc == first.soc
     assert second.details["raw_target"] == pytest.approx(0.51)
+
+
+def test_a_sent_reward_factor_turns_the_target_into_a_floor():
+    decision = _decide(mode=END_SOC_FIXED_50)
+    annotate_final_reward(decision, 0.7, sent=True, min_version="0.18.5")
+
+    assert decision.details["reward_factor"] == 0.7
+    assert "At least this" in decision.reason
+    assert "reward_inactive" not in decision.details
+
+
+def test_a_reward_factor_the_backend_cannot_take_is_flagged_inert():
+    decision = _decide(mode=END_SOC_FIXED_50)
+    reason = decision.reason
+    annotate_final_reward(decision, 0.7, sent=False, min_version="0.18.5")
+
+    assert decision.details["reward_inactive"] == "needs EMHASS 0.18.5"
+    assert "reward_factor" not in decision.details
+    assert decision.reason == reason
+
+
+def test_a_zero_reward_factor_leaves_the_decision_alone():
+    decision = _decide(mode=END_SOC_FIXED_50)
+    before = (decision.reason, dict(decision.details))
+    annotate_final_reward(decision, 0.0, sent=True, min_version="0.18.5")
+    assert (decision.reason, decision.details) == before

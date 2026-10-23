@@ -120,6 +120,25 @@ actually pay or get paid, for import and export separately:
   time) are available. Choosing *Template* without one shows an error and
   opens the section for you.
 
+
+### Price forecast (optional)
+
+Most price sources only publish up to the end of the day they have announced
+(tomorrow's prices usually arrive in the afternoon). Until then the plan
+repeats yesterday's prices for the missing hours. If you have an
+[eupowerprices.com](https://eupowerprices.com) key, open **Advanced settings**
+on this step and set:
+
+- **Price forecast source** — *eupowerprices.com (Europe)*, or *Off*.
+- **Forecast API key** — your key.
+- **Forecast area** — your bidding zone, for example `SE2` or `DE`.
+
+The forecast is automatically scaled to match your own prices (currency, unit
+and taxes), and only fills hours your source has not published yet. If it does
+not fit your prices, for example because the area is wrong, it is ignored, the
+plan falls back to repeating yesterday, and a warning explains why. The
+service is for personal, non-commercial use only.
+
 ## 4. Solar forecast
 
 ![The Solar forecast step, listing the four sources](../assets/setup-solar-temp.png)
@@ -276,6 +295,13 @@ the dynamic limits. The inverter's own settings are on the next screen.
 
     Requires EMHASS 0.18 or newer. See **[End SOC](../end_soc.md)** for
     how *Optimized* decides.
+- **Value of leftover energy** — optional, in the collapsed *Advanced*
+  section. By default the plan sells any energy above the End SOC target to
+  land on it. Raise this (0 to 1) to let the plan keep spare energy instead,
+  valued at that share of the import price at the end of the plan; the End
+  SOC target then becomes the least it ends at. 0 keeps today's behaviour.
+  Needs EMHASS 0.18.5 or newer; on an older add-on the value is kept but not
+  sent. See [End SOC](../end_soc.md#value-of-leftover-energy).
 - **Self-consumption handoff threshold** — how close to zero the grid power
   needs to be before the battery is handed back to plain self-consumption
   instead of a forced charge/discharge. Once handed over, grid power must

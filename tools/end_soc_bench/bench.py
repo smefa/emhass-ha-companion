@@ -89,7 +89,12 @@ def cost_to_go(scenario: Scenario, dispatcher: Dispatcher) -> np.ndarray:
     return dispatcher.cost_to_go(scenario.world, scenario.pin_index, residual)
 
 
-def evaluate(scenario: Scenario, dispatcher: Dispatcher, to_go: np.ndarray) -> Result:
+def evaluate(
+    scenario: Scenario,
+    dispatcher: Dispatcher,
+    to_go: np.ndarray,
+    rewards: tuple[float, ...] = (),
+) -> Result:
     world = scenario.world
     pin = scenario.pin_index
     to_reach = dispatcher.cost_to_reach(world, scenario.soc_init, pin)
@@ -122,14 +127,40 @@ def evaluate(scenario: Scenario, dispatcher: Dispatcher, to_go: np.ndarray) -> R
     pins[ORACLE] = float(dispatcher.soc[best_index])
     worst = float(np.max(total[reachable]))
 
+    regret = {key: dispatcher.evaluate(total, value) - oracle_cost for key, value in pins.items()}
+    if rewards:
+        # What the run could see of the last step's import price -- the number
+        # EMHASS prices the reward against, a guess when the tail is unpublished.
+        # Extended the way production extends it (yesterday's shape past the
+        # published coverage), so an unpublished tail is a guess, not a hold.
+        last_price = scenario.buy_price.extended_with_previous_day(
+            scenario.horizon_end, scenario.step
+        ).value_at(scenario.horizon_end - scenario.step)
+        if last_price is None:
+            last_price = float(np.median(scenario.world.buy))
+        # ~100x the dearest slot, EMHASS's own under-target penalty scale.
+        under_penalty = 100.0 * float(np.max(scenario.world.buy))
+        scored = (terminal.ACTIVE_CANDIDATE, BASELINE_START, BASELINE_RESERVE)
+        for key in scored:
+            for factor in rewards:
+                regret[f"{key}@{factor:g}"] = (
+                    dispatcher.evaluate_with_reward(
+                        to_reach,
+                        to_go,
+                        pins[key],
+                        factor=factor,
+                        last_price=last_price,
+                        under_penalty=under_penalty,
+                    )
+                    - oracle_cost
+                )
+
     return Result(
         scenario=scenario.name,
         season=scenario.season,
         hour=scenario.now.astimezone(LOCAL).hour,
         soc_init=scenario.soc_init,
-        regret={
-            key: dispatcher.evaluate(total, value) - oracle_cost for key, value in pins.items()
-        },
+        regret=regret,
         pins=pins,
         oracle_pin=pins[ORACLE],
         oracle_cost=oracle_cost,
@@ -148,6 +179,7 @@ def run(
     season: str | None,
     every: int = 1,
     levels: int = 201,
+    rewards: tuple[float, ...] = (),
 ) -> list[Result]:
     dataset = Dataset.load()
     index = dataset.index()
@@ -165,7 +197,7 @@ def run(
             continue
         shared = cost_to_go(built[0], dispatcher)
         for scenario in built:
-            results.append(evaluate(scenario, dispatcher, shared))
+            results.append(evaluate(scenario, dispatcher, shared, rewards))
         if limit and len(results) >= limit:
             break
     return results
@@ -246,6 +278,11 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--every", type=int, default=1, help="use every Nth decision moment")
     parser.add_argument("--levels", type=int, default=201, help="SOC grid resolution")
+    parser.add_argument(
+        "--rewards",
+        default="",
+        help="End SOC reward factors to score the active rule and baselines at, e.g. 0.5,0.8,1.0",
+    )
     parser.add_argument("--json", default=None, help="write per-decision results here")
     parser.add_argument(
         "--proposals", action="store_true", help="also score everything in proposals/"
@@ -269,6 +306,7 @@ def main() -> None:
     def moment(value: str | None) -> datetime | None:
         return None if value is None else datetime.fromisoformat(value).replace(tzinfo=UTC)
 
+    rewards = tuple(float(value) for value in args.rewards.split(",") if value)
     results = run(
         house=live_house(),
         hours=tuple(int(value) for value in args.hours.split(",")),
@@ -279,12 +317,18 @@ def main() -> None:
         season=args.season,
         every=args.every,
         levels=args.levels,
+        rewards=rewards,
     )
     keys = [candidate.key for candidate in terminal.CANDIDATES] + [
         BASELINE_START,
         BASELINE_RESERVE,
         BASELINE_FULL,
         ORACLE,
+    ]
+    keys += [
+        f"{key}@{factor:g}"
+        for key in (terminal.ACTIVE_CANDIDATE, BASELINE_START, BASELINE_RESERVE)
+        for factor in rewards
     ]
     report(results, keys=keys, by=args.by)
     if args.json:

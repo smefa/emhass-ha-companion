@@ -163,9 +163,9 @@ depend on either and still applies.
 
 How it works:
 
-- **Only a forced charge is touched.** That is the one battery action that
-  adds load to every phase on purpose. Discharge and self-consumption take
-  load off the grid.
+- **Only a planned forced charge is touched.** That is the one battery action
+  that adds load to every phase on purpose. A planned discharge or
+  self-consumption takes load off the grid and is left alone.
 - **The battery's own share is taken out first.** From the measured battery
   power, the guard works out what each phase would carry with the battery
   idle: it subtracts a charge, and adds a discharge back. Then it allows as
@@ -177,10 +177,37 @@ How it works:
   charge on the next reading. The charge comes back only after every phase
   has stayed clear for 60 seconds, so a heater cycling on and off doesn't drag
   the inverter up and down with it.
-- **Too little room hands the battery to self-consumption.** If less than
-  300 W of charging fits, there's no point forcing a token charge. On a hybrid
-  inverter, self-consumption also lets the battery cover the house, which
-  takes load off the phase that is in trouble.
+- **The plan's charge is always the aim.** The guard gives way only as far
+  as the phases force it to, and never switches the battery to
+  self-consumption. On a hybrid inverter that would let the battery cover the
+  house, feeding the very load (a car, a dishwasher) that is overloading the
+  phase with energy the plan meant to keep. In order of preference:
+    1. **Lower the charge** to what fits, when at least 300 W fits.
+    2. **Hold the battery at 0 W** (the profile's `idle` action) when less than
+       300 W fits. A token charge isn't worth commanding.
+    3. **Discharge** only in the worst case: a phase more than 300 W over its
+       limit even with the battery held. The discharge is exactly the
+       overage, which brings the worst phase back to its limit and no
+       further. Three limits keep it safe:
+        - It never exceeds the battery's maximum discharge power, or what the
+          most exporting phase can take on top of what it already carries. A
+          symmetric discharge pushes the other phases the other way, and the
+          fuse doesn't care which way the current runs. If that leaves less
+          than 300 W, the battery is held instead.
+        - The overload has to hold for 10 seconds first. The phase meter and
+          the battery sensor update independently, so a battery that has just
+          stopped discharging can briefly look like a house 3 kW heavier than
+          it is. Once a discharge has started, the 60 second release window
+          keeps it going.
+        - A profile with no `force_discharge` action is held instead, and so
+          is an install that reads its phases from current (A) sensors: those
+          usually carry no direction, so what an exporting phase can still
+          take isn't known.
+  The planned charge returns on its own once every phase has stayed clear for
+  60 seconds. A profile with no `idle` action falls back to self-consumption
+  for the hold, as it does for any other idle. A profile whose idle step is
+  aimed at an option left unset (the generic script profile without an idle
+  script) does nothing for the hold either, and the charge carries on.
 - **The guard fails open.** If a phase reading or the battery power reading
   goes unavailable, charging follows the plan unlimited until it is back,
   with a warning in the log.
@@ -195,7 +222,7 @@ have done before you hand over.
 | Entity | |
 |---|---|
 | `sensor.*_phase_headroom` | Symmetric charging the worst phase has room for right now, in W, with the battery's own charge taken out. It reads the same whether the battery is charging or not. Negative means a phase is over its limit before any charging. The attributes hold each phase's current, the worst phase, the fuse, the planner limit and the overload state |
-| `binary_sensor.*_phase_guard_active` | On while the executor is holding the charge below the plan. The attributes hold the planned charge, the allowed charge and the watts cut |
+| `binary_sensor.*_phase_guard_active` | On while the executor is holding the charge below the plan. The attributes hold the planned charge, the allowed charge (0 for a hold or a discharge), the discharge the guard is commanding, and the watts cut |
 
 `sensor.*_battery_action` also shows the cut in its `rules` trace and in
 `planned_charge_w` / `phase_cut_w`. A phase above the fuse rating is logged

@@ -69,14 +69,19 @@
         "sections": {
           "advanced": {
             "name": "Advanced settings",
-            "description": "Price templates, only used when the method above is Template. The variables spot and time (your local time) are available.",
+            "description": "Price templates, only used when the method above is Template (the variables spot and time, your local time, are available), and the optional price forecast.",
             "data": {
               "buy_template": "Import template",
-              "sell_template": "Export template"
+              "sell_template": "Export template",
+              "forecast_api_key": "Forecast API key",
+              "forecast_area": "Forecast area",
+              "forecast_provider": "Price forecast source"
             },
             "data_description": {
               "buy_template": "Only used in Template mode. `spot` and `time` (your local time) are available.",
-              "sell_template": "Only used in Template mode. `spot` and `time` (your local time) are available."
+              "sell_template": "Only used in Template mode. `spot` and `time` (your local time) are available.",
+              "forecast_area": "Your bidding zone as the source names it, for example SE2 or DE.",
+              "forecast_provider": "Fills price hours your source has not published yet (for example tomorrow before the day-ahead auction) with a forecast, fitted to match your own prices. Off repeats the previous day instead. The key and area below are for the source chosen here. eupowerprices.com is for personal, non-commercial use only."
             }
           }
         }
@@ -192,6 +197,7 @@
               "battery_soc_deficit_cost": "Cost of sitting below it",
               "battery_soc_surplus_threshold": "High charge comfort level",
               "battery_soc_surplus_cost": "Cost of sitting above it",
+              "battery_soc_final_reward_factor": "Value of leftover energy",
               "battery_stress_segments": "Stress cost detail",
               "battery_stress_cost": "High-power stress cost",
               "end_soc_mode": "End SOC",
@@ -211,6 +217,7 @@
               "battery_soc_deficit_cost": "Charged per kWh below the comfort level, per hour spent there, in your price currency. Nudges the plan to keep a reserve rather than sitting near empty. 0 turns this off, which is the default.",
               "battery_soc_surplus_threshold": "The level above which the battery is charged a holding cost, if one is set below. Sitting at full charge ages a lithium battery faster, so this discourages parking there for hours.",
               "battery_soc_surplus_cost": "Charged per kWh above the comfort level, per hour spent there. Use it to make the plan fill the battery late rather than early when both cost the same. 0 turns this off, which is the default.",
+              "battery_soc_final_reward_factor": "How much a kWh left in the battery at the end of the plan is worth, as a share of the import price at that moment. 0 keeps the default: the plan aims for the End SOC target and sells anything above it. Raise it to let the plan keep spare energy instead; the End SOC target then becomes a minimum. Needs EMHASS 0.18.5 or newer.",
               "battery_stress_segments": "How finely the squared cost curve below is approximated. Higher tracks the true cost more closely but makes every optimisation a little slower; 10 is a good balance and only matters when a stress cost is set below.",
               "battery_stress_cost": "Discourages fast charging and discharging. The cost grows with the square of the power, so running at half power costs a quarter as much, and the plan spreads a charge over several hours instead of forcing it into the single cheapest one. Priced per kW at full power, per hour. 0 turns this off, which is the default.",
               "end_soc_mode": "How the battery level the plan aims for at the end of the horizon is chosen. \"Optimized\" computes it each run from the solar, price and load forecasts beyond the horizon; \"Same as start\" always plans back to the current level; \"Fixed % slider\" always aims for the Target charge level above. Requires EMHASS 0.18 or newer.",
@@ -474,6 +481,7 @@
               "battery_soc_deficit_cost": "Cost of sitting below it",
               "battery_soc_surplus_threshold": "High charge comfort level",
               "battery_soc_surplus_cost": "Cost of sitting above it",
+              "battery_soc_final_reward_factor": "Value of leftover energy",
               "battery_stress_segments": "Stress cost detail",
               "battery_stress_cost": "High-power stress cost",
               "end_soc_mode": "End SOC",
@@ -493,6 +501,7 @@
               "battery_soc_deficit_cost": "Charged per kWh below the comfort level, per hour spent there, in your price currency. Nudges the plan to keep a reserve rather than sitting near empty. 0 turns this off, which is the default.",
               "battery_soc_surplus_threshold": "The level above which the battery is charged a holding cost, if one is set below. Sitting at full charge ages a lithium battery faster, so this discourages parking there for hours.",
               "battery_soc_surplus_cost": "Charged per kWh above the comfort level, per hour spent there. Use it to make the plan fill the battery late rather than early when both cost the same. 0 turns this off, which is the default.",
+              "battery_soc_final_reward_factor": "How much a kWh left in the battery at the end of the plan is worth, as a share of the import price at that moment. 0 keeps the default: the plan aims for the End SOC target and sells anything above it. Raise it to let the plan keep spare energy instead; the End SOC target then becomes a minimum. Needs EMHASS 0.18.5 or newer.",
               "battery_stress_segments": "How finely the squared cost curve below is approximated. Higher tracks the true cost more closely but makes every optimisation a little slower; 10 is a good balance and only matters when a stress cost is set below.",
               "battery_stress_cost": "Discourages fast charging and discharging. The cost grows with the square of the power, so running at half power costs a quarter as much, and the plan spreads a charge over several hours instead of forcing it into the single cheapest one. Priced per kW at full power, per hour. 0 turns this off, which is the default.",
               "end_soc_mode": "How the battery level the plan aims for at the end of the horizon is chosen. \"Optimized\" computes it each run from the solar, price and load forecasts beyond the horizon; \"Same as start\" always plans back to the current level; \"Fixed % slider\" always aims for the Target charge level above. Requires EMHASS 0.18 or newer.",
@@ -590,10 +599,17 @@
         "sections": {
           "advanced": {
             "name": "Advanced settings",
-            "description": "Price templates, only used when the method above is Template. The variables spot and time (your local time) are available.",
+            "description": "Price templates, only used when the method above is Template (the variables spot and time, your local time, are available), and the optional price forecast.",
             "data": {
               "buy_template": "Import template",
-              "sell_template": "Export template"
+              "sell_template": "Export template",
+              "forecast_api_key": "Forecast API key",
+              "forecast_area": "Forecast area",
+              "forecast_provider": "Price forecast source"
+            },
+            "data_description": {
+              "forecast_area": "Your bidding zone as the source names it, for example SE2 or DE.",
+              "forecast_provider": "Fills price hours your source has not published yet (for example tomorrow before the day-ahead auction) with a forecast, fitted to match your own prices. Off repeats the previous day instead. The key and area below are for the source chosen here. eupowerprices.com is for personal, non-commercial use only."
             }
           }
         }
@@ -741,6 +757,12 @@
         "optimized": "Optimized",
         "same_as_start": "Same as start",
         "fixed_50": "Fixed % slider"
+      }
+    },
+    "price_forecast_provider": {
+      "options": {
+        "none": "Off",
+        "eupowerprices": "eupowerprices.com (Europe)"
       }
     }
   },
@@ -1087,6 +1109,10 @@
       "title": "EMHASS plan infeasible: a forecast has gaps",
       "description": "The last {action} run was infeasible: {key} has {count} empty value(s), the first at timestep {first}. A data source returned nothing for part of the horizon; check the source behind that forecast. The previous plan is being kept. {total} blocking cause(s) found in all; the Home Assistant log lists every finding. This resolves automatically once a run solves successfully."
     },
+    "plan_degraded": {
+      "title": "EMHASS plan is a fallback, not a full solve",
+      "description": "The last {action} run did not finish a full solve, so EMHASS published a fallback plan (EMHASS status: {status}). The integration does not act on a fallback plan: while control is on, the battery goes back to self-consumption and deferrable loads are switched off until a full solve succeeds. Optimal (Incumbent) means the solver ran out of time and kept the best feasible plan it had: raise lp_solver_timeout in EMHASS, or shorten the optimisation horizon. Optimal (Relaxed) means the on/off decisions could not be solved, so EMHASS dropped them to find any plan at all. This resolves automatically once a full solve succeeds."
+    },
     "run_failed": {
       "title": "The last {action} run failed",
       "description": "EMHASS did not produce a plan: {error}\n\nThe previous plan is being kept. This resolves automatically once a run succeeds again -- check the EMHASS add-on logs for the full error if it doesn't clear on its own."
@@ -1130,6 +1156,14 @@
     "phase_clamp_off_slow_profile": {
       "title": "Phase guard can't cut battery charging fast enough",
       "description": "A main fuse is set on the grid step, but the inverter profile {profile} may only be written once every {interval} seconds. A cut held back that long can outlast what an overloaded fuse tolerates, so forced charging isn't limited in real time with this profile. The plan's import limit from the phases still applies. A profile that talks to the inverter locally, such as over Modbus, doesn't have this limit."
+    },
+    "heat_topology_replaces_loads": {
+      "title": "EMHASS's heat topology replaces the Companion's loads",
+      "description": "The EMHASS add-on has a heat topology saved in its own configuration. EMHASS then replaces every load the Companion sends with the ones the topology builds, so the Companion's loads are not planned. Add \"extend_deferrable_loads\": true at the top level of the topology (needs EMHASS {required} or newer), or clear the topology in the add-on configuration. Then reload this integration."
+    },
+    "heat_topology_replaces_loads_upgrade": {
+      "title": "EMHASS's heat topology replaces the Companion's loads",
+      "description": "The EMHASS add-on has a heat topology saved in its own configuration. EMHASS then replaces every load the Companion sends with the ones the topology builds, so the Companion's loads are not planned. This EMHASS is older than {required}, the first version that can keep the Companion's loads next to a topology. Update the add-on and add \"extend_deferrable_loads\": true at the top level of the topology, or clear the topology in the add-on configuration. Then reload this integration."
     }
   },
   "services": {

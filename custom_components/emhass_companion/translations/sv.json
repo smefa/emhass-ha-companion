@@ -72,11 +72,16 @@
             "description": "Prismallar, används bara när metoden ovan är Mall. Variablerna spot och time (din lokala tid) finns tillgängliga.",
             "data": {
               "buy_template": "Mall för inköpspris",
-              "sell_template": "Mall för säljpris"
+              "sell_template": "Mall för säljpris",
+              "forecast_api_key": "API-nyckel för prognosen",
+              "forecast_area": "Område för prognosen",
+              "forecast_provider": "Källa för prisprognos"
             },
             "data_description": {
               "buy_template": "Används bara i Mall-läget. `spot` och `time` (din lokala tid) är tillgängliga.",
-              "sell_template": "Används bara i Mall-läget. `spot` och `time` (din lokala tid) är tillgängliga."
+              "sell_template": "Används bara i Mall-läget. `spot` och `time` (din lokala tid) är tillgängliga.",
+              "forecast_area": "Ditt elområde så som källan namnger det, till exempel SE2 eller DE.",
+              "forecast_provider": "Fyller i pristimmar som din priskälla inte har publicerat ännu (till exempel i morgon före dagen före-auktionen) med en prognos, anpassad till dina egna priser. Av upprepar gårdagen i stället. Nyckeln och området nedan gäller källan som väljs här. eupowerprices.com är endast för personligt, icke-kommersiellt bruk."
             }
           }
         }
@@ -192,6 +197,7 @@
               "battery_soc_deficit_cost": "Kostnad för att ligga under den",
               "battery_soc_surplus_threshold": "Bekväm högsta laddningsnivå",
               "battery_soc_surplus_cost": "Kostnad för att ligga över den",
+              "battery_soc_final_reward_factor": "Värde på överbliven energi",
               "battery_stress_segments": "Detaljnivå för effektkostnaden",
               "battery_stress_cost": "Kostnad för hög effekt",
               "end_soc_mode": "Slutladdningsnivå",
@@ -211,6 +217,7 @@
               "battery_soc_deficit_cost": "Debiteras per kWh under den bekväma nivån, per timme där, i din prisvaluta. Får planen att hålla en reserv i stället för att ligga nära tomt. 0 stänger av detta, vilket är standard.",
               "battery_soc_surplus_threshold": "Nivån över vilken batteriet debiteras en hållkostnad, om en sådan är satt nedan. Att stå fulladdat åldrar ett litiumbatteri snabbare, så detta motverkar att det parkeras där i timmar.",
               "battery_soc_surplus_cost": "Debiteras per kWh över den bekväma nivån, per timme där. Använd det för att få planen att fylla batteriet sent i stället för tidigt när båda kostar lika mycket. 0 stänger av detta, vilket är standard.",
+              "battery_soc_final_reward_factor": "Hur mycket en kWh som finns kvar i batteriet när planen slutar är värd, som en andel av importpriset vid den tidpunkten. 0 behåller standardbeteendet: planen siktar på slutnivån för laddning och säljer allt över den. Höj värdet för att låta planen spara överskottsenergi i stället; slutnivån blir då ett minimum. Kräver EMHASS 0.18.5 eller nyare.",
               "battery_stress_segments": "Hur fint den kvadratiska kostnadskurvan nedan approximeras. Högre följer den verkliga kostnaden närmare men gör varje optimering något långsammare; 10 är en bra avvägning och spelar bara roll när en effektkostnad är satt nedan.",
               "battery_stress_cost": "Motverkar snabb laddning och urladdning. Kostnaden växer med effekten i kvadrat, så halv effekt kostar en fjärdedel, och planen sprider en laddning över flera timmar i stället för att pressa in den i den billigaste. Prissatt per kW vid full effekt, per timme. 0 stänger av detta, vilket är standard.",
               "end_soc_mode": "Hur batterinivån som planen siktar på vid horisontens slut väljs. \"Optimerad\" beräknas varje körning ur sol-, pris- och lastprognoserna bortom horisonten; \"Samma som start\" planerar alltid tillbaka till nuvarande nivå; \"Fast %-reglage\" siktar alltid på önskad laddningsnivå ovan. Kräver EMHASS 0.18 eller nyare.",
@@ -474,6 +481,7 @@
               "battery_soc_deficit_cost": "Kostnad för att ligga under den",
               "battery_soc_surplus_threshold": "Bekväm högsta laddningsnivå",
               "battery_soc_surplus_cost": "Kostnad för att ligga över den",
+              "battery_soc_final_reward_factor": "Värde på överbliven energi",
               "battery_stress_segments": "Detaljnivå för effektkostnaden",
               "battery_stress_cost": "Kostnad för hög effekt",
               "end_soc_mode": "Slutladdningsnivå",
@@ -493,6 +501,7 @@
               "battery_soc_deficit_cost": "Debiteras per kWh under den bekväma nivån, per timme där, i din prisvaluta. Får planen att hålla en reserv i stället för att ligga nära tomt. 0 stänger av detta, vilket är standard.",
               "battery_soc_surplus_threshold": "Nivån över vilken batteriet debiteras en hållkostnad, om en sådan är satt nedan. Att stå fulladdat åldrar ett litiumbatteri snabbare, så detta motverkar att det parkeras där i timmar.",
               "battery_soc_surplus_cost": "Debiteras per kWh över den bekväma nivån, per timme där. Använd det för att få planen att fylla batteriet sent i stället för tidigt när båda kostar lika mycket. 0 stänger av detta, vilket är standard.",
+              "battery_soc_final_reward_factor": "Hur mycket en kWh som finns kvar i batteriet när planen slutar är värd, som en andel av importpriset vid den tidpunkten. 0 behåller standardbeteendet: planen siktar på slutnivån för laddning och säljer allt över den. Höj värdet för att låta planen spara överskottsenergi i stället; slutnivån blir då ett minimum. Kräver EMHASS 0.18.5 eller nyare.",
               "battery_stress_segments": "Hur fint den kvadratiska kostnadskurvan nedan approximeras. Högre följer den verkliga kostnaden närmare men gör varje optimering något långsammare; 10 är en bra avvägning och spelar bara roll när en effektkostnad är satt nedan.",
               "battery_stress_cost": "Motverkar snabb laddning och urladdning. Kostnaden växer med effekten i kvadrat, så halv effekt kostar en fjärdedel, och planen sprider en laddning över flera timmar i stället för att pressa in den i den billigaste. Prissatt per kW vid full effekt, per timme. 0 stänger av detta, vilket är standard.",
               "end_soc_mode": "Hur batterinivån som planen siktar på vid horisontens slut väljs. \"Optimerad\" beräknas varje körning ur sol-, pris- och lastprognoserna bortom horisonten; \"Samma som start\" planerar alltid tillbaka till nuvarande nivå; \"Fast %-reglage\" siktar alltid på önskad laddningsnivå ovan. Kräver EMHASS 0.18 eller nyare.",
@@ -592,7 +601,14 @@
             "description": "Prismallar, används bara när metoden ovan är Mall. Variablerna spot och time (din lokala tid) finns tillgängliga.",
             "data": {
               "buy_template": "Mall för inköpspris",
-              "sell_template": "Mall för säljpris"
+              "sell_template": "Mall för säljpris",
+              "forecast_api_key": "API-nyckel för prognosen",
+              "forecast_area": "Område för prognosen",
+              "forecast_provider": "Källa för prisprognos"
+            },
+            "data_description": {
+              "forecast_area": "Ditt elområde så som källan namnger det, till exempel SE2 eller DE.",
+              "forecast_provider": "Fyller i pristimmar som din priskälla inte har publicerat ännu (till exempel i morgon före dagen före-auktionen) med en prognos, anpassad till dina egna priser. Av upprepar gårdagen i stället. Nyckeln och området nedan gäller källan som väljs här. eupowerprices.com är endast för personligt, icke-kommersiellt bruk."
             }
           }
         },
@@ -741,6 +757,12 @@
         "optimized": "Optimerad",
         "same_as_start": "Samma som start",
         "fixed_50": "Fast %-reglage"
+      }
+    },
+    "price_forecast_provider": {
+      "options": {
+        "none": "Av",
+        "eupowerprices": "eupowerprices.com (Europa)"
       }
     }
   },
@@ -1087,6 +1109,10 @@
       "title": "EMHASS-planen är olösbar: en prognos har luckor",
       "description": "Den senaste körningen av {action} var olösbar: {key} har {count} tomma värde(n), det första vid tidssteg {first}. En datakälla returnerade inget för en del av horisonten; kontrollera källan bakom den prognosen. Den tidigare planen behålls. Totalt {total} blockerande orsak(er) hittades; Home Assistant-loggen listar alla fynd. Detta löser sig automatiskt så snart en körning löses framgångsrikt."
     },
+    "plan_degraded": {
+      "title": "EMHASS-planen är en backuplösning, inte en fullständig lösning",
+      "description": "Den senaste körningen av {action} gav ingen fullständig lösning, så EMHASS publicerade en reservplan (EMHASS-status: {status}). Integrationen agerar inte på en reservplan: när styrningen är på går batteriet tillbaka till egenanvändning och styrbara laster stängs av tills en fullständig lösning lyckas. Optimal (Incumbent) betyder att lösaren fick slut på tid och behöll den bästa genomförbara plan den hade: höj lp_solver_timeout i EMHASS eller korta optimeringshorisonten. Optimal (Relaxed) betyder att på/av-besluten inte kunde lösas, så EMHASS släppte dem för att hitta någon plan alls. Detta löser sig automatiskt så snart en fullständig lösning lyckas."
+    },
     "run_failed": {
       "title": "Den senaste körningen av {action} misslyckades",
       "description": "EMHASS producerade ingen plan: {error}\n\nDen tidigare planen behålls. Detta löser sig automatiskt så snart en körning lyckas igen -- kontrollera EMHASS-tilläggets loggar för hela felet om det inte löser sig av sig själv."
@@ -1130,6 +1156,14 @@
     "phase_clamp_off_slow_profile": {
       "title": "Fasvakten kan inte sänka batteriladdningen tillräckligt snabbt",
       "description": "En huvudsäkring är angiven i nätsteget, men växelriktarprofilen {profile} får bara skrivas en gång var {interval}:e sekund. En sänkning som hålls tillbaka så länge kan vara längre än en överbelastad säkring tål, så tvångsladdning begränsas inte i realtid med den här profilen. Planens importgräns från faserna gäller fortfarande. En profil som pratar direkt med växelriktaren, till exempel över Modbus, har inte den begränsningen."
+    },
+    "heat_topology_replaces_loads": {
+      "title": "EMHASS värmetopologi ersätter Companions laster",
+      "description": "EMHASS-tillägget har en värmetopologi sparad i sin egen konfiguration. EMHASS ersätter då alla laster som Companion skickar med de som topologin bygger, så Companions laster planeras inte. Lägg till \"extend_deferrable_loads\": true överst i topologin (kräver EMHASS {required} eller nyare), eller töm topologin i tilläggets konfiguration. Ladda sedan om den här integrationen."
+    },
+    "heat_topology_replaces_loads_upgrade": {
+      "title": "EMHASS värmetopologi ersätter Companions laster",
+      "description": "EMHASS-tillägget har en värmetopologi sparad i sin egen konfiguration. EMHASS ersätter då alla laster som Companion skickar med de som topologin bygger, så Companions laster planeras inte. Den här EMHASS är äldre än {required}, den första versionen som kan behålla Companions laster bredvid en topologi. Uppdatera tillägget och lägg till \"extend_deferrable_loads\": true överst i topologin, eller töm topologin i tilläggets konfiguration. Ladda sedan om den här integrationen."
     }
   },
   "services": {

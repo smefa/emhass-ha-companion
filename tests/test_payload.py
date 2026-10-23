@@ -2422,3 +2422,31 @@ def test_what_is_held_on_beyond_the_limit_is_reported_not_hidden():
     # Both pins released: the heater's own minimum on-time keeps it on anyway.
     assert "def_current_power" not in payload
     assert any("still needs 500 W" in w and "Heater 1100 W" in w for w in warnings)
+
+
+def test_soc_final_reward_factor_zero_is_sent_explicitly():
+    """0 is asserted on every request, so a value persisted in EMHASS's own
+    config can never be the one that is active."""
+    battery = BatteryConfig(enabled=True, capacity_wh=25600)
+    payload = build_payload(_inputs(battery=battery, soc_init=0.5)).payload
+    assert payload["battery_soc_final_reward_factor"] == 0.0
+
+
+def test_soc_final_reward_factor_is_sent_when_set():
+    battery = BatteryConfig(enabled=True, capacity_wh=25600, soc_final_reward_factor=0.7)
+    payload = build_payload(_inputs(battery=battery, soc_init=0.5)).payload
+    assert payload["battery_soc_final_reward_factor"] == 0.7
+
+
+def test_soc_final_reward_factor_is_omitted_on_an_old_or_unknown_backend():
+    battery = BatteryConfig(enabled=True, capacity_wh=25600, soc_final_reward_factor=0.7)
+    payload = build_payload(
+        _inputs(battery=battery, soc_init=0.5, send_soc_final_reward=False)
+    ).payload
+    assert "battery_soc_final_reward_factor" not in payload
+
+
+def test_soc_final_reward_factor_is_omitted_without_a_battery():
+    battery = BatteryConfig(enabled=False, soc_final_reward_factor=0.7)
+    payload = build_payload(_inputs(battery=battery)).payload
+    assert "battery_soc_final_reward_factor" not in payload

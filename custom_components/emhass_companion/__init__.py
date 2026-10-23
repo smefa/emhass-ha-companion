@@ -196,6 +196,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
     await coordinator.async_load_ml_state()
     _report_profile_errors(hass, coordinator)
     await coordinator.async_sync_emhass_config()
+    await coordinator.async_check_heat_topology()
 
     scheduler = Scheduler(hass, coordinator)
     executor = Executor(hass, coordinator)

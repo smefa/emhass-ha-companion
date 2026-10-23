@@ -647,6 +647,36 @@ class DeferrableRuntime:
     def is_commanded(self) -> bool:
         return self.commanded_since is not None
 
+    def mid_program(self, now: datetime, step_minutes: int) -> bool:
+        """Whether an unbroken, metered load is between two phases of its program.
+
+        ``is_running`` is a threshold crossing, so it is false for every dip a
+        program takes below the running threshold: a dishwasher passes through
+        3-20 W between phases and finishes on a ten-minute tail of 3-4 W.
+        Reported as ``def_current_state`` that reads "off" to EMHASS, which
+        pins a currently-on unbroken load for its whole remaining run and
+        otherwise treats the run as finished and re-places the rest wherever
+        is cheapest. The plan then stopped asking for the load at the next
+        timestep and the executor cut a dishwasher with 15 % of its cycle left
+        (seen live 2026-10-10).
+
+        Judged by the same evidence as "finished", so the two cannot disagree:
+        the load has run since it was last commanded on, and has not read idle
+        for a whole idle window. Only a run we are commanding qualifies, which
+        keeps an appliance that merely drew power on its own out of it, and
+        only an unbroken one, since a load that may be split gains nothing
+        from being called on.
+        """
+        return (
+            self.single_constant
+            and self.metered
+            and self.is_commanded
+            and self.off_since is not None
+            and self.commanded_since is not None
+            and self.off_since >= self.commanded_since
+            and self.idle_for(now) < self.idle_window(step_minutes)
+        )
+
     @property
     def idle_counts(self) -> bool:
         """Whether an idle reading right now could mean the appliance finished.
@@ -675,7 +705,7 @@ class DeferrableRuntime:
             if self.running_since is None:
                 self.running_since = now
                 self.off_since = None
-        else:
+        elif not self._still_in_program(watts):
             self._stop(now)
 
         if watts >= self.idle_threshold_w or not self.idle_counts:
@@ -685,6 +715,29 @@ class DeferrableRuntime:
             self.idle_since = None
         elif self.idle_since is None:
             self.idle_since = now
+
+    def _still_in_program(self, watts: float) -> bool:
+        """Whether a reading below the running threshold is still the same run.
+
+        Starting needs the running threshold, which is what separates a program
+        from the standby draw of a display. Stopping needs only the idle floor:
+        a dishwasher passes through 3-20 W between phases and ends on a ten
+        minute tail of 3-4 W, and that is still the program running. Ending the
+        run at the running threshold told EMHASS an unbroken load was off in
+        the middle of it, so the rest was re-placed hours later and the plug
+        was cut (seen live 2026-10-10).
+
+        Only an on-demand metered load, the only kind with an idle floor to
+        configure. A floor of 0 W cannot hold a load on: a dead meter would
+        keep it running forever.
+        """
+        return (
+            self.on_demand
+            and self.metered
+            and self.running_since is not None
+            and watts > 0
+            and watts >= self.idle_threshold_w
+        )
 
     def idle_for(self, now: datetime) -> timedelta:
         """How long this load has read idle while being told to run."""
@@ -792,7 +845,7 @@ class DeferrableRuntime:
             self.seen_running = False
             self.idle_since = None
 
-    def in_completion_hold(self, now: datetime) -> bool:
+    def in_completion_hold(self, now: datetime, step_minutes: int = DEFAULT_TIME_STEP) -> bool:
         """Whether this run is over on paper but the appliance is still drawing.
 
         The reason the run is not simply ended at ``operating_hours``: the plan
@@ -809,7 +862,7 @@ class DeferrableRuntime:
             self.on_demand
             and self.requested
             and self.metered
-            and self.is_running
+            and (self.is_running or self.mid_program(now, step_minutes))
             and self.elapsed_towards_target(now) >= timedelta(hours=self.operating_hours)
         )
 
@@ -877,7 +930,9 @@ class DeferrableRuntime:
             elif elapsed >= target:
                 if self.metered and not self.seen_running:
                     reason = COMPLETION_NEVER_STARTED
-                elif not (self.metered and self.is_running):
+                elif not (
+                    self.metered and (self.is_running or self.mid_program(now, step_minutes))
+                ):
                     reason = COMPLETION_COMPLETED
             if reason is not None:
                 self.cancel(reason, now)
@@ -1071,7 +1126,14 @@ class DeferrableRuntime:
             # streak reported alongside it falls short of the minimum. That
             # door is closed in :meth:`reported_on_timesteps`, not here: the
             # startup credit is worth keeping and only the remainder is not.
-            current_state=self.is_running or self.mode == LOAD_MODE_FORCE_ON,
+            #
+            # An unbroken program that has dipped below the running threshold
+            # between phases is still running -- see :meth:`mid_program`.
+            current_state=(
+                self.is_running
+                or self.mode == LOAD_MODE_FORCE_ON
+                or self.mid_program(now, step_minutes)
+            ),
             # Only ever a power this integration is itself commanding, never one
             # it has merely observed. EMHASS turns def_current_power into a hard
             # equality on timestep 0 -- p_deferrable[k][0] == this, plus a
@@ -1543,7 +1605,7 @@ class DeferrableRegistry:
             load.assume_from_plan(plan.rows, index, now)
 
     def adopt_plan_commitments(
-        self, plan: Plan | None, load_order: list[str], now: datetime, *, stale: bool
+        self, plan: Plan | None, load_order: list[str], now: datetime, *, untrusted: bool
     ) -> None:
         """Record which loads the plan in force already asks for right now.
 
@@ -1558,14 +1620,15 @@ class DeferrableRegistry:
         or out of its load order -- stops being committed to rather than
         keeping the last answer it was given.
 
-        A stale plan commits to nothing. Its rows were solved against prices
-        that have since been superseded, and pinning from them is exactly the
-        latch this flag exists to avoid, just with a slower clock.
+        An untrusted plan commits to nothing: a stale one, whose rows were
+        solved against prices that have since been superseded, and a fallback
+        solve, which the executor did not act on. Pinning from either is
+        exactly the latch this flag exists to avoid, just with a slower clock.
         """
         for load in self._loads.values():
             load.plan_scheduled_now = False
             load.plan_power_now_w = 0.0
-        if plan is None or stale:
+        if plan is None or untrusted:
             return
         row = plan.row_at(now)
         if row is None:

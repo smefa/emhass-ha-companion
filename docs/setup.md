@@ -132,6 +132,7 @@ The inverter's own limits and the live PV sensor are on the
 | Minimum / maximum charge level | The optimiser will not plan the battery outside this range |
 | Target charge level | Where the optimiser aims to leave the battery at the end of the horizon. What it means depends on End SOC below |
 | End SOC | How that end-of-horizon level is chosen. See below |
+| Value of leftover energy | Optional, in Advanced. How much a kWh left above the End SOC target is worth, as a share of the import price at the end of the plan. 0 keeps the old behaviour. Needs EMHASS 0.18.5+ |
 | Discharge / charge cycle cost | What a kWh through the battery costs in wear. See below |
 | Low / high charge comfort level | Levels the plan prefers to stay between, softly. See below |
 | Cost of sitting below / above it | What that preference is worth, per kWh past the level per hour |
@@ -203,6 +204,14 @@ tomorrow. Three modes:
 Requires EMHASS 0.18 or newer. The resulting target, and the reasoning behind
 it, is published on the **End SOC target** sensor. See
 [End SOC](end_soc.md) for how *Optimized* decides.
+
+**Value of leftover energy.** Optional, in the collapsed Advanced section, 0 by
+default. With 0 the plan is penalised for ending above the End SOC target as
+well as below it, so it sells spare energy to land on the target. Above 0, each
+kWh left above the target is rewarded at that share of the import price in the
+plan's last timestep, and the target becomes the least the plan ends at. Needs
+EMHASS 0.18.5 or newer; on an older add-on the value is kept but not sent. See
+[Value of leftover energy](end_soc.md#value-of-leftover-energy).
 
 **Self-consumption handoff threshold.** When the plan's grid power is within
 this many watts of zero, the battery is handed to the inverter's own
@@ -286,3 +295,42 @@ the price series actually gains a new day. Markets publish at different hours
 and publication slips; a fixed time means quietly optimising against
 yesterday's prices whenever it does. A configurable fallback time exists as a
 backstop.
+
+## Price forecast
+
+A day-ahead source (Nord Pool, ENTSO-E and so on) only publishes up to the end
+of the day it has announced, so part of every day the planning horizon reaches
+past the real prices. By default the missing hours repeat the previous day. If
+you have an [eupowerprices.com](https://eupowerprices.com) API key you can
+fill them with a two-week hourly forecast for your bidding zone instead.
+
+Configure it under **Advanced settings** on the *Buy and sell prices* step
+(also in the options flow):
+
+- **Price forecast source** — *Off* (the default) or *eupowerprices.com*.
+- **Forecast API key** — your key. Stored in the config entry.
+- **Forecast area** — your bidding zone as the source names it, for example
+  `SE2` or `DE`.
+
+All three must be set; leaving any blank turns the forecast off.
+
+How the fill works:
+
+- The forecast is quoted in EUR/MWh, your prices in whatever currency and unit
+  you use, often with taxes folded in. Rather than a configured conversion, the
+  forecast is rescaled (one scale and offset) to your real prices over the
+  hours where both exist. That absorbs currency, MWh against kWh and VAT.
+- Only the hours after your source ends are filled. Real prices are never
+  replaced, and the price-horizon observation still measures the real source.
+- The fill is refused, and the previous-day repeat is used as before, when the
+  fit looks wrong: fewer than 12 overlapping hours, a correlation below 0.5
+  (usually a wrong area), a flat series, or a forecast that does not reach past
+  your prices. The reason is shown as a plan warning, as is a successful fill
+  with its scale, offset and correlation.
+- The forecast is cached for 3 hours, a failed request is not retried for 15
+  minutes, and a cached forecast up to 36 hours old is still used if the API
+  is unreachable.
+
+eupowerprices.com is for personal, non-commercial use only. Other providers
+can be added in `price_forecast.py` (a URL, an auth header and a parser).
+

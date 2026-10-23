@@ -276,6 +276,7 @@ LOAD_SWITCHES: tuple[LoadSwitchDescription, ...] = (
     LoadSwitchDescription(
         key="start_asap",
         translation_key="start_asap",
+        entity_category=EntityCategory.CONFIG,
         get_fn=lambda load: load.start_asap,
         set_fn=_set_start_asap,
         default=False,

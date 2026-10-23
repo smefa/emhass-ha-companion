@@ -135,6 +135,7 @@ POWER_SENSORS: tuple[EmhassSensorDescription, ...] = (
 CURTAILMENT_SENSOR: EmhassSensorDescription = EmhassSensorDescription(
     key="pv_curtailment",
     translation_key="pv_curtailment",
+    entity_category=EntityCategory.DIAGNOSTIC,
     device_class=SensorDeviceClass.POWER,
     native_unit_of_measurement=UnitOfPower.WATT,
     state_class=SensorStateClass.MEASUREMENT,
@@ -146,6 +147,7 @@ CURTAILMENT_SENSOR: EmhassSensorDescription = EmhassSensorDescription(
 HYBRID_INVERTER_SENSOR: EmhassSensorDescription = EmhassSensorDescription(
     key="hybrid_inverter",
     translation_key="hybrid_inverter",
+    entity_category=EntityCategory.DIAGNOSTIC,
     device_class=SensorDeviceClass.POWER,
     native_unit_of_measurement=UnitOfPower.WATT,
     state_class=SensorStateClass.MEASUREMENT,
@@ -519,6 +521,7 @@ class NetHouseLoadSensor(EmhassEntity, SensorEntity):
     """
 
     _attr_translation_key = "net_house_load"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_device_class = SensorDeviceClass.POWER
     _attr_native_unit_of_measurement = UnitOfPower.WATT
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -634,6 +637,7 @@ class LoadScheduledPowerSensor(EmhassLoadEntity, SensorEntity):
     """The power EMHASS has scheduled for this load right now."""
 
     _attr_translation_key = "scheduled_power"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_device_class = SensorDeviceClass.POWER
     _attr_native_unit_of_measurement = UnitOfPower.WATT
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -673,6 +677,7 @@ class LoadPlannedTemperatureSensor(EmhassLoadEntity, SensorEntity):
     """
 
     _attr_translation_key = "planned_temperature"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_device_class = SensorDeviceClass.TEMPERATURE
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -763,6 +768,7 @@ class LoadRuntimeTodaySensor(EmhassLoadEntity, RestoreSensor):
     """
 
     _attr_translation_key = "runtime_today"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_device_class = SensorDeviceClass.DURATION
     _attr_native_unit_of_measurement = UnitOfTime.HOURS
     _attr_state_class = SensorStateClass.TOTAL
@@ -882,6 +888,7 @@ class SolarSurplusEnergySensor(SolarSurplusBase, SensorEntity):
     """
 
     _attr_translation_key = "solar_surplus_energy"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_suggested_display_precision = 2
@@ -907,6 +914,7 @@ class SolarSurplusStartSensor(SolarSurplusBase, SensorEntity):
     """When the plan's surplus first reaches the reporting threshold."""
 
     _attr_translation_key = "solar_surplus_start"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_device_class = SensorDeviceClass.TIMESTAMP
 
     def __init__(self, coordinator: EmhassCoordinator) -> None:
@@ -926,6 +934,7 @@ class SolarSurplusEndSensor(SolarSurplusBase, SensorEntity):
     """
 
     _attr_translation_key = "solar_surplus_end"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_device_class = SensorDeviceClass.TIMESTAMP
 
     def __init__(self, coordinator: EmhassCoordinator) -> None:
@@ -1494,12 +1503,14 @@ SAVINGS_SENSORS: tuple[SavingsSensorDescription, ...] = (
     SavingsSensorDescription(
         key=SAVINGS_KEY_SOLAR_TODAY,
         translation_key=SAVINGS_KEY_SOLAR_TODAY,
+        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda ledger: ledger.solar_savings,
         attrs_fn=_solar_attributes,
     ),
     SavingsSensorDescription(
         key=SAVINGS_KEY_BATTERY_TODAY,
         translation_key=SAVINGS_KEY_BATTERY_TODAY,
+        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda ledger: ledger.battery_savings,
         attrs_fn=_battery_attributes,
     ),
@@ -1543,12 +1554,14 @@ FORECAST_SENSORS: tuple[ForecastSensorDescription, ...] = (
     ForecastSensorDescription(
         key=SAVINGS_KEY_FORECAST_COST,
         translation_key=SAVINGS_KEY_FORECAST_COST,
+        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda forecast: forecast.actual_cost,
         attrs_fn=_forecast_attributes,
     ),
     ForecastSensorDescription(
         key=SAVINGS_KEY_FORECAST_SAVINGS,
         translation_key=SAVINGS_KEY_FORECAST_SAVINGS,
+        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda forecast: forecast.total_savings,
         attrs_fn=_forecast_attributes,
     ),

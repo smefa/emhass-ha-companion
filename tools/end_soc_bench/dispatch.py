@@ -187,3 +187,36 @@ class Dispatcher:
         soc = self.soc[reachable]
         costs = total[reachable]
         return float(np.interp(pin, soc, costs))
+
+    def evaluate_with_reward(
+        self,
+        to_reach: np.ndarray,
+        to_go: np.ndarray,
+        pin: float,
+        *,
+        factor: float,
+        last_price: float,
+        under_penalty: float,
+    ) -> float:
+        """What a pin costs when EMHASS rewards energy held above it.
+
+        EMHASS 0.18.5's ``battery_soc_final_reward_factor`` replaces the
+        over-target penalty with a reward of ``factor x last_price`` per kWh
+        above the pin; the under-target penalty stays. The optimiser picks the
+        end SOC ``s`` that minimises ``reach(s) - reward(s) + penalty(s)``, and
+        the world then pays ``to_go(s)`` for whatever it chose. So the pin is
+        a floor, and the cost is that of the SOC the reward actually leads to.
+        """
+        if factor <= 0:
+            # 0 keeps EMHASS's two-sided target: the ordinary scoring path.
+            return self.evaluate(to_reach + to_go, pin)
+        capacity_kwh = self.plant.capacity_wh / 1000
+        above = np.maximum(self.soc - pin, 0.0) * capacity_kwh
+        below = np.maximum(pin - self.soc, 0.0) * capacity_kwh
+        objective = to_reach - factor * last_price * above + under_penalty * below
+        total = to_reach + to_go
+        usable = np.isfinite(total)
+        if not usable.any():
+            return float("inf")
+        chosen = int(np.argmin(np.where(usable, objective, np.inf)))
+        return float(total[chosen])

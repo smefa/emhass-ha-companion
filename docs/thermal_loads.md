@@ -103,3 +103,23 @@ Start conservative (the defaults) and tune from observed behaviour:
   response delay is real and unset.
 - The optimiser never pre-heats → the gap between comfort and maximum
   temperature is the storage it plays with; widen it.
+
+## EMHASS heat topology
+
+EMHASS 0.18.5 extends its `heat_topology` setting into a full model of a hybrid
+heating plant: several heat sources (heat pump, boiler) feeding tanks, tanks
+feeding each other, and a house modelled as a thermal mass with window solar
+gain. The Companion does **not** manage a topology. A thermal load above is
+still the single-load model, and EMHASS keeps supporting it unchanged.
+
+If you already run a `heat_topology` in the EMHASS add-on, one setting matters.
+By default EMHASS *replaces* every deferrable load of a run with the ones the
+topology builds, which would silently drop the loads the Companion sends. Set
+`"extend_deferrable_loads": true` at the top level of the topology (EMHASS
+0.18.5 or newer). EMHASS then appends the topology's loads after the Companion's,
+which keep their place. The Companion raises a repair issue when it finds a
+topology in replace mode alongside Companion loads.
+
+This combination is not tested against a real heating plant. The topology's own
+loads get no entities or controls from the Companion; drive that hardware from
+EMHASS's own outputs.

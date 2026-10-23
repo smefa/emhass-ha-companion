@@ -32,6 +32,7 @@ from custom_components.emhass_companion.const import (
     MODE_FORCE_DISCHARGE,
     MODE_IDLE,
     MODE_SELF_CONSUME,
+    PHASE_GUARD_MIN_DISCHARGE_W,
     RECURRENCE_ON_DEMAND,
     SUBENTRY_TYPE_DEFERRABLE,
     SYSTEM_MODES,
@@ -144,12 +145,14 @@ def _plan(
     p_grid: float | None = None,
     p_pv_curtailment: float | None = None,
     unit_prod_price: float | None = None,
+    optim_status: str = "Optimal",
 ) -> Plan:
     start = dt_util.utcnow() - timedelta(minutes=minutes_ago)
     record: dict[str, Any] = {
         "timestamp": (start - timedelta(minutes=5)).isoformat(),
         "P_batt": p_batt,
         "P_deferrable0": deferrable,
+        "optim_status": optim_status,
     }
     if p_grid is not None:
         record["P_grid"] = p_grid
@@ -338,6 +341,27 @@ async def test_no_plan_at_all_falls_back(hass: HomeAssistant) -> None:
 
     decision = await executor.async_apply()
     assert decision.action == MODE_SELF_CONSUME
+
+
+@pytest.mark.parametrize("optim_status", ["Optimal (Relaxed)", "Optimal (Incumbent)"])
+async def test_a_fallback_solve_is_not_acted_on(
+    hass: HomeAssistant, calls: list[ServiceCall], optim_status: str
+) -> None:
+    """EMHASS calls a relaxed or time-limited solve healthy. It is still not
+    followed: the executor falls back as it does for a missing plan."""
+    executor, coordinator = await _build(hass)
+    coordinator.data = EmhassData(
+        plan=_plan(-5000, optim_status=optim_status),
+        last_success=dt_util.utcnow(),
+    )
+    coordinator.control_enabled = True
+
+    decision = await executor.async_apply()
+    await hass.async_block_till_done()
+
+    assert decision.action == MODE_SELF_CONSUME
+    assert "fallback solve" in decision.reason
+    assert calls[-1].data["option"] == "Self Consumption"
 
 
 # --- manual override ---------------------------------------------------------
@@ -1437,6 +1461,18 @@ def _phases(
     coordinator.phase_guard.async_update()
 
 
+def _settle(coordinator: EmhassCoordinator, freezer) -> None:
+    """Let a reading stand for the guard's skew window, as a real overload does.
+
+    A discharge is only commanded for an overload that has been seen for 10 s:
+    the first reading alone could be the meter and the battery sensor
+    disagreeing for a moment.
+    """
+    freezer.tick(timedelta(seconds=11))
+    assert coordinator.phase_guard is not None
+    coordinator.phase_guard.async_update()
+
+
 async def test_a_heater_on_one_phase_caps_the_planned_charge(
     hass: HomeAssistant, calls: list[ServiceCall]
 ) -> None:
@@ -1458,9 +1494,10 @@ async def test_a_heater_on_one_phase_caps_the_planned_charge(
     assert 2549 <= calls[0].data["value"] <= 2550
 
 
-async def test_a_phase_already_at_its_limit_hands_the_battery_to_self_consumption(
+async def test_a_phase_already_at_its_limit_holds_the_battery_at_zero(
     hass: HomeAssistant, calls: list[ServiceCall]
 ) -> None:
+    """Never self-consumption: that would let the battery feed the overload."""
     executor, coordinator = await _build(hass, grid=PHASE_GRID)
     _phases(hass, coordinator, 3500)
     coordinator.data = EmhassData(plan=_plan(-5000), last_success=dt_util.utcnow())
@@ -1469,9 +1506,127 @@ async def test_a_phase_already_at_its_limit_hands_the_battery_to_self_consumptio
     decision = await executor.async_apply()
     await hass.async_block_till_done()
 
-    assert decision.action == MODE_SELF_CONSUME
+    assert decision.action == MODE_IDLE
+    assert decision.power_w == 0
+    assert decision.planned_charge_w == 5000
     assert decision.phase_cut_w == 5000
-    assert calls[-1].data["option"] == "Self Consumption"
+    assert calls[-1].data["option"] == "Stop"
+    assert not any(call.data.get("option") == "Self Consumption" for call in calls)
+
+
+async def test_a_phase_far_over_its_limit_discharges_by_the_overage(
+    hass: HomeAssistant, calls: list[ServiceCall], freezer
+) -> None:
+    """L1 at 4500 W is 1050 W over 3450 W on that phase: 3150 W symmetric."""
+    executor, coordinator = await _build(hass, grid=PHASE_GRID)
+    _phases(hass, coordinator, 4500)
+    _settle(coordinator, freezer)
+    coordinator.data = EmhassData(plan=_plan(-5000), last_success=dt_util.utcnow())
+    coordinator.control_enabled = True
+
+    decision = await executor.async_apply()
+    await hass.async_block_till_done()
+
+    assert decision.action == MODE_FORCE_DISCHARGE
+    assert decision.power_w == pytest.approx(3150)
+    assert decision.planned_charge_w == 5000
+    assert calls[-2].data["value"] == pytest.approx(3150, abs=2)
+    assert calls[-1].data["option"] == "Forced Discharge"
+
+
+async def test_a_discharge_cannot_push_an_exporting_phase_over_its_limit(
+    hass: HomeAssistant, freezer
+) -> None:
+    """L2 and L3 already export 3000 W each: 450 W of room on each before 3450 W."""
+    executor, coordinator = await _build(hass, grid=PHASE_GRID)
+    _phases(hass, coordinator, 4500, -3000, -3000)
+    _settle(coordinator, freezer)
+    coordinator.data = EmhassData(plan=_plan(-5000), last_success=dt_util.utcnow())
+
+    decision = await executor.async_apply()
+
+    assert decision.action == MODE_FORCE_DISCHARGE
+    assert decision.power_w == pytest.approx(3 * 450)
+
+
+async def test_exporting_phases_with_no_room_leave_the_battery_held(
+    hass: HomeAssistant, freezer
+) -> None:
+    executor, coordinator = await _build(hass, grid=PHASE_GRID)
+    _phases(hass, coordinator, 4500, -3400, -3400)
+    _settle(coordinator, freezer)
+    coordinator.data = EmhassData(plan=_plan(-5000), last_success=dt_util.utcnow())
+
+    decision = await executor.async_apply()
+
+    assert decision.action == MODE_IDLE
+
+
+async def test_a_brief_overload_is_held_not_discharged(hass: HomeAssistant, freezer) -> None:
+    """The meter can move before the battery sensor does; that is not an overload.
+
+    A deep reading only counts once it has held for the skew window. Until
+    then the battery is held at 0 W, and it is discharged once it has stayed.
+    """
+    executor, coordinator = await _build(hass, grid=PHASE_GRID)
+    coordinator.data = EmhassData(plan=_plan(-5000), last_success=dt_util.utcnow())
+    _phases(hass, coordinator, 400)
+
+    _phases(hass, coordinator, 4500)
+    assert (await executor.async_apply()).action == MODE_IDLE
+
+    freezer.tick(timedelta(seconds=11))
+    coordinator.phase_guard.async_update()
+    decision = await executor.async_apply()
+
+    assert decision.action == MODE_FORCE_DISCHARGE
+    assert decision.power_w == pytest.approx(3150)
+
+
+async def test_a_transient_dip_in_the_house_never_reaches_the_discharge(
+    hass: HomeAssistant, freezer
+) -> None:
+    _executor, coordinator = await _build(hass, grid=PHASE_GRID)
+    coordinator.data = EmhassData(plan=_plan(-5000), last_success=dt_util.utcnow())
+    _phases(hass, coordinator, 400)
+
+    _phases(hass, coordinator, 4500)
+    freezer.tick(timedelta(seconds=3))
+    _phases(hass, coordinator, 400)
+    freezer.tick(timedelta(seconds=11))
+    coordinator.phase_guard.async_update()
+
+    assert coordinator.phase_guard.discharge_limit_w == 0.0
+
+
+async def test_the_guard_discharge_is_limited_to_the_battery_maximum(
+    hass: HomeAssistant, freezer
+) -> None:
+    executor, coordinator = await _build(hass, grid=PHASE_GRID)
+    coordinator.config.battery.discharge_power_max_w = 2000.0
+    _phases(hass, coordinator, 4500)
+    _settle(coordinator, freezer)
+    coordinator.data = EmhassData(plan=_plan(-5000), last_success=dt_util.utcnow())
+
+    decision = await executor.async_apply()
+
+    assert decision.action == MODE_FORCE_DISCHARGE
+    assert decision.power_w == 2000
+
+
+async def test_an_inverter_without_discharge_is_held_when_far_over(
+    hass: HomeAssistant, freezer
+) -> None:
+    executor, coordinator = await _build(hass, grid=PHASE_GRID)
+    coordinator.profiles[TEST_INVERTER_KEY].document["actions"].pop("force_discharge")
+    _phases(hass, coordinator, 4500)
+    _settle(coordinator, freezer)
+    coordinator.data = EmhassData(plan=_plan(-5000), last_success=dt_util.utcnow())
+
+    decision = await executor.async_apply()
+
+    assert decision.action == MODE_IDLE
+    assert decision.error is None
 
 
 async def test_discharge_is_never_touched(hass: HomeAssistant) -> None:
@@ -1581,7 +1736,7 @@ async def test_a_discharging_battery_is_added_back_to_the_house(hass: HomeAssist
     decision = await executor.async_apply()
 
     assert coordinator.phase_guard.headroom_w == pytest.approx(150)
-    assert decision.action == MODE_SELF_CONSUME
+    assert decision.action == MODE_IDLE
 
 
 async def test_without_a_battery_sensor_the_clamp_is_off_and_says_so(
@@ -1629,12 +1784,12 @@ async def test_an_unreadable_battery_sensor_fails_open(hass: HomeAssistant) -> N
 async def test_a_blocked_change_of_action_is_retried_whatever_the_watts(
     hass: HomeAssistant,
 ) -> None:
-    """80 W of charge still has to become self-consumption under a 100 W deadband."""
+    """80 W of charge still has to become a hold under a 100 W deadband."""
     executor, coordinator = await _build(hass, grid=PHASE_GRID)
     _phases(hass, coordinator, 3500)
     coordinator.control_enabled = True
     executor.last_decision = Decision(
-        action=MODE_SELF_CONSUME, power_w=0.0, planned_charge_w=80.0, phase_cut_w=80.0
+        action=MODE_IDLE, power_w=0.0, planned_charge_w=80.0, phase_cut_w=80.0
     )
     executor._last_applied[AXIS_BATTERY] = _Command(MODE_FORCE_CHARGE, 80.0, dt_util.utcnow())
 
@@ -1667,19 +1822,17 @@ async def test_the_cut_is_released_only_after_the_phases_stay_clear(
     assert calls[-2].data["value"] == 5000
 
 
-async def test_guard_forced_self_consumption_does_not_hold_the_plan_back(
-    hass: HomeAssistant, freezer
-) -> None:
-    """The exit hysteresis is for the plan's own chatter, not the guard's.
+async def test_the_plans_charge_resumes_when_the_phases_clear(hass: HomeAssistant, freezer) -> None:
+    """A hold the guard chose never counts as the plan's own self-consumption.
 
     p_grid 500 W is past the 300 W entry threshold but inside the 600 W exit
     one: had the plan itself chosen self-consumption, staying there would be
-    right. The guard chose it, so the plan's charge resumes once clear.
+    right. The guard chose a hold, so the plan's charge resumes once clear.
     """
     executor, coordinator = await _build(hass, grid=PHASE_GRID)
     _phases(hass, coordinator, 3500)
     coordinator.data = EmhassData(plan=_plan(-500, p_grid=500), last_success=dt_util.utcnow())
-    assert (await executor.async_apply()).action == MODE_SELF_CONSUME
+    assert (await executor.async_apply()).action == MODE_IDLE
 
     # The heater reading clears at once; the window then has to run out.
     _phases(hass, coordinator, 400)
@@ -1690,6 +1843,99 @@ async def test_guard_forced_self_consumption_does_not_hold_the_plan_back(
 
     assert decision.action == MODE_FORCE_CHARGE
     assert decision.power_w == 500
+
+
+async def test_the_first_reading_alone_never_discharges(hass: HomeAssistant) -> None:
+    """Cold start, or the first reading after an outage: nothing to compare it with."""
+    executor, coordinator = await _build(hass, grid=PHASE_GRID)
+    _phases(hass, coordinator, 4500)
+    coordinator.data = EmhassData(plan=_plan(-5000), last_success=dt_util.utcnow())
+
+    decision = await executor.async_apply()
+
+    assert decision.action == MODE_IDLE
+    assert coordinator.phase_guard.discharge_limit_w == 0.0
+
+
+async def test_current_sensors_never_discharge_because_their_direction_is_unknown(
+    hass: HomeAssistant, freezer
+) -> None:
+    """Amps usually carry no sign: an exporting phase would read as an importing one."""
+    executor, coordinator = await _build(hass, grid=PHASE_GRID)
+    hass.states.async_set("sensor.battery_power", "0", {"unit_of_measurement": "W"})
+    for entity_id, amps in (("sensor.l1", 19.57), ("sensor.l2", 13.0), ("sensor.l3", 13.0)):
+        hass.states.async_set(entity_id, str(amps), {"unit_of_measurement": "A"})
+    coordinator.phase_guard.async_update()
+    _settle(coordinator, freezer)
+    coordinator.data = EmhassData(plan=_plan(-5000), last_success=dt_util.utcnow())
+
+    decision = await executor.async_apply()
+
+    assert coordinator.phase_guard.headroom_w < -PHASE_GUARD_MIN_DISCHARGE_W
+    assert coordinator.phase_guard.export_room_w == 0.0
+    assert decision.action == MODE_IDLE
+
+
+async def test_a_lowered_discharge_is_retried_until_it_lands(hass: HomeAssistant, freezer) -> None:
+    """3150 W is running; the exporting phases now only take 1350 W of it.
+
+    A write held back by the profile's minimum interval must keep being asked
+    for: leaving the larger discharge in place is the unsafe direction.
+    """
+    executor, coordinator = await _build(hass, grid=PHASE_GRID)
+    _phases(hass, coordinator, 4500, -3000, -3000)
+    _settle(coordinator, freezer)
+    coordinator.control_enabled = True
+    executor.last_decision = Decision(
+        action=MODE_FORCE_DISCHARGE, power_w=1350.0, planned_charge_w=5000.0, phase_cut_w=6350.0
+    )
+    executor._last_applied[AXIS_BATTERY] = _Command(MODE_FORCE_DISCHARGE, 3150.0, dt_util.utcnow())
+
+    assert executor._phase_retarget_needed()
+
+    executor._last_applied[AXIS_BATTERY] = _Command(MODE_FORCE_DISCHARGE, 1350.0, dt_util.utcnow())
+
+    assert not executor._phase_retarget_needed()
+
+
+async def test_overload_then_relief_then_clear_walks_back_to_the_plan(
+    hass: HomeAssistant, calls: list[ServiceCall], freezer
+) -> None:
+    """Between plans, on meter updates alone: discharge, then the plan's charge.
+
+    L1 is 1050 W over with the battery idle, so the guard discharges 3150 W. As
+    that takes the load off, the measured battery share is added back and the
+    room it reports is unchanged -- the discharge neither flaps nor sticks.
+    """
+    executor, coordinator = await _build(hass, grid=PHASE_GRID)
+    _phases(hass, coordinator, 4500)
+    _settle(coordinator, freezer)
+    coordinator.data = EmhassData(plan=_plan(-5000), last_success=dt_util.utcnow())
+    coordinator.control_enabled = True
+    await executor.async_apply()
+    await hass.async_block_till_done()
+    assert executor.last_decision.action == MODE_FORCE_DISCHARGE
+
+    # The discharge lands: each phase drops by 3150 / 3 W, the battery reads it.
+    _phases(hass, coordinator, 4500 - 1050, 300 - 1050, 300 - 1050, battery=-3150)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert executor.last_decision.action == MODE_FORCE_DISCHARGE
+    assert executor.last_decision.power_w == pytest.approx(3150, abs=2)
+
+    # The heater stops. Still inside the release window: nothing changes yet.
+    _phases(hass, coordinator, 400 - 1050, 300 - 1050, 300 - 1050, battery=-3150)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert executor.last_decision.action == MODE_FORCE_DISCHARGE
+
+    freezer.tick(timedelta(seconds=61))
+    coordinator.phase_guard.async_update()
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert executor.last_decision.action == MODE_FORCE_CHARGE
+    assert executor.last_decision.power_w == 5000
+    assert executor.last_decision.phase_cut_w == 0
+    assert calls[-1].data["option"] == "Forced Charge"
+    assert not any(call.data.get("option") == "Self Consumption" for call in calls)
 
 
 async def test_dry_run_still_shows_the_cut(hass: HomeAssistant, calls: list[ServiceCall]) -> None:

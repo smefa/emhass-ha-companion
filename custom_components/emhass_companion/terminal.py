@@ -120,6 +120,7 @@ REPLENISH_NONE: str = "none"
 
 PRICE_TAIL_KNOWN: str = "known"
 PRICE_TAIL_PROXY: str = "assumed from today"
+PRICE_TAIL_FORECAST: str = "forecast"
 PV_TAIL_KNOWN: str = "known"
 PV_TAIL_PROXY: str = "assumed from the previous day"
 PV_TAIL_ZERO: str = "assumed zero"
@@ -193,6 +194,28 @@ class EndSocDecision:
     """Structured attributes for the End SOC target sensor."""
 
 
+def annotate_final_reward(
+    decision: EndSocDecision, factor: float, *, sent: bool, min_version: str
+) -> None:
+    """Say on the End SOC sensor whether the target is a floor or an aim.
+
+    With a reward factor sent, EMHASS keeps energy above ``soc_final`` when it
+    beats selling it, so the target is the least the plan ends at, not where it
+    ends. A factor that is set but not sent (backend too old) is flagged as
+    inert rather than raised as a fault: it is a tuning knob.
+    """
+    if factor <= 0:
+        return
+    if sent:
+        decision.details["reward_factor"] = round(factor, 4)
+        decision.reason = (
+            f"{decision.reason} At least this: leftover energy is valued at "
+            f"{factor:.0%} of the last import price, so the plan may end higher."
+        )
+    else:
+        decision.details["reward_inactive"] = f"needs EMHASS {min_version}"
+
+
 @dataclass(slots=True)
 class _Sample:
     """One timestep of the world past the horizon."""
@@ -238,6 +261,8 @@ class _Tail:
     pv: Series
     sell: Series
     price_proxied: bool
+    price_forecast: bool
+    """True when some tail price came from the price forecast, past the real source."""
     pv_proxied: bool
     pv_unknown: bool
     load_source: str
@@ -320,6 +345,7 @@ def decide_end_soc(
     grid: GridConfig | None = None,
     load_source: str = LOAD_SOURCE_PROFILE,
     previous: EndSocDecision | None = None,
+    price_real_end: datetime | None = None,
 ) -> EndSocDecision:
     """Choose ``soc_final`` for one optimisation request.
 
@@ -336,6 +362,10 @@ def decide_end_soc(
     way to tell on its own, since a borrowed series looks like any other.
     Recorded verbatim into the Optimized decision's ``details["load_tail"]``
     for the sensor; callers that always supply a real forecast can ignore it.
+
+    ``price_real_end`` is where the real price source stopped when ``buy_price``
+    was stretched past it with a price forecast. Tail prices after it are
+    forecast, not published, and are reported as such in ``price_tail``.
     """
     if mode == END_SOC_FIXED_50:
         target = battery.soc_target
@@ -385,6 +415,7 @@ def decide_end_soc(
         sell_price=sell_price if sell_price else Series.empty(),
         grid=grid if grid is not None else GridConfig(),
         load_source=load_source,
+        price_real_end=price_real_end,
     )
 
     active = next(candidate for candidate in CANDIDATES if candidate.key == ACTIVE_CANDIDATE)
@@ -392,7 +423,7 @@ def decide_end_soc(
     decision.details.update(
         mode=END_SOC_OPTIMIZED,
         reserve=round(tail.reserve, 4),
-        price_tail=PRICE_TAIL_PROXY if tail.price_proxied else PRICE_TAIL_KNOWN,
+        price_tail=_price_tail(tail),
         pv_tail=_pv_tail(tail),
         load_tail=load_source,
     )
@@ -1203,13 +1234,14 @@ def _build_tail(
     sell_price: Series,
     grid: GridConfig,
     load_source: str,
+    price_real_end: datetime | None = None,
 ) -> _Tail:
     """Walk the lookahead window once, filling every gap with a flagged guess."""
     day = timedelta(hours=24)
     step_hours = step.total_seconds() / 3600
     load_mean = sum(load.values) / len(load)
     samples: list[_Sample] = []
-    price_proxied = pv_proxied = pv_unknown = False
+    price_proxied = pv_proxied = pv_unknown = price_forecast = False
 
     when = horizon_end
     while when < horizon_end + LOOKAHEAD:
@@ -1239,6 +1271,8 @@ def _build_tail(
 
         price = _real_value(buy_price, when)
         sample_price_proxied = False
+        if price is not None and price_real_end is not None and when > price_real_end:
+            price_forecast = True
         if price is None:
             # Prices repeat their daily *shape* (night trough, evening peak),
             # so before tomorrow's market publishes, today's curve shifted a
@@ -1271,10 +1305,18 @@ def _build_tail(
         pv=pv,
         sell=sell_price,
         price_proxied=price_proxied,
+        price_forecast=price_forecast,
         pv_proxied=pv_proxied,
         pv_unknown=pv_unknown,
         load_source=load_source,
     )
+
+
+def _price_tail(tail: _Tail) -> str:
+    """Where the tail's prices came from; a yesterday guess outranks a forecast."""
+    if tail.price_proxied:
+        return PRICE_TAIL_PROXY
+    return PRICE_TAIL_FORECAST if tail.price_forecast else PRICE_TAIL_KNOWN
 
 
 @dataclass(slots=True)

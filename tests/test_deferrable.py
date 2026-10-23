@@ -973,14 +973,15 @@ def test_a_gap_between_phases_is_not_the_end_of_the_program():
 
 
 def test_a_low_power_phase_is_not_idle():
-    """A drying phase draws far too little to count as running, and is not
-    remotely finished. Only the idle floor separates the two."""
+    """A drying phase draws far too little to start a run, but once one has
+    started it is the program still running, and not remotely finished. Only
+    the idle floor separates the two."""
     load = _metered()
     _run(load, T0)
     load.observe_power(1900, T0)
     load.observe_power(30, T0 + timedelta(minutes=20))
 
-    assert load.is_running is False
+    assert load.is_running is True
     assert load.idle_since is None
     assert load.check_auto_disarm(T0 + timedelta(minutes=50), STEP) is False
 
@@ -1164,7 +1165,7 @@ def _plan(*deferrables: float) -> Plan:
 
 def test_a_load_the_plan_asks_for_is_committed():
     load = _load()
-    _registry(load).adopt_plan_commitments(_plan(1500.0), ["abc"], T0, stale=False)
+    _registry(load).adopt_plan_commitments(_plan(1500.0), ["abc"], T0, untrusted=False)
 
     assert load.plan_scheduled_now is True
     assert load.plan_power_now_w == 1500.0
@@ -1172,7 +1173,7 @@ def test_a_load_the_plan_asks_for_is_committed():
 
 def test_a_load_the_plan_leaves_off_is_not():
     load = _load()
-    _registry(load).adopt_plan_commitments(_plan(0.0), ["abc"], T0, stale=False)
+    _registry(load).adopt_plan_commitments(_plan(0.0), ["abc"], T0, untrusted=False)
 
     assert load.plan_scheduled_now is False
 
@@ -1181,7 +1182,7 @@ def test_a_stale_plan_commits_to_nothing():
     """Its rows were solved against prices that have since been superseded, so
     pinning from them is the same latch on a slower clock."""
     load = _load()
-    _registry(load).adopt_plan_commitments(_plan(2000.0), ["abc"], T0, stale=True)
+    _registry(load).adopt_plan_commitments(_plan(2000.0), ["abc"], T0, untrusted=True)
 
     assert load.plan_scheduled_now is False
 
@@ -1189,8 +1190,8 @@ def test_a_stale_plan_commits_to_nothing():
 def test_a_commitment_is_cleared_when_the_plan_stops_asking():
     load = _load()
     registry = _registry(load)
-    registry.adopt_plan_commitments(_plan(2000.0), ["abc"], T0, stale=False)
-    registry.adopt_plan_commitments(_plan(0.0), ["abc"], T0, stale=False)
+    registry.adopt_plan_commitments(_plan(2000.0), ["abc"], T0, untrusted=False)
+    registry.adopt_plan_commitments(_plan(0.0), ["abc"], T0, untrusted=False)
 
     assert load.plan_scheduled_now is False
 
@@ -1198,7 +1199,7 @@ def test_a_commitment_is_cleared_when_the_plan_stops_asking():
 def test_a_load_missing_from_the_plans_order_is_not_committed():
     """Its index means nothing in that plan, so no row can speak for it."""
     load = _load()
-    _registry(load).adopt_plan_commitments(_plan(2000.0), ["other"], T0, stale=False)
+    _registry(load).adopt_plan_commitments(_plan(2000.0), ["other"], T0, untrusted=False)
 
     assert load.plan_scheduled_now is False
 
@@ -1206,8 +1207,8 @@ def test_a_load_missing_from_the_plans_order_is_not_committed():
 def test_no_plan_at_all_clears_every_commitment():
     load = _load()
     registry = _registry(load)
-    registry.adopt_plan_commitments(_plan(2000.0), ["abc"], T0, stale=False)
-    registry.adopt_plan_commitments(None, [], T0, stale=False)
+    registry.adopt_plan_commitments(_plan(2000.0), ["abc"], T0, untrusted=False)
+    registry.adopt_plan_commitments(None, [], T0, untrusted=False)
 
     assert load.plan_scheduled_now is False
 
@@ -1215,7 +1216,7 @@ def test_no_plan_at_all_clears_every_commitment():
 def test_standby_draw_in_the_plan_is_not_a_commitment():
     """The same threshold that decides the load is running decides this."""
     load = _load(nominal_power_w=2000.0)
-    _registry(load).adopt_plan_commitments(_plan(150.0), ["abc"], T0, stale=False)
+    _registry(load).adopt_plan_commitments(_plan(150.0), ["abc"], T0, untrusted=False)
 
     assert load.plan_scheduled_now is False
 
@@ -1539,3 +1540,123 @@ def test_battery_lockout_while_running_excludes_thermal_loads():
     load.running_since = T0
 
     assert load.to_load(T0, STEP).battery_lockout_windows == ()
+
+
+# --- an unbroken program between its phases ------------------------------------
+
+
+def _program(**overrides) -> DeferrableRuntime:
+    """A metered, unbroken, commanded dishwasher that has drawn real power."""
+    defaults = {"single_constant": True, "nominal_power_w": 1101.0, "operating_hours": 1.5}
+    load = _metered(**{**defaults, **overrides})
+    _run(load, T0)
+    load.observe_power(2200, T0)
+    return load
+
+
+def test_a_program_between_phases_is_still_running():
+    """The 2026-10-10 cut: the 14:15 run caught the dishwasher at 21 W between
+    its last heat burst and its tail, reported it as off, and EMHASS re-placed
+    the rest of the run an hour later. The plug was cut with 15 % left."""
+    load = _program()
+    load.observe_power(21, T0 + timedelta(minutes=75))
+
+    assert load.is_running is True
+    assert load.to_load(T0 + timedelta(minutes=75), STEP).current_state is True
+
+
+def test_standby_draw_does_not_start_a_run():
+    """Starting still needs the running threshold: a display's 22 W after the
+    plug is switched on is not a program."""
+    load = _metered(nominal_power_w=1101.0)
+    _run(load, T0)
+    load.observe_power(22, T0)
+
+    assert load.is_running is False
+    assert load.seen_running is False
+
+
+def test_a_run_ends_below_the_idle_floor_not_the_running_threshold():
+    load = _program()
+    load.observe_power(21, T0 + timedelta(minutes=75))
+    load.observe_power(5, T0 + timedelta(minutes=80))
+
+    assert load.is_running is False
+
+
+def test_a_zero_idle_floor_cannot_hold_a_dead_meter_running():
+    load = _program(idle_power_w=0.0)
+    load.observe_power(0, T0 + timedelta(minutes=75))
+
+    assert load.is_running is False
+
+
+def test_an_unbroken_program_below_the_idle_floor_is_still_on_for_a_window():
+    load = _program()
+    load.observe_power(5, T0 + timedelta(minutes=75))
+
+    assert load.is_running is False
+    assert load.to_load(T0 + timedelta(minutes=75), STEP).current_state is True
+
+
+def test_the_final_tail_keeps_the_program_on_until_the_idle_window_ends():
+    load = _program()
+    load.observe_power(0, T0 + timedelta(minutes=75))
+
+    assert load.to_load(T0 + timedelta(minutes=80), STEP).current_state is True
+    assert load.to_load(T0 + timedelta(minutes=90), STEP).current_state is False
+
+
+def test_a_program_that_never_ran_is_not_reported_on():
+    load = _metered(single_constant=True)
+    _run(load, T0)
+    load.observe_power(0, T0)
+
+    assert load.to_load(T0 + timedelta(minutes=5), STEP).current_state is False
+
+
+def test_a_stale_run_from_before_the_command_does_not_count():
+    """Drawing power before we asked for it is the appliance's own doing."""
+    load = _metered(single_constant=True)
+    load.observe_power(2200, T0)
+    load.observe_power(5, T0 + timedelta(minutes=10))
+    load.observe_command(True, T0 + timedelta(minutes=20))
+
+    assert load.to_load(T0 + timedelta(minutes=25), STEP).current_state is False
+
+
+def test_a_load_that_may_be_split_is_not_reported_on_between_phases():
+    load = _program(single_constant=False)
+    load.observe_power(5, T0 + timedelta(minutes=75))
+
+    assert load.to_load(T0 + timedelta(minutes=75), STEP).current_state is False
+
+
+def test_an_unmetered_unbroken_load_is_not_reported_on_by_its_own_command():
+    load = _load(single_constant=True, recurrence=RECURRENCE_ON_DEMAND)
+    _run(load, T0)
+
+    assert load.to_load(T0 + timedelta(minutes=5), STEP).current_state is False
+
+
+def test_a_dip_at_the_target_is_held_not_completed_or_cut():
+    """The same dip, met at the booked-hours boundary. Left to is_running the
+    run was ended as completed and the executor cut the plug mid-program."""
+    load = _program(operating_hours=1.0)
+    at_target = T0 + timedelta(hours=1)
+    load.observe_power(5, at_target)
+
+    assert load.is_running is False
+    assert load.in_completion_hold(at_target, STEP) is True
+    assert load.check_auto_disarm(at_target, STEP) is False
+    assert load.requested is True
+
+
+def test_a_dip_does_not_outlast_the_hard_cut():
+    """The hold is still bounded: one timestep past the target it is cut_short."""
+    load = _program(operating_hours=1.0)
+    overrun = T0 + timedelta(hours=1, minutes=STEP)
+    load.observe_power(5, overrun)
+
+    assert load.check_auto_disarm(overrun, STEP) is True
+    assert load.last_completion_reason == COMPLETION_CUT_SHORT

@@ -27,6 +27,7 @@ from .const import (
     CONF_MPC_INTERVAL,
     CONF_NETWORK,
     CONF_PRICE,
+    CONF_PRICE_FORECAST,
     CONF_PROFILE,
     CONF_PROFILE_OPTIONS,
     CONF_PV,
@@ -45,6 +46,7 @@ from .const import (
     STALE_PLAN_FACTOR,
 )
 from .models import BatteryConfig, GridConfig, HybridInverterConfig
+from .price_forecast import PriceForecastConfig
 from .stored_time import parse_stored_time
 from .tariff import Tariff
 
@@ -111,6 +113,9 @@ class EmhassConfig:
     # did before this existed. See docs/network_tariffs_plan.md.
     network: ProfileSelection = field(default_factory=ProfileSelection)
     tariff: Tariff = field(default_factory=lambda: Tariff.from_dict({}))
+    # eupowerprices.com key and zone, used to fill price hours the spot source
+    # has not published. None (blank in the form) leaves the old behaviour.
+    price_forecast: PriceForecastConfig | None = None
     battery: BatteryConfig = field(default_factory=BatteryConfig)
     grid: GridConfig = field(default_factory=GridConfig)
     hybrid_inverter: HybridInverterConfig = field(default_factory=HybridInverterConfig)
@@ -160,6 +165,7 @@ class EmhassConfig:
             temperature=ProfileSelection.from_dict(options.get(CONF_TEMPERATURE)),
             network=ProfileSelection.from_dict(options.get(CONF_NETWORK)),
             tariff=Tariff.from_dict(options.get("tariff")),
+            price_forecast=PriceForecastConfig.from_dict(options.get(CONF_PRICE_FORECAST)),
             battery=battery,
             grid=GridConfig.from_dict(options.get("grid")),
             hybrid_inverter=hybrid_inverter,

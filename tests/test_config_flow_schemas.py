@@ -832,3 +832,20 @@ def test_a_basic_only_save_keeps_stored_advanced_values():
     )
     assert grid["horizon_hours"] == 12
     assert grid["mpc_interval_minutes"] == 10
+
+
+def test_the_end_soc_reward_factor_lives_in_the_advanced_section():
+    from custom_components.emhass_companion.const import CONF_BATTERY_SOC_FINAL_REWARD_FACTOR
+
+    schema = battery_schema({})
+    top = {str(k) for k in schema} - {ADVANCED_SECTION}
+    advanced = {str(k) for k in _advanced_keys(schema)}
+    assert CONF_BATTERY_SOC_FINAL_REWARD_FACTOR in advanced
+    assert CONF_BATTERY_SOC_FINAL_REWARD_FACTOR not in top
+
+
+def test_a_basic_only_save_keeps_the_stored_end_soc_reward_factor():
+    section = vol.Schema(battery_schema({"battery_soc_final_reward_factor": 0.6}))(
+        {"use_battery": True, ADVANCED_SECTION: {}}
+    )[ADVANCED_SECTION]
+    assert section["battery_soc_final_reward_factor"] == 0.6

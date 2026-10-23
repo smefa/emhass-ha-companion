@@ -100,6 +100,12 @@ CONF_TEMPERATURE: Final = "temperature"
 CONF_NETWORK: Final = "network"
 
 CONF_TARIFF: Final = "tariff"
+# Optional price forecast (see price_forecast.PROVIDERS) used to fill hours the price source has
+# not published yet. Stored as {provider, api_key, area}; empty means off.
+CONF_PRICE_FORECAST: Final = "price_forecast"
+CONF_PROVIDER: Final = "provider"
+CONF_API_KEY: Final = "api_key"
+CONF_AREA: Final = "area"
 CONF_BUY: Final = "buy"
 CONF_SELL: Final = "sell"
 CONF_MODE: Final = "mode"
@@ -157,6 +163,9 @@ CONF_BATTERY_SOC_DEFICIT_THRESHOLD: Final = "battery_soc_deficit_threshold"
 CONF_BATTERY_SOC_DEFICIT_COST: Final = "battery_soc_deficit_cost"
 CONF_BATTERY_SOC_SURPLUS_THRESHOLD: Final = "battery_soc_surplus_threshold"
 CONF_BATTERY_SOC_SURPLUS_COST: Final = "battery_soc_surplus_cost"
+# Value of energy left above the End SOC target, as a share of the last
+# timestep's import price (EMHASS 0.18.5). 0 keeps the two-sided soft target.
+CONF_BATTERY_SOC_FINAL_REWARD_FACTOR: Final = "battery_soc_final_reward_factor"
 # C-rate penalty: a quadratic cost on battery power magnitude, so half power
 # costs a quarter as much and the plan spreads a charge out rather than
 # slamming it into the cheapest hour. `segments` is the piecewise-linear
@@ -411,6 +420,7 @@ DEFAULT_BATTERY_SOC_DEFICIT_THRESHOLD: Final = 0.10
 DEFAULT_BATTERY_SOC_DEFICIT_COST: Final = 0.05
 DEFAULT_BATTERY_SOC_SURPLUS_THRESHOLD: Final = 0.90
 DEFAULT_BATTERY_SOC_SURPLUS_COST: Final = 0.0
+DEFAULT_BATTERY_SOC_FINAL_REWARD_FACTOR: Final = 0.0
 DEFAULT_BATTERY_STRESS_COST: Final = 0.0
 # 10 piecewise-linear pieces per quadratic curve. More tracks the curve closer
 # at the cost of two extra solver constraints each; EMHASS's own default.
@@ -469,10 +479,15 @@ PHASE_GUARD_RECHECK_S: Final = 10
 # the last PHASE_GUARD_SKEW_S. Set it above the gap between a meter's first and
 # last phase; a real overload outlasts it, and a fuse takes minutes.
 PHASE_GUARD_SKEW_S: Final = 10
-# Below this, a capped charge is not worth commanding: the battery is handed to
-# self-consumption instead, which on a hybrid also lets it cover the house and
-# take load off the overloaded phase.
+# Below this, a capped charge is not worth commanding: the battery is held at
+# 0 W instead. Never handed to self-consumption -- on a hybrid that lets the
+# battery cover the house, so it would feed whatever is overloading the phase
+# (a car, a dishwasher) with stored energy the plan meant to keep.
 PHASE_GUARD_MIN_CHARGE_W: Final = 300
+# A phase this far over its limit even with the battery held at 0 W is the one
+# case where the guard discharges: holding is not enough, and the discharge is
+# sized to bring the worst phase back to its limit, no more.
+PHASE_GUARD_MIN_DISCHARGE_W: Final = 300
 # A profile that may not be written more often than this cannot carry a cut
 # fast enough to matter -- at 1.5x a gG fuse has minutes, and a cut held back
 # by iSolarCloud's 300 s interval uses all of them. The clamp is switched off
@@ -859,6 +874,17 @@ MIN_EMHASS_VERSION_DEMAND_COMPONENTS: Final = "0.18.3"
 # applies.
 MIN_EMHASS_VERSION_CHARGE_DERATING: Final = "0.18.3"
 
+# The EMHASS release ``battery_soc_final_reward_factor`` shipped in (PR #1180).
+# Below this the factor is stored but not sent -- an older backend would see an
+# unknown optim_conf key.
+MIN_EMHASS_VERSION_SOC_FINAL_REWARD: Final = "0.18.5"
+
+# EMHASS's topology of heat sources and stores (``optim_conf.heat_topology``).
+# Its ``extend_deferrable_loads`` flag, which appends the topology's loads after
+# the ones the Companion sends instead of replacing them, first shipped in 0.18.5.
+EMHASS_CONF_HEAT_TOPOLOGY: Final = "heat_topology"
+MIN_EMHASS_VERSION_HEAT_TOPOLOGY_EXTEND: Final = "0.18.5"
+
 # --- Cost and savings ---------------------------------------------------------
 #
 # Sensor keys for the savings feature. Grouped here rather than left inline in
@@ -1093,6 +1119,13 @@ INFEASIBLE_CAUSE_CODES: Final = frozenset(
 # A run that errored outright (EMHASS unreachable, rejected the request, or
 # raised internally) rather than merely failing to find a feasible plan.
 ISSUE_RUN_FAILED: Final = "run_failed"
+# EMHASS reports these as a healthy run, but the plan is a fallback: an
+# "Optimal (Incumbent)" is a time-limited solve's best feasible plan, and an
+# "Optimal (Relaxed)" is one found with the on/off decisions dropped. The
+# coordinator flags them and the executor does not act on them until a full
+# solve arrives.
+DEGRADED_OPTIM_STATUSES: Final = frozenset({"Optimal (Incumbent)", "Optimal (Relaxed)"})
+ISSUE_PLAN_DEGRADED: Final = "plan_degraded"
 # End SOC's Optimized mode has little or no PV forecast past the horizon, but
 # the selected Solcast profile could provide one more day by adding its day-3
 # sensor. A nudge with a one-click fix, not an error -- the heuristic already
@@ -1136,6 +1169,10 @@ ISSUE_STANDARD_NAMES_TAKEN: Final = "standard_names_taken"
 # The phase guard's real-time clamp cannot run on this install. One issue id,
 # one translation per reason (see phase_guard.clamp_blocker).
 ISSUE_PHASE_CLAMP_OFF: Final = "phase_clamp_off"
+# A heat_topology saved in the EMHASS add-on's own configuration, in EMHASS's
+# default replace mode, overwrites every deferrable load the Companion sends.
+# One issue id, a second translation for a backend too old for the fix.
+ISSUE_HEAT_TOPOLOGY_REPLACES: Final = "heat_topology_replaces_loads"
 
 # Solcast's day sensors are named today / tomorrow / day_3..day_7 -- "tomorrow"
 # *is* day 2, there is no forecast_day_2. Day 3 is the first sensor past the

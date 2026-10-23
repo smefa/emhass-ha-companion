@@ -16,6 +16,7 @@ import logging
 from pathlib import Path
 
 from aiohttp import web
+from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.components.lovelace import LovelaceData
 from homeassistant.components.lovelace.const import (
     DOMAIN as LOVELACE_DOMAIN,
@@ -57,12 +58,25 @@ BUNDLES: tuple[tuple[str, str], ...] = (
     ("emhass-economy-card.js", f"/{DOMAIN}/emhass-economy-card.js"),
 )
 
+# The dashboard strategy ("Community dashboards" in HA 2026.5+'s Add dashboard
+# dialog) is served like a bundle but loaded differently. The cards are Lovelace
+# resources, which only the dashboard panel loads; the dialog that lists
+# strategies lives in the settings panel, so this one is added as an extra
+# module URL, which every page loads. It must not also be a resource: a second
+# load would define its custom element twice.
+DASHBOARD_FILENAME = "emhass-dashboard.js"
+DASHBOARD_URL = f"/{DOMAIN}/{DASHBOARD_FILENAME}"
+
 _STATIC_PATH_KEY = f"{DOMAIN}_static_path_registered"
 
 
 async def async_setup_frontend(hass: HomeAssistant, version: str) -> None:
     """Serve the card bundles and register them as Lovelace resources."""
     await _async_register_static_paths(hass, version)
+    try:
+        add_extra_js_url(hass, f"{DASHBOARD_URL}?v={version}")
+    except KeyError:  # pragma: no cover - frontend not set up (headless install)
+        _LOGGER.debug("Frontend is not set up; the dashboard strategy is not registered")
     for _, url in BUNDLES:
         await _async_register_resource(hass, version, url)
     await _async_drop_retired_resources(hass)
@@ -145,12 +159,14 @@ async def _async_register_static_paths(hass: HomeAssistant, version: str) -> Non
     again, so it is guarded. Each resource URL carries a version query string,
     which is what actually invalidates a stale cached copy. The core module is
     served here too -- every family bundle imports it -- but it is never one of
-    `BUNDLES`, since nothing loads it as a Lovelace resource of its own.
+    `BUNDLES`, since nothing loads it as a Lovelace resource of its own. The
+    dashboard strategy is in the same position, for the opposite reason: it is
+    loaded as an extra module URL, not as a resource.
     """
     if hass.data.get(_STATIC_PATH_KEY):
         return
 
-    files = ((CORE_FILENAME, CORE_URL), *BUNDLES)
+    files = ((CORE_FILENAME, CORE_URL), (DASHBOARD_FILENAME, DASHBOARD_URL), *BUNDLES)
     routes: dict[str, _Bundle] = {}
     for filename, url in files:
         source = Path(__file__).parent / "frontend" / filename

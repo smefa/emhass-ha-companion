@@ -39,6 +39,32 @@ from .thermal import build_def_load_config
 
 _LOGGER = logging.getLogger(__name__)
 
+# Messages that describe normal operation (a day-ahead price not yet published,
+# a duration that does not fit the timestep). They stay in the payload warnings
+# for the dashboard and diagnostics, but are not log-worthy as warnings.
+_EXPECTED_WARNING_MARKERS = (
+    " only covered until ",
+    " is not a whole number of ",
+)
+
+# The previous build's messages, so an unchanged message is logged once rather
+# than on every run.
+_last_logged: set[str] = set()
+
+
+def _log_warnings(warnings: list[str]) -> None:
+    global _last_logged
+    current = set(warnings)
+    for message in warnings:
+        if message in _last_logged:
+            continue
+        if any(marker in message for marker in _EXPECTED_WARNING_MARKERS):
+            _LOGGER.info("%s", message)
+        else:
+            _LOGGER.warning("%s", message)
+    _last_logged = current
+
+
 _PRICE_KEYS = ("load_cost_forecast", "prod_price_forecast")
 
 _POWER_KEYS = ("pv_power_forecast", "load_power_forecast")
@@ -337,6 +363,9 @@ class PayloadInputs:
     load: Series | None = None
     buy_price: Series | None = None
     sell_price: Series | None = None
+    price_source_end: datetime | None = None
+    """How far the real price source reached, when ``buy_price`` was stretched
+    past it with a forecast. None means ``buy_price.end`` is the source's end."""
     outdoor_temperature: Series | None = None
     soc_init: float | None = None
     soc_final: float | None = None
@@ -417,6 +446,10 @@ class PayloadInputs:
     """Whether this backend accepts ``battery_charge_power_derating``
     (EMHASS 0.18.3+). The table still lives on :attr:`battery`; this only
     gates sending it. Unknown/older backends keep the flat charge-power max."""
+    send_soc_final_reward: bool = True
+    """Whether this backend accepts ``battery_soc_final_reward_factor``
+    (EMHASS 0.18.5+). The factor still lives on :attr:`battery`; this only
+    gates sending it. Unknown/older backends keep the two-sided soft target."""
 
 
 @dataclass(slots=True)
@@ -982,7 +1015,11 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
 
     # -- settings -------------------------------------------------------------
     payload.update(
-        _battery_settings(inputs.battery, send_derating=inputs.send_charge_power_derating)
+        _battery_settings(
+            inputs.battery,
+            send_derating=inputs.send_charge_power_derating,
+            send_soc_final_reward=inputs.send_soc_final_reward,
+        )
     )
     payload.update(
         _battery_lockout_weights(
@@ -1163,8 +1200,7 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
     # (a "no solar" profile turning PV modelling off, for instance).
     payload.update(inputs.extra_settings)
 
-    for message in warnings:
-        _LOGGER.warning("%s", message)
+    _log_warnings(warnings)
 
     return PayloadResult(payload=payload, warnings=warnings, load_order=load_order)
 
@@ -1202,7 +1238,12 @@ def _thermal_settings(inputs: PayloadInputs, step: timedelta, load_count: int) -
     return {} if config is None else {"def_load_config": config}
 
 
-def _battery_settings(battery: BatteryConfig, *, send_derating: bool = True) -> dict[str, Any]:
+def _battery_settings(
+    battery: BatteryConfig,
+    *,
+    send_derating: bool = True,
+    send_soc_final_reward: bool = True,
+) -> dict[str, Any]:
     if not battery.enabled:
         return {"set_use_battery": False}
     settings: dict[str, Any] = {
@@ -1244,6 +1285,11 @@ def _battery_settings(battery: BatteryConfig, *, send_derating: bool = True) -> 
         settings["battery_charge_power_derating"] = [
             [round(soc, 4), round(fraction, 4)] for soc, fraction in battery.charge_power_derating
         ]
+    # Sent even at 0 (EMHASS's own default) so no value left in the add-on's
+    # persisted config can silently decide the answer. Only an older backend
+    # is skipped: it would see an unknown optim_conf key.
+    if send_soc_final_reward:
+        settings["battery_soc_final_reward_factor"] = round(battery.soc_final_reward_factor, 4)
     return settings
 
 

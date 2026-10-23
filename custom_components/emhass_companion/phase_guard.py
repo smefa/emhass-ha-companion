@@ -15,12 +15,16 @@ So this module produces two numbers from the same per-phase readings:
   but taken as the lowest value over a window rather than the reading at the
   instant of the solve. That is what a thermal fuse needs: worst case of the
   last half hour, not whatever the dishwasher happened to be doing at 22:00.
-* ``charge_cap_w`` -- how much battery charging fits *right now*, for the
+* ``charge_room_w`` -- how much battery charging fits *right now*, for the
   executor to clamp a forced charge with between plans. This is the real
   protection; the planner limit only makes it rarely needed.
 
 The battery is what gets throttled: it is symmetric, it responds in seconds,
-and charging a little less never hurts anything.
+and charging a little less never hurts anything. The plan's charge is always
+the aim: the guard lowers it as far as the phases force, preferably to a hold
+at 0 W and only as a last resort to a discharge, and the plan's charge
+returns when the phases have been clear for the release window. It never
+hands the battery to self-consumption.
 
 Everything above ``PhaseGuard`` is pure and unit-tested without Home Assistant.
 """
@@ -44,9 +48,11 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     MODE_FORCE_CHARGE,
-    MODE_SELF_CONSUME,
+    MODE_FORCE_DISCHARGE,
+    MODE_IDLE,
     PHASE_GUARD_MAX_WRITE_INTERVAL_S,
     PHASE_GUARD_MIN_CHARGE_W,
+    PHASE_GUARD_MIN_DISCHARGE_W,
     PHASE_GUARD_RECHECK_S,
     PHASE_GUARD_RELEASE_S,
     PHASE_GUARD_SKEW_S,
@@ -163,6 +169,24 @@ def charge_headroom_w(
     return n * (limit_a - worst_base_a) * voltage_v
 
 
+def discharge_room_w(
+    currents_a: Sequence[float], limit_a: float, voltage_v: float, battery_w: float
+) -> float:
+    """How much symmetric discharge fits before a phase passes the limit exporting.
+
+    A discharge takes the same amount off every phase, so one that relieves an
+    overloaded phase pushes the others the other way: a phase already
+    exporting 13 A is at 17 A after the discharge that brings L1 back to 15 A.
+    The fuse does not care which way the current runs. ``battery_w`` is the
+    battery's measured power, positive while charging, taken out first exactly
+    as in ``charge_headroom_w``. Zero when a phase is already at the limit.
+    """
+    n = len(currents_a)
+    share_a = battery_w / (n * voltage_v)
+    lowest_base_a = min(current - share_a for current in currents_a)
+    return max(n * (limit_a + lowest_base_a) * voltage_v, 0.0)
+
+
 def overload_level(worst_a: float, fuse_a: float) -> str:
     """How close a gG fuse is to blowing, from its rating and the worst phase.
 
@@ -199,32 +223,57 @@ def clamp_blocker(
     return None
 
 
-def clamp_charge(planned_w: float, cap_w: float | None) -> tuple[str, float, float, list[str]]:
-    """Fit a planned forced charge under the phase cap.
+def clamp_charge(
+    planned_w: float, room_w: float | None, *, max_discharge_w: float = math.inf
+) -> tuple[str, float, float, list[str]]:
+    """Fit a planned forced charge under the room the phases leave.
 
-    Returns the action, the power to command, how many watts were cut, and
-    the rules trace. A cap too small to be worth commanding hands the battery
-    to self-consumption rather than forcing a token charge: on a hybrid that
-    also lets the battery cover the house, which takes load *off* the phase
-    that is in trouble.
+    ``room_w`` is the symmetric charge that fits, negative when the worst
+    phase is over its limit before any charging. Returns the action, the
+    power to command, how many watts of the plan's charge were taken away,
+    and the rules trace. The plan's charge is always the aim; this only gives
+    way as far as the phases force it to, and never leaves the plan's
+    direction by more than it has to:
+
+    * the charge fits: as planned;
+    * some room, but under ``PHASE_GUARD_MIN_CHARGE_W``: held at 0 W. Not
+      self-consumption -- on a hybrid that lets the battery cover the house,
+      feeding the very load that is overloading the phase;
+    * over the limit by ``PHASE_GUARD_MIN_DISCHARGE_W`` or more even with the
+      battery held: discharged by exactly the overage, the one case where
+      holding is not enough. ``max_discharge_w`` bounds it (the battery's own
+      maximum, what the exporting phases can take, zero for an inverter that
+      cannot discharge or while the overload is not yet confirmed); a bound
+      under the threshold means a hold instead.
     """
-    if cap_w is None or planned_w <= cap_w:
+    if room_w is None or planned_w <= room_w:
         return MODE_FORCE_CHARGE, planned_w, 0.0, []
-    if cap_w < PHASE_GUARD_MIN_CHARGE_W:
+    if room_w >= PHASE_GUARD_MIN_CHARGE_W:
         return (
-            MODE_SELF_CONSUME,
-            0.0,
-            planned_w,
+            MODE_FORCE_CHARGE,
+            room_w,
+            planned_w - room_w,
+            [f"phase guard: charge capped {planned_w:.0f}W→{room_w:.0f}W"],
+        )
+    if room_w <= -PHASE_GUARD_MIN_DISCHARGE_W and max_discharge_w >= PHASE_GUARD_MIN_DISCHARGE_W:
+        relief_w = min(-room_w, max_discharge_w)
+        return (
+            MODE_FORCE_DISCHARGE,
+            relief_w,
+            planned_w + relief_w,
             [
-                f"phase guard: room for {max(cap_w, 0.0):.0f}W of charging, "
-                f"plan wants {planned_w:.0f}W; handing the battery to self-consumption"
+                f"phase guard: worst phase {-room_w:.0f}W over its limit with the battery "
+                f"held, plan wants {planned_w:.0f}W of charging; discharging {relief_w:.0f}W"
             ],
         )
     return (
-        MODE_FORCE_CHARGE,
-        cap_w,
-        planned_w - cap_w,
-        [f"phase guard: charge capped {planned_w:.0f}W→{cap_w:.0f}W"],
+        MODE_IDLE,
+        0.0,
+        planned_w,
+        [
+            f"phase guard: room for {max(room_w, 0.0):.0f}W of charging, "
+            f"plan wants {planned_w:.0f}W; holding the battery at 0W"
+        ],
     )
 
 
@@ -308,6 +357,9 @@ class PhaseGuard:
 
         self.currents_a: tuple[float, ...] | None = None
         self.headroom_w: float | None = None
+        # Symmetric discharge the most exporting phase can take, same basis as
+        # headroom_w. See discharge_room_w.
+        self.export_room_w: float | None = None
         # Measured battery power, positive charging; None when there is a
         # battery but no usable reading of it.
         self.battery_w: float | None = None
@@ -326,6 +378,19 @@ class PhaseGuard:
         # makes. The charge cap is not: it cuts at once, and a phantom there
         # lasts one release window rather than the plan's whole one.
         self._limit_skew = SlidingMax(timedelta(seconds=PHASE_GUARD_SKEW_S))
+        # A discharge is the one command that sends the battery's energy out on
+        # a reading, and the phase meter and the battery sensor update
+        # independently: a battery that stopped discharging, seen by the meter
+        # before its own sensor, reads as a house 3 kW heavier than it is.
+        # So a deep overload only counts once it has held for PHASE_GUARD_SKEW_S
+        # (the highest headroom of that window is still below the threshold),
+        # and, once counted, lasts as long as the release window says.
+        self._room_skew = SlidingMax(timedelta(seconds=PHASE_GUARD_SKEW_S))
+        self._room_since: datetime | None = None
+        self._discharge_confirmed = False
+        # Whether any phase is read from a current sensor, which usually carries
+        # no direction: an exporting phase then looks like an importing one.
+        self._unsigned_phases = False
         self._listeners: list[Callable[[], None]] = []
         self._unsubs: list[CALLBACK_TYPE] = []
         self._warned_unreadable = False
@@ -399,11 +464,15 @@ class PhaseGuard:
                 self._warned_unreadable = True
             self.currents_a = None
             self.headroom_w = None
+            self.export_room_w = None
             self.battery_w = None
             self.overload = OVERLOAD_NONE
             self._charge_window.clear()
             self._limit_window.clear()
             self._limit_skew.clear()
+            self._room_skew.clear()
+            self._room_since = None
+            self._discharge_confirmed = False
         else:
             if self._warned_unreadable:
                 _LOGGER.info("Phase readings are back; the phase guard is active again")
@@ -416,6 +485,14 @@ class PhaseGuard:
             # of whatever the battery is doing -- published, but never used to
             # clamp (charge_ready). The window is dropped rather than fed it.
             self.headroom_w = charge_headroom_w(currents, limit_a, voltage, self.battery_w or 0.0)
+            if self.battery_w is None:
+                self.export_room_w = None
+            elif self._unsigned_phases:
+                # Nothing says which way the current on a phase runs, so what an
+                # exporting phase can still take cannot be known: no discharge.
+                self.export_room_w = 0.0
+            else:
+                self.export_room_w = discharge_room_w(currents, limit_a, voltage, self.battery_w)
             # What the skew held until this reading is recorded first: a dip
             # that outlasted it may be pushed out by this very reading, and
             # would otherwise never reach the window.
@@ -424,8 +501,15 @@ class PhaseGuard:
             self._limit_skew.add(now, phase_import_limit_w(currents, limit_a, voltage))
             if self.battery_w is None:
                 self._charge_window.clear()
+                self._room_skew.clear()
+                self._room_since = None
+                self._discharge_confirmed = False
             else:
                 self._charge_window.add(now, self.headroom_w)
+                self._room_skew.add(now, self.headroom_w)
+                if self._room_since is None:
+                    self._room_since = now
+                self._refresh_discharge_confirmation(now)
             if (steady := self._limit_skew.value(now)) is not None:
                 self._limit_window.add(now, steady)
             self._track_overload(currents, now)
@@ -436,15 +520,19 @@ class PhaseGuard:
     def _read_phases(self) -> tuple[tuple[float, ...] | None, list[str]]:
         currents: list[float] = []
         unreadable: list[str] = []
+        unsigned = False
         for entity_id in self.grid.phase_entities:
             amps = None
             state = self.hass.states.get(entity_id)
             if state is not None and (value := reading(state)) is not None:
-                amps = to_amps(value, state.attributes.get("unit_of_measurement"), self.voltage_v)
+                unit = state.attributes.get("unit_of_measurement")
+                unsigned = unsigned or unit in _AMP_UNITS
+                amps = to_amps(value, unit, self.voltage_v)
             if amps is None:
                 unreadable.append(entity_id)
             else:
                 currents.append(amps)
+        self._unsigned_phases = unsigned
         return (None if unreadable else tuple(currents)), unreadable
 
     def _read_voltage(self) -> None:
@@ -500,6 +588,22 @@ class PhaseGuard:
         # for a sensor that is positive while charging.
         return watts if self.battery_power_invert else -watts
 
+    def _refresh_discharge_confirmation(self, now: datetime) -> None:
+        settled = self._room_skew.value(now)
+        observed = self._room_since is not None and now - self._room_since >= timedelta(
+            seconds=PHASE_GUARD_SKEW_S
+        )
+        if observed and settled is not None and settled <= -PHASE_GUARD_MIN_DISCHARGE_W:
+            self._discharge_confirmed = True
+        elif self._discharge_confirmed:
+            # Held up by the release window, not by the latest reading: while a
+            # discharge is working the readings briefly look better than they
+            # are, because the meter moves before the battery sensor does.
+            lowest = self._charge_window.value(now)
+            self._discharge_confirmed = (
+                lowest is not None and lowest <= -PHASE_GUARD_MIN_DISCHARGE_W
+            )
+
     def _track_overload(self, currents: tuple[float, ...], now: datetime) -> None:
         fuse_a = self.grid.main_fuse_a or 0.0
         worst = max(currents)
@@ -537,15 +641,33 @@ class PhaseGuard:
         return self.currents_a is not None and self.battery_w is not None
 
     @property
-    def charge_cap_w(self) -> float | None:
-        """Battery charging allowed now: the lowest headroom of the release window.
+    def charge_room_w(self) -> float | None:
+        """Symmetric charging that fits now, negative when a phase is over its limit.
 
-        Drops the moment a phase climbs, and only comes back up once the
-        phases have stayed clear for the whole window.
+        The lowest headroom of the release window: drops the moment a phase
+        climbs, and only comes back up once the phases have stayed clear for
+        the whole window. Unclamped, because how far over is what sizes a
+        discharge.
         """
         if not self.charge_ready:
             return None
-        value = self._charge_window.value(dt_util.utcnow())
+        return self._charge_window.value(dt_util.utcnow())
+
+    @property
+    def discharge_limit_w(self) -> float:
+        """The most the guard may discharge now: zero until a deep overload is confirmed.
+
+        Then bounded by what the most exporting phase can take on top of
+        what it carries.
+        """
+        if not self.charge_ready or not self._discharge_confirmed or self.export_room_w is None:
+            return 0.0
+        return self.export_room_w
+
+    @property
+    def charge_cap_w(self) -> float | None:
+        """Battery charging allowed now: ``charge_room_w``, never below zero."""
+        value = self.charge_room_w
         return None if value is None else max(value, 0.0)
 
     @property
@@ -569,6 +691,7 @@ class PhaseGuard:
             "voltage_measured": self.voltage_measured,
             "battery_w": None if self.battery_w is None else round(self.battery_w),
             "charge_cap_w": None if cap is None else round(cap),
+            "discharge_limit_w": round(self.discharge_limit_w),
             "import_limit_w": None if limit is None else round(limit),
             "overload": self.overload,
             "unreadable": self.unreadable,
@@ -587,6 +710,7 @@ __all__ = [
     "charge_headroom_w",
     "clamp_blocker",
     "clamp_charge",
+    "discharge_room_w",
     "overload_level",
     "phase_import_limit_w",
     "to_amps",

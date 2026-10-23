@@ -160,6 +160,15 @@ Three things deliberately do **not** count as idle:
   left between two blocks of one run is idle for reasons that have nothing to
   do with the appliance.
 
+The same two settings decide when a run that has started stops *running*. It
+starts at the running threshold, which is what tells a program from a display's
+standby draw, but it only stops running once the reading falls below
+`counts_as_finished_below`. A dishwasher's gaps between phases and its quiet
+final tail are the program still running, so the load stays reported as on to
+EMHASS and its plan is not re-placed in the middle of the cycle. A reading
+below the floor is given up to the idle window before the run is called off.
+If you set `counts_as_finished_below` to 0, a reading of 0 W still ends the run.
+
 An appliance still drawing power when its hours run out is **held on for up to
 one more timestep** rather than cut off mid-program, then ends as `cut_short`.
 

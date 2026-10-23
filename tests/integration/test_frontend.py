@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+from homeassistant.components.frontend import DATA_EXTRA_MODULE_URL, UrlManager
 from homeassistant.components.lovelace.const import MODE_STORAGE, MODE_YAML
 from homeassistant.core import HomeAssistant
 from homeassistant.setup import async_setup_component
@@ -19,6 +20,8 @@ import custom_components.emhass_companion.frontend as frontend
 from custom_components.emhass_companion.frontend import (
     CORE_FILENAME,
     CORE_URL,
+    DASHBOARD_FILENAME,
+    DASHBOARD_URL,
     _async_register_static_paths,
     async_setup_frontend,
 )
@@ -274,3 +277,47 @@ async def test_family_bundle_gets_the_version_substituted_into_its_core_import(
     # The source file on disk is untouched -- only the served copy is templated.
     on_disk = _bundle_path(filename).read_text(encoding="utf-8")
     assert "./emhass-core.js?v=__VERSION__" in on_disk
+
+
+# --- dashboard strategy ------------------------------------------------------
+
+
+async def test_the_dashboard_strategy_defines_and_registers_itself() -> None:
+    """HA 2026.5+ lists a strategy only if the element and the registry entry exist."""
+    path = _bundle_path(DASHBOARD_FILENAME)
+    assert path.is_file(), f"dashboard strategy missing at {path}"
+    text = path.read_text(encoding="utf-8")
+    assert 'customElements.define("ll-strategy-dashboard-emhass"' in text
+    assert "static async generate(config, hass)" in text
+    assert "static getCreateSuggestions(" in text
+    assert 'strategyType: "dashboard"' in text
+    assert "window.customStrategies.push(" in text
+    # Loaded on every page, so it must not drag the (large) shared core in.
+    assert not any(line.startswith("import ") for line in text.splitlines())
+
+
+async def test_the_dashboard_strategy_is_an_extra_module_not_a_resource(
+    hass: HomeAssistant, lovelace
+) -> None:
+    """The Add dashboard dialog is in the settings panel, which loads no resources.
+
+    As a resource as well it would also load twice and define its element twice.
+    """
+    hass.data[DATA_EXTRA_MODULE_URL] = UrlManager(lambda *_: None, [])
+
+    await async_setup_frontend(hass, "1.0.0")
+
+    assert f"{DASHBOARD_URL}?v=1.0.0" in hass.data[DATA_EXTRA_MODULE_URL].urls
+    resources = {r["url"].split("?")[0] for r in lovelace.resources.async_items()}
+    assert DASHBOARD_URL not in resources
+
+
+async def test_the_dashboard_strategy_is_served(hass: HomeAssistant, hass_client_no_auth) -> None:
+    assert await async_setup_component(hass, "http", {})
+    await _async_register_static_paths(hass, "1.0.0")
+    client = await hass_client_no_auth()
+
+    response = await client.get(DASHBOARD_URL, headers={"Accept-Encoding": "identity"})
+
+    assert response.status == 200
+    assert await response.read() == _bundle_path(DASHBOARD_FILENAME).read_bytes()

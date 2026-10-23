@@ -277,6 +277,7 @@ LOAD_NUMBERS: tuple[LoadNumberDescription, ...] = (
     LoadNumberDescription(
         key="comfort_temperature",
         translation_key="comfort_temperature",
+        entity_category=EntityCategory.CONFIG,
         device_class=NumberDeviceClass.TEMPERATURE,
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
         native_min_value=5,
@@ -290,6 +291,7 @@ LOAD_NUMBERS: tuple[LoadNumberDescription, ...] = (
     LoadNumberDescription(
         key="setback_temperature",
         translation_key="setback_temperature",
+        entity_category=EntityCategory.CONFIG,
         device_class=NumberDeviceClass.TEMPERATURE,
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
         native_min_value=5,
