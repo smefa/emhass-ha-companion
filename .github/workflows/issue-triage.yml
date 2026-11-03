@@ -1,0 +1,70 @@
+name: Issue triage
+
+on:
+  issues:
+    types: [opened, edited, reopened]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Issue number to triage
+        required: true
+        type: number
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: issue-triage-${{ github.event.issue.number || inputs.issue_number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check Copilot configuration
+        env:
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+        run: |
+          if [ -z "$COPILOT_GITHUB_TOKEN" ]; then
+            echo "::error::Add the COPILOT_GITHUB_TOKEN Actions secret. See CONTRIBUTING.md#issue-triage-bot."
+            exit 1
+          fi
+
+      - name: Prepare issue
+        id: prepare
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { prepare } = require('./.github/scripts/issue-triage.cjs');
+            await prepare({ github, context, core });
+
+      - name: Install Copilot CLI
+        if: steps.prepare.outputs.ready == 'true'
+        run: npm install --global @github/copilot@1.0.105
+
+      - name: Classify issue
+        if: steps.prepare.outputs.ready == 'true'
+        id: classify
+        uses: actions/ai-inference@2c43c91ae16266ca159d311430343c67a5ffa222 # v3
+        env:
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+        with:
+          prompt-file: ${{ runner.temp }}/issue-triage-prompt.txt
+          # No tools are granted: issue text is input, never executable instructions.
+          model: gpt-4.1
+
+      - name: Update triage comment and label
+        if: steps.prepare.outputs.ready == 'true'
+        uses: actions/github-script@v8
+        env:
+          TRIAGE_RESPONSE_FILE: ${{ steps.classify.outputs.response-file }}
+        with:
+          script: |
+            const { publish } = require('./.github/scripts/issue-triage.cjs');
+            await publish({ github, context, core });
