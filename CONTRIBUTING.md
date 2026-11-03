@@ -49,6 +49,45 @@ Contributing an inverter profile specifically? Start from
 covers the current schema, the archetypes already proven, and which models
 are wanted next.
 
+## Issue triage bot
+
+The **Issue triage** workflow uses Copilot to suggest a type, area, priority
+(P1 highest to P4 lowest), effort (XS to XL), and summary. It runs on opened,
+edited, and reopened issues and updates one comment as `github-actions[bot]`.
+It adds an existing `bug`, `enhancement`, `question`, or `documentation` label
+only when no type label is already present. It never removes labels, closes
+issues, or changes code. Area, priority, and effort remain comment-only suggestions.
+
+One-time setup after merging the workflow:
+
+1. With an active Copilot subscription, create a
+   [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new).
+   Select your **personal account** as resource owner, **Public repositories**
+   for repository access, and **Account permissions > Copilot Requests**.
+   No repository write permission is needed for this token.
+2. In this repository, open **Settings > Secrets and variables > Actions**.
+   Add a repository secret named `COPILOT_GITHUB_TOKEN` containing that token.
+   Do not paste it into an issue, commit, or chat. Renew the secret when it expires.
+3. To triage an existing issue, open **Actions > Issue triage > Run workflow**
+   and enter its issue number (for example, `5`).
+
+Copilot usage is charged to the token owner's subscription. Public issue authors
+can trigger runs, including by editing their issues. Disable the workflow from
+Actions if you need to stop usage. Each run has a five-minute timeout, and
+overlapping runs for the same issue are cancelled.
+
+Issue text is treated as untrusted input. Copilot is granted no tools, receives
+only the title and first 12,000 body characters, and does not inspect code or
+attachments. Invalid model output fails the run without publishing it; stale
+results are skipped if the issue changed or closed. Closed issues, pull requests,
+and bot-authored issues are skipped. Missing credentials fail with a setup message.
+
+Run the bot's dependency-free tests with:
+
+```bash
+node --test .github/scripts/issue-triage.test.cjs
+```
+
 ## Translations
 
 English and Swedish. `translations/sv.json` is generated from `strings.json`
