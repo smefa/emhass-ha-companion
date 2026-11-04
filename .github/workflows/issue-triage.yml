@@ -57,7 +57,8 @@ jobs:
         with:
           prompt-file: ${{ runner.temp }}/issue-triage-prompt.txt
           # No tools are granted: issue text is input, never executable instructions.
-          model: gpt-4.1
+          # Use a currently supported small model; allow account-specific overrides.
+          model: ${{ vars.ISSUE_TRIAGE_MODEL || 'gpt-6-luna' }}
 
       - name: Update triage comment and label
         if: steps.prepare.outputs.ready == 'true'
