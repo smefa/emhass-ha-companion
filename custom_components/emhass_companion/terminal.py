@@ -12,8 +12,11 @@ Optimized mode is governed by one rule (:func:`_shadow_centred`, Test 8):
     **Plan the whole window that can be seen -- the horizon and the 24 h past
     it -- and take the SOC that plan holds when the horizon runs out.**
 
-The pin exists only because EMHASS's horizon stops after 24 h, so it is the
-one channel through which knowledge of hour 25 reaches hour 24. Given that,
+The horizon is whatever the user set (6 to 48 h); the lookahead is always one
+day beyond it, so a 48 h horizon plans 72 h and pins hour 48.
+
+The pin exists only because EMHASS's horizon stops at its end, so it is the
+one channel through which knowledge of what follows reaches the last step. Given that,
 the honest answer is not a rule about what stored energy ought to be worth: it
 is the SOC an optimisation over everything visible actually passes through.
 Everything a heuristic here would have asserted -- carry the night, buy the
@@ -573,8 +576,8 @@ def _shadow_plan(tail: _Tail) -> EndSocDecision:
     :func:`_build_tail` already samples -- what SOC would that plan be passing
     through at the horizon's end? That SOC is the terminal condition, derived
     rather than asserted, and it is exactly what the pin is for: EMHASS's
-    horizon stops after 24 h, so the pin is the only channel through which
-    knowledge of hour 25 reaches hour 24.
+    horizon stops at its end, so the pin is the only channel through which
+    knowledge of what follows reaches the last step.
 
     The machinery is :func:`_solve_window`, a dynamic program over a coarse SOC
     grid: one backward pass from the far end of the tail to the pin, one forward
@@ -784,7 +787,8 @@ def _horizon_view(tail: _Tail) -> list[_HorizonSlot]:
 
     :class:`_Tail` keeps no buy series and no load series -- only the samples
     past the pin -- but each of those was filled from ``when - DAY`` whenever
-    the real thing ran out, which for a 24 h lookahead is a horizon instant.
+    the real thing ran out, which for a 24 h horizon is a horizon instant (for a
+    longer one it is a later instant, still inside the horizon).
     Load always falls back that way (the borrowed forecast is one horizon
     long); price only where the auction has not cleared, which is why an
     unpublished horizon hour comes back as ``None`` rather than as a guess.
@@ -959,7 +963,9 @@ def _plan_window(tail: _Tail) -> tuple[list[_PlanSlot], int, dict[str, Any]]:
     horizon = tail.horizon_end - tail.now
     pin = max(0, round(horizon / step))
     # Where the in-horizon step at index i finds its twin in the tail: the
-    # sample one day later. Zero whenever the horizon is the usual 24 h.
+    # sample one day later. Zero for a 24 h horizon; negative for a longer
+    # one, where it is clamped, so the twin is exact only for the slots in the
+    # last 24 h of the horizon (earlier slots reuse the first tail sample).
     shift = round((DAY - horizon) / step)
     samples = tail.samples
     slope, intercept, trusted = _buy_from_sell(samples)
@@ -1081,7 +1087,7 @@ def _flatten_guesses(slots: list[_PlanSlot]) -> dict[str, Any]:
 def _residual_value(tail: _Tail, slots: list[_PlanSlot]) -> float:
     """What a kWh above the reserve is worth at the far end of the tail.
 
-    Moving the horizon out 24 h does not remove the need for a terminal value,
+    Moving the end of the window out a day does not remove the need for a terminal value,
     it relocates it; without one the program simply empties the battery into the
     last half hour. The import it would displace, at the window's median price,
     is the only valuation of stored energy that needs no assumption beyond "it
