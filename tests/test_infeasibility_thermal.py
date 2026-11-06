@@ -207,3 +207,90 @@ def test_the_request_is_not_modified():
     diagnose(request)
 
     assert request == before
+
+
+# --- heating window and start cap on a tank ----------------------------------
+
+
+def _tank_request(**overrides):
+    """A 200 L tank with a 2 kW element, 1 kW minimum and little demand."""
+    tank = {
+        "start_temperature": 55.0,
+        "min_temperatures": [50.0] * HORIZON,
+        "max_temperatures": [57.0] * HORIZON,
+        "draw_off_demand": [0.1] * HORIZON,
+    }
+    payload_keys = {
+        k: overrides.pop(k)
+        for k in list(overrides)
+        if k.endswith("_deferrable_load")
+        or k.endswith("_deferrable_loads")
+        or k == "def_current_state"
+    }
+    tank.update(overrides)
+    payload = _request(**tank)
+    payload["minimum_power_of_deferrable_loads"] = [0, 1000]
+    payload["set_deferrable_max_startups"] = [0, 1]
+    payload.update(payload_keys)
+    return payload
+
+
+def _codes(payload, code):
+    return [f for f in diagnose(payload, load_names=["Washer", "Tank"]) if f.code == code]
+
+
+def test_a_window_that_closes_before_a_later_floor_is_critical():
+    payload = _tank_request(
+        start_temperature=40.0,
+        min_temperatures=[30.0] * 9 + [52.0] * 3,
+        max_temperatures=[65.0] * HORIZON,
+        draw_off_demand=[0.0] * HORIZON,
+        start_timesteps_of_each_deferrable_load=[0, 0],
+        end_timesteps_of_each_deferrable_load=[0, 2],
+    )
+
+    (finding,) = _codes(payload, "thermal_window")
+    assert finding.severity is Severity.CRITICAL
+    assert finding.placeholders["name"] == "Tank"
+    assert finding.placeholders["required"] == "52.0"
+    assert (finding.placeholders["start"], finding.placeholders["end"]) == ("0", "2")
+    assert not _codes(payload, "thermal_unreachable")
+
+
+def test_a_window_wide_enough_for_the_floor_is_not_flagged():
+    payload = _tank_request(
+        start_temperature=40.0,
+        min_temperatures=[30.0] * 9 + [52.0] * 3,
+        max_temperatures=[65.0] * HORIZON,
+        draw_off_demand=[0.0] * HORIZON,
+        start_timesteps_of_each_deferrable_load=[0, 0],
+        end_timesteps_of_each_deferrable_load=[0, 9],
+    )
+
+    assert not _codes(payload, "thermal_window")
+
+
+def test_a_floor_unreachable_even_without_a_window_is_left_to_the_other_check():
+    payload = _tank_request(
+        start_temperature=40.0,
+        min_temperatures=[60.0] * HORIZON,
+        start_timesteps_of_each_deferrable_load=[0, 0],
+        end_timesteps_of_each_deferrable_load=[0, 2],
+    )
+
+    assert not _codes(payload, "thermal_window")
+    assert _codes(payload, "thermal_unreachable")
+
+
+def test_a_load_already_running_is_not_held_to_its_window():
+    payload = _tank_request(
+        start_temperature=40.0,
+        min_temperatures=[30.0] * 9 + [52.0] * 3,
+        max_temperatures=[65.0] * HORIZON,
+        draw_off_demand=[0.0] * HORIZON,
+        start_timesteps_of_each_deferrable_load=[0, 0],
+        end_timesteps_of_each_deferrable_load=[0, 2],
+        def_current_state=[False, True],
+    )
+
+    assert not _codes(payload, "thermal_window")

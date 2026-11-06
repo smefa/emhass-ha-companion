@@ -1128,6 +1128,7 @@ INFEASIBLE_CAUSE_CODES: Final = frozenset(
         "window_too_short",
         "window_energy",
         "thermal_unreachable",
+        "thermal_window",
         "power_deficit",
         "pv_surplus",
         "array_length",

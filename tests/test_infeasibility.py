@@ -403,6 +403,28 @@ _CAUSES = {
             }
         ],
     ),
+    "thermal_window": _payload(
+        number_of_deferrable_loads=1,
+        nominal_power_of_deferrable_loads=[2000],
+        start_timesteps_of_each_deferrable_load=[0],
+        end_timesteps_of_each_deferrable_load=[2],
+        def_load_config=[
+            {
+                "thermal_battery": {
+                    "volume": 0.2,
+                    "density": 997.0,
+                    "heat_capacity": 4.184,
+                    "thermal_loss": 0.06,
+                    "efficiency": 1.0,
+                    "sense": "heat",
+                    "start_temperature": 40.0,
+                    "min_temperatures": [30.0] * 4 + [45.0],
+                    "max_temperatures": [65.0] * 5,
+                    "draw_off_demand": [0.0] * 5,
+                }
+            }
+        ],
+    ),
     "power_deficit": _payload(load_power_forecast=[500, 500, 20000, 500, 500]),
     "pv_surplus": _payload(pv_power_forecast=[0, 1000, 30000, 1000, 0]),
     "array_length": _payload(load_power_forecast=[500, 500, 500]),

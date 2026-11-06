@@ -109,6 +109,7 @@ HEADLINE_ORDER = (
     "window_too_short",
     "window_energy",
     "thermal_unreachable",
+    "thermal_window",
     "power_deficit",
     "pv_surplus",
     "array_length",
@@ -953,7 +954,11 @@ def check_power_balance(payload: dict, report: Report) -> None:
 
 
 def best_case_temperatures(
-    tank: dict, power_w: Any, step_minutes: float, steps: int
+    tank: dict,
+    power_w: Any,
+    step_minutes: float,
+    steps: int,
+    window: tuple[int, int] | None = None,
 ) -> list[float] | None:
     """Hottest a ``thermal_battery`` tank can be at each timestep, heater flat out.
 
@@ -971,6 +976,9 @@ def best_case_temperatures(
     need their own bound, so those return None rather than a guess. The grid,
     battery and other loads are ignored, which can only make the best case too
     generous: a floor above it is a proof that no plan exists.
+
+    ``window`` is the heating window ``(start, end)`` in timesteps (``end`` is
+    exclusive); the heater is off outside it, as EMHASS's ``p <= nominal * mask``.
     """
     try:
         draw = [float(v) for v in tank["draw_off_demand"]]
@@ -997,8 +1005,11 @@ def best_case_temperatures(
     best = [temperature]
     # EMHASS tiles a short demand profile.
     for i in range(steps - 1):
+        heating = window is None or window[0] <= i < window[1]
         temperature += (
-            3600 / capacity * (efficiency * power_w / 1000 * dt - draw[i % len(draw)] - loss)
+            3600
+            / capacity
+            * (efficiency * (power_w if heating else 0) / 1000 * dt - draw[i % len(draw)] - loss)
         )
         if ceiling is not None and i + 1 < len(ceiling):
             temperature = min(temperature, ceiling[i + 1])
@@ -1084,6 +1095,87 @@ def check_thermal_unreachable(
                 break
 
 
+def _tank_loads(payload: dict):
+    """Each ``thermal_battery`` load as ``(k, tank, floor, steps, power, window)``.
+
+    ``window`` is ``(start, end)`` in timesteps, ``end`` 0 meaning the horizon,
+    or None when the load has no window. Loads whose bounds cannot be read are
+    skipped.
+    """
+    configs = payload.get("def_load_config")
+    if not isinstance(configs, list) or not payload.get("optimization_time_step"):
+        return
+    horizon = _horizon_length(payload)
+    for k, entry in enumerate(configs):
+        tank = entry.get("thermal_battery") if isinstance(entry, dict) else None
+        if not isinstance(tank, dict):
+            continue
+        try:
+            floor = [float(v) for v in tank["min_temperatures"]]
+        except (KeyError, TypeError, ValueError):
+            continue
+        steps = len(floor) if horizon is None else min(horizon, len(floor))
+        start = _item(payload.get("start_timesteps_of_each_deferrable_load"), k, 0)
+        end = _item(payload.get("end_timesteps_of_each_deferrable_load"), k, 0) or steps
+        window = (start, end) if (start > 0 or end < steps) else None
+        yield (
+            k,
+            tank,
+            floor,
+            steps,
+            _item(payload.get("nominal_power_of_deferrable_loads"), k, None),
+            window,
+        )
+
+
+def _forced_on(payload: dict, k: int) -> bool:
+    """Whether load ``k`` is pinned or running now, which EMHASS lets through its window."""
+    return bool(_item(payload.get("def_current_state"), k, False)) or bool(
+        _item(payload.get("def_current_power"), k, 0)
+    )
+
+
+def check_tank_window(payload: dict, report: Report, load_names: list[str] | None = None) -> None:
+    """A tank whose heating window closes before a later temperature floor.
+
+    A thermal load has no run-hours constraint, so its start and end timesteps
+    only switch the heater off outside the window. A floor that the heater
+    could reach flat out, but not within the window, is infeasible for that
+    reason alone, which :func:`check_thermal_unreachable` does not see.
+    """
+    step_minutes = payload.get("optimization_time_step") or 0
+    for k, tank, floor, steps, power, window in _tank_loads(payload):
+        if window is None or _forced_on(payload, k):
+            continue
+        open_best = best_case_temperatures(tank, power, step_minutes, steps)
+        masked = best_case_temperatures(tank, power, step_minutes, steps, window)
+        if open_best is None or masked is None:
+            continue
+        for i in range(1, steps):
+            if open_best[i] < floor[i] - 0.01:
+                break  # unreachable even with no window: the other check names it
+            if masked[i] < floor[i] - 0.01:
+                name = _load_name(load_names, k)
+                report.add(
+                    Severity.CRITICAL,
+                    "thermal_window",
+                    f"{name} cannot heat in time inside its window",
+                    f"{name} must be at least {floor[i]:.1f} C at timestep {i}, but its "
+                    f"heating window only covers timesteps {window[0]}-{window[1]} and "
+                    f"inside it the best it can reach is {masked[i]:.1f} C. Widen the "
+                    "heating window, lower the required temperature, or turn the window off.",
+                    {
+                        "name": name,
+                        "required": f"{floor[i]:.1f}",
+                        "achievable": f"{masked[i]:.1f}",
+                        "timestep": str(i),
+                        "start": str(window[0]),
+                        "end": str(window[1]),
+                    },
+                )
+                break
+
+
 def run_checks(
     payload: dict,
     warnings: list[str],
@@ -1101,6 +1193,7 @@ def run_checks(
     check_deferrable_windows(payload, report, load_names)
     check_window_energy(payload, report, load_names)
     check_thermal_unreachable(payload, report, load_names)
+    check_tank_window(payload, report, load_names)
     check_battery_soc(payload, report)
     check_hybrid_inverter(payload, report)
     check_power_balance(payload, report)
