@@ -403,7 +403,9 @@ is under **Advanced settings**.
   prices, 60 for most others). Pick from the list or type any number of
   minutes; a coarser step solves faster.
 - **Recalculate every** — how often the plan is re-optimised, in minutes.
-- **Planning horizon** — how many hours ahead it plans.
+- **Planning horizon** — how many hours ahead it plans (6 to 48). Longer
+  horizons see more of the price forecast but solve more slowly; End SOC
+  *Optimized* then plans a further day beyond it.
 - **Day-ahead fallback time** — backup time for the once-a-day full
   re-plan, in case new prices haven't shown up yet.
 
