@@ -251,7 +251,7 @@
       },
       "inverter": {
         "title": "Inverter profile",
-        "description": "How the battery is actually controlled. Leave this unset and the integration only ever reads.\n\nDon't see your inverter? **Scripts** works with any inverter you can already control from Home Assistant, and advanced users can write their own YAML profile for a dedicated entry - see the profiles guide in the documentation.\n\nPlease report if you get an untested profile running on [Discord](https://discord.gg/ugDwJwynC5).\n\nNothing is written to your hardware until you also turn on the Control enabled switch.",
+        "description": "How the battery is actually controlled. Leave this unset and the integration only ever reads.\n\nDon't see your inverter? **Scripts** works with any inverter you can already control from Home Assistant, and advanced users can write their own YAML profile for a dedicated entry - see the profiles guide in the documentation.\n\nPlease report if you get an untested profile running on [Discord]({discord}).\n\nNothing is written to your hardware until you also turn on the Control enabled switch.",
         "data": {
           "profile": "Inverter profile"
         }
@@ -691,7 +691,7 @@
       },
       "inverter": {
         "title": "Inverter profile",
-        "description": "How the battery is actually controlled. Leave this unset and the integration only ever reads.\n\nDon't see your inverter? **Scripts** works with any inverter you can already control from Home Assistant, and advanced users can write their own YAML profile for a dedicated entry - see the profiles guide in the documentation.\n\nPlease report if you get an untested profile running on [Discord](https://discord.gg/ugDwJwynC5).\n\nNothing is written to your hardware until you also turn on the Control enabled switch.",
+        "description": "How the battery is actually controlled. Leave this unset and the integration only ever reads.\n\nDon't see your inverter? **Scripts** works with any inverter you can already control from Home Assistant, and advanced users can write their own YAML profile for a dedicated entry - see the profiles guide in the documentation.\n\nPlease report if you get an untested profile running on [Discord]({discord}).\n\nNothing is written to your hardware until you also turn on the Control enabled switch.",
         "data": {
           "profile": "Inverter profile"
         }

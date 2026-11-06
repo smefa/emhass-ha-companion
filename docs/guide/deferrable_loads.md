@@ -168,7 +168,12 @@ tomorrow, each with the full hours.
   far enough.
 - **Today's run counts for today only.** Once today's run is done, tomorrow's
   window still gets its full hours.
-- **Not for every load.** Loads on spare solar, thermal loads, on-demand
+- **Water tanks stay one load.** A tank has a single temperature, so it is
+  not duplicated. Its heating window is stretched from the first window to
+  the last one in the plan, and *Most starts per plan* is multiplied by the
+  number of windows. Heating between the windows is therefore allowed; the
+  temperature targets still decide when it has to happen.
+- **Not for every load.** Loads on spare solar, room thermal loads, on-demand
   loads and daily loads without a time window are planned as before. Windows
   that sit closer together than the load's *Minimum time off* are also
   planned as one.

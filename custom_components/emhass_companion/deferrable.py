@@ -1163,6 +1163,14 @@ class DeferrableRuntime:
                 and self.earliest_start is not None
                 and self.latest_end is not None
             ),
+            spans_daily_windows=(
+                self.recurrence == RECURRENCE_DAILY
+                and windowed
+                and not surplus
+                and self.is_water_tank
+                and self.earliest_start is not None
+                and self.latest_end is not None
+            ),
             semi_continuous=self.semi_continuous,
             single_constant=self.single_constant,
             startup_penalty=self.startup_penalty,

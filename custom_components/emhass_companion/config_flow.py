@@ -170,6 +170,7 @@ from .const import (
     DEFAULT_URL,
     DEFAULT_WEIGHT_BATTERY_CHARGE,
     DEFAULT_WEIGHT_BATTERY_DISCHARGE,
+    DISCORD_INVITE_URL,
     DOMAIN,
     END_SOC_MODES,
     INVERTER_FALLBACK_PROFILE,
@@ -1062,6 +1063,7 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema(
                 {vol.Optional(CONF_PROFILE): _inverter_profile_selector(choices)}
             ),
+            description_placeholders={"discord": DISCORD_INVITE_URL},
         )
 
     async def async_step_inverter_options(
@@ -3503,6 +3505,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
                     ): _inverter_profile_selector(choices)
                 }
             ),
+            description_placeholders={"discord": DISCORD_INVITE_URL},
         )
 
     async def async_step_inverter_options(

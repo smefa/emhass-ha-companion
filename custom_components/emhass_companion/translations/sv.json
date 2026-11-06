@@ -251,7 +251,7 @@
       },
       "inverter": {
         "title": "Växelriktarprofil",
-        "description": "Hur batteriet faktiskt styrs. Lämnar du detta tomt läser integrationen bara.\n\nSer du inte din växelriktare? **Skript** fungerar med vilken växelriktare som helst som du redan kan styra från Home Assistant, och avancerade användare kan skriva en egen YAML-profil för en dedikerad post - se profilguiden i dokumentationen.\n\nRapportera gärna om du får en otestad profil att fungera på [Discord](https://discord.gg/ugDwJwynC5).\n\nInget skrivs till din utrustning förrän du dessutom slår på reglaget Styrning aktiverad.",
+        "description": "Hur batteriet faktiskt styrs. Lämnar du detta tomt läser integrationen bara.\n\nSer du inte din växelriktare? **Skript** fungerar med vilken växelriktare som helst som du redan kan styra från Home Assistant, och avancerade användare kan skriva en egen YAML-profil för en dedikerad post - se profilguiden i dokumentationen.\n\nRapportera gärna om du får en otestad profil att fungera på [Discord]({discord}).\n\nInget skrivs till din utrustning förrän du dessutom slår på reglaget Styrning aktiverad.",
         "data": {
           "profile": "Växelriktarprofil"
         }
@@ -691,7 +691,7 @@
       },
       "inverter": {
         "title": "Växelriktarprofil",
-        "description": "Hur batteriet faktiskt styrs. Lämnar du detta tomt läser integrationen bara.\n\nSer du inte din växelriktare? **Skript** fungerar med vilken växelriktare som helst som du redan kan styra från Home Assistant, och avancerade användare kan skriva en egen YAML-profil för en dedikerad post - se profilguiden i dokumentationen.\n\nRapportera gärna om du får en otestad profil att fungera på [Discord](https://discord.gg/ugDwJwynC5).\n\nInget skrivs till din utrustning förrän du dessutom slår på reglaget Styrning aktiverad.",
+        "description": "Hur batteriet faktiskt styrs. Lämnar du detta tomt läser integrationen bara.\n\nSer du inte din växelriktare? **Skript** fungerar med vilken växelriktare som helst som du redan kan styra från Home Assistant, och avancerade användare kan skriva en egen YAML-profil för en dedikerad post - se profilguiden i dokumentationen.\n\nRapportera gärna om du får en otestad profil att fungera på [Discord]({discord}).\n\nInget skrivs till din utrustning förrän du dessutom slår på reglaget Styrning aktiverad.",
         "data": {
           "profile": "Växelriktarprofil"
         }

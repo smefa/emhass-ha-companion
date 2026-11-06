@@ -785,6 +785,16 @@ class DeferrableLoad:
     routine, not something to report every solve.
     """
 
+    spans_daily_windows: bool = False
+    """A water tank whose standing window recurs every day.
+
+    A tank is one thermal state, so it keeps a single EMHASS row (its
+    temperature arrays already cover the whole horizon). That row has only one
+    contiguous heating mask and one start cap, so the payload stretches the mask
+    from the first window's opening to the last window's closing and scales the
+    start cap by the number of windows, instead of adding rows.
+    """
+
     repeats_daily: bool = False
     """Whether the standing window recurs every day.
 

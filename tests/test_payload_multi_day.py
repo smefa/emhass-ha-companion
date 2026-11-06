@@ -247,3 +247,48 @@ def test_parked_running_load_still_gets_its_later_window_row():
     assert [(row.parent, row.name) for row in result.extra_rows] == [(0, "Washer (day 2)")]
     assert result.payload["operating_hours_of_each_deferrable_load"] == [0.0, 2.0]
     assert result.payload["def_current_state"] == [False, False]
+
+
+def _tank(**overrides) -> DeferrableLoad:
+    return _load("tank", repeats_daily=False, spans_daily_windows=True, max_startups=1, **overrides)
+
+
+def test_water_tank_keeps_one_row_with_a_mask_spanning_every_window():
+    result = _build([_tank()])
+    payload = result.payload
+
+    assert result.extra_rows == []
+    assert payload["number_of_deferrable_loads"] == 1
+    assert payload["start_timesteps_of_each_deferrable_load"] == [4]
+    assert payload["end_timesteps_of_each_deferrable_load"] == [60]
+    assert payload["set_deferrable_max_startups"] == [2]
+
+
+def test_water_tank_with_one_window_is_unchanged():
+    spanning = _build([_tank()], horizon_steps=30).payload
+    plain = _build([_load("tank", repeats_daily=False, max_startups=1)], horizon_steps=30).payload
+
+    assert spanning["start_timesteps_of_each_deferrable_load"] == [4]
+    assert (
+        spanning["end_timesteps_of_each_deferrable_load"]
+        == plain["end_timesteps_of_each_deferrable_load"]
+    )
+    assert spanning["set_deferrable_max_startups"] == [1]
+
+
+def test_water_tank_window_that_reaches_the_horizon_edge_is_unconstrained_for_mpc():
+    payload = _build([_tank()], horizon_steps=60).payload
+
+    # The second window, 14:00-18:00 tomorrow, closes exactly at the edge.
+    assert payload["end_timesteps_of_each_deferrable_load"] == [0]
+
+
+def test_water_tank_mask_reaches_a_window_that_the_horizon_clips():
+    # 48 h from 12:00 ends at 12:00 on the third day; that day's 14:00-18:00
+    # window opens after the edge, so it is not needed. Starting at 16:00 the
+    # third window opens (14:00) before the edge (16:00) and closes after it.
+    now = datetime(2026, 7, 28, 14, 0, tzinfo=UTC)  # 16:00 Stockholm
+    payload = _build([_tank()], now=now).payload
+
+    assert payload["end_timesteps_of_each_deferrable_load"] == [0]
+    assert payload["set_deferrable_max_startups"] == [3]

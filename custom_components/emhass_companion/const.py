@@ -7,6 +7,10 @@ from typing import Final
 
 DOMAIN: Final = "emhass_companion"
 
+# Community invite shown in the inverter step. Strings may not hold URLs (hassfest),
+# so the link reaches the text through a description placeholder.
+DISCORD_INVITE_URL: Final = "https://discord.gg/ugDwJwynC5"
+
 # --- EMHASS backend contract -------------------------------------------------
 
 # Minimum EMHASS version. 0.17.9 introduced GET /api/v1/plan, /api/v1/last-run and

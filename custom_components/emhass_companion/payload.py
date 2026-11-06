@@ -1618,6 +1618,10 @@ def _deferrable_settings(
         _describe(load, inputs, step, warnings) if load.wants_to_run else _park(load)
         for load in loads
     ]
+    real = [
+        _spanning_daily_windows(row, load, inputs, step) if load.spans_daily_windows else row
+        for row, load in zip(real, loads, strict=True)
+    ]
     # Rows for later windows of daily loads go after every real load, so no real
     # load's P_deferrable{k} ever moves. Ordered by occurrence, then by load.
     extras = _extra_window_rows(loads, inputs, step)
@@ -1674,6 +1678,48 @@ def _deferrable_settings(
         ]
 
     return settings, [load.subentry_id for load in loads], warnings, extra_rows
+
+
+def _spanning_daily_windows(
+    row: _LoadSettings, load: DeferrableLoad, inputs: PayloadInputs, step: timedelta
+) -> _LoadSettings:
+    """Stretch a water tank's single row over every daily window in the horizon.
+
+    EMHASS gives a tank's row one contiguous heating mask and one cap on starts
+    for the whole horizon. The temperature arrays already carry each period's
+    deadline, so the mask only has to reach from the first window's opening to
+    the last one's closing (heating between windows stays allowed), and the
+    start cap grows with the number of windows so a later one is not starved.
+    """
+    if not load.wants_to_run:
+        return row
+    # Look a day past the horizon: a window that opens inside it but closes
+    # after it is dropped for a load that needs whole windows, yet the tank's
+    # temperature targets still reach into it, so its mask must too.
+    day_steps = round(timedelta(days=1) / step)
+    occurrences = [
+        (start, end)
+        for start, end in window_occurrences(
+            load.earliest_start,
+            load.latest_end,
+            inputs.row_zero(step),
+            step,
+            inputs.horizon_steps + day_steps,
+            timedelta(minutes=load.minimum_off_time_minutes),
+        )
+        if start < inputs.horizon_steps
+    ]
+    if len(occurrences) < 2:
+        return row
+    end_index = occurrences[-1][1]
+    if inputs.action == ACTION_MPC and end_index >= inputs.horizon_steps:
+        end_index = 0  # same convention as the first window: unconstrained
+    return replace(
+        row,
+        start_index=occurrences[0][0],
+        end_index=end_index,
+        max_startups=row.max_startups * len(occurrences),
+    )
 
 
 def _without_credit_for_later_day(
