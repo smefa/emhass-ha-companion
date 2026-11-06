@@ -129,6 +129,7 @@ class EmhassTankCard extends HTMLElement {
       if (!this.shadowRoot) this.attachShadow({ mode: "open" });
       this.shadowRoot.innerHTML = `
         <style>
+          :host { display: block; max-width: var(--emh-max-width, 960px); margin-inline: auto; }
           ha-card { padding: 12px 8px 4px 8px; }
           .head { display:flex; justify-content:space-between; align-items:baseline;
                   padding: 0 8px 4px 8px; }

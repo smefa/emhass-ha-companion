@@ -1027,3 +1027,18 @@ def test_sectioned_form_fields_are_labelled_where_the_schema_puts_them(filename,
         assert basic <= set(form["data"]), (filename, block)
         section = form["sections"][ADVANCED_SECTION]
         assert section["name"] and advanced <= set(section["data"]), (filename, block)
+
+
+def test_every_inverter_profile_option_has_a_label():
+    """Profile options are labelled by step-level keys, not by the profile's own name."""
+    options: dict[str, bool] = {}
+    for path in sorted((COMPONENT / "profiles" / "builtin" / "inverter").glob("*.yaml")):
+        for key, option in (load_yaml(str(path)).get("options") or {}).items():
+            options[key] = bool(option.get("advanced"))
+    for name in ("strings.json", "translations/en.json", "translations/sv.json"):
+        document = _json(COMPONENT / name)
+        for flow in ("config", "options"):
+            step = document[flow]["step"]["inverter_options"]
+            basic, advanced = step["data"], step["sections"]["advanced"]["data"]
+            for key, is_advanced in options.items():
+                assert key in (advanced if is_advanced else basic), (name, flow, key)

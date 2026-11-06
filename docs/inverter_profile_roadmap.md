@@ -442,7 +442,7 @@ These seven need only **three** archetypes: `signed_power`,
 
 | Profile | Route | Archetype | Status |
 |---|---|---|---|
-| Deye SUN-5K–25K-SG01HP3-EU | `davidrapan/ha-solarman` | `mode_and_magnitude` | **shipped, tested OK based on a user hardware report.** Toggles global TOU off for charge/idle and on for discharge/self-consumption, without rewriting the six programs. Current limits are power ceilings; configure pack voltage and review active TOU slots. Not independently verified across every listed model/firmware |
+| Deye SUN-5K–25K-SG01HP3-EU | `davidrapan/ha-solarman` | `mode_and_magnitude` | **shipped, tested OK based on a user hardware report.** Toggles global TOU off for charge/idle and on for discharge/self-consumption, without rewriting the six programs, so the user must set all six to Charging = Disabled and a low SOC (reporter: 10) first; the setup step shows this checklist. Current limits are power ceilings; configure pack voltage. Not independently verified across every listed model/firmware |
 | Growatt MOD / MID TL3-XH | `solax_modbus` | `tou_rewrite` | **shipped, untested.** Genuinely TOU-based — there is no setpoint register on this family — so it dedicates one slot to the plan and moves that slot's priority mode. Percentages of rated power, so it needs the nameplate rating. No curtailment: two candidate export-limit registers exist, in different units, and which one the family honours is unresolved |
 | Ferroamp EnergyHub | `jonasbkarlsson/ferroamp_operation_settings` | `mode_and_magnitude` | **shipped, untested.** Goes through the Portal's operation settings rather than `henricm/ha-ferroamp`'s charge/discharge services, which sidesteps the undocumented sign: direction is the Battery power mode select, magnitude an unsigned reference. Cloud, so a 30 s write floor. Modelled on a user's working scripts (Manual + Charge/Discharge/Off, Peak Shaving for self-consumption) |
 
@@ -556,7 +556,7 @@ per profile:
 |---|---|
 | Sungrow SH-T | Register 13052 is Watts per Sungrow's V1.1.9 spec, which lists these models in the same table — but no field report from a T-series owner exists. The export-limit register has had a factor-of-ten bug on SH15T |
 | Huawei | What the inverter does when a `forcible_charge` duration elapses; whether power 0 is a genuine hold (which is why the profile defines no `idle`); the exact battery sensor entity ids |
-| Deye | The battery and grid power sign — the two integrations that read this hardware disagree, one negating what the other passes through. The TOU-toggle workaround is reported working; active-slot interactions and behavior across all listed models/firmware remain unverified |
+| Deye | The battery and grid power sign — the two integrations that read this hardware disagree, one negating what the other passes through. The TOU-toggle workaround is reported working with all six programs at Charging = Disabled and SOC 10; program times/power values and behavior across all listed models/firmware remain unverified |
 | SolaX | Whether a recent install's entity ids carry the "(mode 1)" suffix the current display names imply |
 | Growatt | Whether Battery First at a zero charge rate is a true idle; which of the two export-limit registers this family honours |
 | Sigenergy | Nothing load-bearing: the profile avoids the one undocumented fact (the signed setpoint's sign) rather than guessing it. Whether the per-inverter setpoint needs the plant-level enable is unconfirmed, but this profile uses the plant-level entities throughout |

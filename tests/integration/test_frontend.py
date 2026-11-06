@@ -7,7 +7,10 @@ stale bundle. Both are checked here.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+import shutil
+import subprocess
 from unittest.mock import AsyncMock, patch
 
 from homeassistant.components.frontend import DATA_EXTRA_MODULE_URL, UrlManager
@@ -322,3 +325,104 @@ async def test_the_dashboard_strategy_is_served(hass: HomeAssistant, hass_client
 
     assert response.status == 200
     assert await response.read() == _bundle_path(DASHBOARD_FILENAME).read_bytes()
+
+
+_TRENDS_HARNESS = """
+const fs = require("fs");
+globalThis.window = {};
+globalThis.HTMLElement = class {};
+const apex = process.argv[2] === "apex";
+if (process.argv[4]) {
+  const RealDate = Date;
+  const fixed = new RealDate(process.argv[4]).getTime();
+  globalThis.Date = class extends RealDate {
+    constructor(...args) {
+      if (args.length) super(...args);
+      else super(fixed);
+    }
+    static now() {
+      return fixed;
+    }
+  };
+}
+globalThis.customElements = {
+  define() {},
+  get: () => (apex ? class {} : undefined),
+  whenDefined: () => new Promise(() => {}),
+};
+eval(fs.readFileSync(process.argv[1], "utf8") + "; globalThis.S = EmhassDashboardStrategy;");
+const entities = {};
+for (const k of JSON.parse(process.argv[3])) {
+  entities["sensor.x_" + k] = { platform: "emhass_companion", translation_key: k };
+}
+S.generate({}, { entities, devices: {} }).then((c) => console.log(JSON.stringify(c)));
+"""
+
+
+def _generate_dashboard(*, apex: bool, keys: list[str], now: str | None = None) -> dict:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+    # Passed with -e rather than as a file: Node on Windows cannot resolve a
+    # WSL /tmp path when it looks for a package.json to decide the module type.
+    out = subprocess.run(
+        [
+            node,
+            "-e",
+            _TRENDS_HARNESS,
+            str(_bundle_path(DASHBOARD_FILENAME)),
+            "apex" if apex else "plain",
+            json.dumps(keys),
+            *([now] if now else []),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=20,
+    )
+    return json.loads(out.stdout)
+
+
+_ALL_MONEY = ["energy_cost_today", "savings_today", "solar_savings_today", "battery_savings_today"]
+
+
+def _trend_cards(dashboard: dict) -> list[dict]:
+    view = next(v for v in dashboard["views"] if v["path"] == "trends")
+    return view["cards"]
+
+
+def test_trends_view_uses_apexcharts_when_installed() -> None:
+    cards = _trend_cards(_generate_dashboard(apex=True, keys=_ALL_MONEY))
+    charts = [c for c in cards if c["type"] != "markdown"]
+    assert [c["type"] for c in charts] == ["custom:apexcharts-card"] * 3
+    assert charts[1]["stacked"] is True
+    assert charts[2]["graph_span"] == "3year"
+
+
+def test_trends_view_falls_back_to_statistics_graph_without_apex() -> None:
+    cards = _trend_cards(_generate_dashboard(apex=False, keys=_ALL_MONEY))
+    charts = [c for c in cards if c["type"] != "markdown"]
+    assert [c["type"] for c in charts] == ["statistics-graph"] * 3
+    assert all(c["period"] == "month" and c["stat_types"] == ["change"] for c in charts)
+    assert charts[2]["chart_type"] == "line"
+
+
+def test_this_year_window_never_reaches_back_into_december() -> None:
+    # Mid-January: whole days since 1 January, so the window starts on 1 January.
+    cards = _trend_cards(
+        _generate_dashboard(apex=False, keys=_ALL_MONEY, now="2026-01-15T12:00:00")
+    )
+    charts = [c for c in cards if c["type"] != "markdown"]
+    assert charts[0]["days_to_show"] == 14
+
+
+def test_trends_view_skips_the_source_split_without_a_solar_meter() -> None:
+    keys = ["energy_cost_today", "savings_today"]
+    cards = _trend_cards(_generate_dashboard(apex=True, keys=keys))
+    titles = [c.get("header", {}).get("title") for c in cards]
+    assert "Savings by source, by month" not in titles
+
+
+def test_trends_view_is_absent_without_savings_entities() -> None:
+    dashboard = _generate_dashboard(apex=True, keys=["should_run"])
+    assert "trends" not in [v["path"] for v in dashboard["views"]]

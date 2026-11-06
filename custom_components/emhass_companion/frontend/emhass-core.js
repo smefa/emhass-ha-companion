@@ -593,6 +593,10 @@ function labelFor(hass, stateObj, value) {
 const TOKENS = `
   :host {
     display: block;
+    /* A card alone on a panel view would otherwise stretch edge to edge. In a
+       masonry column it is narrower than this and the cap does nothing. */
+    max-width: var(--emh-max-width, 960px);
+    margin-inline: auto;
     --emh-radius: 14px;
     --emh-gap: 10px;
     --emh-ease: cubic-bezier(.2, 0, 0, 1);

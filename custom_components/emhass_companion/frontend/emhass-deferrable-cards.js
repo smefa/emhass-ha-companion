@@ -295,6 +295,7 @@ class EmhassDeferrableCard extends HTMLElement {
       if (!this.shadowRoot) this.attachShadow({ mode: "open" });
       this.shadowRoot.innerHTML = `
         <style>
+          :host { display: block; max-width: var(--emh-max-width, 960px); margin-inline: auto; }
           ha-card { padding: 12px 16px 16px 16px; }
           .head { display:flex; justify-content:space-between; align-items:center; }
           .name { font-size:1.1em; font-weight:500; }

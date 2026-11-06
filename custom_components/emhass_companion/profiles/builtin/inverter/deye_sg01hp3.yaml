@@ -1,4 +1,4 @@
-name: Deye SUN-5K–25K-SG01HP3-EU hybrid (TOU Toggle)
+name: Deye SUN-5K–25K-SG01HP3-EU hybrid (ha-solarman)
 kind: inverter
 version: 2
 
@@ -27,48 +27,39 @@ description: >-
   self-consumption in Zero Export To CT mode.
 
 notes: >-
-  **Based on a user-reported working custom profile.** With TOU enabled their
-  inverter would not grid-charge; with TOU disabled it would not supply the
-  house from the battery. The reported workaround toggles TOU with each mode.
-  This is working evidence for that installation, not verification of every
-  listed model or firmware. Marked tested based on this working hardware report.
-  When upgrading from the earlier Deye profile, reconfigure the inverter and
-  select the new Time of Use entity before enabling control. Existing saved
-  voltage, current and work-mode options remain in use; review them. A saved
-  51 V value on a 400 V pack would allow roughly eight times the planned current.
-  An unset TOU entity blocks battery commands until reconfigured.
+  **Before enabling control, set all six TOU programs.** This profile only
+  switches the global Time of Use on and off; it never writes the programs.
 
-  **Check your TOU slots.** This profile changes the global TOU enable only;
-  it does not rewrite the six programs. When TOU is enabled, their SOC targets,
-  power limits and charging flags may still constrain battery operation.
-  Check transitions across slot boundaries on your firmware. The TOU select
-  must expose the exact options "Enabled" and "Disabled".
+  1. Set **Charging** to **Disabled** on programs 1-6.
 
-  **Current ceilings, not exact power setpoints.** The plan's watts are divided
-  by the configured nominal battery voltage. This high-voltage family defaults
-  to 400 V, rather than the shared custom profile's 51 V. Enter your actual
-  pack's nominal voltage and configure the unrestricted current for your
-  inverter and battery; the reported 180 A ceiling is not a hardware rating.
-  This ceiling is used for both charge and discharge during self-consumption.
+  2. Set **SOC** to a low floor on programs 1-6 (the working report uses 10).
 
-  **Check the meter location.** Self-consumption defaults to Zero Export To CT,
-  as in the working report. Change the option if your installation uses Zero
-  Export To Load. Forced discharge selects Export First and can export energy.
-  Charge and idle leave that work mode unchanged until self-consumption runs.
+  3. Re-apply after changing the programs. The reporter uses an automation that
+  runs when Companion control is switched on.
 
-  **Configure export recovery.** Ending curtailment writes the configured
-  unrestricted export power, not the previous limit. The reported 15000 W
-  default may restrict a 20 kW or 25 kW installation; set your allowed export
-  ceiling before enabling curtailment.
 
-  **Handover uses self-consumption.** On release of control, TOU is enabled,
-  grid charging disabled, and both current limits set to the configured
-  unrestricted current. Previous settings are not saved or restored. Idle
-  disables TOU and sets both current limits to zero, also preventing PV battery
-  charging. Writes are sequential, not atomic; verify mode transitions.
+  **Pack settings.** The plan's watts become current limits using the nominal
+  voltage (default 400 V) and are capped at the unrestricted current (default
+  180 A, not a hardware rating). Enter your own values. Self-consumption
+  uses Zero Export To CT; change it if your meter is on the load side.
 
-  **Confirm sensor signs.** Check battery and grid power while charging and
-  importing. Solarman readings and sign conventions can vary by integration.
+
+  **Upgrading from the earlier Deye profile.** Select the Time of Use entity
+  (it must offer "Enabled" and "Disabled") and review the saved voltage and
+  current options. A saved 51 V on a 400 V pack allows about eight times the
+  planned current.
+
+
+  **Curtailment.** Ending it writes the unrestricted export power (default
+  15000 W), which may restrict a 20 or 25 kW model.
+
+
+  **Handover.** TOU on, grid charging off and both current limits at the
+  unrestricted current. Previous settings are not restored.
+
+
+  Reported working on one installation; other models and firmware are not
+  verified. Check the battery and grid power signs.
 
 control:
   archetype: mode_and_magnitude
