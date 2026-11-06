@@ -9,6 +9,7 @@
 import {
   CardEditor,
   LiveCard,
+  callService,
   cleanSections,
   findHub,
   findLoads,
@@ -411,11 +412,15 @@ class EmhassHealthCard extends LiveCard {
       const actions = tag("div", "actions", pad);
       ui.buttonMpc = tag("button", "btn primary", actions, "Recalculate");
       ui.buttonDay = tag("button", "btn", actions, "Day-ahead");
-      ui.buttonFit = tag("button", "btn", actions, "Train");
       ui.buttonMpc.addEventListener("click", () => this._press("button.run_mpc"));
-      ui.buttonDay.addEventListener("click", () => this._press("button.run_dayahead"));
-      ui.buttonFit.addEventListener("click", () => this._press("button.run_forecast_fit"));
+      ui.buttonDay.addEventListener("click", () => this._run("run_dayahead"));
     }
+  }
+
+  /** Day-ahead is an action only, so it has no entity to press. */
+  _run(service) {
+    haptic("medium");
+    callService(this._hass, "emhass_companion", service, {});
   }
 
   _press(key) {

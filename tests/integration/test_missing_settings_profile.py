@@ -4,8 +4,7 @@
 to return ``{}``. So a deleted or renamed *settings-only* profile
 (``load/emhass_native``, ``pv/none``, ``temperature/emhass_native``) contributed
 nothing, raised nothing, and the run went out with EMHASS falling back to its
-own persisted config -- exactly what ``async_sync_emhass_config`` exists to
-prevent, and invisible from the outside.
+own persisted config, invisible from the outside.
 """
 
 from __future__ import annotations
@@ -69,8 +68,8 @@ async def test_setup_time_callers_degrade_instead_of_taking_setup_down(
 ) -> None:
     """load_forecast_settings runs at setup, where raising costs every entity.
 
-    The button platform asks ``uses_mlforecaster`` and the config sync asks for
-    the load settings before any run exists; a hard failure there would leave
+    The button platform asks ``uses_mlforecaster`` and the baseline bootstrap runs
+    before any run exists; a hard failure there would leave
     the user with no integration at all rather than a failed optimisation they
     can read. The run path still raises -- see the test above.
     """
@@ -80,7 +79,7 @@ async def test_setup_time_callers_degrade_instead_of_taking_setup_down(
 
     assert coordinator.load_forecast_settings() == {}
     assert coordinator.uses_mlforecaster is False
-    await coordinator.async_sync_emhass_config()
+    await coordinator.async_ensure_emhass_baseline()
 
 
 async def test_a_resolvable_settings_profile_is_unaffected(hass: HomeAssistant) -> None:

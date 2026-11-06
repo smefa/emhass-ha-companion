@@ -1,4 +1,4 @@
-name: Deye SUN-5K–25K-SG01HP3-EU hybrid (Solarman)
+name: Deye SUN-5K–25K-SG01HP3-EU hybrid (TOU Toggle)
 kind: inverter
 version: 2
 
@@ -18,52 +18,57 @@ requires: davidrapan/ha-solarman (HACS) with the deye_p3 definition; the older S
 
 docs: https://github.com/davidrapan/ha-solarman
 
-untested: true
+# TOU-toggle strategy reported working by a user; not verified on every model/firmware.
+untested: false
 
 description: >-
-  Deye three-phase high-voltage hybrids, steered through work mode and the
-  battery current limits rather than a power setpoint.
+  Deye three-phase high-voltage hybrids with dynamic Time of Use switching.
+  Disables TOU for grid charging and idle, and enables it for discharge and
+  self-consumption in Zero Export To CT mode.
 
 notes: >-
-  **This hardware has no instantaneous power setpoint.** There is no "charge at
-  1500 W now" register anywhere in Deye's map — control is normally done by
-  rewriting one of the six time-of-use programs, which is a poor fit for a plan
-  that changes every half hour and would take over the whole TOU schedule you
-  configured.
+  **Based on a user-reported working custom profile.** With TOU enabled their
+  inverter would not grid-charge; with TOU disabled it would not supply the
+  house from the battery. The reported workaround toggles TOU with each mode.
+  This is working evidence for that installation, not verification of every
+  listed model or firmware. Marked tested based on this working hardware report.
+  When upgrading from the earlier Deye profile, reconfigure the inverter and
+  select the new Time of Use entity before enabling control. Existing saved
+  voltage, current and work-mode options remain in use; review them. A saved
+  51 V value on a 400 V pack would allow roughly eight times the planned current.
+  An unset TOU entity blocks battery commands until reconfigured.
 
-  So this profile does not touch your TOU programs at all. It steers the
-  battery with the controls that *do* act immediately: the energy pattern
-  (Battery First / Load First), the work mode (Export First / Zero Export), the
-  global grid-charge switch, and the maximum charge and discharge **currents**.
-  A forced charge becomes "Battery First, grid charging allowed, charge current
-  capped at the plan's power"; a forced discharge becomes "Export First with
-  the discharge current capped"; idle becomes "both currents zero", which on
-  this hardware is a genuine hold.
+  **Check your TOU slots.** This profile changes the global TOU enable only;
+  it does not rewrite the six programs. When TOU is enabled, their SOC targets,
+  power limits and charging flags may still constrain battery operation.
+  Check transitions across slot boundaries on your firmware. The TOU select
+  must expose the exact options "Enabled" and "Disabled".
 
-  **It is a cap, not a setpoint.** The inverter will charge or discharge *up
-  to* the current this profile sets, not exactly at it. Expect the plan to be
-  followed in direction and magnitude-ceiling, not tracked watt for watt.
+  **Current ceilings, not exact power setpoints.** The plan's watts are divided
+  by the configured nominal battery voltage. This high-voltage family defaults
+  to 400 V, rather than the shared custom profile's 51 V. Enter your actual
+  pack's nominal voltage and configure the unrestricted current for your
+  inverter and battery; the reported 180 A ceiling is not a hardware rating.
+  This ceiling is used for both charge and discharge during self-consumption.
 
-  **Set the nominal battery voltage below.** The limits are in Amps and the
-  plan is in Watts, so this profile divides by the voltage you give it. A
-  wrong value scales every command proportionally. Use your pack's nominal
-  voltage (high-voltage packs are typically 350–450 V), not its momentary
-  reading.
+  **Check the meter location.** Self-consumption defaults to Zero Export To CT,
+  as in the working report. Change the option if your installation uses Zero
+  Export To Load. Forced discharge selects Export First and can export energy.
+  Charge and idle leave that work mode unchanged until self-consumption runs.
 
-  **Your TOU programs still run underneath.** If a program is active and set to
-  charge from grid, it can still act while this profile thinks the battery
-  should be idle. Whether the global grid-charge switch overrides a per-program
-  grid-charge bit, or the other way round, is firmware behaviour that is not
-  visible in the integration's source — so if you see charging you did not
-  plan, that interaction is the first place to look.
+  **Configure export recovery.** Ending curtailment writes the configured
+  unrestricted export power, not the previous limit. The reported 15000 W
+  default may restrict a 20 kW or 25 kW installation; set your allowed export
+  ceiling before enabling curtailment.
 
-  **Do not trust the battery/grid power sign without checking.** The two
-  integrations that read this hardware disagree about it: ha-solarman passes
-  the raw register through and offers a negated copy as an attribute, while
-  kellerza/sunsynk bakes in a sign flip. Watch the sensor while the battery is
-  known to be charging and confirm before relying on it. Reads over the
-  Solarman stick logger have also been seen to glitch to nonsense values on
-  this exact model family, so treat a single wild reading as noise.
+  **Handover uses self-consumption.** On release of control, TOU is enabled,
+  grid charging disabled, and both current limits set to the configured
+  unrestricted current. Previous settings are not saved or restored. Idle
+  disables TOU and sets both current limits to zero, also preventing PV battery
+  charging. Writes are sequential, not atomic; verify mode transitions.
+
+  **Confirm sensor signs.** Check battery and grid power while charging and
+  importing. Solarman readings and sign conventions can vary by integration.
 
 control:
   archetype: mode_and_magnitude
@@ -75,7 +80,7 @@ control:
   lifetime: persistent
   duration_min: 30
   deadband_w: 200
-  # Each action writes four or five registers through a stick logger that does
+  # Each action writes four to six registers through a stick logger that does
   # not enjoy being hammered.
   min_write_interval_s: 10
   restore_required: true
@@ -83,6 +88,16 @@ control:
   curtail_unit: w
 
 options:
+  time_of_use_select:
+    name: Time of Use select
+    description: Global TOU mode; must offer Enabled and Disabled.
+    suggest:
+      - select.time_of_use
+      - select.deye_time_of_use
+    selector:
+      entity:
+        domain: select
+
   energy_pattern_select:
     name: Energy pattern
     description: Battery First / Load First. Called "Priority load" by kellerza/sunsynk.
@@ -105,7 +120,7 @@ options:
 
   grid_charge_switch:
     name: Grid charging switch
-    description: The global "charge battery from grid" enable (register 130). Without it a forced charge can only use PV surplus.
+    description: The global "charge battery from grid" enable. Without it a forced charge can only use PV surplus.
     suggest:
       - switch.battery_grid_charging
       - switch.grid_charge_enabled
@@ -146,7 +161,7 @@ options:
   max_current_a:
     name: Unrestricted current
     description: What the charge and discharge current limits are set back to when this profile hands control over — your normal everyday ceiling.
-    default: 100
+    default: 180
     selector:
       number:
         min: 1
@@ -180,7 +195,7 @@ options:
     advanced: true
     name: Work mode — zero export option name
     description: What this profile returns the work mode to. Use "Zero Export To CT" if your meter is on the grid connection point rather than the load side.
-    default: Zero Export To Load
+    default: Zero Export To CT
     selector:
       text: {}
 
@@ -197,8 +212,8 @@ options:
 
   export_limit_max_w:
     name: Unrestricted export power
-    description: What the export limit is set back to when curtailment ends.
-    default: 25000
+    description: Export ceiling written when curtailment ends, not the previous limit. Set this for your installation; 15000 W may restrict larger models.
+    default: 15000
     selector:
       number:
         min: 0
@@ -221,6 +236,10 @@ limits:
 
 actions:
   force_charge:
+    - service: select.select_option
+      required_target: true
+      target: { entity_id: "{{ options.time_of_use_select }}" }
+      data: { option: "Disabled" }
     - service: switch.turn_on
       target: { entity_id: "{{ options.grid_charge_switch }}" }
     - service: select.select_option
@@ -239,6 +258,10 @@ actions:
       data: { value: 0 }
 
   force_discharge:
+    - service: select.select_option
+      required_target: true
+      target: { entity_id: "{{ options.time_of_use_select }}" }
+      data: { option: "Enabled" }
     - service: switch.turn_off
       target: { entity_id: "{{ options.grid_charge_switch }}" }
     - service: select.select_option
@@ -260,6 +283,10 @@ actions:
       data: { value: 0 }
 
   idle:
+    - service: select.select_option
+      required_target: true
+      target: { entity_id: "{{ options.time_of_use_select }}" }
+      data: { option: "Disabled" }
     # Both limits at zero is a real hold on this hardware -- the battery sits
     # while PV and grid serve the house between them.
     - service: switch.turn_off
@@ -272,6 +299,10 @@ actions:
       data: { value: 0 }
 
   self_consume:
+    - service: select.select_option
+      required_target: true
+      target: { entity_id: "{{ options.time_of_use_select }}" }
+      data: { option: "Enabled" }
     - service: switch.turn_off
       target: { entity_id: "{{ options.grid_charge_switch }}" }
     - service: select.select_option

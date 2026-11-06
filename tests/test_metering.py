@@ -11,6 +11,7 @@ replay is built on top of it.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 from homeassistant.core import State
 import pytest
@@ -19,10 +20,40 @@ from custom_components.emhass_companion.metering import (
     _RESTORE_MAX_GAP,
     Meter,
     MeterSpec,
+    build_forecast_callable,
     read_meters,
 )
+from custom_components.emhass_companion.models import Plan, PlanRow, Series
 
 T0 = datetime(2026, 8, 3, 10, 0, tzinfo=UTC)
+
+
+@pytest.mark.parametrize("battery_enabled", [False, True])
+def test_forecast_callable_applies_battery_configuration(battery_enabled):
+    plan = Plan(
+        generated_at=T0,
+        schema_version="1.0",
+        rows=[
+            PlanRow(
+                timestamp=T0,
+                p_load=1000,
+                p_pv=3000,
+                p_grid=0,
+                unit_load_cost=2,
+                unit_prod_price=0.5,
+            )
+        ],
+    )
+    coordinator = SimpleNamespace(
+        data=SimpleNamespace(plan=plan, buy_price=Series.empty(), sell_price=Series.empty()),
+        config=SimpleNamespace(battery=SimpleNamespace(enabled=battery_enabled, capacity_wh=0)),
+        soc_percent=None,
+    )
+
+    forecast = build_forecast_callable(coordinator)(T0, timedelta(hours=1))
+    assert forecast is not None
+    assert forecast.battery_enabled is battery_enabled
+    assert forecast.battery_savings == (-0.5 if battery_enabled else 0.0)
 
 
 def _energy_state(value: float, unit: str | None = "kWh") -> State:
@@ -57,6 +88,85 @@ def test_energy_reset_is_the_post_reset_reading():
     meter.take_from(_energy_state(10.0), T0)
     moved = meter.take_from(_energy_state(1.2), T0 + timedelta(minutes=5))
     assert moved == pytest.approx(1.2)
+
+
+@pytest.mark.parametrize("unit,scale", [("kWh", 1), ("Wh", 1000), ("MWh", 0.001)])
+def test_energy_correction_retains_high_water_until_recovery(unit, scale):
+    meter = Meter("sensor.meter", kind="energy")
+    readings = [19.438, 19.433, 19.431, 19.435, 19.438, 19.446, 19.463]
+    moved = [
+        meter.take_from(_energy_state(reading * scale, unit), T0 + timedelta(seconds=index))
+        for index, reading in enumerate(readings)
+    ]
+    assert moved == pytest.approx([0, 0, 0, 0, 0, 0.008, 0.017])
+    assert sum(moved) == pytest.approx(0.025)
+
+
+@pytest.mark.parametrize("reading,expected", [(9.0, 0), (8.999, 8.999), (0, 0)])
+def test_energy_reset_threshold_and_zero_rebase(reading, expected):
+    meter = Meter("sensor.meter", kind="energy")
+    meter.take_from(_energy_state(10), T0)
+    assert meter.take_from(_energy_state(reading), T0 + timedelta(seconds=1)) == pytest.approx(
+        expected
+    )
+    baseline = 10 if reading == 9 else reading
+    assert meter.as_dict()["last_value"] == pytest.approx(baseline)
+    assert meter.take_from(_energy_state(10.1), T0 + timedelta(seconds=2)) == pytest.approx(
+        10.1 - baseline
+    )
+
+
+def test_energy_correction_then_real_reset_starts_a_new_cycle():
+    meter = Meter("sensor.meter", kind="energy")
+    readings = [19.438, 19.433, 0.002, 0.007]
+    moved = [
+        meter.take_from(_energy_state(reading), T0 + timedelta(seconds=index))
+        for index, reading in enumerate(readings)
+    ]
+    assert moved == pytest.approx([0, 0, 0.002, 0.005])
+
+
+@pytest.mark.parametrize("invalid", [-1, float("nan"), float("inf")])
+def test_invalid_energy_does_not_lower_high_water_or_advance_time(invalid):
+    meter = Meter("sensor.meter", kind="energy")
+    meter.take_from(_energy_state(19.438), T0)
+    assert meter.take_from(_energy_state(invalid), T0 + timedelta(seconds=1)) == 0
+    assert meter.last_time == T0
+    assert meter.take_from(_energy_state(19.446), T0 + timedelta(seconds=2)) == pytest.approx(0.008)
+
+
+def test_energy_correction_baseline_survives_serialization_restore_and_seed():
+    meter = Meter("sensor.meter", kind="energy")
+    meter.take_from(_energy_state(19.438), T0)
+    meter.take_from(_energy_state(19.433), T0 + timedelta(seconds=1))
+    stored = meter.as_dict()
+    assert stored["last_value"] == 19.438
+    restored = Meter("sensor.meter", kind="energy")
+    assert restored.restore(_FakeHass(), stored, now=T0 + timedelta(seconds=2)) == 0
+    seeded = Meter.seeded(
+        "sensor.meter", kind="energy", last_value=stored["last_value"], last_time=meter.last_time
+    )
+    for resumed in (restored, seeded):
+        assert resumed.take_from(_energy_state(19.435), T0 + timedelta(seconds=3)) == 0
+        assert resumed.take_from(_energy_state(19.446), T0 + timedelta(seconds=4)) == pytest.approx(
+            0.008
+        )
+
+
+@pytest.mark.parametrize("during_gap", [19.433, 19.435])
+def test_long_gap_restore_retains_an_unrecovered_correction(during_gap):
+    meter = Meter("sensor.meter", kind="energy")
+    meter.take_from(_energy_state(19.438), T0)
+    meter.take_from(_energy_state(19.433), T0 + timedelta(seconds=1))
+    now = T0 + _RESTORE_MAX_GAP + timedelta(minutes=1)
+    hass = SimpleNamespace(states=SimpleNamespace(get=lambda _entity: _energy_state(during_gap)))
+    restored = Meter("sensor.meter", kind="energy")
+    assert restored.restore(hass, meter.as_dict(), now=now) == 0
+    assert restored.as_dict()["last_value"] == 19.438
+    assert restored.last_time == now
+    assert restored.take_from(_energy_state(19.446), now + timedelta(seconds=1)) == pytest.approx(
+        0.008
+    )
 
 
 def test_unavailable_energy_reading_holds_the_baseline():

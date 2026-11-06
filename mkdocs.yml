@@ -54,6 +54,7 @@ nav:
       - Surplus loads: guide/surplus_loads.md
       - Inverter control: guide/inverter_control.md
       - Hub controls: guide/hub_controls.md
+      - Actions (advanced): guide/actions.md
       - Network tariffs: guide/network_tariffs.md
       - Dashboard cards: guide/dashboard_cards.md
   - Technical reference:
@@ -79,5 +80,6 @@ nav:
       - Network tariffs: network_tariffs.md
       - Template additions: template_additions.md
       - Writing a profile: profiles.md
+      - Settings ownership: settings_ownership.md
       - Inverter profile roadmap: inverter_profile_roadmap.md
       - Troubleshooting: troubleshooting.md

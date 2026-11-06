@@ -31,6 +31,7 @@ from .api import EmhassClient, EmhassError
 from .const import (
     CONF_CAPACITY_COST_PER_KW,
     CONF_CONTROL_ENTITY,
+    CONF_HOT_WATER_PERIODS,
     CONF_HOUSE_LOAD_TOTAL_ENTITY,
     CONF_NETWORK,
     CONF_PROFILE,
@@ -67,6 +68,14 @@ from .services import async_register_services, async_unregister_services
 from .util import version_at_least
 
 _LOGGER = logging.getLogger(__name__)
+
+# Hub buttons that became actions only in 0.9.9.3. A restart leaves their registry
+# entries behind as "no longer provided" entities, which the user would have to
+# delete one by one. Unique ids are always "<entry_id>_<key>", whatever the UI
+# language, so these are exact.
+# TODO: remove _REMOVED_BUTTON_KEYS and _async_remove_retired_buttons a few
+# releases after 0.9.9.3 (once everyone has started a release that ran them).
+_REMOVED_BUTTON_KEYS = ("run_dayahead", "run_forecast_fit", "export_settings")
 
 PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
@@ -172,13 +181,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
 
     loads = DeferrableRegistry(hass, entry)
     loads.sync()
+    _async_remove_retired_buttons(hass, entry)
     _report_unusable_control_entities(hass, entry)
 
     if entry.options.get(CONF_HOUSE_LOAD_TOTAL_ENTITY):
-        # Registered here, ahead of both the config sync below and the sensor
-        # platform forwarded later, so EmhassConfig.from_entry can resolve
-        # this entity's id on the very first setup -- not just from the
-        # second one onward, once the sensor platform has run at least once.
+        # Registered here, ahead of the sensor platform forwarded later, so
+        # EmhassConfig.from_entry can resolve this entity's id on the very
+        # first setup -- not just from the second one onward, once the sensor
+        # platform has run at least once.
         er.async_get(hass).async_get_or_create(
             "sensor",
             DOMAIN,
@@ -195,7 +205,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
     await coordinator.async_load_profiles()
     await coordinator.async_load_ml_state()
     _report_profile_errors(hass, coordinator)
-    await coordinator.async_sync_emhass_config()
+    await coordinator.async_ensure_emhass_baseline()
     await coordinator.async_check_heat_topology()
 
     scheduler = Scheduler(hass, coordinator)
@@ -229,6 +239,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
         prices=build_prices_callable(coordinator),
         plan_forecast=build_forecast_callable(coordinator),
         add_price_listener=coordinator.async_add_listener,
+        battery_enabled=coordinator.config.battery.enabled,
     )
     await tracker.async_load()
 
@@ -342,6 +353,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
         already_loaded = {load.subentry_id for load in entry.runtime_data.loads.all()}
         if current != already_loaded:
             hass.config_entries.async_schedule_reload(entry.entry_id)
+            return
+        refresh_needed = False
+        for load in entry.runtime_data.loads.all():
+            subentry = entry.subentries[load.subentry_id]
+            if not load.is_water_tank or CONF_HOT_WATER_PERIODS not in subentry.data:
+                continue
+            periods = subentry.data[CONF_HOT_WATER_PERIODS] or []
+            if load.hot_water_periods != periods:
+                load.hot_water_periods = periods
+                load.invalidate_battery_lockout()
+                load.notify()
+                refresh_needed = refresh_needed or load.enabled
+        if refresh_needed:
+            entry.async_create_background_task(
+                hass, coordinator.async_request_settings_refresh(), "emhass_hot_water_plan"
+            )
 
     entry.async_on_unload(
         async_dispatcher_connect(hass, SIGNAL_CONFIG_ENTRY_CHANGED, _async_entry_changed)
@@ -454,6 +481,17 @@ def _report_phase_clamp(
             ),
         },
     )
+
+
+@callback
+def _async_remove_retired_buttons(hass: HomeAssistant, entry: EmhassConfigEntry) -> None:
+    """Delete the registry entries of buttons that are now actions only."""
+    registry = er.async_get(hass)
+    for key in _REMOVED_BUTTON_KEYS:
+        entity_id = registry.async_get_entity_id("button", DOMAIN, f"{entry.entry_id}_{key}")
+        if entity_id is not None:
+            _LOGGER.info("Removing retired button %s; it is an action now", entity_id)
+            registry.async_remove(entity_id)
 
 
 @callback

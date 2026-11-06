@@ -11,7 +11,8 @@ the rest in one collapsed **Advanced settings** section at the bottom. The
 defaults suit most houses, so you can leave it closed. Nothing you have to fill
 in is ever hidden there. Where a screen is a list of sources, the common ones
 are listed first and the others are in *Advanced settings*, numbered, with a
-matching numbered explanation underneath.
+matching numbered explanation underneath. House consumption uses one list for
+creating a house load sensor and selecting an existing source.
 
 ## 1. Connect
 
@@ -133,11 +134,19 @@ on this step and set:
 - **Forecast API key** — your key.
 - **Forecast area** — your bidding zone, for example `SE2` or `DE`.
 
-The forecast is automatically scaled to match your own prices (currency, unit
-and taxes), and only fills hours your source has not published yet. If it does
-not fit your prices, for example because the area is wrong, it is ignored, the
-plan falls back to repeating yesterday, and a warning explains why. The
-service is for personal, non-commercial use only.
+The forecast is automatically scaled to your own price level and variation,
+and only fills hours your source has not published yet. Those hours blend the
+adjusted forecast with yesterday's prices: the forecast weight is the square
+of its positive correlation with the published prices. Weak agreement reduces
+its influence instead of rejecting it at a fixed threshold; flat or negatively
+correlated prices use only yesterday's repeat. This is a conservative heuristic,
+not a backtested confidence score. The health card reports the weights and fit.
+Invalid data, missing hours, insufficient overlap, a forecast that does not
+extend your prices, and a mismatched response area still cause a fallback with
+an explanatory warning. Short forecasts fill their available portion; the
+uncovered tail uses the existing price back-fill. Check that the forecast area
+matches your price source. The service is for personal,
+non-commercial use only.
 
 ## 4. Solar forecast
 
@@ -201,17 +210,17 @@ the horizon instead of inferring it from the previous day.
       that reading minus whatever your deferrable loads are drawing at any
       moment, and forecasts from that.
 
-  The other three sources are under **Advanced settings**, collapsed until
-  you open it (it opens by itself if one of them is already selected):
+  All four choices share one list, so selecting a source clears the previous
+  selection:
 
+    - **House load sensor** — most accurate, if you have one that already
+      excludes your own deferrable loads.
     - **Typical household profile (no sensor needed)** — a generic daily
       shape, scaled to an average power you type in. Least accurate, but
       works with no sensor at all.
     - **Load forecast from an entity attribute** — for when you already
       generate a load prediction elsewhere and want EMHASS to consume it
       rather than forecast for itself.
-    - **House load sensor** — most accurate, if you have one that already
-      excludes your own deferrable loads.
 
 ### Configuring the load source
 
@@ -226,10 +235,13 @@ the horizon instead of inferring it from the previous day.
     - *Naive (repeat yesterday)* — repeats the last day. Suits stable
       households.
     - *Machine-learning forecaster* — trains on your own history and is the
-      most accurate, but must be trained before first use. Picking it adds a
-      **Train load forecaster** button to the EMHASS Companion device; press
-      it once after setup, and again whenever you want the model retrained on
-      more recent history.
+      most accurate, but needs history to train on. The integration trains it
+      itself once the sensor has enough history, and retrains it every week,
+      because a trained model does not keep learning on its own. Until the
+      first training it uses the sensor's recent readings. Changing the time
+      step, load sensor or lag count makes the saved model unusable until it
+      is trained again, which also happens automatically. To retrain right
+      away, call the `emhass_companion.train_load_forecaster` action.
 - **Typical household profile** — **Average power**, your household's typical
   average draw in watts. The generic shape is scaled so its own average
   matches it. A rough starting point: last year's bill in kWh, divided by

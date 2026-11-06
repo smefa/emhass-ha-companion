@@ -20,6 +20,7 @@ the repository root for the full terms.
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import datetime
 import logging
 
@@ -84,31 +85,14 @@ def _walk(
         ledger.record(read_meters(scratch, when, held.get), prices(when))
 
 
-async def async_replay_gap(
-    hass: HomeAssistant,
-    meters: MeterSpec,
-    prices: Callable[[datetime], Prices | None],
-    ledger: Ledger,
-    pending: PendingGapReplay,
-) -> bool:
-    """Reconstruct one restart gap from recorder history and fold it into ``ledger``.
-
-    Returns whether the replay actually ran. ``ledger`` is left completely
-    untouched on a ``False`` -- a history probe must never leave the books
-    half-updated, the same discipline
-    :meth:`coordinator.EmhassCoordinator._recent_load_series` already
-    applies to a load forecast bootstrap.
-
-    No partial replay: a shared :class:`~savings.IntervalEnergy` cannot mix a
-    meter reconstructed from history with one silently assumed idle for the
-    same instant, so recorder history must hold *some* observation
-    somewhere in the gap for *every* seeded entity or nothing is touched at
-    all.
-    """
+async def _async_fetch_gap(
+    hass: HomeAssistant, pending: PendingGapReplay
+) -> dict[str, list[State]] | None:
+    """Fetch complete source coverage, leaving callers untouched on failure."""
     try:
         instance = get_instance(hass)
     except (KeyError, RuntimeError):
-        return False
+        return None
 
     def fetch() -> dict[str, list[State]] | None:
         """Fetch and reduce inside the one executor job.
@@ -151,7 +135,62 @@ async def async_replay_gap(
         fetched = await instance.async_add_executor_job(fetch)
     except Exception:  # a history probe must never break a run
         _LOGGER.debug("Could not fetch recorder history to replay a restart gap", exc_info=True)
-        return False
+        return None
+    return fetched
+
+
+async def async_prepare_gap(
+    hass: HomeAssistant, meters: MeterSpec, pending: PendingGapReplay
+) -> PendingGapReplay:
+    """Resolve counter baselines before live tracking, independently of prices.
+
+    Cache the exact observations for the later priced replay. Otherwise a
+    recovery followed by another correction during downtime can leave live
+    tracking below the replay's final high-water mark and count recovery twice.
+    Failed preparation cannot be retried after live accounting has started:
+    without a matching baseline, later replay would overlap live recovery.
+    """
+    closing = {seed.entity_id: hass.states.get(seed.entity_id) for seed in pending.seeds.values()}
+    fetched = await _async_fetch_gap(hass, pending)
+    if fetched is not None:
+        for entity_id, state in closing.items():
+            if state is not None:
+                fetched[entity_id] = [
+                    sample
+                    for sample in fetched[entity_id]
+                    if sample.last_changed < pending.window_end
+                ] + [
+                    State(
+                        entity_id,
+                        state.state,
+                        dict(state.attributes),
+                        last_changed=pending.window_end,
+                    )
+                ]
+        scratch = _scratch_meters(pending.seeds)
+        _walk(fetched, scratch, lambda _when: None, Ledger())
+        for name in pending.seeds:
+            meter = getattr(meters, name)
+            meter.resume_counter(
+                getattr(scratch, name), closing[meter.entity_id], now=pending.window_end
+            )
+    return replace(pending, prepared=True, history=fetched)
+
+
+async def async_replay_gap(
+    hass: HomeAssistant,
+    meters: MeterSpec,
+    prices: Callable[[datetime], Prices | None],
+    ledger: Ledger,
+    pending: PendingGapReplay,
+) -> bool:
+    """Reconstruct a gap using the same observations as its restored baselines.
+
+    The ledger stays untouched on failure or absent source coverage. Direct
+    callers without a prepared gap fetch history themselves; SavingsTracker
+    prepares before subscribing so a delayed replay cannot overlap live energy.
+    """
+    fetched = pending.history if pending.prepared else await _async_fetch_gap(hass, pending)
     if fetched is None:
         _LOGGER.debug(
             "Recorder history does not cover %s -> %s for every meter; leaving the gap unpriced",

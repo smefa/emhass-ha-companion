@@ -12,15 +12,21 @@ from typing import Any
 from homeassistant.components.recorder import get_instance, history
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import Event, EventStateChangedData, HomeAssistant, State, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.event import async_track_state_change_event, async_track_time_interval
+from homeassistant.helpers.event import (
+    async_call_later,
+    async_track_state_change_event,
+    async_track_time_interval,
+)
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
+from packaging.version import InvalidVersion, Version
 
-from .api import EmhassClient, EmhassError
+from .api import EmhassClient, EmhassConnectionError, EmhassError
 from .configuration import EmhassConfig, ProfileSelection
 from .const import (
     ACTION_DAYAHEAD,
@@ -36,9 +42,8 @@ from .const import (
     DEGRADED_OPTIM_STATUSES,
     DOMAIN,
     EMHASS_CONF_LOAD_FORECAST_METHOD,
-    EMHASS_CONF_NUM_LAGS,
     EMHASS_CONF_SENSOR_LOAD,
-    EMHASS_CONF_TIME_STEP,
+    EMHASS_CONF_SENSOR_PV,
     EMHASS_CONF_VAR_MODEL,
     END_SOC_OPTIMIZED,
     INFEASIBLE_CAUSE_CODES,
@@ -51,6 +56,7 @@ from .const import (
     ISSUE_PV_TAIL_SHORT,
     ISSUE_RUN_FAILED,
     ISSUE_SOURCES_BLIND,
+    ISSUE_TANK_BEHIND_SCHEDULE,
     LOAD_BOOTSTRAP_LOOKBACK,
     LOAD_FORECAST_METHOD_LIST,
     LOAD_FORECAST_METHOD_MLFORECASTER,
@@ -60,7 +66,6 @@ from .const import (
     MIN_EMHASS_VERSION_DEMAND_CHARGE,
     MIN_EMHASS_VERSION_DEMAND_COMPONENTS,
     MIN_EMHASS_VERSION_DEMAND_WINDOW,
-    MIN_EMHASS_VERSION_HEAT_TOPOLOGY_EXTEND,
     MIN_EMHASS_VERSION_SOC_FINAL_REWARD,
     ML_MIN_HISTORY_DAYS,
     MODE_AUTO,
@@ -74,11 +79,14 @@ from .const import (
     SUBENTRY_TYPE_LOAD_GROUP,
     SUPPORTED_PLAN_SCHEMA_MAJOR,
 )
-from .deferrable import DeferrableRegistry, state_to_watts
+from .deferrable import DeferrableRegistry, DeferrableRuntime, state_to_watts
+from .effective_settings import ML_MODEL_SETTING_NAMES, ML_SETTING_NAMES, resolve_effective_settings
 from .health import SourceHealth
-from .heat import topology_replaces_loads
-from .infeasibility import Finding, Severity, diagnose, headline
+from .infeasibility import Finding, Severity, diagnose, format_power, headline
 from .models import (
+    ROW_ZERO_FIRST,
+    ROW_ZERO_LAST,
+    ROW_ZERO_NEAREST,
     DeferrableLoad,
     DeferrableLoadGroup,
     LastRun,
@@ -87,13 +95,13 @@ from .models import (
     Series,
     ceil_to_step,
     floor_to_step,
+    row_zero_start,
 )
 from .network_calendar import HolidayCache, NetworkCalendar, NetworkCalendarError
 from .payload import PayloadInputs, PayloadResult, build_payload
 from .peaks import PeakTracker, days_in_current_period, effective_rate_per_kw
 from .phase_guard import PhaseGuard
 from .price_forecast import (
-    PROVIDERS,
     PriceForecastClient,
     PriceForecastError,
     fill_with_forecast,
@@ -119,6 +127,7 @@ from .terminal import (
     LOOKAHEAD as END_SOC_LOOKAHEAD,
 )
 from .util import schema_major, version_at_least
+from .water_tank import TankShortfall
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -127,8 +136,14 @@ _LOGGER = logging.getLogger(__name__)
 # isn't hammered with an expensive fit request every MPC cycle, short enough
 # that recorder history crossing ML_MIN_HISTORY_DAYS is noticed the same day.
 _ML_FIT_RETRY_COOLDOWN = timedelta(hours=1)
+# A fitted model's weights are frozen: predictions take fresh lag values as
+# input but never learn from them. Refitting weekly keeps it following the
+# season and the household's habits, and matches the weekly cycle the model
+# itself learns.
+_ML_REFIT_INTERVAL = timedelta(days=7)
 _ML_STORE_VERSION = 1
 _SOC_DAY_STORE_VERSION = 1
+_SETTINGS_REFRESH_DELAY = 3
 
 # How long the coordinator keeps building the load forecast itself after a run
 # that left that job to EMHASS failed.
@@ -148,6 +163,10 @@ _SOC_DAY_STORE_VERSION = 1
 # costs exactly one failed run, which is what stops this masking a real
 # misconfiguration forever.
 _NO_LIST_RETRY_COOLDOWN = timedelta(hours=1)
+
+
+class WaterTankError(UpdateFailed):
+    """Local tank data/configuration failure before contacting the backend."""
 
 
 @dataclass(slots=True)
@@ -316,6 +335,33 @@ def publish_soc_day_range(day_range: DayRange, series: Series, now: datetime) ->
     day_range.high = high
 
 
+def plan_soc_ahead(series: Series, now: datetime) -> tuple[Point | None, Point | None]:
+    """The (low, high) planned level from ``now`` to the end of the plan.
+
+    The counterpart to DayRange: forward-looking only, so a trough or peak the
+    plan has already passed does not count. The row in force at ``now`` does,
+    so a plan that only falls from here reports the current level as its high.
+    Ties keep the earlier row. Cheap enough to call at render time, which is
+    what keeps it honest between optimisation runs.
+    """
+    now_utc = dt_util.as_utc(now)
+    in_force: Point | None = None
+    ahead: list[Point] = []
+    for point in series:
+        if point.time <= now_utc:
+            in_force = point
+        else:
+            ahead.append(point)
+    if in_force is not None:
+        ahead.insert(0, Point(now_utc, in_force.value))
+    low: Point | None = None
+    high: Point | None = None
+    for point in ahead:
+        low = _more_extreme(low, point, high=False)
+        high = _more_extreme(high, point, high=True)
+    return low, high
+
+
 def _point_to_json(point: Point | None) -> dict[str, Any] | None:
     if point is None:
         return None
@@ -347,7 +393,18 @@ class EmhassData:
     load_forecast: Series = field(default_factory=Series.empty)
     payload: dict[str, Any] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
+    defaulted_forecast_methods: frozenset[str] = frozenset()
     load_order: list[str] = field(default_factory=list)
+    payload_order: list[str] = field(default_factory=list)
+    """Subentry ids in the order of ``payload``'s real loads.
+
+    Equal to ``load_order`` except after an infeasible run, which keeps the plan
+    (and so ``load_order``) but reports the rejected request here."""
+    extra_row_names: list[str] = field(default_factory=list)
+    """Names of the internal rows appended to ``payload`` for later daily windows.
+
+    Describes the request in ``payload`` (diagnostics only). The plan is already
+    folded back to ``load_order``'s columns."""
     end_soc: EndSocDecision | None = None
     soc_day_range: DayRange | None = None
     last_action: str | None = None
@@ -435,6 +492,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         # setup (unit tests), in which case the demand charge gate below is
         # conservative and treats it as unsupported.
         self.backend_version: str | None = None
+        self._water_tank_plan_blocked: str | None = None
         # Set once, right after __init__.async_setup_entry builds them (may be
         # empty -- see _build_peak_trackers). Held here, not just on
         # EmhassRuntimeData, because demand_charge_pricing / _build need each
@@ -487,12 +545,17 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         # sensor's recorder history so a peak that already happened is not
         # replaced by whatever the forward series still has ahead.
         self._soc_day_range: DayRange | None = None
+        # How the backend rounds a launch time to plan row zero. EMHASS
+        # defaults to "nearest" and only takes the setting from its add-on
+        # config, so it is learned from the plans it returns.
+        self._row_zero_mode = ROW_ZERO_NEAREST
         self._soc_history_merged_day: date | None = None
         self._soc_day_store: Store[dict[str, Any]] = Store(
             hass, _SOC_DAY_STORE_VERSION, f"{DOMAIN}_{entry.entry_id}_soc_day"
         )
 
         self._unsub_tick: Callable[[], None] | None = None
+        self._unsub_settings_refresh: Callable[[], None] | None = None
         # Smooths the live PV entity the same way NetHouseLoadSensor smooths
         # its own reading: a single instantaneous sample at MPC-run time can
         # catch the entity mid-swing (a cloud edge, a noisy inverter
@@ -509,14 +572,11 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         self.health = SourceHealth(hass, entry)
         self._unsub_health: Callable[[], None] | None = None
 
-        # Sensor mlforecaster has actually been confirmed trained against,
-        # persisted so a restart does not throw away a working model and
-        # retrain for nothing. None until a fit succeeds or async_load_ml_state
-        # restores it; a mismatch against the currently configured sensor is
-        # exactly what triggers an auto-fit -- see _resolve_load_forecast_method.
-        self._ml_trained_sensor: str | None = None
+        self._ml_trained_settings: dict[str, Any] | None = None
+        self._ml_trained_at: datetime | None = None
         self._ml_last_attempt: datetime | None = None
         self._ml_fit_lock = asyncio.Lock()
+        self._settings_export_lock = asyncio.Lock()
         # When a run that left the load forecast to EMHASS last failed, and
         # whether the run currently in flight is one of those. Both are plain
         # attributes rather than anything threaded through _build/_run because
@@ -565,6 +625,28 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         return Series.concat([self._surplus_carry, series])
 
     # -- lifecycle ------------------------------------------------------------
+
+    async def async_request_settings_refresh(self) -> None:
+        """Queue one solve after three seconds without further settings changes."""
+        if self._shutdown_requested:
+            return
+        if self._unsub_settings_refresh is not None:
+            self._unsub_settings_refresh()
+        self._unsub_settings_refresh = async_call_later(
+            self.hass, _SETTINGS_REFRESH_DELAY, self._async_refresh_settings
+        )
+
+    async def _async_refresh_settings(self, _now: datetime) -> None:
+        """Run with the final settings, without the generic refresh cooldown."""
+        self._unsub_settings_refresh = None
+        await self.async_refresh()
+
+    async def async_shutdown(self) -> None:
+        """Cancel any queued settings solve before shutting down."""
+        if self._unsub_settings_refresh is not None:
+            self._unsub_settings_refresh()
+            self._unsub_settings_refresh = None
+        await super().async_shutdown()
 
     @callback
     def async_start_clock(self) -> None:
@@ -926,7 +1008,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         if start is None:
             _LOGGER.debug("Capacity interval history: no open interval settled yet")
             return []
-        m = int((floor_to_step(now, step) - start) / step)
+        m = int((row_zero_start(now, step, self._row_zero_mode) - start) / step)
         if not 0 <= m < interval_timesteps:
             _LOGGER.debug(
                 "Capacity interval history: elapsed timestep %d outside 0..%d, sending none",
@@ -941,13 +1023,152 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         return [entry_w] * m
 
     async def async_load_ml_state(self) -> None:
-        """Restore which sensor mlforecaster was last confirmed trained against."""
+        """Restore successful-fit settings; legacy sensor-only state needs refitting."""
         stored = await self._ml_store.async_load()
         if stored:
-            self._ml_trained_sensor = stored.get("trained_sensor")
+            self._ml_trained_settings = stored.get("trained_settings")
+            if raw := stored.get("trained_at"):
+                self._ml_trained_at = dt_util.parse_datetime(raw)
 
     async def _async_save_ml_state(self) -> None:
-        await self._ml_store.async_save({"trained_sensor": self._ml_trained_sensor})
+        await self._ml_store.async_save(
+            {
+                "trained_settings": self._ml_trained_settings,
+                "trained_at": self._ml_trained_at.isoformat() if self._ml_trained_at else None,
+            }
+        )
+
+    async def _ml_refit_due(self) -> bool:
+        """Whether the trained model is older than :data:`_ML_REFIT_INTERVAL`.
+
+        State saved before the fit time was recorded has no age to go on, so its
+        clock starts now -- one weekly cycle from the first run after upgrading,
+        not an immediate refit of a model that may be a day old.
+        """
+        if self._ml_trained_at is None:
+            self._ml_trained_at = dt_util.utcnow()
+            await self._async_save_ml_state()
+            return False
+        return dt_util.utcnow() - self._ml_trained_at >= _ML_REFIT_INTERVAL
+
+    def _ml_model_matches(self, settings: dict[str, Any]) -> bool:
+        """Ignore request-grid and weather transport choices that do not train the model."""
+        return self._ml_trained_settings is not None and all(
+            settings.get(name) == self._ml_trained_settings.get(name)
+            for name in ML_MODEL_SETTING_NAMES
+        )
+
+    def _forecast_profile_settings(self) -> dict[str, Any]:
+        """Use identical profile precedence for training and optimisation."""
+        settings: dict[str, Any] = {}
+        for selection, kind in (
+            (self.config.price, PROFILE_KIND_PRICE),
+            (self.config.pv, PROFILE_KIND_PV),
+            (self.config.load, PROFILE_KIND_LOAD),
+        ):
+            settings.update(self._settings(selection, kind))
+        if self.loads.needs_outdoor_temperature:
+            settings.update(self._settings(self.config.temperature, PROFILE_KIND_TEMPERATURE))
+        return settings
+
+    def _effective_ml_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
+        """Project the same static ML inputs used by the optimisation payload resolver."""
+        config = self.config
+        effective = resolve_effective_settings(
+            battery=config.battery,
+            grid=config.grid,
+            hybrid=config.hybrid_inverter,
+            time_step_minutes=config.time_step_minutes,
+            cost_fun=DEFAULT_COST_FUN,
+            row_zero_mode=self._row_zero_mode,
+            num_lags=config.dayahead_num_lags,
+            profile_settings=settings,
+            backend_version=self.backend_version,
+        )
+        return {
+            name: value for name, value in effective.runtime().items() if name in ML_SETTING_NAMES
+        }
+
+    def _persistent_baseline(self) -> tuple[dict[str, Any], tuple[str, ...]]:
+        """The allowlisted static baseline and the warnings raised resolving it.
+
+        Same inputs and profile precedence as an optimisation request, but only
+        the persistent projection is kept: no live inputs, forecasts, grid
+        safety limits or load progress can reach it.
+        """
+        config = self.config
+        effective = resolve_effective_settings(
+            battery=config.battery,
+            grid=config.grid,
+            hybrid=config.hybrid_inverter,
+            time_step_minutes=config.time_step_minutes,
+            cost_fun=self.cost_fun,
+            row_zero_mode=self._row_zero_mode,
+            num_lags=config.dayahead_num_lags,
+            profile_settings=self._forecast_profile_settings(),
+            backend_version=self.backend_version,
+            send_derating=(
+                self.backend_version is not None
+                and version_at_least(self.backend_version, MIN_EMHASS_VERSION_CHARGE_DERATING)
+            ),
+            send_soc_final_reward=self.soc_final_reward_supported,
+            # Configured enablement, not whether a series happens to be present.
+            use_pv=bool(config.pv.key),
+        )
+        return effective.persistent(), effective.warnings
+
+    @staticmethod
+    def _export_failure(stage: str, err: EmhassError) -> str:
+        """Describe a failed export step without quoting the response body."""
+        if isinstance(err, EmhassConnectionError):
+            return f"could not reach EMHASS to {stage} its configuration"
+        status = getattr(err, "status", None)
+        return f"EMHASS refused to {stage} its configuration" + (
+            f" (HTTP {status})" if status else ""
+        )
+
+    async def async_export_settings(self) -> int:
+        """Write Companion's static settings into EMHASS's saved configuration.
+
+        Manual only. Fetches the active configuration, overlays the allowlisted
+        baseline and saves the whole result, because ``/set-config`` rebuilds
+        from EMHASS's defaults and would reset every key left out. Unrelated
+        settings, including credentials, therefore round-trip untouched.
+        Returns the number of Companion-owned settings written.
+
+        Raises :class:`HomeAssistantError` on any failure; nothing is reported
+        as saved unless ``/set-config`` accepted the request. The fetched
+        configuration is never logged or echoed in an error -- it holds the
+        backend's secrets -- so failures carry the status code, not the body.
+        This is :meth:`EmhassClient.async_set_config_merged` unrolled, because
+        an empty answer from ``/get-config`` must stop the write rather than
+        reset every other setting to EMHASS's defaults.
+        """
+        async with self._settings_export_lock:
+            try:
+                baseline, warnings = self._persistent_baseline()
+            except ProfileError as err:
+                raise HomeAssistantError(f"Settings were not written to EMHASS: {err}") from err
+            try:
+                current = await self.client.async_get_config()
+            except EmhassError as err:
+                raise HomeAssistantError(
+                    f"Settings were not written to EMHASS: {self._export_failure('read', err)}"
+                ) from None
+            if not isinstance(current, dict) or not current:
+                raise HomeAssistantError(
+                    "Settings were not written to EMHASS: it returned no active configuration"
+                )
+            try:
+                await self.client.async_set_config({**current, **baseline})
+            except EmhassError as err:
+                raise HomeAssistantError(
+                    f"Settings were not written to EMHASS: {self._export_failure('save', err)}"
+                ) from None
+        for warning in warnings:
+            _LOGGER.warning("Settings export: %s", warning)
+        _LOGGER.info("Wrote %d Companion settings to EMHASS", len(baseline))
+        return len(baseline)
 
     def reload_config(self) -> None:
         self.config = EmhassConfig.from_entry(self.hass, self.config_entry)
@@ -957,12 +1178,12 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         """The ``emhass:`` settings the configured load profile contributes.
 
         Exposed (unlike the private ``_settings`` used for the other kinds)
-        because both the "train forecaster" button and the config sync step
-        need to know what the load profile resolves to before any run happens.
+        because the "train forecaster" action needs to know what the load profile
+        resolves to before any run happens.
 
         A profile that no longer resolves degrades to ``{}`` here rather than
         raising, unlike the run path: every caller of this runs at setup
-        (button platform, config sync), where a hard failure would cost the
+        (button platform), where a hard failure would cost the
         whole integration. The next run still fails loudly on the same
         condition -- see :meth:`_settings`.
         """
@@ -976,109 +1197,44 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
     def uses_mlforecaster(self) -> bool:
         """Whether the configured load profile trains EMHASS's own ML model.
 
-        Gates both the "Train load forecaster" button and the fit-relevant
-        settings in :meth:`async_sync_emhass_config` -- neither means anything
-        for the "typical"/"naive" methods or for a load profile that supplies
-        its own forecast (``forecast_entity``), which never touch mlforecaster
-        at all.
+        Gates the "Train load forecaster" action, which means nothing for the
+        "typical"/"naive" methods or for a load profile that supplies its own
+        forecast (``forecast_entity``), which never touch mlforecaster at all.
         """
         method = self.load_forecast_settings().get(EMHASS_CONF_LOAD_FORECAST_METHOD)
         return method == LOAD_FORECAST_METHOD_MLFORECASTER
 
-    async def async_sync_emhass_config(self) -> None:
-        """Push the settings EMHASS must have before any run.
+    async def async_ensure_emhass_baseline(self) -> None:
+        """Make sure EMHASS has a saved configuration for actions to run against.
 
-        EMHASS persists its configuration independently of the runtime
-        parameters a run sends, and ``/set-config`` is not additive (see
-        :meth:`EmhassClient.async_set_config_merged`) -- so rather than trying
-        to detect what drifted, this always asserts the complete, currently
-        true picture, the same way ``payload.py`` always sends every setting
-        rather than only what changed.
+        Every ``/action/*`` request fails until EMHASS has a ``params.pkl``,
+        which ``/set-config`` creates. So this fetches the active configuration
+        and saves it back unchanged: a no-op for a backend that already has
+        one, and the minimal initialisation for one that does not.
 
-        Two things specifically must never be left to drift:
+        It deliberately carries no Companion setting. Timestep, rounding, ML
+        and every other static value travel with each request (see
+        :mod:`effective_settings`), and the manual export is the only thing
+        that writes them to the saved configuration; a backend value the user
+        chose is therefore never overwritten by a setup or reload.
 
-        - ``optimization_time_step`` must match what every run actually sends
-          (``time_step_minutes``); a mismatch is a hard crash inside EMHASS's
-          skforecast layer when a trained model is asked to predict at a
-          different frequency than it was fit at, not a soft error.
-        - When the load profile trains mlforecaster, EMHASS's own
-          ``sensor_power_load_no_var_loads`` (``retrieve_hass_conf``) and
-          ``var_model`` (``optim_conf``) are two independently persisted
-          copies of the same sensor; EMHASS's ``_get_ml_param()`` falls back
-          to whichever ``var_model`` is currently on disk regardless of a
-          per-request ``sensor_power_load_no_var_loads`` override, so the two
-          must always be pushed together. ``num_lags`` must cover a full
-          day-ahead call in one predict, or EMHASS returns a clean but fatal
-          "unable to obtain N lags_opt values" for every day-ahead run.
-
-        Non-fatal on failure: EMHASS being briefly unreachable at setup should
-        not cost the whole integration, only leave the next optimisation or
-        fit to fail loudly (and diagnosably) instead.
+        Failure is non-fatal during setup and logged for diagnosis. Runs also
+        work against an existing baseline, so this is retried on the next
+        reload rather than blocking the integration.
         """
-        patch: dict[str, Any] = {EMHASS_CONF_TIME_STEP: self.config.time_step_minutes}
-
-        settings = self.load_forecast_settings()
-        if settings.get(EMHASS_CONF_LOAD_FORECAST_METHOD) == LOAD_FORECAST_METHOD_MLFORECASTER:
-            sensor = settings.get(EMHASS_CONF_SENSOR_LOAD)
-            if sensor:
-                patch[EMHASS_CONF_SENSOR_LOAD] = sensor
-                patch[EMHASS_CONF_VAR_MODEL] = sensor
-                patch[EMHASS_CONF_NUM_LAGS] = self.config.dayahead_num_lags
-
         try:
-            await self.client.async_set_config_merged(patch)
+            await self.client.async_set_config_merged({})
         except EmhassError as err:
             _LOGGER.warning(
-                "Could not sync configuration to EMHASS (%s); continuing setup. "
-                "The next optimisation or forecaster fit may fail until this "
-                "succeeds -- reloading the integration will retry it.",
+                "Could not initialise the EMHASS configuration (%s); continuing "
+                "setup. Actions need EMHASS to have a saved configuration -- "
+                "reloading the integration will retry it.",
                 err,
             )
 
     async def async_check_heat_topology(self) -> None:
-        """Say so when EMHASS's own config would wipe the Companion's loads.
-
-        A ``heat_topology`` saved in the add-on's configuration, in EMHASS's
-        default replace mode, overwrites ``number_of_deferrable_loads``,
-        ``def_load_config`` and every per-load array on each run, whatever the
-        Companion sends. The loads then silently stop being planned. With no
-        Companion load configured there is nothing to wipe, and the topology is
-        the user's own business.
-
-        Checked once per setup: it is a setting in the add-on, and nothing the
-        Companion does changes it. Non-fatal and silent when EMHASS cannot be
-        read; any existing issue is left as it was, since nothing new is known.
-        """
-        try:
-            config = await self.client.async_get_config()
-        except EmhassError as err:
-            _LOGGER.debug("Could not read EMHASS's heat_topology setting: %s", err)
-            return
-        if not isinstance(config, dict):
-            return
-
-        # `extend_deferrable_loads` is the fix, and older backends do not read it:
-        # on one the flag is ignored and the topology still replaces the loads.
-        can_extend = self.backend_version is None or version_at_least(
-            self.backend_version, MIN_EMHASS_VERSION_HEAT_TOPOLOGY_EXTEND
-        )
-        if not self.loads.all() or not topology_replaces_loads(config, extend_supported=can_extend):
-            ir.async_delete_issue(self.hass, DOMAIN, ISSUE_HEAT_TOPOLOGY_REPLACES)
-            return
-
-        ir.async_create_issue(
-            self.hass,
-            DOMAIN,
-            ISSUE_HEAT_TOPOLOGY_REPLACES,
-            is_fixable=False,
-            severity=ir.IssueSeverity.WARNING,
-            translation_key=(
-                ISSUE_HEAT_TOPOLOGY_REPLACES
-                if can_extend
-                else f"{ISSUE_HEAT_TOPOLOGY_REPLACES}_upgrade"
-            ),
-            translation_placeholders={"required": MIN_EMHASS_VERSION_HEAT_TOPOLOGY_EXTEND},
-        )
+        """Clear the obsolete repair: each request now disables saved topology."""
+        ir.async_delete_issue(self.hass, DOMAIN, ISSUE_HEAT_TOPOLOGY_REPLACES)
 
     # -- deferrable loads -----------------------------------------------------
 
@@ -1088,7 +1244,73 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         Read from the registry rather than the subentries, because the values a
         user adjusts day to day live in entities; the subentry only seeds them.
         """
-        return self.loads.to_loads(now, self.config.time_step_minutes)
+        tanks = [load for load in self.loads.all() if load.is_water_tank and load.enabled]
+        backend_error = self._water_tank_backend_error() if tanks else None
+        if backend_error:
+            self._water_tank_plan_blocked = backend_error
+            ir.async_create_issue(
+                self.hass,
+                DOMAIN,
+                "water_tank_unsupported",
+                is_fixable=False,
+                severity=ir.IssueSeverity.ERROR,
+                translation_key="water_tank_unsupported",
+                translation_placeholders={
+                    "required": "0.18.8",
+                    "version": self.backend_version or "unknown",
+                },
+            )
+            raise WaterTankError(backend_error)
+        ir.async_delete_issue(self.hass, DOMAIN, "water_tank_unsupported")
+        projected = []
+        for load in self.loads.all():
+            issue_id = f"water_tank_invalid_{load.subentry_id}"
+            try:
+                temperature = self.loads.room_temperature(load)
+                projected.append(load.to_load(now, self.config.time_step_minutes, temperature))
+            except ValueError as err:
+                if not load.is_water_tank:
+                    raise
+                message = f"Water tank {load.name}: {err}"
+                self._water_tank_plan_blocked = message
+                ir.async_create_issue(
+                    self.hass,
+                    DOMAIN,
+                    issue_id,
+                    is_fixable=False,
+                    severity=ir.IssueSeverity.ERROR,
+                    translation_key="water_tank_invalid",
+                    translation_placeholders={"name": load.name, "reason": str(err)},
+                )
+                raise WaterTankError(message) from err
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+        return projected
+
+    def _water_tank_backend_error(self) -> str | None:
+        try:
+            supported = Version(self.backend_version or "") >= Version("0.18.8")
+        except InvalidVersion:
+            supported = False
+        if not supported:
+            return (
+                "Water tanks require EMHASS 0.18.8 or newer with a known version; "
+                f"the backend reports {self.backend_version or 'unknown'}. Upgrade EMHASS and reload."
+            )
+        return None
+
+    def water_tank_error(self, load: DeferrableRuntime) -> str | None:
+        """Fail closed before tank dispatch, including between optimiser runs."""
+        if not load.is_water_tank or not load.enabled:
+            return None
+        if error := self._water_tank_backend_error():
+            self._water_tank_plan_blocked = error
+            return error
+        try:
+            load.thermal_config(self.loads.room_temperature(load))
+        except ValueError as err:
+            self._water_tank_plan_blocked = f"Water tank {load.name}: {err}"
+            return self._water_tank_plan_blocked
+        return self._water_tank_plan_blocked
 
     def load_groups(self) -> list[DeferrableLoadGroup]:
         """Configured load groups, read straight from their subentries.
@@ -1143,6 +1365,9 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
     async def _async_run(self, action: str, *, notify: bool) -> EmhassData:
         try:
             data = await self._run(action)
+        except WaterTankError as err:
+            self._track_run_failed_issue(True, action, str(err))
+            raise
         except ProfileError as err:
             # Deliberately not counted against EMHASS's own load forecast
             # below: a data source that could not be read is this side's
@@ -1173,15 +1398,50 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             self.async_set_updated_data(data)
         return data
 
+    def _learn_row_zero_mode(
+        self, inputs: PayloadInputs, plan: Plan, sent_at: datetime | None = None
+    ) -> None:
+        """Work out how EMHASS rounds a launch time onto row zero.
+
+        Only a run launched where the rounding modes disagree says anything:
+        one in the second half of a step separates ``nearest`` from ``first``.
+        Otherwise the current belief stands.
+        """
+        if not plan.rows:
+            return
+        step = timedelta(minutes=inputs.time_step_minutes)
+        modes = (ROW_ZERO_NEAREST, ROW_ZERO_FIRST, ROW_ZERO_LAST)
+        candidates = {mode: row_zero_start(inputs.now, step, mode) for mode in modes}
+        if len(set(candidates.values())) == 1:
+            return
+        # Input gathering takes time, so EMHASS read its clock somewhere between
+        # the two instants. If they round differently the observation is
+        # ambiguous and teaches nothing.
+        if sent_at is not None and any(
+            row_zero_start(sent_at, step, mode) != candidates[mode] for mode in modes
+        ):
+            return
+        matches = [mode for mode, start in candidates.items() if start == plan.rows[0].timestamp]
+        if not matches or self._row_zero_mode in matches:
+            return
+        # A run just past the half-way point cannot tell "nearest" from "last".
+        learned = ROW_ZERO_NEAREST if ROW_ZERO_NEAREST in matches else matches[0]
+        _LOGGER.info("EMHASS rounds plan row zero '%s' (was '%s')", learned, self._row_zero_mode)
+        self._row_zero_mode = learned
+
     async def _run(self, action: str) -> EmhassData:
         inputs, built = await self._build(action)
+        self._track_tank_behind_issues(built.tank_shortfalls)
         if (entity_id := self._unreadable_load_sensor(action, built.payload)) is not None:
             raise UpdateFailed(
                 f"Load sensor {entity_id} is unavailable, so EMHASS has nothing "
                 "to build a load forecast from. Check the integration that "
                 "provides it."
             )
+        sent_at = dt_util.utcnow()
         last_run, plan = await self.client.async_optimize(action, built.payload)
+        if plan is not None and last_run.ok and not last_run.infeasible:
+            self._learn_row_zero_mode(inputs, plan, sent_at)
 
         findings: list[Finding] = []
         load_order = built.load_order
@@ -1219,7 +1479,25 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
 
         if plan is not None and not self._schema_supported(plan):
             plan = None
+        if plan is not None and built.extra_rows and not last_run.infeasible:
+            # Success branch only: a kept plan is already folded and numbered
+            # for its own request, so folding it again would corrupt it.
+            folded = plan.folded(len(built.load_order), [row.parent for row in built.extra_rows])
+            if folded is None:
+                _LOGGER.warning(
+                    "EMHASS returned a %s plan without the extra rows requested for "
+                    "later daily windows; ignoring it",
+                    action,
+                )
+            plan = folded
         self._track_degraded_plan_issue(action, plan)
+        if (
+            plan is not None
+            and last_run.ok
+            and not last_run.infeasible
+            and plan.optim_status not in DEGRADED_OPTIM_STATUSES
+        ):
+            self._water_tank_plan_blocked = None
 
         # Trimmed to the horizon that was actually requested: profiles fetch
         # whatever their source publishes (a day-ahead tariff commonly hands
@@ -1230,12 +1508,13 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         # which is what stretched the dashboard cards' time window out past
         # where the plan itself stops.
         #
-        # Cut on the timestep boundary rather than on the wall-clock instant the
-        # run happened to start: EMHASS aligns row zero of its plan to that
-        # boundary, so cutting at `now` (a few seconds later) left the price
-        # series starting one whole timestep after the plan did, and the price
-        # sensors reading "unknown" for the entire timestep in progress -- every
-        # run, indefinitely, since the next run arrives before the gap closes.
+        # Cut on the timestep boundary at or before the run rather than on the
+        # wall-clock instant it happened to start: cutting at `now` (a few
+        # seconds later) left the price series starting one whole timestep
+        # after the plan did, and the price sensors reading "unknown" for the
+        # entire timestep in progress -- every run, indefinitely, since the
+        # next run arrives before the gap closes. Not row zero: that can be the
+        # next boundary, which would drop the price in force right now.
         step = timedelta(minutes=inputs.time_step_minutes)
         window_start = floor_to_step(inputs.now, step)
         horizon_end = window_start + step * inputs.horizon_steps
@@ -1263,7 +1542,10 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             load_forecast=inputs.load or Series.empty(),
             payload=built.payload,
             warnings=built.warnings,
+            defaulted_forecast_methods=built.defaulted_forecast_methods,
             load_order=load_order,
+            payload_order=built.load_order,
+            extra_row_names=[row.name for row in built.extra_rows],
             end_soc=self._end_soc,
             soc_day_range=self._soc_day_range,
             last_action=action,
@@ -1419,6 +1701,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
                 else f"Deferrable {k}"
                 for k, subentry_id in enumerate(built.load_order)
             ]
+            names.extend(row.name for row in built.extra_rows)
             findings = diagnose(built.payload, load_names=names, warnings=built.warnings, now=now)
         except Exception:  # a diagnosis must never break a run
             _LOGGER.debug("Could not diagnose the infeasible %s run", action, exc_info=True)
@@ -1467,6 +1750,44 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             translation_key=translation_key,
             translation_placeholders=placeholders,
         )
+
+    def _track_tank_behind_issues(self, shortfalls: dict[str, TankShortfall]) -> None:
+        """Raise or clear the per-tank "cannot reach its target in time" warning.
+
+        The request already carries a floor lowered to what the heater can
+        reach (``WaterTankConfig.to_emhass``), so the run goes ahead; this only
+        says the schedule is being missed. One issue per tank, cleared by the
+        first request in which its schedule is reachable again.
+        """
+        tanks = [load for load in self.loads.all() if load.is_water_tank]
+        # A deleted tank is never visited below, so sweep its leftover warning.
+        prefix = f"{ISSUE_TANK_BEHIND_SCHEDULE}_"
+        current = {f"{prefix}{load.subentry_id}" for load in tanks}
+        for domain, issue_id in list(ir.async_get(self.hass).issues):
+            if domain == DOMAIN and issue_id.startswith(prefix) and issue_id not in current:
+                ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+        for load in tanks:
+            issue_id = f"{prefix}{load.subentry_id}"
+            shortfall = shortfalls.get(load.subentry_id)
+            if shortfall is None:
+                ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+                continue
+            ir.async_create_issue(
+                self.hass,
+                DOMAIN,
+                issue_id,
+                is_fixable=False,
+                severity=ir.IssueSeverity.WARNING,
+                translation_key=ISSUE_TANK_BEHIND_SCHEDULE,
+                translation_placeholders={
+                    "name": load.name,
+                    "current": f"{shortfall.current:.1f}",
+                    "required": f"{shortfall.required:.1f}",
+                    "achievable": f"{shortfall.achievable:.1f}",
+                    "time": shortfall.moment.strftime("%H:%M"),
+                    "power": format_power(shortfall.power_w),
+                },
+            )
 
     def _track_never_started_issues(self) -> None:
         """Raise or clear the per-load "it never started" repair.
@@ -1620,7 +1941,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         # Only fetched once a thermal load exists: the outdoor forecast is what
         # the thermal model cools towards, and means nothing without one.
         outdoor = Series.empty()
-        if self.loads.has_thermal and config.temperature:
+        if self.loads.needs_outdoor_temperature and config.temperature:
             outdoor = await self._series(config.temperature, PROFILE_KIND_TEMPERATURE)
 
         buy = sell = None
@@ -1651,17 +1972,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
                 )
                 buy, sell = self.network_calendar.apply_bands(buy, sell, self.holiday_cache)
 
-        settings: dict[str, Any] = {}
-        for selection, kind in (
-            (config.price, PROFILE_KIND_PRICE),
-            (config.pv, PROFILE_KIND_PV),
-            (config.load, PROFILE_KIND_LOAD),
-        ):
-            settings.update(self._settings(selection, kind))
-        if self.loads.has_thermal:
-            # A temperature profile may contribute settings instead of a series
-            # (EMHASS built-in lets EMHASS fetch Open-Meteo itself).
-            settings.update(self._settings(config.temperature, PROFILE_KIND_TEMPERATURE))
+        settings = self._forecast_profile_settings()
         if EMHASS_CONF_LOAD_FORECAST_METHOD in settings:
             method, load_bootstrap = await self._resolve_load_forecast_method(
                 settings, now, horizon_end
@@ -1669,6 +1980,14 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             settings[EMHASS_CONF_LOAD_FORECAST_METHOD] = method
             if load_bootstrap is not None:
                 load = load_bootstrap
+
+        # EMHASS skips its own history fetch only when the load series is a list
+        # and so is the weather forecast (a PV series was sent) -- or PV is off.
+        pv_used = bool(config.pv.key) and settings.get("set_use_pv", True) is not False
+        if action == ACTION_MPC and pv_used and (not load or not pv):
+            load = (
+                await self._ensure_history_fetchable(settings, now, horizon_end, bool(load)) or load
+            )
 
         # Whether this request will carry a load series at all -- read off the
         # same emptiness test payload.build_payload uses to decide whether to
@@ -1873,6 +2192,10 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         inputs = PayloadInputs(
             action=action,
             now=now,
+            backend_version=self.backend_version,
+            use_pv=bool(config.pv.key),
+            num_lags=config.dayahead_num_lags,
+            row_zero_mode=self._row_zero_mode,
             time_step_minutes=config.time_step_minutes,
             horizon_steps=config.horizon_steps,
             battery=config.battery,
@@ -1915,6 +2238,17 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             send_soc_final_reward=self.soc_final_reward_supported,
         )
         built = build_payload(inputs)
+        for series, method, label in (
+            (buy, "load_cost_forecast_method", "buy price"),
+            (sell, "production_price_forecast_method", "sell price"),
+        ):
+            if not series and method in built.defaulted_forecast_methods:
+                message = (
+                    f"No configured {label} forecast is available; using Companion's "
+                    "fallback tariff. Configure a price source before relying on this plan."
+                )
+                built.warnings.append(message)
+                _LOGGER.warning(message)
         if network_warnings or price_warnings:
             built.warnings = [*price_warnings, *network_warnings, *built.warnings]
         return inputs, built
@@ -1930,19 +2264,28 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         source stopped, set only when a forecast was actually used, so the
         price-horizon observation keeps measuring the source and not the fill.
         Any failure leaves ``spot`` untouched: the payload builder then repeats
-        the previous day as it always did, and the reason is shown as a warning.
+        the previous day as it always did. Warn only when published price
+        intervals do not cover the next 24 hours, not for lookahead-only fills.
         """
         assert self.price_forecast is not None
+        real_until = spot.end + (spot.step() or timedelta())
+        warn = real_until < now + timedelta(hours=24)
         try:
             forecast = await self.price_forecast.async_get(now)
             fill = fill_with_forecast(spot, forecast, until)
         except PriceForecastError as err:
-            return spot, None, f"Price forecast not used: {err}."
+            return spot, None, f"Price forecast unavailable: {err}." if warn else None
+        if not warn:
+            return fill.series, spot.end, None
+        source = (
+            f"{fill.forecast_weight:.0%} forecast, {1 - fill.forecast_weight:.0%} previous day"
+            if fill.forecast_weight > 0
+            else "previous-day prices"
+        )
         return (
             fill.series,
             spot.end,
-            f"Prices after {dt_util.as_local(spot.end + (spot.step() or timedelta())):%H:%M} come from the "
-            f"{PROVIDERS[self.price_forecast.config.provider].name} forecast.",
+            f"Estimated prices from {dt_util.as_local(fill.forecast_from):%d %b %H:%M %Z}: {source}.",
         )
 
     async def _series(self, selection: ProfileSelection, kind: str) -> Series:
@@ -1957,8 +2300,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         Routed through :meth:`_profile` for the same reason :meth:`_series` is:
         a settings-only profile that no longer resolves (deleted, renamed)
         would otherwise contribute nothing *silently*, and the run would go out
-        with EMHASS falling back to its own persisted config -- precisely what
-        :meth:`async_sync_emhass_config` exists to prevent. Failing here means
+        with EMHASS falling back to its own persisted config. Failing here means
         ``_async_run``'s ProfileError handler names the missing profile.
         """
         profile = self._profile(selection, kind)
@@ -2179,22 +2521,30 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
 
         Deliberately bypasses :meth:`async_run`: a fit produces no plan and no
         ``last-run`` outcome worth storing in ``self.data``, it just trains and
-        saves a model file. Runtime parameters are sent explicitly rather than
-        relying on the persisted config, for the same reason
-        :meth:`async_sync_emhass_config` pushes them proactively -- so this
-        works correctly even if that sync has not run yet or failed.
+        saves a model file. Fit and implicit prediction use the shared resolver,
+        independently of EMHASS's saved configuration.
         """
-        settings = self.load_forecast_settings()
-        runtime_params: dict[str, Any] = {
-            EMHASS_CONF_LOAD_FORECAST_METHOD: LOAD_FORECAST_METHOD_MLFORECASTER,
-        }
-        sensor = settings.get(EMHASS_CONF_SENSOR_LOAD)
-        if sensor:
-            runtime_params[EMHASS_CONF_SENSOR_LOAD] = sensor
+        async with self._ml_fit_lock:
+            try:
+                await self._async_fit_forecast(self._forecast_profile_settings())
+            except ProfileError as err:
+                raise HomeAssistantError(f"Forecast model was not trained: {err}") from err
+
+    async def _async_fit_forecast(self, settings: dict[str, Any]) -> None:
+        runtime_params = self._effective_ml_settings(
+            settings | {EMHASS_CONF_LOAD_FORECAST_METHOD: LOAD_FORECAST_METHOD_MLFORECASTER}
+        )
+        if not runtime_params.get(EMHASS_CONF_SENSOR_LOAD) or not runtime_params.get(
+            EMHASS_CONF_VAR_MODEL
+        ):
+            raise EmhassError("Select a load sensor before training the load forecaster")
+        self._ml_trained_settings = None
+        self._ml_trained_at = None
+        await self._async_save_ml_state()
         await self.client.async_run_action(ACTION_FORECAST_FIT, runtime_params)
-        if sensor:
-            self._ml_trained_sensor = sensor
-            await self._async_save_ml_state()
+        self._ml_trained_settings = runtime_params
+        self._ml_trained_at = dt_util.utcnow()
+        await self._async_save_ml_state()
         self._track_ml_not_ready_issue(False)
 
     async def _has_history_since(self, entity_id: str, lookback: timedelta) -> bool:
@@ -2347,21 +2697,22 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
 
         Passes ``settings[EMHASS_CONF_LOAD_FORECAST_METHOD]`` through unchanged
         (with no bootstrap series) unless it asks for mlforecaster and that has
-        not been confirmed trained for the *currently* configured sensor.
-        Enabling mlforecaster for the first time, or changing which sensor
-        feeds it, otherwise means the very next optimisation is a
-        guaranteed-failing predict against a stale or entirely missing model
-        file (EMHASS's ``_get_ml_param()`` falls back to whatever
-        ``var_model`` its last fit used, regardless of what this run asks for
-        -- see :meth:`async_sync_emhass_config`).
+        not been confirmed trained with the current effective settings.
+        Sensor, timestep, lag, model and preprocessing changes require a new
+        fit: runtime overrides cannot change an already trained model file.
 
         Falls back to :meth:`_load_forecast_fallback` until a fit against the
         current sensor actually succeeds, auto-triggering that fit itself the
         first time enough recorder history exists rather than waiting on the
-        "Train load forecaster" button to be pressed by hand. A sensor with
+        "Train load forecaster" action to be called by hand. A sensor with
         less than :data:`ML_MIN_HISTORY_DAYS` of history (most commonly a
         sensor "Create a house load sensor" only just built) is left alone
         until it has enough -- there is nothing to train on yet.
+
+        A trained model is refitted every :data:`_ML_REFIT_INTERVAL`, because a
+        fitted model never learns from the data it later predicts on. A failed
+        refit does not keep the old model: it falls back and retries as for a
+        first fit.
 
         Also falls back, whatever the configured method, for
         :data:`_NO_LIST_RETRY_COOLDOWN` after a run that left the forecast to
@@ -2382,37 +2733,108 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         if method != LOAD_FORECAST_METHOD_MLFORECASTER:
             return method, None
 
-        sensor = settings.get(EMHASS_CONF_SENSOR_LOAD)
-        if sensor and sensor == self._ml_trained_sensor:
+        effective = self._effective_ml_settings(settings)
+        sensor = effective.get(EMHASS_CONF_SENSOR_LOAD)
+        if sensor and self._ml_model_matches(effective):
+            if (
+                await self._ml_refit_due()
+                and not self._ml_fit_lock.locked()
+                and not self._ml_attempt_cooling_down(now)
+            ):
+                async with self._ml_fit_lock:
+                    if await self._has_enough_history(effective[EMHASS_CONF_VAR_MODEL]):
+                        if not await self._async_auto_fit(settings, sensor, now):
+                            return await self._load_forecast_fallback(sensor, now, horizon_end)
+                    else:
+                        # A fit would fail, and clearing the working model first
+                        # would then leave nothing -- e.g. after recorder
+                        # retention was cut. Keep the old one, look again later.
+                        self._ml_last_attempt = now
+                if not self._ml_model_matches(effective):
+                    return await self._load_forecast_fallback(sensor, now, horizon_end)
             self._track_ml_not_ready_issue(False)
             return method, None
         if not sensor:
             return await self._load_forecast_fallback(sensor, now, horizon_end)
 
-        if self._ml_fit_lock.locked() or (
-            self._ml_last_attempt is not None
-            and now - self._ml_last_attempt < _ML_FIT_RETRY_COOLDOWN
-        ):
+        self._track_ml_not_ready_issue(True)
+        if self._ml_fit_lock.locked() or self._ml_attempt_cooling_down(now):
             return await self._load_forecast_fallback(sensor, now, horizon_end)
 
         async with self._ml_fit_lock:
-            if not await self._has_enough_history(sensor):
+            if not await self._has_enough_history(effective[EMHASS_CONF_VAR_MODEL]):
                 self._track_ml_not_ready_issue(True)
                 return await self._load_forecast_fallback(sensor, now, horizon_end)
 
-            self._ml_last_attempt = now
-            try:
-                await self.async_run_forecast_fit()
-            except EmhassError as err:
-                _LOGGER.warning(
-                    "Auto-training the load forecaster for %s failed (%s); "
-                    "falling back for this run instead",
-                    sensor,
-                    err,
-                )
+            if not await self._async_auto_fit(settings, sensor, now):
                 return await self._load_forecast_fallback(sensor, now, horizon_end)
 
+        if not self._ml_model_matches(effective):
+            return await self._load_forecast_fallback(sensor, now, horizon_end)
         return method, None
+
+    async def _ensure_history_fetchable(
+        self,
+        settings: dict[str, Any],
+        now: datetime,
+        horizon_end: datetime,
+        has_load_series: bool = False,
+    ) -> Series | None:
+        """Make the history fetch of a series-less MPC run succeed, or avoid it.
+
+        With no load series in the request, ``naive-mpc-optim`` fetches recent
+        history for the load sensor *and*, when PV is used, for
+        ``sensor_power_photovoltaics`` -- and skips every day on which either
+        has none. That setting otherwise comes from EMHASS's saved
+        configuration, where it is the stock ``sensor.power_photovoltaics``
+        unless someone renamed it, so the run died with "No data was retrieved
+        for any day". It surfaced when the load forecaster finished training,
+        the first time a request carried no series. The PV sensor is named
+        here: the profile's own, else the live PV entity. With neither, nothing
+        can satisfy the fetch, so the in-house series is returned to send instead
+        (which only avoids the fetch when a PV series is sent as well; with native
+        PV forecasting EMHASS fetches regardless, and the run is left to report it).
+        """
+        if settings.get(EMHASS_CONF_SENSOR_PV):
+            return None
+        if self.config.pv_live_entity:
+            settings[EMHASS_CONF_SENSOR_PV] = self.config.pv_live_entity
+            return None
+        sensor = settings.get(EMHASS_CONF_SENSOR_LOAD)
+        if not sensor or has_load_series:
+            return None
+        _LOGGER.warning(
+            "No live PV sensor is configured, so EMHASS cannot fetch the history it "
+            "needs without a load series; sending the integration's own load series"
+        )
+        method, series = await self._load_forecast_fallback(sensor, now, horizon_end)
+        settings[EMHASS_CONF_LOAD_FORECAST_METHOD] = method
+        return series
+
+    def _ml_attempt_cooling_down(self, now: datetime) -> bool:
+        return (
+            self._ml_last_attempt is not None
+            and now - self._ml_last_attempt < _ML_FIT_RETRY_COOLDOWN
+        )
+
+    async def _async_auto_fit(self, settings: dict[str, Any], sensor: str, now: datetime) -> bool:
+        """Fit on the caller's behalf; the caller holds ``_ml_fit_lock``.
+
+        Returns whether it succeeded. A failure is logged, not raised, so the
+        run carries on with the in-house fallback forecast.
+        """
+        self._ml_last_attempt = now
+        try:
+            await self._async_fit_forecast(settings)
+        except EmhassError as err:
+            _LOGGER.warning(
+                "Auto-training the load forecaster for %s failed (%s); "
+                "falling back for this run instead",
+                sensor,
+                err,
+            )
+            return False
+        return True
 
     def _track_ml_not_ready_issue(self, not_ready: bool) -> None:
         """Raise or clear the "mlforecaster not trained yet" repair.

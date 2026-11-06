@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from itertools import pairwise
 import logging
+import math
 from typing import Any, Final
 
 from homeassistant.config_entries import (
@@ -30,6 +31,7 @@ import voluptuous as vol
 from .api import EmhassClient, EmhassError
 from .configuration import EmhassConfig
 from .const import (
+    ADVANCED_SECTION,
     CONF_ADDER,
     CONF_API_KEY,
     CONF_AREA,
@@ -47,6 +49,7 @@ from .const import (
     CONF_CHARGE_EFFICIENCY,
     CONF_CHARGE_POWER_DERATING,
     CONF_COMFORT_END,
+    CONF_COMFORT_PENALTY,
     CONF_COMFORT_START,
     CONF_COMFORT_TEMPERATURE,
     CONF_COMPUTE_CURTAILMENT,
@@ -54,6 +57,9 @@ from .const import (
     CONF_COOLING_CONSTANT,
     CONF_DAYAHEAD_FALLBACK_TIME,
     CONF_DISCHARGE_EFFICIENCY,
+    CONF_DRAW_END,
+    CONF_DRAW_ENERGY,
+    CONF_DRAW_START,
     CONF_EARLIEST_START,
     CONF_EMHASS_STANDARD_NAMES,
     CONF_END_SOC_MODE,
@@ -65,8 +71,11 @@ from .const import (
     CONF_GROUP_LOAD_IDS,
     CONF_GROUP_MAX_POWER,
     CONF_GROUP_MUTUAL_EXCLUSION,
+    CONF_HEATER_COP,
     CONF_HEATING_RATE,
     CONF_HORIZON_HOURS,
+    CONF_HOT_WATER_PERIOD_COUNT,
+    CONF_HOT_WATER_PERIODS,
     CONF_HOUSE_LOAD_TOTAL_ENTITY,
     CONF_HYBRID_INVERTER,
     CONF_INVERTER,
@@ -111,13 +120,16 @@ from .const import (
     CONF_SETBACK_TEMPERATURE,
     CONF_SINGLE_CONSTANT,
     CONF_SOC_ENTITY,
+    CONF_STANDBY_LOSS,
     CONF_STARTUP_PENALTY,
     CONF_SURPLUS_HEADROOM,
     CONF_SURPLUS_PRIORITY,
+    CONF_TANK_VOLUME,
     CONF_TEMPERATURE,
     CONF_TEMPERATURE_SENSOR,
     CONF_TEMPLATE,
     CONF_THERMAL_INERTIA,
+    CONF_THERMAL_MODEL,
     CONF_TIME_STEP,
     CONF_URL,
     CONF_WEIGHT_BATTERY_CHARGE,
@@ -133,12 +145,14 @@ from .const import (
     DEFAULT_BATTERY_STRESS_COST,
     DEFAULT_BATTERY_STRESS_SEGMENTS,
     DEFAULT_CHARGE_EFFICIENCY,
+    DEFAULT_COMFORT_PENALTY,
     DEFAULT_COMPUTE_CURTAILMENT,
     DEFAULT_DAYAHEAD_FALLBACK_TIME,
     DEFAULT_DISCHARGE_EFFICIENCY,
     DEFAULT_END_SOC_MODE,
     DEFAULT_GRID_EXPORT_MAX,
     DEFAULT_GRID_IMPORT_MAX,
+    DEFAULT_HEATER_COP,
     DEFAULT_HORIZON_HOURS,
     DEFAULT_INVERTER_EFFICIENCY,
     DEFAULT_MPC_INTERVAL,
@@ -151,6 +165,7 @@ from .const import (
     DEFAULT_SOC_TARGET,
     DEFAULT_SURPLUS_HEADROOM_W,
     DEFAULT_SURPLUS_PRIORITY,
+    DEFAULT_TANK_VOLUME,
     DEFAULT_TIME_STEP,
     DEFAULT_URL,
     DEFAULT_WEIGHT_BATTERY_CHARGE,
@@ -181,6 +196,11 @@ from .const import (
     SUBENTRY_TYPE_THERMAL,
     TEMPERATURE_ADVANCED_PROFILES,
     TEMPERATURE_PROFILE_ORDER,
+    THERMAL_MODEL_ROOM,
+    THERMAL_MODEL_WATER_TANK,
+)
+from .forms import (
+    flatten_picker as _flatten_picker,
 )
 from .forms import (
     flatten_sections as _flatten_sections,
@@ -212,10 +232,13 @@ from .thermal import (
     DEFAULT_MAX_TEMPERATURE,
     DEFAULT_SETBACK_TEMPERATURE,
     DEFAULT_THERMAL_INERTIA,
+    MAX_THERMAL_TEMPERATURE,
+    MIN_THERMAL_TEMPERATURE,
     SENSE_HEAT,
     SENSES,
 )
 from .util import version_at_least
+from .water_tank import MAX_HOT_WATER_PERIODS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -443,8 +466,8 @@ def _profile_picker_schema(
 ) -> dict[Any, Any]:
     """The profile picker, with the less common sources in a collapsed section.
 
-    Both lists write the same ``profile`` key and ``_flatten_sections`` lets the
-    section win, so choosing from either ends up as one answer. The basic list
+    Both lists write the same ``profile`` key. Reconfiguration uses
+    ``_flatten_picker`` so a changed selection wins over the prefill. The basic list
     has no default: leaving both untouched is reported as ``profile_required``
     rather than silently picking something. When either list would be empty the
     picker stays one flat list.
@@ -520,55 +543,16 @@ def _default_profile_options(profile: Profile, *, skip: set[str] = frozenset()) 
 LOAD_CREATE_LABEL: Final = "Create a house load sensor"
 
 
-def _load_picker_schema(
-    profiles: list[Profile], *, current: str | None = None, advanced_open: bool = False
-) -> dict[Any, Any]:
-    """The load picker: creating a sensor up front, every existing source under Advanced.
-
-    Same shape as ``_profile_picker_schema`` -- one ``profile`` key in both
-    places, the section winning when ``_flatten_sections`` merges them. The
-    basic list is the create option alone (always offered), so the section is
-    never empty while a profile exists.
-    """
-    profile_keys = {profile.key for profile in profiles}
-    if not profiles:
-        return {
-            vol.Required(CONF_PROFILE, description={"suggested_value": current}): (
-                _load_profile_selector(profiles)
-            )
-        }
-    create_only = selector.SelectSelector(
-        selector.SelectSelectorConfig(
-            mode=selector.SelectSelectorMode.LIST,
-            options=[
-                selector.SelectOptionDict(
-                    value=LOAD_PROFILE_CREATE_SENTINEL, label=LOAD_CREATE_LABEL
-                )
-            ],
+def _load_picker_schema(profiles: list[Profile], *, current: str | None = None) -> dict[Any, Any]:
+    """One mutually exclusive choice for creating a sensor or using an existing source."""
+    return {
+        vol.Required(CONF_PROFILE, description={"suggested_value": current}): (
+            _load_profile_selector(profiles)
         )
-    )
-    return _with_advanced(
-        {
-            vol.Optional(
-                CONF_PROFILE,
-                description=(
-                    {"suggested_value": current} if current == LOAD_PROFILE_CREATE_SENTINEL else {}
-                ),
-            ): create_only
-        },
-        {
-            vol.Optional(
-                CONF_PROFILE,
-                description={"suggested_value": current} if current in profile_keys else {},
-            ): _load_profile_selector(profiles, create=False, numbered=True)
-        },
-        collapsed=not (advanced_open or current in profile_keys),
-    )
+    }
 
 
-def _load_profile_selector(
-    profiles: list[Profile], *, create: bool = True, numbered: bool = False
-) -> selector.SelectSelector:
+def _load_profile_selector(profiles: list[Profile]) -> selector.SelectSelector:
     """The load-profile picker, with "Create a house load sensor" first.
 
     Also reorders the real profiles per LOAD_PROFILE_ORDER: available_profiles
@@ -578,21 +562,9 @@ def _load_profile_selector(
     """
     order = {key: index for index, key in enumerate(LOAD_PROFILE_ORDER)}
     ranked = sorted(profiles, key=lambda profile: order.get(profile.key, len(order)))
-    # The create option is not a profile, so it has no number of its own.
-    numbering = LOAD_PROFILE_ORDER[1:] if numbered else ()
     options = [
-        *(
-            [selector.SelectOptionDict(value=LOAD_PROFILE_CREATE_SENTINEL, label=LOAD_CREATE_LABEL)]
-            if create
-            else []
-        ),
-        *(
-            selector.SelectOptionDict(
-                value=profile.key,
-                label=_numbered(profile.name, profile.key, numbering),
-            )
-            for profile in ranked
-        ),
+        selector.SelectOptionDict(value=LOAD_PROFILE_CREATE_SENTINEL, label=LOAD_CREATE_LABEL),
+        *(selector.SelectOptionDict(value=profile.key, label=profile.name) for profile in ranked),
     ]
     return selector.SelectSelector(
         selector.SelectSelectorConfig(mode=selector.SelectSelectorMode.LIST, options=options)
@@ -819,6 +791,7 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
             suggested = url
 
         return self.async_show_form(
+            last_step=False,
             step_id="user",
             data_schema=vol.Schema(
                 {vol.Required(CONF_URL, default=suggested): selector.TextSelector()}
@@ -858,6 +831,7 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
             suggested = url
 
         return self.async_show_form(
+            last_step=True,
             step_id="reconfigure",
             data_schema=vol.Schema(
                 {vol.Required(CONF_URL, default=suggested): selector.TextSelector()}
@@ -887,6 +861,7 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
                 return await self.async_step_pv()
 
         return self.async_show_form(
+            last_step=False,
             step_id="tariff",
             data_schema=vol.Schema(
                 tariff_schema(
@@ -929,8 +904,9 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
                 return await self.async_step_load_options()
 
         return self.async_show_form(
+            last_step=False,
             step_id="load",
-            data_schema=vol.Schema(_load_picker_schema(choices, advanced_open=bool(errors))),
+            data_schema=vol.Schema(_load_picker_schema(choices)),
             errors=errors,
         )
 
@@ -952,6 +928,7 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
             return await self.async_step_load_create_options()
 
         return self.async_show_form(
+            last_step=False,
             step_id="load_create",
             data_schema=vol.Schema(
                 {
@@ -978,6 +955,7 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
             return await self.async_step_battery()
 
         return self.async_show_form(
+            last_step=False,
             step_id="load_create_options",
             data_schema=vol.Schema(schema),
             description_placeholders={
@@ -1015,6 +993,7 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
 
         defaults = _battery_form_defaults(user_input) if user_input is not None else {}
         return self.async_show_form(
+            last_step=False,
             step_id="battery",
             data_schema=vol.Schema(battery_schema(defaults, advanced_open="base" in errors)),
             description_placeholders={
@@ -1050,6 +1029,7 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
             }
         )
         return self.async_show_form(
+            last_step=False,
             step_id="inverter_settings",
             data_schema=vol.Schema(inverter_schema(defaults)),
             errors=errors,
@@ -1077,6 +1057,7 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
             return await self.async_step_inverter_options()
 
         return self.async_show_form(
+            last_step=False,
             step_id="inverter",
             data_schema=vol.Schema(
                 {vol.Optional(CONF_PROFILE): _inverter_profile_selector(choices)}
@@ -1094,6 +1075,7 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
             return await self.async_step_grid()
 
         return self.async_show_form(
+            last_step=False,
             step_id="inverter_options",
             data_schema=self.add_suggested_values_to_schema(
                 vol.Schema(profile.selector_schema()),
@@ -1128,6 +1110,7 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
         )
         defaults = {CONF_TIME_STEP: detected} if detected else {}
         return self.async_show_form(
+            last_step=not bool(async_taken_standard_ids(self.hass)),
             step_id="grid",
             data_schema=vol.Schema(
                 grid_schema({**defaults, **submitted}, advanced_open=bool(errors))
@@ -1167,6 +1150,7 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
             return self._async_finish()
 
         return self.async_show_form(
+            last_step=True,
             step_id="compatibility",
             data_schema=vol.Schema(
                 {
@@ -1213,6 +1197,7 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
         order = _PROFILE_ORDER_BY_KIND.get(kind, ())
         ranked = _rank_profiles(_profiles_shown_first(kind, choices), order)
         return self.async_show_form(
+            last_step=False,
             step_id=step_id,
             data_schema=vol.Schema(
                 _profile_picker_schema(kind, choices, advanced_open=bool(errors))
@@ -1243,6 +1228,7 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
             return await next_step()
 
         return self.async_show_form(
+            last_step=False,
             step_id=step_id,
             data_schema=vol.Schema(profile.selector_schema()),
             description_placeholders={
@@ -1583,7 +1569,11 @@ def thermal_schema(
                     default=defaults.get(CONF_COMFORT_TEMPERATURE, DEFAULT_COMFORT_TEMPERATURE),
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
-                        min=5, max=35, step=0.5, unit_of_measurement="°C", mode="box"
+                        min=MIN_THERMAL_TEMPERATURE,
+                        max=MAX_THERMAL_TEMPERATURE,
+                        step=0.5,
+                        unit_of_measurement="°C",
+                        mode="box",
                     )
                 ),
                 vol.Required(
@@ -1591,7 +1581,11 @@ def thermal_schema(
                     default=defaults.get(CONF_SETBACK_TEMPERATURE, DEFAULT_SETBACK_TEMPERATURE),
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
-                        min=5, max=35, step=0.5, unit_of_measurement="°C", mode="box"
+                        min=MIN_THERMAL_TEMPERATURE,
+                        max=MAX_THERMAL_TEMPERATURE,
+                        step=0.5,
+                        unit_of_measurement="°C",
+                        mode="box",
                     )
                 ),
                 vol.Required(
@@ -1599,7 +1593,11 @@ def thermal_schema(
                     default=defaults.get(CONF_MAX_TEMPERATURE, DEFAULT_MAX_TEMPERATURE),
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
-                        min=5, max=40, step=0.5, unit_of_measurement="°C", mode="box"
+                        min=MIN_THERMAL_TEMPERATURE,
+                        max=MAX_THERMAL_TEMPERATURE,
+                        step=0.5,
+                        unit_of_measurement="°C",
+                        mode="box",
                     )
                 ),
                 vol.Required(
@@ -1653,6 +1651,155 @@ def thermal_schema(
     return _split_advanced(schema, THERMAL_ADVANCED_KEYS) if initial else schema
 
 
+def thermal_kind_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
+    """Choose the thermal model once, before asking model-specific questions."""
+    return {
+        vol.Required(CONF_NAME, default=defaults.get(CONF_NAME, "")): vol.All(
+            selector.TextSelector(), vol.Length(min=1)
+        ),
+        vol.Required(
+            CONF_THERMAL_MODEL,
+            default=defaults.get(CONF_THERMAL_MODEL, THERMAL_MODEL_ROOM),
+        ): selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                mode=selector.SelectSelectorMode.DROPDOWN,
+                translation_key="thermal_model",
+                options=[THERMAL_MODEL_ROOM, THERMAL_MODEL_WATER_TANK],
+            )
+        ),
+    }
+
+
+class _FiniteNumberSelector(selector.NumberSelector):
+    """Keep number-selector serialization while rejecting nonfinite input."""
+
+    def __call__(self, value: Any) -> float:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise vol.Invalid("Expected a finite number")
+        try:
+            finite = math.isfinite(value)
+        except OverflowError as err:
+            raise vol.Invalid("Expected a finite number") from err
+        if not finite:
+            raise vol.Invalid("Expected a finite number")
+        return super().__call__(value)
+
+
+def water_tank_schema(
+    defaults: dict[str, Any], step_minutes: int = DEFAULT_TIME_STEP, *, initial: bool = True
+) -> dict[Any, Any]:
+    """Immersion tank settings, with entity-owned values offered only at creation."""
+    room_fields = thermal_schema(defaults, step_minutes, initial=initial)
+    excluded = {CONF_SENSE, CONF_NAME, ADVANCED_SECTION, CONF_COMFORT_START, CONF_COMFORT_END}
+    if not initial:
+        excluded.discard(CONF_NAME)
+    schema = {key: value for key, value in room_fields.items() if str(key) not in excluded}
+    schema.pop(next(key for key in schema if str(key) == CONF_TEMPERATURE_SENSOR))
+    sensor_key = (
+        vol.Required(CONF_TEMPERATURE_SENSOR, default=defaults[CONF_TEMPERATURE_SENSOR])
+        if defaults.get(CONF_TEMPERATURE_SENSOR)
+        else vol.Required(CONF_TEMPERATURE_SENSOR)
+    )
+    schema[sensor_key] = selector.EntitySelector(
+        selector.EntitySelectorConfig(filter=[{"domain": "sensor", "device_class": "temperature"}])
+    )
+    if initial:
+        for field, temperature in (
+            (CONF_SETBACK_TEMPERATURE, 50),
+            (CONF_COMFORT_TEMPERATURE, 60),
+            (CONF_MAX_TEMPERATURE, 65),
+        ):
+            previous = next(key for key in schema if str(key) == field)
+            validator = schema.pop(previous)
+            schema[vol.Required(field, default=defaults.get(field, temperature))] = validator
+    volume_key = vol.Required(
+        CONF_TANK_VOLUME, default=defaults.get(CONF_TANK_VOLUME, DEFAULT_TANK_VOLUME)
+    )
+    schema[volume_key] = selector.NumberSelector(
+        selector.NumberSelectorConfig(min=0.1, step="any", unit_of_measurement="L", mode="box")
+    )
+    periods = _stored_tank_periods(defaults)
+    schema[vol.Required(CONF_HOT_WATER_PERIOD_COUNT, default=len(periods) or 1)] = vol.All(
+        _FiniteNumberSelector(
+            selector.NumberSelectorConfig(min=1, max=MAX_HOT_WATER_PERIODS, step=1, mode="box")
+        ),
+        vol.In(range(1, MAX_HOT_WATER_PERIODS + 1)),
+    )
+    basic = {
+        key: _FiniteNumberSelector(value.config)
+        if isinstance(value, selector.NumberSelector)
+        else value
+        for key, value in schema.items()
+    }
+    if not initial:
+        return basic
+    # All three are entity-owned from here on, so only the first setup offers them.
+    return _with_advanced(
+        basic,
+        {
+            vol.Required(
+                CONF_STANDBY_LOSS, default=defaults.get(CONF_STANDBY_LOSS, 60)
+            ): _FiniteNumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0, max=1000, step="any", unit_of_measurement="W", mode="box"
+                )
+            ),
+            vol.Required(
+                CONF_HEATER_COP, default=defaults.get(CONF_HEATER_COP, DEFAULT_HEATER_COP)
+            ): _FiniteNumberSelector(
+                selector.NumberSelectorConfig(min=0.1, max=10, step="any", mode="box")
+            ),
+            vol.Required(
+                CONF_COMFORT_PENALTY,
+                default=defaults.get(CONF_COMFORT_PENALTY, DEFAULT_COMFORT_PENALTY),
+            ): _FiniteNumberSelector(
+                selector.NumberSelectorConfig(min=0, max=1000, step="any", mode="box")
+            ),
+        },
+    )
+
+
+def _stored_tank_periods(defaults: dict[str, Any]) -> list[dict[str, Any]]:
+    """Offer legacy consumption as one period without changing it on read."""
+    if CONF_HOT_WATER_PERIODS in defaults:
+        periods = defaults[CONF_HOT_WATER_PERIODS]
+        return (
+            [dict(period) for period in periods if isinstance(period, dict)][:MAX_HOT_WATER_PERIODS]
+            if isinstance(periods, list)
+            else []
+        )
+    fields = (CONF_DRAW_START, CONF_DRAW_END, CONF_DRAW_ENERGY)
+    return (
+        [{field: defaults[field] for field in fields}]
+        if all(field in defaults for field in fields)
+        else []
+    )
+
+
+def water_tank_period_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
+    """One repeatable setup page; consumption is per period, not per day."""
+    schema = {
+        vol.Optional(CONF_NAME, default=defaults.get(CONF_NAME, "")): selector.TextSelector(),
+        vol.Optional("enabled", default=defaults.get("enabled", True)): selector.BooleanSelector(),
+    }
+    for field in (CONF_DRAW_START, CONF_DRAW_END, CONF_DRAW_ENERGY):
+        key = (
+            vol.Required(field, default=defaults[field])
+            if field in defaults
+            else vol.Required(field)
+        )
+        schema[key] = (
+            _FiniteNumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0, step="any", unit_of_measurement="kWh", mode="box"
+                )
+            )
+            if field == CONF_DRAW_ENERGY
+            else selector.TimeSelector()
+        )
+    return schema
+
+
 def _clean_deferrable(user_input: dict[str, Any]) -> dict[str, Any]:
     """Drop empty optional fields so absent means "unset", not "midnight"."""
     return {key: value for key, value in user_input.items() if value not in (None, "")}
@@ -1663,9 +1810,7 @@ class DeferrableLoadSubentryFlow(ConfigSubentryFlow):
 
     _schema = staticmethod(deferrable_schema)
     _kind_schema: Any = staticmethod(deferrable_kind_schema)
-    """The first step's fields, or None for a load type with only one step.
-    Set to None by the thermal flow, whose demand is a comfort band rather than
-    a run time and so has no recurrence to choose."""
+    """The first step's fields, or None for a load type with only one step."""
 
     _kind: dict[str, Any]
     """What the first step answered, carried into the second."""
@@ -1694,6 +1839,7 @@ class DeferrableLoadSubentryFlow(ConfigSubentryFlow):
             if user_input is not None:
                 return self._create(_clean_deferrable(_flatten_sections(user_input)))
             return self.async_show_form(
+                last_step=True,
                 step_id="user",
                 data_schema=vol.Schema(self._schema({}, self._step_minutes)),
                 description_placeholders=self._placeholders(),
@@ -1704,6 +1850,7 @@ class DeferrableLoadSubentryFlow(ConfigSubentryFlow):
             return await self.async_step_settings()
 
         return self.async_show_form(
+            last_step=False,
             step_id="user",
             data_schema=vol.Schema(self._kind_schema({})),
             description_placeholders=self._placeholders(),
@@ -1766,18 +1913,164 @@ class DeferrableLoadSubentryFlow(ConfigSubentryFlow):
 
 
 class ThermalLoadSubentryFlow(DeferrableLoadSubentryFlow):
-    """Add or reconfigure one thermal load.
-
-    The thermal questions instead of the deferrable ones, asked in a single
-    step: a thermal load's demand is its comfort band, which stands every day
-    by nature, so there is no recurrence to pick and nothing that would change
-    which fields follow. The temperature sensor joins the clearable keys so a
-    blanked picker actually forgets the sensor.
-    """
+    """Choose a room or immersion tank at creation; keep that model on edits."""
 
     _schema = staticmethod(thermal_schema)
-    _kind_schema = None
+    _kind_schema = staticmethod(thermal_kind_schema)
     _clearable_keys = (CONF_POWER_SENSOR, CONF_CONTROL_ENTITY, CONF_TEMPERATURE_SENSOR)
+
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
+        if (
+            user_input is not None
+            and CONF_SENSE in user_input
+            and user_input.get(CONF_THERMAL_MODEL, THERMAL_MODEL_ROOM) == THERMAL_MODEL_ROOM
+        ):
+            return self._create(_clean_deferrable(_flatten_sections(user_input)))
+        if user_input is None:
+            return self.async_show_form(
+                last_step=False,
+                step_id="user",
+                data_schema=vol.Schema(thermal_kind_schema({}), extra=vol.ALLOW_EXTRA),
+                description_placeholders=self._placeholders(),
+            )
+        return await super().async_step_user(
+            {
+                key: value
+                for key, value in user_input.items()
+                if key in (CONF_NAME, CONF_THERMAL_MODEL)
+            }
+        )
+
+    async def async_step_settings(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        model = self._kind.get(CONF_THERMAL_MODEL, THERMAL_MODEL_ROOM)
+        if model == THERMAL_MODEL_ROOM:
+            schema = {
+                key: value
+                for key, value in thermal_schema({}, self._step_minutes).items()
+                if str(key) != CONF_NAME
+            }
+            if user_input is not None:
+                return self._create(
+                    {**_clean_deferrable(_flatten_sections(user_input)), **self._kind}
+                )
+            return self.async_show_form(
+                step_id="settings",
+                data_schema=vol.Schema(schema),
+                description_placeholders=self._placeholders(),
+            )
+        return self._tank_form("water_tank", user_input, initial=True)
+
+    async def async_step_water_tank(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        return self._tank_form("water_tank", user_input, initial=True)
+
+    def _tank_form(
+        self, step_id: str, user_input: dict[str, Any] | None, *, initial: bool
+    ) -> SubentryFlowResult:
+        stored = {} if initial else dict(self._get_reconfigure_subentry().data)
+        schema = vol.Schema(water_tank_schema(stored, self._step_minutes, initial=initial))
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            try:
+                data = _clean_deferrable(_flatten_sections(schema(user_input)))
+            except vol.Invalid as err:
+                field = str(err.path[0]) if err.path else "base"
+                errors["base" if field == ADVANCED_SECTION else field] = "invalid_tank_value"
+            else:
+                if initial and not (
+                    data[CONF_SETBACK_TEMPERATURE]
+                    <= data[CONF_COMFORT_TEMPERATURE]
+                    <= data[CONF_MAX_TEMPERATURE]
+                ):
+                    errors["base"] = "invalid_tank_band"
+                else:
+                    self._tank_initial = initial
+                    self._tank_period_count = int(data.pop(CONF_HOT_WATER_PERIOD_COUNT))
+                    self._tank_existing_periods = _stored_tank_periods(stored)
+                    self._tank_periods: list[dict[str, Any]] = []
+                    self._tank_data = {**stored, **data}
+                    if initial:
+                        self._tank_data.update(self._kind)
+                    for key in (CONF_POWER_SENSOR, CONF_CONTROL_ENTITY):
+                        if key not in data:
+                            self._tank_data.pop(key, None)
+                    return self._tank_period_form(None)
+        return self.async_show_form(
+            last_step=False,
+            step_id=step_id,
+            data_schema=schema,
+            errors=errors,
+            description_placeholders=self._placeholders(),
+        )
+
+    async def async_step_water_tank_period(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        return self._tank_period_form(user_input)
+
+    def _tank_period_form(self, user_input: dict[str, Any] | None) -> SubentryFlowResult:
+        index = len(self._tank_periods)
+        defaults = (
+            self._tank_existing_periods[index] if index < len(self._tank_existing_periods) else {}
+        )
+        schema = vol.Schema(water_tank_period_schema(defaults))
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            try:
+                period = _clean_deferrable(schema(user_input))
+            except vol.Invalid as err:
+                errors[str(err.path[0]) if err.path else "base"] = "invalid_tank_value"
+            else:
+                self._tank_periods.append(period)
+                if len(self._tank_periods) < self._tank_period_count:
+                    return self._tank_period_form(None)
+                data = {**self._tank_data, CONF_HOT_WATER_PERIODS: self._tank_periods}
+                for key in (
+                    CONF_DRAW_START,
+                    CONF_DRAW_END,
+                    CONF_DRAW_ENERGY,
+                    CONF_COMFORT_START,
+                    CONF_COMFORT_END,
+                ):
+                    data.pop(key, None)
+                if self._tank_initial:
+                    return self._create(data)
+                return self.async_update_and_abort(
+                    self._get_entry(),
+                    self._get_reconfigure_subentry(),
+                    title=data[CONF_NAME],
+                    data=data,
+                )
+        return self.async_show_form(
+            step_id="water_tank_period",
+            data_schema=schema,
+            errors=errors,
+            description_placeholders={
+                "period": str(index + 1),
+                "count": str(self._tank_period_count),
+            },
+            last_step=index + 1 == self._tank_period_count,
+        )
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        stored = self._get_reconfigure_subentry().data
+        if stored.get(CONF_THERMAL_MODEL, THERMAL_MODEL_ROOM) == THERMAL_MODEL_WATER_TANK:
+            return self._tank_form("reconfigure_water_tank", user_input, initial=False)
+        if user_input is not None:
+            user_input = {
+                key: value for key, value in user_input.items() if key != CONF_THERMAL_MODEL
+            }
+        return await super().async_step_reconfigure(user_input)
+
+    async def async_step_reconfigure_water_tank(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        return self._tank_form("reconfigure_water_tank", user_input, initial=False)
 
 
 def load_group_schema(
@@ -2868,10 +3161,9 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
             # when the entry was actually built through the create flow.
             current = LOAD_PROFILE_CREATE_SENTINEL
         return self.async_show_form(
+            last_step=False,
             step_id="load",
-            data_schema=vol.Schema(
-                _load_picker_schema(choices, current=current, advanced_open=bool(errors))
-            ),
+            data_schema=vol.Schema(_load_picker_schema(choices, current=current)),
             errors=errors,
         )
 
@@ -2890,6 +3182,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
 
         current = self.config_entry.options.get(CONF_HOUSE_LOAD_TOTAL_ENTITY)
         return self.async_show_form(
+            last_step=False,
             step_id="load_create",
             data_schema=vol.Schema(
                 {
@@ -2940,6 +3233,8 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
 
         user_input = _flatten_sections(user_input) if user_input is not None else None
         if user_input is not None or not profile.options:
+            # An existing source must no longer resolve to Companion's generated sensor.
+            options.pop(CONF_HOUSE_LOAD_TOTAL_ENTITY, None)
             options[CONF_LOAD] = {
                 CONF_PROFILE: self._load_key,
                 CONF_PROFILE_OPTIONS: user_input or {},
@@ -2974,18 +3269,19 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
             # Should not happen: every kind ships an always-available profile.
             return self.async_abort(reason="no_profiles")
 
+        current = (options.get(CONF_PV) or {}).get(CONF_PROFILE)
         errors: dict[str, str] = {}
         if user_input is not None:
-            user_input = _flatten_sections(user_input)
+            user_input = _flatten_picker(user_input, current)
             if CONF_PROFILE in user_input:
                 self._pv_key = user_input[CONF_PROFILE]
                 self._pv_profiles = profiles
                 return await self.async_step_pv_options()
             errors["base"] = "profile_required"
 
-        current = (options.get(CONF_PV) or {}).get(CONF_PROFILE)
         ranked = _rank_profiles(_profiles_shown_first(PROFILE_KIND_PV, choices), PV_PROFILE_ORDER)
         return self.async_show_form(
+            last_step=False,
             step_id="pv",
             data_schema=vol.Schema(
                 _profile_picker_schema(
@@ -3045,20 +3341,21 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
         profiles = (await async_load_profiles(self.hass)).profiles
         choices = available_profiles(self.hass, profiles, PROFILE_KIND_TEMPERATURE)
 
+        current = (options.get(CONF_TEMPERATURE) or {}).get(CONF_PROFILE)
         errors: dict[str, str] = {}
         if user_input is not None:
-            user_input = _flatten_sections(user_input)
+            user_input = _flatten_picker(user_input, current)
             if CONF_PROFILE in user_input:
                 self._temperature_key = user_input[CONF_PROFILE]
                 self._temperature_profiles = profiles
                 return await self.async_step_temperature_options()
             errors["base"] = "profile_required"
 
-        current = (options.get(CONF_TEMPERATURE) or {}).get(CONF_PROFILE)
         ranked = _rank_profiles(
             _profiles_shown_first(PROFILE_KIND_TEMPERATURE, choices), TEMPERATURE_PROFILE_ORDER
         )
         return self.async_show_form(
+            last_step=False,
             step_id="temperature",
             data_schema=vol.Schema(
                 _profile_picker_schema(
@@ -3127,6 +3424,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
 
         current = (options.get(CONF_NETWORK) or {}).get(CONF_PROFILE)
         return self.async_show_form(
+            last_step=False,
             step_id="network",
             data_schema=vol.Schema(
                 {
@@ -3196,6 +3494,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
 
         current = (options.get(CONF_INVERTER) or {}).get(CONF_PROFILE)
         return self.async_show_form(
+            last_step=False,
             step_id="inverter",
             data_schema=vol.Schema(
                 {

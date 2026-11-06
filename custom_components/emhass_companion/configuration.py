@@ -141,7 +141,11 @@ class EmhassConfig:
         ) or time.fromisoformat(DEFAULT_DAYAHEAD_FALLBACK_TIME)
         load = ProfileSelection.from_dict(options.get(CONF_LOAD))
         house_load_total_entity = options.get(CONF_HOUSE_LOAD_TOTAL_ENTITY)
-        if house_load_total_entity and load.key == PROFILE_KEY_LOAD_SENSOR:
+        if (
+            house_load_total_entity
+            and load.key == PROFILE_KEY_LOAD_SENSOR
+            and "entity" not in load.options
+        ):
             _resolve_net_house_load_entity(hass, entry, load)
         battery = BatteryConfig.from_dict(options.get("battery"))
         # Hybrid defaults on in its own model (most battery installs are

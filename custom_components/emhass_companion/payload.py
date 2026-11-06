@@ -1,16 +1,14 @@
 """Build the EMHASS runtime-parameter payload.
 
-Every optimisation request carries the *complete* set of inputs and settings.
-EMHASS's ``associations.csv`` drives a generic override loop, so nearly every
-configuration key can be supplied per-request; sending all of them means the
-configuration stored inside EMHASS is never consulted for these values and can
-never drift away from what Home Assistant believes.
+Companion-owned static settings come from the shared resolver. Live inputs and
+load progress are added here; backend connections and saved ML models remain
+backend-owned prerequisites.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, time, timedelta
 import logging
 import math
@@ -26,16 +24,19 @@ from .const import (
     COST_FUN_SELF_CONSUMPTION,
     DEFAULT_COST_FUN,
 )
+from .effective_settings import resolve_effective_settings
 from .models import (
+    ROW_ZERO_NEAREST,
     BatteryConfig,
     DeferrableLoad,
     DeferrableLoadGroup,
     GridConfig,
     HybridInverterConfig,
     Series,
-    floor_to_step,
+    row_zero_start,
 )
 from .thermal import build_def_load_config
+from .water_tank import TankShortfall, WaterTankConfig, _resolve_endpoint
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -343,6 +344,98 @@ def window_to_timesteps(
     return window.start_index, window.end_index
 
 
+def window_occurrences(
+    earliest: time | None,
+    latest: time | None,
+    grid_start: datetime,
+    step: timedelta,
+    horizon_steps: int,
+    minimum_off: timedelta = timedelta(0),
+) -> list[tuple[int, int]]:
+    """Every full recurrence of a daily window that fits the horizon.
+
+    Returns ``(start_index, end_index)`` pairs. The first is exactly what
+    :func:`window_to_timesteps` gives (clipped when already open, end 0 when
+    unconstrained). Later ones are whole windows with an exclusive end index
+    inside the horizon; the caller clamps an end on the horizon edge to 0 as it
+    does for the first. A partly covered window is left out and picked up by a
+    later run once the horizon reaches it.
+
+    Each later window is built from the previous *canonical* close, not by
+    shifting the first (which may have been clipped to "now"). Wall-clock times
+    that do not exist on a DST night resolve through the water-tank endpoint
+    policy. Only a window with both ends set and a gap to the next at least
+    ``minimum_off`` repeats; anything else gives the single first window.
+    """
+    first = resolve_load_window(
+        name="",
+        earliest=earliest,
+        latest=latest,
+        deadline=None,
+        grid_start=grid_start,
+        step=step,
+        horizon_steps=horizon_steps,
+    )
+    result = [(first.start_index, first.end_index)]
+    if earliest is None or latest is None or earliest == latest:
+        return result
+
+    local_start = dt_util.as_local(grid_start)
+    timezone = local_start.tzinfo
+    origin = local_start.astimezone(UTC)
+    step_seconds = step.total_seconds()
+
+    def elapsed_steps(moment: datetime) -> float:
+        return (moment - origin).total_seconds() / step_seconds
+
+    _, canonical_close = _resolve_wall_clock(earliest, latest, local_start)
+    if canonical_close is None:
+        return result
+    previous_close = canonical_close.astimezone(UTC)
+    previous_end_index = math.floor(elapsed_steps(previous_close))
+    off_steps = math.ceil(minimum_off / step)
+    close_wall = canonical_close.astimezone(timezone).replace(tzinfo=None)
+
+    # Each pass advances at least a day of wall time, so this bounds the loop
+    # even if the horizon is huge or every occurrence is skipped.
+    for _ in range(horizon_steps + 2):
+        opens_wall = datetime.combine(close_wall.date(), earliest)
+        if opens_wall < close_wall:
+            opens_wall += timedelta(days=1)
+        closes_wall = datetime.combine(opens_wall.date(), latest)
+        while closes_wall <= opens_wall:
+            closes_wall += timedelta(days=1)
+
+        opens = _resolve_endpoint(opens_wall, timezone)
+        closes = _resolve_endpoint(closes_wall, timezone)
+        close_wall = closes_wall
+
+        start_index = round(elapsed_steps(opens))
+        if start_index >= horizon_steps:
+            break
+        # Rounded to the grid the two windows can touch even when the wall
+        # clock leaves a gap, so the off time is checked in steps as well.
+        if (
+            closes <= opens
+            or opens - previous_close < minimum_off
+            or start_index - previous_end_index < off_steps
+        ):
+            _LOGGER.debug("Skipping window occurrence %s-%s", opens_wall, closes_wall)
+            if closes > opens:
+                break
+            continue
+        previous_close = closes
+        previous_end_index = math.floor(elapsed_steps(closes))
+
+        end_index = math.floor(elapsed_steps(closes))
+        if start_index < 0 or end_index > horizon_steps:
+            break
+        if end_index <= start_index:
+            continue
+        result.append((start_index, end_index))
+    return result
+
+
 # --- payload -----------------------------------------------------------------
 
 
@@ -360,6 +453,8 @@ class PayloadInputs:
     loads: list[DeferrableLoad] = field(default_factory=list)
     load_groups: list[DeferrableLoadGroup] = field(default_factory=list)
     pv: Series | None = None
+    use_pv: bool | None = None
+    """Configured PV enablement; standalone callers may infer it from their series."""
     load: Series | None = None
     buy_price: Series | None = None
     sell_price: Series | None = None
@@ -450,6 +545,24 @@ class PayloadInputs:
     """Whether this backend accepts ``battery_soc_final_reward_factor``
     (EMHASS 0.18.5+). The factor still lives on :attr:`battery`; this only
     gates sending it. Unknown/older backends keep the two-sided soft target."""
+    row_zero_mode: str = ROW_ZERO_NEAREST
+    """Rounding asserted through ``method_ts_round`` and used by every array."""
+    backend_version: str | None = None
+    num_lags: int | None = None
+
+    def row_zero(self, step: timedelta) -> datetime:
+        """The timestamp EMHASS will give this request's first plan row."""
+        return row_zero_start(self.now, step, self.row_zero_mode)
+
+
+@dataclass(frozen=True, slots=True)
+class ExtraRow:
+    """An internal EMHASS row for a later occurrence of a daily load's window."""
+
+    parent: int
+    """Index of the real load (in ``load_order``) this row belongs to."""
+    name: str
+    """For diagnostics, e.g. ``"Dishwasher (day 2)"``."""
 
 
 @dataclass(slots=True)
@@ -460,6 +573,15 @@ class PayloadResult:
     warnings: list[str] = field(default_factory=list)
     load_order: list[str] = field(default_factory=list)
     """Subentry ids in the order they map to EMHASS's ``P_deferrable{k}``."""
+    extra_rows: list[ExtraRow] = field(default_factory=list)
+    """Internal rows appended after the real loads, one per further daily window.
+
+    Row ``len(load_order) + i`` is ``extra_rows[i]``; folding its plan column
+    into ``load_order[extra_rows[i].parent]`` restores the real numbering.
+    """
+    defaulted_forecast_methods: frozenset[str] = frozenset()
+    tank_shortfalls: dict[str, TankShortfall] = field(default_factory=dict)
+    """Hot-water tanks (by subentry id) whose floor was lowered to what they can reach."""
 
 
 def resolve_grid_limit(
@@ -574,6 +696,7 @@ def _battery_lockout_weights(
     horizon_end: datetime,
     step: timedelta,
     count: int,
+    settings: dict[str, Any],
 ) -> dict[str, Any]:
     """Per-timestep ``weight_battery_discharge``, pricing every flagged load's window.
 
@@ -600,14 +723,19 @@ def _battery_lockout_weights(
     battery still wins against grid inside the window.
     """
     windows = [window for load in inputs.loads for window in load.battery_lockout_windows]
-    if not inputs.battery.enabled or not windows:
+    if not settings["set_use_battery"] or not windows:
         return {}
     horizon_prices = inputs.buy_price.window(grid_start, horizon_end) if inputs.buy_price else None
     max_buy_price = max(horizon_prices.values, default=0.0) if horizon_prices else 0.0
     price = max(BATTERY_LOCKOUT_PRICE_FACTOR * max_buy_price, BATTERY_LOCKOUT_PRICE_FLOOR)
-    if inputs.cost_fun == COST_FUN_SELF_CONSUMPTION:
+    if settings["costfun"] == COST_FUN_SELF_CONSUMPTION:
         price *= BATTERY_LOCKOUT_SELF_CONSUMPTION_BIGM
-    values = [inputs.battery.weight_battery_discharge] * count
+    baseline = settings["weight_battery_discharge"]
+    values = (
+        [baseline[min(index, len(baseline) - 1)] for index in range(count)]
+        if isinstance(baseline, list) and baseline
+        else [baseline if not isinstance(baseline, list) else 0.0] * count
+    )
     for index in range(count):
         start = grid_start + step * index
         if any(window_start <= start < window_end for window_start, window_end in windows):
@@ -870,22 +998,29 @@ def _fit_pins_to_import_limit(
 
 
 def build_payload(inputs: PayloadInputs) -> PayloadResult:
-    """Assemble the runtime parameters for one EMHASS request."""
+    """Assemble one request with coverage and positional arrays aligned to row zero."""
     step = timedelta(minutes=inputs.time_step_minutes)
-    # Floored onto the timestep grid, because ``now`` is a raw utcnow() and so
-    # the horizon it defines lands at some arbitrary fraction of a second past
-    # a boundary. Every forecast series *is* on the grid, so an unfloored
-    # horizon is one no series can ever cover: the coverage checks below would
-    # report a shortfall of seconds on every run, in the same words they use
-    # for a price source that stops tonight. The grid boundary at or before
-    # the horizon already describes the timestep the horizon ends inside.
-    horizon_end = floor_to_step(inputs.now + step * inputs.horizon_steps, step)
-    warnings: list[str] = []
-
-    payload: dict[str, Any] = {
-        "optimization_time_step": inputs.time_step_minutes,
-        "costfun": inputs.cost_fun,
-    }
+    horizon_end = inputs.row_zero(step) + step * inputs.horizon_steps
+    effective = resolve_effective_settings(
+        battery=inputs.battery,
+        grid=inputs.grid,
+        hybrid=inputs.hybrid_inverter,
+        time_step_minutes=inputs.time_step_minutes,
+        cost_fun=inputs.cost_fun,
+        row_zero_mode=inputs.row_zero_mode,
+        num_lags=inputs.num_lags
+        or (
+            max(1, math.ceil(inputs.horizon_steps * inputs.time_step_minutes / 1440))
+            * (1440 // inputs.time_step_minutes)
+        ),
+        profile_settings=inputs.extra_settings,
+        backend_version=inputs.backend_version,
+        send_derating=inputs.send_charge_power_derating,
+        send_soc_final_reward=inputs.send_soc_final_reward,
+        use_pv=bool(inputs.pv) if inputs.use_pv is None else inputs.use_pv,
+    )
+    warnings = list(effective.warnings)
+    payload = effective.runtime()
 
     if inputs.action == ACTION_MPC:
         # Counted in timesteps, not hours -- a frequent source of horizons that
@@ -1015,18 +1150,10 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
 
     # -- settings -------------------------------------------------------------
     payload.update(
-        _battery_settings(
-            inputs.battery,
-            send_derating=inputs.send_charge_power_derating,
-            send_soc_final_reward=inputs.send_soc_final_reward,
-        )
-    )
-    payload.update(
         _battery_lockout_weights(
-            inputs, floor_to_step(inputs.now, step), horizon_end, step, capacity_array_steps
+            inputs, inputs.row_zero(step), horizon_end, step, capacity_array_steps, payload
         )
     )
-    payload.update(_hybrid_inverter_settings(inputs.hybrid_inverter))
     import_floor = _import_floor_w(inputs, horizon_end)
     import_scalar_w = resolve_grid_limit(
         inputs.grid_import_limit_w, inputs.grid.import_max_w, import_floor
@@ -1050,7 +1177,7 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
         capacity_array, capacity_warnings = build_capacity_limit_array(
             grid_scalar_w=import_scalar_w,
             ceilings=capacity_ceilings,
-            grid_start=floor_to_step(inputs.now, step),
+            grid_start=inputs.row_zero(step),
             step=step,
             count=capacity_array_steps,
             load=inputs.load,
@@ -1109,7 +1236,7 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
 
             if inputs.demand_charge_window is not None:
                 windows = inputs.demand_charge_window
-                start = floor_to_step(inputs.now, step)
+                start = inputs.row_zero(step)
                 if isinstance(windows, list):
                     payload["capacity_charge_window"] = [
                         build_capacity_charge_window_mask(
@@ -1166,25 +1293,28 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
             payload["capacity_cost_per_kw"] = 0.0
     else:
         payload["capacity_cost_per_kw"] = inputs.flat_demand_charge_per_kw
-    # EMHASS's own PV curtailment, a plant_conf parameter reachable through
-    # runtimeparams via its associations.csv. With it off there is no
-    # `P_PV_curtailment` column at all, so strategy.decide_curtailment's
-    # primary rule has nothing to act on. Omitted entirely when unset rather
-    # than sent as False: an entry saved before this setting existed must not
-    # silently override whatever the add-on already has configured.
-    if inputs.grid.compute_curtailment is not None:
-        payload["compute_curtailment"] = inputs.grid.compute_curtailment
-
-    deferrable, load_order, deferrable_warnings = _deferrable_settings(inputs, step)
+    deferrable, load_order, deferrable_warnings, extra_rows = _deferrable_settings(inputs, step)
+    row_count = len(load_order) + len(extra_rows)
     payload.update(deferrable)
+    payload["is_electric_load"] = [True] * row_count
+    payload["cost_forecast_per_deferrable_load"] = [None] * row_count
     warnings.extend(deferrable_warnings)
 
-    group_settings, group_warnings = _deferrable_load_group_settings(inputs.load_groups, load_order)
+    group_settings, group_warnings = _deferrable_load_group_settings(
+        inputs.load_groups, load_order, extra_rows
+    )
     payload.update(group_settings)
     warnings.extend(group_warnings)
 
-    thermal = _thermal_settings(inputs, step, len(load_order))
+    thermal = _thermal_settings(inputs, step, row_count)
     payload.update(thermal)
+    tank_shortfalls = _tank_shortfalls(inputs, step)
+    warnings.extend(
+        f"Water tank {load.name}: its temperature target cannot be reached in time, "
+        "so the plan aims for the highest temperature the heater can reach instead."
+        for load in inputs.loads
+        if load.subentry_id in tank_shortfalls
+    )
 
     # After everything the check reads is in place: the import limit, the
     # blended house load, and def_load_config for which loads are thermal.
@@ -1192,17 +1322,32 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
     if inputs.action == ACTION_MPC:
         warnings.extend(
             _fit_pins_to_import_limit(
-                payload, [load.name for load in inputs.loads], inputs.load_live_w, inputs.now
+                payload,
+                [*(load.name for load in inputs.loads), *(row.name for row in extra_rows)],
+                inputs.load_live_w,
+                inputs.now,
             )
         )
 
-    # Profile-contributed settings last, so a profile can override a default
-    # (a "no solar" profile turning PV modelling off, for instance).
-    payload.update(inputs.extra_settings)
-
     _log_warnings(warnings)
 
-    return PayloadResult(payload=payload, warnings=warnings, load_order=load_order)
+    return PayloadResult(
+        payload=payload,
+        warnings=warnings,
+        load_order=load_order,
+        extra_rows=extra_rows,
+        tank_shortfalls=tank_shortfalls,
+        defaulted_forecast_methods=frozenset(
+            name
+            for name in (
+                "load_forecast_method",
+                "weather_forecast_method",
+                "load_cost_forecast_method",
+                "production_price_forecast_method",
+            )
+            if name not in effective.profile_overrides
+        ),
+    )
 
 
 def _thermal_settings(inputs: PayloadInputs, step: timedelta, load_count: int) -> dict[str, Any]:
@@ -1223,94 +1368,28 @@ def _thermal_settings(inputs: PayloadInputs, step: timedelta, load_count: int) -
         if load.thermal is not None and load.wants_to_run
     }
 
-    # Floored onto the timestep grid, like every other per-timestep array in
-    # this payload (maximum_power_from_grid, capacity_charge_window,
-    # weight_battery_discharge). EMHASS stamps plan row zero at the grid
-    # boundary at or before launch -- verified against a live 0.18.2 backend:
-    # a run launched at 01:15:33Z produced a first row of 01:15:00Z on a
-    # 15-minute step. Passing the raw launch instant put min_temperatures[i]
-    # at ``now + i*step`` while EMHASS reads it at ``floor(now) + i*step``,
-    # sliding the whole comfort window and its setback ramp up to a full
-    # timestep late.
     config = build_def_load_config(
-        thermal_by_index, load_count, floor_to_step(inputs.now, step), step, inputs.horizon_steps
+        thermal_by_index, load_count, inputs.row_zero(step), step, inputs.horizon_steps
     )
-    return {} if config is None else {"def_load_config": config}
+    return {"def_load_config": config if config is not None else [{} for _ in range(load_count)]}
 
 
-def _battery_settings(
-    battery: BatteryConfig,
-    *,
-    send_derating: bool = True,
-    send_soc_final_reward: bool = True,
-) -> dict[str, Any]:
-    if not battery.enabled:
-        return {"set_use_battery": False}
-    settings: dict[str, Any] = {
-        "set_use_battery": True,
-        "battery_nominal_energy_capacity": battery.capacity_wh,
-        "battery_charge_power_max": battery.charge_power_max_w,
-        "battery_discharge_power_max": battery.discharge_power_max_w,
-        "battery_minimum_state_of_charge": battery.soc_min,
-        "battery_maximum_state_of_charge": battery.soc_max,
-        "battery_target_state_of_charge": battery.soc_target,
-        "battery_charge_efficiency": battery.charge_efficiency,
-        "battery_discharge_efficiency": battery.discharge_efficiency,
-        "set_nodischarge_to_grid": battery.no_discharge_to_grid,
-        "set_nocharge_from_grid": battery.no_charge_from_grid,
-        "set_battery_first_priority": battery.battery_first_priority,
-        "set_battery_dynamic": battery.dynamic_enabled,
-        "battery_dynamic_max": battery.dynamic_max,
-        "battery_dynamic_min": battery.dynamic_min,
-        # Cycle cost per kWh of throughput, charged against the objective
-        # EMHASS maximises. Both default to 0.0 -- EMHASS's own default -- so
-        # an untouched config sends the same numbers it always did.
-        "weight_battery_discharge": battery.weight_battery_discharge,
-        "weight_battery_charge": battery.weight_battery_charge,
-        # Dwell penalties on the SOC level. EMHASS only builds each constraint
-        # when its cost and threshold are both above zero, so the thresholds
-        # ride along unconditionally and simply sit inert at cost 0.0.
-        "battery_soc_deficit_threshold": battery.soc_deficit_threshold,
-        "battery_soc_deficit_cost": battery.soc_deficit_cost,
-        "battery_soc_surplus_threshold": battery.soc_surplus_threshold,
-        "battery_soc_surplus_cost": battery.soc_surplus_cost,
-        # Quadratic C-rate penalty, gated the same way on stress_cost > 0.
-        "battery_stress_cost": battery.stress_cost,
-        "battery_stress_segments": battery.stress_segments,
-    }
-    # Empty is EMHASS's own default (flat charge-power max). Omit rather than
-    # send [] so an older backend never sees an unknown plant_conf key, and so
-    # a table stored against a 0.18.2 add-on stays inert until it is upgraded.
-    if send_derating and battery.charge_power_derating:
-        settings["battery_charge_power_derating"] = [
-            [round(soc, 4), round(fraction, 4)] for soc, fraction in battery.charge_power_derating
-        ]
-    # Sent even at 0 (EMHASS's own default) so no value left in the add-on's
-    # persisted config can silently decide the answer. Only an older backend
-    # is skipped: it would see an unknown optim_conf key.
-    if send_soc_final_reward:
-        settings["battery_soc_final_reward_factor"] = round(battery.soc_final_reward_factor, 4)
-    return settings
+def _tank_shortfalls(inputs: PayloadInputs, step: timedelta) -> dict[str, TankShortfall]:
+    """Tanks whose schedule asks for more than the heater can deliver in time.
 
-
-def _hybrid_inverter_settings(hybrid: HybridInverterConfig) -> dict[str, Any]:
-    """Describe a shared-inverter plant's AC-side throughput to EMHASS.
-
-    Always sent, on or off: EMHASS's own ``inverter_is_hybrid`` gates whether
-    any of the rest is used at all, so leaving it disabled makes the other
-    values inert rather than wrong -- but the flag itself must be asserted on
-    every request the same way every other setting here is, so a value left
-    over in EMHASS's own persisted config is never what decides the answer.
+    ``WaterTankConfig.to_emhass`` has already lowered those floors in the
+    request; this is only the report, for a warning and a repair issue.
     """
-    if not hybrid.enabled:
-        return {"inverter_is_hybrid": False}
-    return {
-        "inverter_is_hybrid": True,
-        "inverter_ac_output_max": hybrid.ac_output_max_w,
-        "inverter_ac_input_max": hybrid.ac_input_max_w,
-        "inverter_efficiency_dc_ac": hybrid.efficiency_dc_ac,
-        "inverter_efficiency_ac_dc": hybrid.efficiency_ac_dc,
-    }
+    shortfalls: dict[str, TankShortfall] = {}
+    for load in inputs.loads:
+        if not isinstance(load.thermal, WaterTankConfig) or not load.wants_to_run:
+            continue
+        shortfall = load.thermal.first_unreachable_step(
+            inputs.row_zero(step), step, inputs.horizon_steps
+        )
+        if shortfall is not None:
+            shortfalls[load.subentry_id] = shortfall
+    return shortfalls
 
 
 def operating_timesteps(operating_hours: float, step_minutes: int) -> int:
@@ -1433,7 +1512,7 @@ def _describe(
         earliest=load.earliest_start,
         latest=load.latest_end,
         deadline=load.deadline_at,
-        grid_start=inputs.now,
+        grid_start=inputs.row_zero(step),
         step=step,
         horizon_steps=inputs.horizon_steps,
         operating_steps=remaining_steps,
@@ -1526,18 +1605,24 @@ def _describe(
 
 def _deferrable_settings(
     inputs: PayloadInputs, step: timedelta
-) -> tuple[dict[str, Any], list[str], list[str]]:
+) -> tuple[dict[str, Any], list[str], list[str], list[ExtraRow]]:
     # Every configured load, always, in the registry's stable order: a load's
     # deferrable number is meant to be as durable as the load itself.
     loads = list(inputs.loads)
     if not loads:
-        return {"number_of_deferrable_loads": 0}, [], []
+        return {"number_of_deferrable_loads": 0}, [], [], []
 
     warnings: list[str] = []
-    described = [
+    loads = [_without_credit_for_later_day(load, inputs, step) for load in loads]
+    real = [
         _describe(load, inputs, step, warnings) if load.wants_to_run else _park(load)
         for load in loads
     ]
+    # Rows for later windows of daily loads go after every real load, so no real
+    # load's P_deferrable{k} ever moves. Ordered by occurrence, then by load.
+    extras = _extra_window_rows(loads, inputs, step)
+    extra_rows = [ExtraRow(parent, name) for _n, parent, name, _row in extras]
+    described = [*real, *(row for _n, _parent, _name, row in extras)]
 
     settings: dict[str, Any] = {
         "number_of_deferrable_loads": len(described),
@@ -1588,11 +1673,113 @@ def _deferrable_settings(
             row.timesteps for row in described
         ]
 
-    return settings, [load.subentry_id for load in loads], warnings
+    return settings, [load.subentry_id for load in loads], warnings, extra_rows
+
+
+def _without_credit_for_later_day(
+    load: DeferrableLoad, inputs: PayloadInputs, step: timedelta
+) -> DeferrableLoad:
+    """Drop today's progress from a daily load whose first window opens on a later date.
+
+    Progress is measured per local day. Once today's run is done, the first
+    window left in the horizon is tomorrow's, and crediting today's run against
+    it would give that day no hours while the day after gets them in full. Only
+    loads that get extra rows are touched, so a single-row load is unchanged.
+    """
+    if not (load.repeats_daily and load.wants_to_run and load.completed_timesteps > 0):
+        return load
+    occurrences = window_occurrences(
+        load.earliest_start,
+        load.latest_end,
+        inputs.row_zero(step),
+        step,
+        inputs.horizon_steps,
+        timedelta(minutes=load.minimum_off_time_minutes),
+    )
+    if len(occurrences) < 2 or occurrences[0][0] == 0:
+        return load  # one window, or the first is open now: its progress is its own
+    opens = dt_util.as_local(inputs.row_zero(step) + step * occurrences[0][0])
+    if opens.date() > dt_util.as_local(inputs.now).date():
+        return replace(load, completed_timesteps=0)
+    return load
+
+
+def _extra_window_rows(
+    loads: list[DeferrableLoad],
+    inputs: PayloadInputs,
+    step: timedelta,
+) -> list[tuple[int, int, str, _LoadSettings]]:
+    """Rows for the later windows of daily loads, as ``(n, parent, name, row)``.
+
+    Only the first window carries runtime state: nothing has run in a future
+    window, so an extra row has no pin, no running state and no progress, and
+    asks for the load's full quantised hours.
+
+    The requirement is described afresh from the load rather than copied from
+    the parent's row. That row can be parked for reasons that only concern
+    today (a running single-constant load whose first window is not open yet),
+    and tomorrow's run is still wanted.
+    """
+    extras: list[tuple[int, int, str, _LoadSettings]] = []
+    for parent, load in enumerate(loads):
+        if not (load.repeats_daily and load.wants_to_run):
+            continue
+        occurrences = window_occurrences(
+            load.earliest_start,
+            load.latest_end,
+            inputs.row_zero(step),
+            step,
+            inputs.horizon_steps,
+            timedelta(minutes=load.minimum_off_time_minutes),
+        )
+        if len(occurrences) < 2:
+            continue
+        # Nothing has run in a later window, so describe the load as if nothing
+        # had. Zero hours from this means the first window is beyond the horizon
+        # (nothing else parks a load that is not running), and so are the later
+        # ones.
+        full = _describe(
+            replace(load, current_state=False, current_power_w=0.0, completed_timesteps=0),
+            inputs,
+            step,
+            [],
+        )
+        if full.hours <= 0:
+            continue
+        for n, (start_index, end_index) in enumerate(occurrences[1:], start=2):
+            extras.append(
+                (
+                    n,
+                    parent,
+                    f"{load.name} (day {n})",
+                    replace(
+                        full,
+                        start_index=start_index,
+                        # Same convention as the first window: an end on or
+                        # past the horizon edge means unconstrained. Day-ahead
+                        # solves whole local days (DST-dependent), so its edge
+                        # is not horizon_steps: the end stays explicit there.
+                        end_index=(
+                            0
+                            if inputs.action == ACTION_MPC and end_index >= inputs.horizon_steps
+                            else end_index
+                        ),
+                        current_state=False,
+                        current_power_w=0.0,
+                        completed_timesteps=0,
+                        current_on_timesteps=0,
+                        current_off_timesteps=0,
+                    ),
+                )
+            )
+    extras.sort(key=lambda item: (item[0], item[1]))
+    return extras
 
 
 def _deferrable_load_group_settings(
-    load_groups: list[DeferrableLoadGroup], load_order: list[str]
+    load_groups: list[DeferrableLoadGroup],
+    load_order: list[str],
+    extra_rows: Sequence[ExtraRow] = (),
 ) -> tuple[dict[str, Any], list[str]]:
     """Describe cross-load relationships (a shared budget or mutual exclusion).
 
@@ -1602,6 +1789,9 @@ def _deferrable_load_group_settings(
     renamed since the group was created) is dropped with a warning rather than
     failing the whole request; a group left with fewer than two valid members
     is meaningless and dropped entirely.
+
+    A member with rows for later daily windows contributes those rows too, so
+    a shared power budget caps the sum and mutual exclusion covers every window.
     """
     warnings: list[str] = []
     groups: list[dict[str, Any]] = []
@@ -1615,7 +1805,13 @@ def _deferrable_load_group_settings(
                     "exists, dropping it from the group."
                 )
                 continue
-            names.append(f"deferrable{load_order.index(subentry_id)}")
+            index = load_order.index(subentry_id)
+            names.append(f"deferrable{index}")
+            names.extend(
+                f"deferrable{len(load_order) + i}"
+                for i, row in enumerate(extra_rows)
+                if row.parent == index
+            )
 
         if len(names) < 2:
             warnings.append(
@@ -1629,6 +1825,4 @@ def _deferrable_load_group_settings(
             entry["max_power"] = group.max_power_w
         groups.append(entry)
 
-    if not groups:
-        return {}, warnings
     return {"deferrable_load_groups": groups}, warnings

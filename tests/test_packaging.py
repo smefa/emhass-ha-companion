@@ -128,7 +128,6 @@ def test_section_descriptions_are_single_line_plain_text(filename):
     ("step", "blocks", "count"),
     [
         ("pv", ("config", "options"), 3),
-        ("load", ("config", "options"), 3),
         ("price", ("config",), 4),
         ("temperature", ("options",), 2),
     ],
@@ -226,7 +225,7 @@ EXPECTED_ENTITY_KEYS = {
         "start_asap",
     },
     "select": {"system_mode", "recurrence", "cost_fun"},
-    "button": {"run_dayahead", "run_mpc", "run_forecast_fit", "run_now"},
+    "button": {"run_mpc", "run_now"},
     "number": {
         "nominal_power",
         "minimum_power",
@@ -286,11 +285,25 @@ def _labelled_names(step: dict) -> set[str]:
 
 
 def test_thermal_subentry_labels_cover_the_form_and_its_advanced_section(strings):
-    from custom_components.emhass_companion.config_flow import thermal_schema
+    from custom_components.emhass_companion.config_flow import (
+        thermal_kind_schema,
+        thermal_schema,
+        water_tank_period_schema,
+        water_tank_schema,
+    )
     from custom_components.emhass_companion.const import SUBENTRY_TYPE_THERMAL
 
-    step = strings["config_subentries"][SUBENTRY_TYPE_THERMAL]["step"]["user"]
-    assert _form_field_names(thermal_schema({})) == _labelled_names(step)
+    steps = strings["config_subentries"][SUBENTRY_TYPE_THERMAL]["step"]
+    forms = {
+        "user": _form_field_names(thermal_kind_schema({})),
+        "settings": _form_field_names(thermal_schema({})) - {"name"},
+        "water_tank": _form_field_names(water_tank_schema({})),
+        "water_tank_period": _form_field_names(water_tank_period_schema({})),
+        "reconfigure": _form_field_names(thermal_schema({}, initial=False)),
+        "reconfigure_water_tank": _form_field_names(water_tank_schema({}, initial=False)),
+    }
+    for step, fields in forms.items():
+        assert fields == _labelled_names(steps[step]), step
 
 
 def test_deferrable_subentry_is_translated(strings):
@@ -342,16 +355,22 @@ def test_every_platform_is_forwarded(strings):
 
 def test_services_yaml_matches_registered_services(strings):
     from custom_components.emhass_companion.services import (
+        SERVICE_EXPORT_SETTINGS,
         SERVICE_RUN_DAYAHEAD,
         SERVICE_RUN_MPC,
+        SERVICE_SET_HOT_WATER_PLAN,
         SERVICE_TEST_PROFILE,
+        SERVICE_TRAIN_LOAD_FORECASTER,
         SERVICE_TYPICAL_LOAD_FORECAST,
     )
 
     registered = {
+        SERVICE_EXPORT_SETTINGS,
         SERVICE_RUN_DAYAHEAD,
         SERVICE_RUN_MPC,
+        SERVICE_SET_HOT_WATER_PLAN,
         SERVICE_TEST_PROFILE,
+        SERVICE_TRAIN_LOAD_FORECASTER,
         SERVICE_TYPICAL_LOAD_FORECAST,
     }
     declared = set(load_yaml(str(COMPONENT / "services.yaml")))
@@ -454,6 +473,7 @@ CARD_FILES = (
     "emhass-overview-card.js",
     "emhass-tariff-card.js",
     "emhass-economy-card.js",
+    "emhass-tank-card.js",
 )
 FRONTEND_FILES = (CORE_FILE, *CARD_FILES)
 
@@ -488,6 +508,7 @@ CARDS = (
     "emhass-overview-card",
     "emhass-tariff-card",
     "emhass-economy-card",
+    "emhass-tank-card",
 )
 
 

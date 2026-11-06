@@ -480,7 +480,19 @@ def render_action(
         options,
         **action_variables(hass, profile, options, action, **variables),
     )
-    return [render(hass, step, scope) for step in steps]
+    rendered_steps = []
+    for step in steps:
+        rendered = render(hass, step, scope)
+        # Required targets must fail before any service runs. This lets a
+        # profile add a mandatory actuator without silently skipping its write
+        # for installations still using options saved by an older profile.
+        if rendered.pop("required_target", False) and _is_blank(rendered.get("target")):
+            raise ProfileError(
+                f"Profile '{profile.key}' requires target {step.get('target')!r} "
+                f"for '{action}'; reconfigure the inverter entity options"
+            )
+        rendered_steps.append(rendered)
+    return rendered_steps
 
 
 def _is_blank(value: Any) -> bool:

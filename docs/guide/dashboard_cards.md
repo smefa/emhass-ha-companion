@@ -2,7 +2,8 @@
 
 Two cards ship with the integration and add themselves to Home Assistant —
 no separate install, and nothing that can end up on a different version
-than the integration itself.
+than the integration itself. A third, the tank temperature card, is described
+below.
 
 ## Plan card
 
@@ -30,10 +31,24 @@ controls.
 
 ![A deferrable load card: scheduled power, next start, deadline and runtime today, over a timeline of the load's schedule](../assets/deferrable-card.png)
 
+## Tank temperature card
+
+```yaml
+type: custom:emhass-tank-card
+load: Hot water tank    # omit to show the first thermal load
+history_hours: 4        # how much recorded measurement to draw before now
+```
+
+The temperature plan of one thermal load, such as a hot-water tank: the
+planned temperature as a stepped line between the minimum and maximum it was
+told to stay inside. A tank heated in a burst while power is cheap and then
+coasting down towards its floor is the plan working. A tank that has a
+temperature sensor also gets its recorded reading drawn before *now*.
+
 ## Adding a card
 
 In a dashboard, **Add card → search for "EMHASS"**, or paste the YAML above
-into an existing view in YAML mode. Both cards find their entities
+into an existing view in YAML mode. The cards find their entities
 automatically, so renaming an entity later won't break them.
 
 > If you manage your dashboards entirely in YAML rather than through the

@@ -20,6 +20,7 @@ from custom_components.emhass_companion.models import (
     SeriesError,
     ceil_to_step,
     parse_utc,
+    row_zero_start,
 )
 
 T0 = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
@@ -901,3 +902,15 @@ def test_soc_final_reward_factor_is_clamped_to_zero_to_one(raw, expected):
 def test_soc_final_reward_factor_junk_reads_as_off(junk):
     config = BatteryConfig.from_dict({"use_battery": True, "battery_soc_final_reward_factor": junk})
     assert config.soc_final_reward_factor == 0.0
+
+
+def test_row_zero_follows_emhass_method_ts_round() -> None:
+    """11:07:12 and 11:07:33 land on opposite sides of the 7.5 min cut-off."""
+    step = timedelta(minutes=15)
+    early = datetime(2026, 10, 28, 11, 7, 12, tzinfo=UTC)
+    late = datetime(2026, 10, 28, 11, 7, 33, tzinfo=UTC)
+
+    assert row_zero_start(early, step) == datetime(2026, 10, 28, 11, 0, tzinfo=UTC)
+    assert row_zero_start(late, step) == datetime(2026, 10, 28, 11, 15, tzinfo=UTC)
+    assert row_zero_start(late, step, "first") == datetime(2026, 10, 28, 11, 0, tzinfo=UTC)
+    assert row_zero_start(early, step, "last") == datetime(2026, 10, 28, 11, 15, tzinfo=UTC)

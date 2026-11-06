@@ -32,8 +32,7 @@
 | `binary_sensor.*_source_readings_unavailable` | One of the entities this integration reads has stopped reporting — see [Troubleshooting](troubleshooting.md#when-a-source-stops-reporting) |
 | `switch.*_control_enabled` | Master gate on acting. Ships **off** |
 | `select.*_mode` | Anything but *Automatic* suspends control |
-| `button.*_recalculate_now` / `*_rebuild_day_ahead_plan` | Run on demand |
-| `button.*_train_load_forecaster` | Only present if your load forecast profile trains EMHASS's own model (see [Data sources](data_sources.md)) |
+| `button.*_recalculate_now` | Run on demand. Rebuilding the day-ahead plan and training the load forecaster are [actions](guide/actions.md) only |
 
 Cost and savings entities only exist once you have pointed the integration at
 your meters, under **Configure → Cost and savings** — see
@@ -45,8 +44,13 @@ entities (`sensor.*_solar_surplus*`) only exist once a surplus load does — see
 you've selected a network profile under **Configure → Network tariff** — see
 [Network tariffs](network_tariffs.md).
 
-Two services mirror the recalculate buttons for use in scripts and
-automations: `emhass_companion.run_dayahead` and `emhass_companion.run_mpc`.
+Actions for scripts and automations: `emhass_companion.run_mpc` (the
+recalculate button), `emhass_companion.run_dayahead` and
+`emhass_companion.train_load_forecaster`, which have no button.
+`emhass_companion.export_settings` (**Write settings to EMHASS**) is an action
+only, with no button or entity; administrators only. See
+[Hub controls](guide/hub_controls.md#write-settings-to-emhass). Every action is
+described, with fields and examples, in [Actions](guide/actions.md).
 
 ## Deferrable and thermal loads
 

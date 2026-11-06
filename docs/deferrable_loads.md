@@ -1,5 +1,18 @@
 # Deferrable loads
 
+Settings-triggered optimisation waits for three seconds without further
+changes. Each change restarts the timer, shared across all loads, so an
+automation can update several settings before one solve uses the final values.
+Settings save and entities update immediately. Automations with pauses longer
+than three seconds can still trigger intermediate solves.
+
+Parameter changes request optimisation only while the load's **Enabled**
+switch is on. To batch changes in an automation, disable the load, update its
+settings, then enable it. Both enable/disable transitions queue a plan refresh;
+intermediate edits while disabled still save and update their entities.
+This applies to standard and thermal loads, including hot-water plans.
+Scheduled optimisations and explicit run actions continue normally.
+
 A deferrable load is anything whose *timing* the optimiser may choose: a
 dishwasher, a car charger, a pool pump. Tell it the load needs three hours
 before morning and it decides which three.

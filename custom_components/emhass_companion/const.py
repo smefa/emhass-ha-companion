@@ -45,20 +45,15 @@ ACTION_MPC: Final = "naive-mpc-optim"
 ACTION_PERFECT: Final = "perfect-optim"
 ACTION_FORECAST_FIT: Final = "forecast-model-fit"
 
-# EMHASS config.json keys that must stay consistent with each other and with
-# what a run actually asks for. `var_model` (optim_conf) is a separate,
-# independently-persisted copy of the load sensor from `retrieve_hass_conf`'s
-# `sensor_power_load_no_var_loads` -- EMHASS's own `_get_ml_param()` falls back
-# to whichever `var_model` is currently on disk regardless of a per-request
-# `sensor_power_load_no_var_loads` override, so the two must be pushed together.
+# EMHASS config.json keys the coordinator reads from a load profile's settings.
+# `var_model` (optim_conf) is a separate copy of the load sensor from
+# `retrieve_hass_conf`'s `sensor_power_load_no_var_loads`, and EMHASS's own
+# `_get_ml_param()` falls back to whichever `var_model` is on disk unless a
+# request overrides it -- so fits and predictions always send both.
 EMHASS_CONF_SENSOR_LOAD: Final = "sensor_power_load_no_var_loads"
 EMHASS_CONF_VAR_MODEL: Final = "var_model"
-EMHASS_CONF_NUM_LAGS: Final = "num_lags"
+EMHASS_CONF_SENSOR_PV: Final = "sensor_power_photovoltaics"
 EMHASS_CONF_LOAD_FORECAST_METHOD: Final = "load_forecast_method"
-# Same wire name EMHASS's own runtime parameter uses (see payload.py); a
-# mismatch between this persisted value and what a run actually sends is a
-# hard crash inside EMHASS's skforecast layer, not a soft error.
-EMHASS_CONF_TIME_STEP: Final = "optimization_time_step"
 LOAD_FORECAST_METHOD_MLFORECASTER: Final = "mlforecaster"
 LOAD_FORECAST_METHOD_TYPICAL: Final = "typical"
 LOAD_FORECAST_METHOD_LIST: Final = "list"
@@ -353,6 +348,24 @@ LOAD_TYPE_STANDARD: Final = "standard"
 LOAD_TYPE_THERMAL: Final = "thermal"
 LOAD_TYPES: Final = (LOAD_TYPE_STANDARD, LOAD_TYPE_THERMAL)
 CONF_TEMPERATURE_SENSOR: Final = "temperature_sensor"
+CONF_THERMAL_MODEL: Final = "thermal_model"
+THERMAL_MODEL_ROOM: Final = "room"
+THERMAL_MODEL_WATER_TANK: Final = "water_tank"
+CONF_TANK_VOLUME: Final = "tank_volume_litres"
+# A common domestic hot-water cylinder; only the form's starting value.
+DEFAULT_TANK_VOLUME: Final = 200
+CONF_STANDBY_LOSS: Final = "standby_loss_w"
+CONF_HEATER_COP: Final = "heater_cop"
+CONF_COMFORT_PENALTY: Final = "comfort_penalty"
+# 1 = a resistive immersion element: one kW of heat per kW drawn.
+DEFAULT_HEATER_COP: Final = 1.0
+# 0 keeps the required temperature a hard floor; above 0 it becomes a target.
+DEFAULT_COMFORT_PENALTY: Final = 0.0
+CONF_HOT_WATER_PERIODS: Final = "hot_water_periods"
+CONF_HOT_WATER_PERIOD_COUNT: Final = "hot_water_period_count"
+CONF_DRAW_START: Final = "draw_start"
+CONF_DRAW_END: Final = "draw_end"
+CONF_DRAW_ENERGY: Final = "draw_energy_kwh"
 CONF_SENSE: Final = "sense"
 CONF_HEATING_RATE: Final = "heating_rate"
 CONF_COOLING_CONSTANT: Final = "cooling_constant"
@@ -1110,6 +1123,7 @@ INFEASIBLE_CAUSE_CODES: Final = frozenset(
         "pin_vs_window",
         "window_too_short",
         "window_energy",
+        "thermal_unreachable",
         "power_deficit",
         "pv_surplus",
         "array_length",
@@ -1153,6 +1167,11 @@ ISSUE_BAD_STORED_TIME: Final = "bad_stored_time"
 # program on power-up, a breaker left off. An error rather than a warning: the
 # user asked for a run, the run did not happen, and nothing else will say so.
 ISSUE_LOAD_NEVER_STARTED: Final = "load_never_started"
+# Suffixed with the load's subentry_id. A hot-water tank asked for a temperature
+# its heater cannot reach in time (it has gone cold, or a comfort window starts
+# soon), so the request carries a lower floor and the tank heats flat out. A
+# warning, not an error: the plan still runs.
+ISSUE_TANK_BEHIND_SCHEDULE: Final = "water_tank_behind_schedule"
 # Entities this integration reads from have stopped reporting for longer than
 # SOURCE_BLIND_GRACE. Whole-integration rather than per-entity: they normally
 # go together (one Modbus connection, one cloud API, one dead inverter), and a

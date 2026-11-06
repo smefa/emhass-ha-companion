@@ -531,9 +531,13 @@ class EmhassOverviewCard extends LiveCard {
     const battery = this._config.battery_entity
       ? { entity: this._config.battery_entity, invert: this._config.invert_battery === true }
       : measuredBy(hass, hub, "sensor.battery_power");
+    // The charge level has no sign convention to get wrong, so the Companion's
+    // measured sensor, where it has one, is used as is.
+    const measuredSoc = measuredBy(hass, hub, "sensor.battery_soc");
     const wanted = {
       solar: this._config.solar_entity || hub["sensor.pv_forecast"],
       battery: battery ? battery.entity : hub["sensor.battery_power"],
+      soc: measuredSoc ? measuredSoc.entity : hub["sensor.battery_soc"],
       price: hub["sensor.buy_price"],
     };
     // Only an outside sensor can have the other sign convention: the plan's
@@ -577,7 +581,7 @@ class EmhassOverviewCard extends LiveCard {
     const prices = mergeHistory(history.price, series(buy));
     const solarPoints = mergeHistory(history.solar, planSolar);
     const batteryPoints = mergeHistory(history.battery, planBattery);
-    const socPoints = series(soc);
+    const socPoints = mergeHistory(history.soc, series(soc));
     const loads = findLoads(hass).map((load) => loadView(hass, load));
     // A rolling window rather than the extent of the data: the plan's own
     // series only reach back to "now", and eleven hours of spent morning
@@ -821,7 +825,7 @@ class EmhassOverviewCard extends LiveCard {
             from: t0,
             to: t1,
             past: now,
-            height: 30,
+            height: 60,
             signed: true,
             // The plan's own convention: positive is discharge, negative is
             // charge. Discharging is the battery doing the same job as the

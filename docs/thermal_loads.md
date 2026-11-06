@@ -36,6 +36,144 @@ exists, every optimiser-facing value (the comfort band, the window, the
 physics) is an entity on the load's own device page, adjustable from a
 dashboard or an automation without reloading anything.
 
+Temperature targets accept **5-95 °C** in both setup and the device controls.
+This is the input range; the room-heating defaults are unchanged. Higher
+targets do not switch models: a **Room** load retains its simple model with
+heat loss relative to outdoor temperature. Choose **Water tank** explicitly
+for water storage and estimated hot-water consumption.
+
+## Water tank (immersion heater)
+
+Under **Add thermal load**, choose **Water tank** instead of **Room**. The first
+version supports one tank and one electric heater, which is an immersion element
+unless you set a heater COP (below). Several heat sources and a COP that varies
+with outdoor temperature are not modelled. Existing thermal loads remain room models, even with
+high temperature targets. The model is fixed when created; use a new load to
+change models, and never leave two loads controlling the same heater.
+
+Enter the tank volume in litres (the form starts at 200), actual heater power in watts, a temperature
+sensor, and explicit **Lowest standby temperature**, **Required hot-water
+temperature** and **Maximum temperature** limits, in that order. These are tank
+temperatures, not tap temperatures. The shared input limits are not operating
+recommendations: use the tank and heater's permitted temperatures. Device
+thermostats and over-temperature protection remain authoritative; this feature
+does not provide disinfection schedules.
+
+A tank that is too cold to meet its schedule in time (it has cooled down, or a
+hot-water period starts soon) does not stop EMHASS from planning. The request
+asks for the highest temperature the heater can reach at each step instead, so
+the tank heats as fast as it can and catches up on its own. A repair warning,
+"*tank name* cannot reach its hot-water target in time", says by when and by how
+much; it clears once the schedule is reachable again. If it keeps returning,
+lower the required or lowest standby temperature, use a stronger heater, or
+check that the temperature sensor really belongs to the tank.
+
+Choose **Number of hot-water periods** (1–8) on the tank settings page. Each
+following page is **Hot-water period 1 of 2**, **2 of 2**, and so on, asking for:
+
+- An optional name, such as Morning or Evening.
+- **Hot water needed from / until**, in local time.
+- **Estimated consumption for this period**, as withdrawn heat in kWh, not
+  electrical heater consumption. Each period has its own amount; it is not
+  the daily total copied into every period.
+
+Water must be ready at each period's start, and the required temperature applies
+throughout it. Between periods the lowest standby temperature applies, with a
+pre-heating ramp before each start. The optimiser chooses when to heat from
+prices and PV; the periods are not heater timers. Overlapping periods share the
+same temperature target and their estimated consumption is added. Enter zero
+for no estimated withdrawal; availability targets and standby losses still apply.
+
+Each period has start/end time entities, a consumption number and an enable
+switch on the tank device. Edits persist and request optimisation without an
+integration reload while the tank load is enabled. With the load disabled,
+edits save without requesting optimisation, just like other deferrable loads.
+All settings-triggered solves share a three-second delay that restarts with
+each change; values save immediately, including whole-plan action updates.
+Disabled periods retain their settings, contribute no draw
+and impose no required-temperature window; disabling every period leaves the
+standby temperature target. These controls remain editable while disabled.
+
+The `emhass_companion.set_hot_water_plan` action accepts a tank `device_id` and
+a `periods` list of 1–8 objects with `draw_start`, `draw_end`, `draw_energy_kwh`,
+optional `name`, and optional boolean `enabled` (default true). It validates and
+saves the whole plan atomically, then requests one optimisation. New slots get
+entities live; removed slots become unavailable. See the
+[guide example](guide/thermal_loads.md) for automation YAML. Legacy tanks must
+first be reconfigured to adopt period-based scheduling.
+
+Reconfigure the tank to change its volume, period count or individual periods.
+Existing periods are prefilled in order; reducing the count keeps the first
+periods, increasing it adds blank pages. Nothing is saved until the final period
+is submitted. Existing single-window tanks continue unchanged until edited;
+their old consumption settings are then offered as one period. Saving adopts
+the combined availability/consumption schedule instead of the old separate
+comfort window. Power, target temperatures and **Standby loss** remain restored
+controls on the load's device. New period-based tanks have no separate comfort
+time controls.
+Standby loss is watts of heat continuously lost, separate from hot-water use;
+start from the tank's specification or an observed no-draw cooling period. It is
+offered under the collapsed **Advanced settings** section when the tank is first
+created, and starts at 60 W.
+Room heating-rate, cooling-constant and response-delay controls are not created.
+
+### Advanced: heater COP and comfort penalty
+
+Two more settings sit in the collapsed **Advanced settings** section of the first
+setup form, next to **Standby loss**, then become restored controls on the load's
+device like the others. The defaults suit an immersion element and need no change.
+
+- **Heater COP** is the heat delivered per unit of electricity. Leave it at 1 for
+  an immersion element. For a heat-pump water heater enter its seasonal COP at
+  tank temperature, typically 2.5 to 3.5 and well below the headline rating.
+  **Power** stays the electrical power drawn while running. The COP is a constant;
+  EMHASS can also model a COP that follows outdoor temperature, but that needs
+  an outdoor forecast and is not set up here.
+- **Comfort penalty** decides how strictly the required hot-water temperature is
+  kept. At 0 (the default) it is a hard limit, and a tank that cannot reach it in
+  time is aimed at the highest temperature it can reach instead. Above 0 it
+  becomes a target: only the lowest standby temperature stays hard, and each
+  degree below the target in a timestep costs this much in your price currency.
+  Compare it with what a degree costs to heat: for 200 litres that is about
+  0.23 kWh divided by the COP, times the price per kWh. A penalty of 1 or more
+  behaves like a hard limit; around 0.1 to 0.5 lets the tank sag a few degrees
+  when electricity is expensive; 10 is effectively a hard limit that can still
+  never leave the optimiser without a plan. It adds one binary variable per
+  timestep, so solves take somewhat longer.
+
+The tank's water volume and heater power determine stored energy and heating
+rate. For reference, 200 litres heated at 2 kW for one hour gains about 8.6 degrees
+Celsius before standing losses or withdrawals. Every solve starts from the live
+tank temperature. A single temperature represents the whole tank: stratification,
+mixing and unexpected consumption remain approximations, not measured predictions.
+
+Consumption is aligned to the optimizer's actual interval grid and resampled
+without changing daily energy. Windows may cross midnight; equal endpoints mean
+a full local day. On daylight-saving changes, energy is spread across the actual
+elapsed window; partial horizons receive only their overlapping share. Ambiguous
+endpoints use their first occurrence; missing endpoints
+advance to the first valid local time. If both endpoints collapse onto that instant,
+the energy is allocated to its containing interval once.
+
+Water tanks require a known **EMHASS 0.18.8 or newer** backend. They use
+`thermal_battery` with water properties, the heater COP as efficiency (1 for an immersion element), standing losses
+and a full-horizon draw-off profile (including explicit zeros for standby-only).
+An immersion-only installation does not need an outdoor-temperature forecast for
+the tank model; any independently selected PV/weather forecast still has its own
+requirements. Planned-temperature and should-run entities and heater control use
+the same global load indices as ordinary and room loads.
+
+For enabled tanks, missing, nonfinite or invalid temperature blocks a new solve
+and tank control
+commands, rather than falling back to a room temperature. Should run becomes
+unknown, including during forced-on mode. An existing switch is left unchanged;
+the device thermostat retains autonomous responsibility. A plan blocked by invalid
+data is not resumed until a new valid solve succeeds. Disabling a tank still gives
+the normal off command unless forced on; it does not require valid telemetry or
+a tank-capable backend. This is not a replacement for
+hardware safety controls. Check the configured profile, temperatures and actual
+hardware behaviour during a supervised trial before unattended operation.
+
 ## What a thermal load does not have
 
 There is no operating-hours target, so everything anchored to one is absent
@@ -112,14 +250,17 @@ feeding each other, and a house modelled as a thermal mass with window solar
 gain. The Companion does **not** manage a topology. A thermal load above is
 still the single-load model, and EMHASS keeps supporting it unchanged.
 
-If you already run a `heat_topology` in the EMHASS add-on, one setting matters.
-By default EMHASS *replaces* every deferrable load of a run with the ones the
-topology builds, which would silently drop the loads the Companion sends. Set
-`"extend_deferrable_loads": true` at the top level of the topology (EMHASS
-0.18.5 or newer). EMHASS then appends the topology's loads after the Companion's,
-which keep their place. The Companion raises a repair issue when it finds a
-topology in replace mode alongside Companion loads.
+Every request the Companion sends explicitly turns EMHASS's heat topology off
+(an empty `heat_topology`), so a topology saved in the EMHASS add-on cannot
+replace or add to the loads the Companion plans. By default EMHASS would
+*replace* every deferrable load of a run with the ones the topology builds,
+which silently drops the Companion's loads; sending the empty value prevents
+that, and the old repair issue for it no longer exists. The same applies to
+shared thermal tanks on EMHASS 0.18.6 or newer.
 
-This combination is not tested against a real heating plant. The topology's own
-loads get no entities or controls from the Companion; drive that hardware from
-EMHASS's own outputs.
+A topology you keep in EMHASS still applies to runs you start from EMHASS's own
+UI, and the Companion does not plan it. Do not use **Write settings to EMHASS**
+if you want to keep it: that action writes the empty topology too (see
+[Hub controls](guide/hub_controls.md#write-settings-to-emhass)). The topology's
+own loads get no entities or controls from the Companion; drive that hardware
+from EMHASS's own outputs.

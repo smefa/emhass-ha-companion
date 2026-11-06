@@ -19,6 +19,7 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 import logging
+import math
 from typing import Any, Final
 
 from homeassistant.config_entries import ConfigEntry
@@ -44,13 +45,19 @@ from .const import (
     COMPLETION_FINISHED_EARLY,
     COMPLETION_NEVER_STARTED,
     CONF_COMFORT_END,
+    CONF_COMFORT_PENALTY,
     CONF_COMFORT_START,
     CONF_COMFORT_TEMPERATURE,
     CONF_CONTROL_ENTITY,
     CONF_COOLING_CONSTANT,
+    CONF_DRAW_END,
+    CONF_DRAW_ENERGY,
+    CONF_DRAW_START,
     CONF_EARLIEST_START,
     CONF_ENERGY_NEEDED,
+    CONF_HEATER_COP,
     CONF_HEATING_RATE,
+    CONF_HOT_WATER_PERIODS,
     CONF_LATEST_END,
     CONF_MAX_STARTUPS,
     CONF_MAX_TEMPERATURE,
@@ -65,12 +72,17 @@ from .const import (
     CONF_SENSE,
     CONF_SETBACK_TEMPERATURE,
     CONF_SINGLE_CONSTANT,
+    CONF_STANDBY_LOSS,
     CONF_STARTUP_PENALTY,
     CONF_SURPLUS_HEADROOM,
     CONF_SURPLUS_PRIORITY,
+    CONF_TANK_VOLUME,
     CONF_TEMPERATURE_SENSOR,
     CONF_THERMAL_INERTIA,
+    CONF_THERMAL_MODEL,
     CONTROL_ENTITY_DOMAINS,
+    DEFAULT_COMFORT_PENALTY,
+    DEFAULT_HEATER_COP,
     DEFAULT_IDLE_MINUTES,
     DEFAULT_IDLE_POWER_W,
     DEFAULT_SURPLUS_HEADROOM_W,
@@ -86,6 +98,8 @@ from .const import (
     RECURRENCE_SURPLUS,
     RECURRENCES,
     SUBENTRY_TYPE_THERMAL,
+    THERMAL_MODEL_ROOM,
+    THERMAL_MODEL_WATER_TANK,
 )
 from .models import BatteryConfig, DeferrableLoad, HybridInverterConfig, Plan, PlanRow, Series
 from .payload import operating_timesteps
@@ -112,6 +126,7 @@ from .thermal import (
     SENSE_HEAT,
     ThermalConfig,
 )
+from .water_tank import WaterTankConfig, hot_water_periods_from_data
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -173,6 +188,15 @@ class DeferrableRuntime:
     control_entity: str | None = None
     temperature_sensor: str | None = None
     sense: str = SENSE_HEAT
+    thermal_model: str = THERMAL_MODEL_ROOM
+    tank_volume_litres: float = 0.0
+    standby_loss_w: float = 0.0
+    heater_cop: float = DEFAULT_HEATER_COP
+    comfort_penalty: float = DEFAULT_COMFORT_PENALTY
+    draw_start: time | None = None
+    draw_end: time | None = None
+    draw_energy_kwh: float = 0.0
+    hot_water_periods: list[dict[str, Any]] | None = None
 
     # Thermal tuning, owned by entities like every other optimiser input. The
     # physics (rates, inertia) live here rather than in the subentry because
@@ -340,6 +364,11 @@ class DeferrableRuntime:
     def is_thermal(self) -> bool:
         """Whether the optimiser controls this load's temperature, not its run time."""
         return self.load_type == LOAD_TYPE_THERMAL
+
+    @property
+    def is_water_tank(self) -> bool:
+        """Whether this is an explicitly configured immersion tank."""
+        return self.is_thermal and self.thermal_model == THERMAL_MODEL_WATER_TANK
 
     @property
     def is_running(self) -> bool:
@@ -1035,7 +1064,9 @@ class DeferrableRuntime:
             return 0
         return max(0, int((now - self.off_since).total_seconds() / 60 // step_minutes))
 
-    def thermal_config(self, current_temperature: float | None) -> ThermalConfig | None:
+    def thermal_config(
+        self, current_temperature: float | None
+    ) -> ThermalConfig | WaterTankConfig | None:
         """This load's thermal model, or None for an ordinary load.
 
         Built fresh on every request from the entity-owned live values, the
@@ -1043,6 +1074,32 @@ class DeferrableRuntime:
         """
         if not self.is_thermal:
             return None
+        if self.is_water_tank:
+            if not self.enabled:
+                return None
+            if current_temperature is None:
+                raise ValueError(f"Water tank {self.name}: a valid temperature is required")
+            return WaterTankConfig(
+                current_temperature=current_temperature,
+                volume_litres=self.tank_volume_litres,
+                nominal_power_w=self.nominal_power_w,
+                standby_loss_w=self.standby_loss_w,
+                heater_cop=self.heater_cop,
+                comfort_penalty=self.comfort_penalty,
+                comfort_temperature=self.comfort_temperature,
+                setback_temperature=self.setback_temperature,
+                max_temperature=self.max_temperature,
+                comfort_start=self.comfort_start,
+                comfort_end=self.comfort_end,
+                draw_start=self.draw_start,
+                draw_end=self.draw_end,
+                draw_energy_kwh=self.draw_energy_kwh,
+                periods=(
+                    hot_water_periods_from_data(self.hot_water_periods)
+                    if self.hot_water_periods is not None
+                    else None
+                ),
+            )
         return ThermalConfig(
             sense=self.sense,
             heating_rate=self.heating_rate,
@@ -1098,6 +1155,14 @@ class DeferrableRuntime:
             # request, the window a standing property of the appliance and the
             # household. Both may apply, and the payload intersects them.
             deadline_at=self.deadline_at,
+            repeats_daily=(
+                self.recurrence == RECURRENCE_DAILY
+                and windowed
+                and not surplus
+                and not self.is_thermal
+                and self.earliest_start is not None
+                and self.latest_end is not None
+            ),
             semi_continuous=self.semi_continuous,
             single_constant=self.single_constant,
             startup_penalty=self.startup_penalty,
@@ -1294,6 +1359,13 @@ class DeferrableRegistry:
         sources = {
             load.running_source: None for load in self._loads.values() if load.running_source
         }
+        sources.update(
+            {
+                load.temperature_sensor: None
+                for load in self._loads.values()
+                if load.is_water_tank and load.temperature_sensor
+            }
+        )
         if sources:
             self._unsubscribes.append(
                 async_track_state_change_event(self.hass, list(sources), self._async_source_changed)
@@ -1345,8 +1417,13 @@ class DeferrableRegistry:
 
     @property
     def has_thermal(self) -> bool:
-        """Whether any load needs an outdoor temperature to be modelled."""
+        """Whether any load has a temperature model."""
         return any(load.is_thermal for load in self._loads.values())
+
+    @property
+    def needs_outdoor_temperature(self) -> bool:
+        """Only room models need an outdoor forecast; immersion tanks do not."""
+        return any(load.is_thermal and not load.is_water_tank for load in self._loads.values())
 
     @property
     def has_surplus(self) -> bool:
@@ -1561,6 +1638,24 @@ class DeferrableRegistry:
         ``start_temperature`` from the payload and lets EMHASS fall back to its
         own default rather than planning from an invented reading.
         """
+        if load.is_water_tank:
+            if not load.enabled:
+                return None
+            state = (
+                self.hass.states.get(load.temperature_sensor) if load.temperature_sensor else None
+            )
+            try:
+                value = float(state.state) if state is not None else float("nan")
+                unit = state.attributes.get(ATTR_UNIT_OF_MEASUREMENT) if state else None
+                if unit and unit != UnitOfTemperature.CELSIUS:
+                    value = TemperatureConverter.convert(value, unit, UnitOfTemperature.CELSIUS)
+            except (TypeError, ValueError, HomeAssistantError) as err:
+                raise ValueError(f"Water tank {load.name}: temperature sensor is invalid") from err
+            if not math.isfinite(value) or not 0 <= value <= 100:
+                raise ValueError(
+                    f"Water tank {load.name}: temperature sensor must report a finite 0-100 C reading"
+                )
+            return value
         if not load.is_thermal or not load.temperature_sensor:
             return None
         state = self.hass.states.get(load.temperature_sensor)
@@ -1673,6 +1768,8 @@ class DeferrableRegistry:
         state = event.data["new_state"]
         now = dt_util.utcnow()
         for load in self._loads.values():
+            if load.is_water_tank and load.temperature_sensor == entity_id:
+                load.notify()
             if load.running_source == entity_id:
                 was_running = load.is_running
                 load.observe(state, now)
@@ -1746,6 +1843,20 @@ def live_settings(load: DeferrableRuntime) -> dict[str, Any]:
     The counterpart to a subentry's ``data`` -- same keys, current values.
     """
     fields = SEEDED_FIELDS + (SEEDED_THERMAL_FIELDS if load.is_thermal else ())
+    if load.is_water_tank:
+        fields = (
+            *(
+                (key, attr)
+                for key, attr in fields
+                if attr not in {"heating_rate", "cooling_constant", "thermal_inertia"}
+                and not (
+                    load.hot_water_periods is not None and attr in {"comfort_start", "comfort_end"}
+                )
+            ),
+            (CONF_STANDBY_LOSS, "standby_loss_w"),
+            (CONF_HEATER_COP, "heater_cop"),
+            (CONF_COMFORT_PENALTY, "comfort_penalty"),
+        )
     return {key: getattr(load, attr, None) for key, attr in fields}
 
 
@@ -1780,6 +1891,9 @@ def _from_subentry(
     recurrence = data.get(CONF_RECURRENCE)
     load.recurrence = recurrence if recurrence in RECURRENCES else RECURRENCE_DAILY
     if load.is_thermal:
+        load.standby_loss_w = float(data.get(CONF_STANDBY_LOSS, 0))
+        load.heater_cop = float(data.get(CONF_HEATER_COP, DEFAULT_HEATER_COP))
+        load.comfort_penalty = float(data.get(CONF_COMFORT_PENALTY, DEFAULT_COMFORT_PENALTY))
         load.heating_rate = float(data.get(CONF_HEATING_RATE, DEFAULT_HEATING_RATE))
         load.cooling_constant = float(data.get(CONF_COOLING_CONSTANT, DEFAULT_COOLING_CONSTANT))
         load.thermal_inertia = float(data.get(CONF_THERMAL_INERTIA, DEFAULT_THERMAL_INERTIA))
@@ -1798,6 +1912,10 @@ def _from_subentry(
             _parse_time(hass, data.get(CONF_COMFORT_END), load=title, field="comfort end")
             or DEFAULT_COMFORT_END
         )
+        if load.is_water_tank:
+            for key in (CONF_COMFORT_TEMPERATURE, CONF_SETBACK_TEMPERATURE, CONF_MAX_TEMPERATURE):
+                if key not in data:
+                    setattr(load, key, float("nan"))
     return load
 
 
@@ -1820,6 +1938,19 @@ def _apply_subentry_fields(
     load.control_entity = supported_control_entity(data.get(CONF_CONTROL_ENTITY))
     load.temperature_sensor = data.get(CONF_TEMPERATURE_SENSOR) or None
     load.sense = data.get(CONF_SENSE) or SENSE_HEAT
+    load.thermal_model = data.get(CONF_THERMAL_MODEL, THERMAL_MODEL_ROOM)
+    load.tank_volume_litres = float(data.get(CONF_TANK_VOLUME, 0))
+    load.draw_energy_kwh = float(data.get(CONF_DRAW_ENERGY, 0))
+    load.hot_water_periods = (
+        (data[CONF_HOT_WATER_PERIODS] or []) if CONF_HOT_WATER_PERIODS in data else None
+    )
+    for key in (CONF_DRAW_START, CONF_DRAW_END):
+        value = data.get(key)
+        try:
+            parsed = value if isinstance(value, time) else time.fromisoformat(str(value))
+        except (TypeError, ValueError):
+            parsed = None
+        setattr(load, key, parsed)
 
 
 def supported_control_entity(entity_id: str | None) -> str | None:

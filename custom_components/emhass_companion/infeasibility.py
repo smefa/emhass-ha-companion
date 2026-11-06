@@ -108,6 +108,7 @@ HEADLINE_ORDER = (
     "pin_vs_window",
     "window_too_short",
     "window_energy",
+    "thermal_unreachable",
     "power_deficit",
     "pv_surplus",
     "array_length",
@@ -163,7 +164,8 @@ def load_names_from(raw: dict) -> list[str] | None:
     """Load names in ``P_deferrable{k}`` order, when a diagnostics download has them.
 
     ``deferrable_order`` lists subentry ids; the ``loads`` section maps those
-    to the names the user gave each load. Anything missing falls back to
+    to the names the user gave each load. ``deferrable_extra_rows`` names the
+    rows after them (later daily windows). Anything missing falls back to
     ``Deferrable k`` in :func:`_load_name`.
     """
     order = raw.get("deferrable_order")
@@ -175,7 +177,11 @@ def load_names_from(raw: dict) -> list[str] | None:
         for item in loads
         if isinstance(item, dict) and item.get("name")
     }
-    return [by_id.get(subentry_id) or f"Deferrable {k}" for k, subentry_id in enumerate(order)]
+    names = [by_id.get(subentry_id) or f"Deferrable {k}" for k, subentry_id in enumerate(order)]
+    extras = raw.get("deferrable_extra_rows")
+    if isinstance(extras, list):
+        names.extend(str(name) for name in extras)
+    return names
 
 
 # -- payload helpers ----------------------------------------------------------
@@ -946,6 +952,138 @@ def check_power_balance(payload: dict, report: Report) -> None:
         )
 
 
+def best_case_temperatures(
+    tank: dict, power_w: Any, step_minutes: float, steps: int
+) -> list[float] | None:
+    """Hottest a ``thermal_battery`` tank can be at each timestep, heater flat out.
+
+    Index ``i`` is the temperature at timestep ``i``; index 0 is the start
+    temperature. EMHASS's tank follows ``T[i+1] = T[i] + 3600 / (density *
+    heat_capacity * volume) * (efficiency * P * dt - draw_off[i] - loss * dt)``
+    (``_add_thermal_battery_constraints``). The ceiling (``max_temperatures``)
+    caps the trajectory, so heat the tank cannot hold is not counted towards
+    later floors -- but only when the tank starts at or below every ceiling.
+    EMHASS relaxes a ceiling the tank starts above, and capping to it then
+    could turn a reachable floor into a false finding.
+
+    Only the constant-efficiency tank form Companion sends is modelled: a heat
+    pump (no ``efficiency``), a thermal inertia filter or solar gain would each
+    need their own bound, so those return None rather than a guess. The grid,
+    battery and other loads are ignored, which can only make the best case too
+    generous: a floor above it is a proof that no plan exists.
+    """
+    try:
+        draw = [float(v) for v in tank["draw_off_demand"]]
+        temperature = float(tank["start_temperature"])
+        capacity = float(tank["density"]) * float(tank["heat_capacity"]) * float(tank["volume"])
+        efficiency = float(tank["efficiency"])
+        dt = step_minutes / 60
+        loss = float(tank.get("thermal_loss", 0.0)) * dt
+    except (KeyError, TypeError, ValueError):
+        return None
+    if (
+        not isinstance(power_w, (int, float))
+        or isinstance(power_w, bool)
+        or power_w <= 0
+        or capacity <= 0
+        or efficiency <= 0
+        or not draw
+        or tank.get("sense", "heat") != "heat"
+        or tank.get("thermal_inertia_time_constant")
+        or tank.get("solar_absorption_area")
+    ):
+        return None
+    ceiling = _holdable_ceiling(tank, temperature)
+    best = [temperature]
+    # EMHASS tiles a short demand profile.
+    for i in range(steps - 1):
+        temperature += (
+            3600 / capacity * (efficiency * power_w / 1000 * dt - draw[i % len(draw)] - loss)
+        )
+        if ceiling is not None and i + 1 < len(ceiling):
+            temperature = min(temperature, ceiling[i + 1])
+        best.append(temperature)
+    return best
+
+
+def _holdable_ceiling(tank: dict, start: float) -> list[float] | None:
+    """The tank's ``max_temperatures``, if it starts at or below all of them."""
+    try:
+        ceiling = [float(v) for v in tank["max_temperatures"]]
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not ceiling or start > min(ceiling):
+        return None
+    return ceiling
+
+
+def check_thermal_unreachable(
+    payload: dict, report: Report, load_names: list[str] | None = None
+) -> None:
+    """A hot-water tank whose temperature floor it cannot reach in time.
+
+    EMHASS holds ``min_temperatures`` as a hard constraint from timestep 1 on;
+    only the opposite bound is ever relaxed. If even the best case (see
+    :func:`best_case_temperatures`) ends a timestep below that timestep's
+    floor, no plan exists. A tank that has cooled below its standby floor
+    stays unreachable run after run, because the plan that would have heated
+    it is never applied.
+
+    Companion itself lowers such a floor to the reachable temperature before
+    sending (``WaterTankConfig.to_emhass``), so this mainly catches requests
+    from older versions and hand-made payloads.
+    """
+    configs = payload.get("def_load_config")
+    step_minutes = payload.get("optimization_time_step")
+    if not isinstance(configs, list) or not step_minutes:
+        return
+    # Day-ahead requests carry timestamped forecasts and no prediction_horizon,
+    # so the bound lists, which are exactly one horizon long, set the length.
+    horizon = _horizon_length(payload)
+    dt = step_minutes / 60
+    for k, entry in enumerate(configs):
+        tank = entry.get("thermal_battery") if isinstance(entry, dict) else None
+        if not isinstance(tank, dict):
+            continue
+        power = _item(payload.get("nominal_power_of_deferrable_loads"), k, None)
+        try:
+            floor = [float(v) for v in tank["min_temperatures"]]
+            start = float(tank["start_temperature"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        # A floor list longer than the horizon is truncated and a shorter one
+        # padded by EMHASS, which is not checked.
+        steps = len(floor) if horizon is None else min(horizon, len(floor))
+        best = best_case_temperatures(tank, power, step_minutes, steps)
+        if best is None:
+            continue
+        name = _load_name(load_names, k)
+        for i in range(1, steps):
+            if best[i] < floor[i] - 0.01:
+                report.add(
+                    Severity.CRITICAL,
+                    "thermal_unreachable",
+                    f"{name} cannot reach its temperature floor in time",
+                    f"{name} must be at least {floor[i]:.1f} C at timestep {i}, "
+                    f"but starting from {start:.1f} C the best "
+                    f"it can do with its heater at {format_power(power)} the whole way is "
+                    f"{best[i]:.1f} C. EMHASS holds that floor as a hard limit, so it "
+                    "finds no plan at all. Lower the required or standby temperature, "
+                    "give the load more power, or check the temperature sensor really "
+                    "belongs to this heater.",
+                    {
+                        "name": name,
+                        "required": f"{floor[i]:.1f}",
+                        "achievable": f"{best[i]:.1f}",
+                        "current": f"{start:.1f}",
+                        "power": format_power(power),
+                        "timestep": str(i),
+                        "hours": f"{i * dt:g}",
+                    },
+                )
+                break
+
+
 def run_checks(
     payload: dict,
     warnings: list[str],
@@ -962,6 +1100,7 @@ def run_checks(
     check_pin_vs_window(payload, report, load_names)
     check_deferrable_windows(payload, report, load_names)
     check_window_energy(payload, report, load_names)
+    check_thermal_unreachable(payload, report, load_names)
     check_battery_soc(payload, report)
     check_hybrid_inverter(payload, report)
     check_power_balance(payload, report)

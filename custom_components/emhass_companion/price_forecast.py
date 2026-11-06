@@ -13,8 +13,11 @@ below does not care what unit or currency a provider quotes.
 The eupowerprices forecast is quoted in EUR/MWh, the user's price entity in whatever
 currency and unit it likes, often with taxes folded in. Rather than configure
 a conversion, the forecast is rescaled to the real prices over the hours where
-both exist -- the one ratio absorbs currency, MWh against kWh, and VAT alike.
-The fill is refused, and the caller falls back, whenever that fit looks wrong.
+both exist. Matching their spreads and means absorbs currency, units and fixed
+additions without flattening a weakly correlated forecast during calibration.
+Missing prices blend this adjusted forecast with the previous-day fallback,
+weighted by squared positive correlation. This is a conservative heuristic,
+not a calibrated probability or a guarantee of forecast skill.
 """
 
 from __future__ import annotations
@@ -25,6 +28,7 @@ from datetime import UTC, datetime, timedelta
 import itertools
 import logging
 import math
+from statistics import mean
 from typing import Any, Final
 
 from aiohttp import ClientError, ClientSession, ClientTimeout
@@ -46,11 +50,7 @@ RETRY_AFTER_FAILURE: Final = timedelta(minutes=15)
 # yesterday, when the API cannot be reached.
 STALE_LIMIT: Final = timedelta(hours=36)
 
-# The scale fit needs enough overlapping hours to mean something, and enough
-# agreement in shape to be the same market. Below the correlation floor the
-# configured area is likelier wrong than the forecast merely noisy.
 MIN_OVERLAP_POINTS: Final = 12
-MIN_CORRELATION: Final = 0.5
 
 
 class PriceForecastError(Exception):
@@ -125,18 +125,25 @@ class ForecastFill:
     scale: float
     offset: float
     correlation: float
+    forecast_weight: float
     overlap: int
     forecast_from: datetime
 
 
 def fill_with_forecast(spot: Series, forecast: Series, until: datetime) -> ForecastFill:
-    """Extend ``spot`` to ``until`` with ``forecast`` rescaled onto it.
+    """Extend ``spot`` using confidence-weighted forecast/previous-day prices.
 
-    Raises :class:`PriceForecastError` when the forecast cannot be trusted to
-    line up with ``spot`` -- the caller then keeps the series it had.
+    Match overlap standard deviations and means before blending; unlike a
+    regression slope, this scale does not also shrink with correlation.
+    Non-positive correlation or a flat overlap gives the forecast zero weight.
+    Raises :class:`PriceForecastError` for insufficient or invalid data.
     """
     if not spot:
         raise PriceForecastError("no real prices to fit the forecast against")
+    if not forecast:
+        raise PriceForecastError("forecast is empty")
+    if any(not math.isfinite(point.value) for point in itertools.chain(spot, forecast)):
+        raise PriceForecastError("prices contain non-finite values")
     pairs: list[tuple[float, float]] = []
     overlap_times: set[datetime] = set()
     for point in spot:
@@ -155,25 +162,16 @@ def fill_with_forecast(spot: Series, forecast: Series, until: datetime) -> Forec
         raise PriceForecastError(
             f"only {overlap_hours} hours overlap the real prices (need {MIN_OVERLAP_POINTS})"
         )
-    mean_real = sum(real for real, _ in pairs) / len(pairs)
-    mean_fore = sum(fore for _, fore in pairs) / len(pairs)
+    mean_real = mean(real for real, _ in pairs)
+    mean_fore = mean(fore for _, fore in pairs)
+    var_real = sum((real - mean_real) ** 2 for real, _ in pairs)
     var_fore = sum((fore - mean_fore) ** 2 for _, fore in pairs)
-    cov = sum((real - mean_real) * (fore - mean_fore) for real, fore in pairs)
-    if var_fore <= 0 or cov <= 0:
-        raise PriceForecastError("forecast does not move with the real prices")
-    # real ~ scale * forecast + offset. The offset carries fixed per-kWh
-    # additions a price entity may already contain (taxes, markups); a pure
-    # ratio would multiply those up and flip the sign of a future negative
-    # price.
-    scale = cov / var_fore
+    scale = math.sqrt(var_real) / math.sqrt(var_fore) if var_fore > 0 else 0.0
     offset = mean_real - scale * mean_fore
     correlation = _correlation(pairs)
     if not (math.isfinite(scale) and math.isfinite(offset) and math.isfinite(correlation)):
         raise PriceForecastError("forecast could not be fitted")
-    if correlation < MIN_CORRELATION:
-        raise PriceForecastError(
-            f"forecast does not follow the real prices (correlation {correlation:.2f})"
-        )
+    forecast_weight = max(0.0, min(1.0, correlation)) ** 2
 
     until = until.astimezone(UTC)
     extra: list[Point] = []
@@ -193,24 +191,40 @@ def fill_with_forecast(spot: Series, forecast: Series, until: datetime) -> Forec
     # first forecast hour after quarter-hour prices is only 75 minutes.
     join_limit = (spot.step() or step) * 2
     if extra[0].time - spot.end > join_limit or any(
-        later - earlier > step * 1.5
-        for earlier, later in itertools.pairwise(point.time for point in extra)
+        later.time - earlier.time > step * 1.5
+        for earlier, later in itertools.pairwise(forecast)
+        if later.time > spot.start and earlier.time < extra[-1].time
     ):
         raise PriceForecastError("forecast has missing hours before the horizon")
+    adjusted = Series(extra)
+    repeated = spot.extended_with_previous_day(extra[-1].time, spot.step() or step)
+    times = sorted(
+        {point.time for point in extra}
+        | {point.time for point in repeated if point.time >= extra[0].time}
+    )
+    blended: list[Point] = []
+    for when in times:
+        forecast_value = adjusted.value_at(when)
+        previous_value = repeated.value_at(when)
+        assert forecast_value is not None and previous_value is not None
+        value = forecast_weight * forecast_value + (1 - forecast_weight) * previous_value
+        if not math.isfinite(value):
+            raise PriceForecastError("adjusted forecast contains non-finite prices")
+        blended.append(Point(when, value))
     return ForecastFill(
-        series=Series([*spot, *extra]),
+        series=Series([*spot, *blended]),
         scale=scale,
         offset=offset,
         correlation=correlation,
+        forecast_weight=forecast_weight,
         overlap=len(pairs),
         forecast_from=extra[0].time,
     )
 
 
 def _correlation(pairs: list[tuple[float, float]]) -> float:
-    n = len(pairs)
-    mean_x = sum(x for x, _ in pairs) / n
-    mean_y = sum(y for _, y in pairs) / n
+    mean_x = mean(real for real, _ in pairs)
+    mean_y = mean(fore for _, fore in pairs)
     cov = sum((x - mean_x) * (y - mean_y) for x, y in pairs)
     var_x = sum((x - mean_x) ** 2 for x, _ in pairs)
     var_y = sum((y - mean_y) ** 2 for _, y in pairs)
@@ -287,6 +301,11 @@ class PriceForecastClient:
                     raise PriceForecastError(f"area {self._config.area} is not available")
                 if response.status != 200:
                     raise PriceForecastError(f"HTTP {response.status}")
-                return await response.json(content_type=None)
+                data = await response.json(content_type=None)
+                if isinstance(data, dict):
+                    area = data.get("area")
+                    if area is not None and str(area).strip().upper() != self._config.area:
+                        raise PriceForecastError("forecast area does not match the configured area")
+                return data
         except (ClientError, TimeoutError, ValueError) as err:
             raise PriceForecastError(f"request failed: {err}") from err

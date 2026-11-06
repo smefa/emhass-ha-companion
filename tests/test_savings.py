@@ -25,7 +25,7 @@ from custom_components.emhass_companion.const import (
     CONF_PV_ENERGY_ENTITY,
 )
 from custom_components.emhass_companion.metering import build_meters
-from custom_components.emhass_companion.models import Plan, PlanRow, Point, Series
+from custom_components.emhass_companion.models import BatteryConfig, Plan, PlanRow, Point, Series
 from custom_components.emhass_companion.savings import (
     IntervalEnergy,
     Ledger,
@@ -534,6 +534,7 @@ def test_the_switch_alone_picks_up_sensors_configured_elsewhere():
             pv_live_entity="sensor.pv_power",
             house_load_total_entity="sensor.house_power",
             battery_power_entity="sensor.batt_power",
+            battery=BatteryConfig(enabled=True),
         ),
         {
             CONF_METERING: {
@@ -581,3 +582,131 @@ def test_half_a_grid_pair_is_not_usable():
         },
     )
     assert spec.usable is False
+
+
+@pytest.mark.parametrize("difference", [7.32, -7.32, 0.0])
+def test_no_battery_keeps_signed_accounting_difference_visible(difference):
+    ledger = Ledger(
+        battery_enabled=False,
+        actual_cost=46.23,
+        solar_only_cost=46.23 + difference,
+        grid_only_cost=63.08,
+        battery_book_value=5.0,
+        battery_book_value_start=1.0,
+        balance_residual_kwh=-0.089,
+        unpriced_kwh=0.148,
+    )
+
+    assert ledger.battery_savings == 0.0
+    assert ledger.storage_carry == 0.0
+    assert ledger.accounting_difference == pytest.approx(difference)
+    assert ledger.solar_only_baseline_cost == 46.23
+    assert ledger.solar_only_cost == pytest.approx(46.23 + difference)
+    assert ledger.solar_savings == pytest.approx(16.85)
+    assert ledger.total_savings == pytest.approx(16.85)
+    assert ledger.total_savings == pytest.approx(ledger.solar_savings + ledger.battery_savings)
+    assert ledger.balance_residual_kwh == -0.089
+    assert ledger.unpriced_kwh == 0.148
+    assert Ledger.from_dict(ledger.as_dict()) == ledger
+
+
+def test_disabled_battery_ignores_stale_meter_configuration():
+    from custom_components.emhass_companion.const import (
+        CONF_BATTERY_CHARGE_ENERGY_ENTITY,
+        CONF_BATTERY_DISCHARGE_ENERGY_ENTITY,
+    )
+
+    spec = build_meters(
+        _config(battery_power_entity="sensor.old_battery"),
+        {
+            CONF_METERING: {
+                CONF_METERING_ENABLED: True,
+                CONF_GRID_IMPORT_ENERGY_ENTITY: "sensor.imported",
+                CONF_GRID_EXPORT_ENERGY_ENTITY: "sensor.exported",
+                CONF_BATTERY_CHARGE_ENERGY_ENTITY: "sensor.old_charge",
+                CONF_BATTERY_DISCHARGE_ENERGY_ENTITY: "sensor.old_discharge",
+            }
+        },
+    )
+
+    assert spec.has_battery is False
+    assert spec.entities() == ["sensor.exported", "sensor.imported"]
+
+
+def test_enabled_battery_keeps_existing_attribution():
+    ledger = Ledger(actual_cost=46.23, solar_only_cost=53.55)
+    assert ledger.solar_only_baseline_cost == 53.55
+    assert ledger.battery_savings == pytest.approx(7.32)
+    assert ledger.accounting_difference == 0.0
+
+
+@pytest.mark.parametrize("battery_enabled", [False, True])
+def test_forecast_battery_flag_preserves_raw_model_for_curtailment(battery_enabled):
+    forecast = forecast_costs(
+        _plan([_row(0, p_load=1000, p_pv=3000, p_grid=0), _row(1)]),
+        start=START,
+        window=timedelta(hours=1),
+        buy=Series.empty(),
+        sell=Series.empty(),
+        battery_enabled=battery_enabled,
+    )
+
+    assert forecast is not None
+    assert forecast.solar_only_cost == -1.0
+    assert forecast.solar_only_baseline_cost == (-1.0 if battery_enabled else 0.0)
+    assert forecast.battery_savings == (-1.0 if battery_enabled else 0.0)
+    assert forecast.solar_savings == (3.0 if battery_enabled else 2.0)
+    assert forecast.total_savings == forecast.solar_savings + forecast.battery_savings
+
+
+def test_no_battery_forecast_ignores_stale_capacity_and_soc():
+    forecast = forecast_costs(
+        _plan([_row(0, p_load=0, p_grid=4000, p_batt=-4000, soc=0.4), _row(1)]),
+        start=START,
+        window=timedelta(hours=1),
+        buy=Series.empty(),
+        sell=Series.empty(),
+        stored_now_kwh=0.0,
+        capacity_kwh=10.0,
+        battery_enabled=False,
+    )
+
+    assert forecast is not None
+    assert forecast.battery_savings == forecast.storage_carry == 0.0
+    assert forecast.solar_only_baseline_cost == forecast.actual_cost == 8.0
+
+
+@pytest.mark.parametrize("pv_batches", [1, 6, 60])
+@pytest.mark.parametrize("measured_load", [False, True])
+def test_no_battery_baseline_does_not_depend_on_pv_batch_size(pv_batches, measured_load):
+    ledger = Ledger(battery_enabled=False)
+    for minute in range(60):
+        ledger.record(
+            IntervalEnergy(
+                imported=1 / 60,
+                pv=1 / pv_batches if (minute + 1) % (60 // pv_batches) == 0 else 0.0,
+                house_load=2 / 60 if measured_load else None,
+            ),
+            PRICES,
+        )
+
+    assert ledger.solar_only_baseline_cost == pytest.approx(BUY)
+    assert ledger.solar_savings == pytest.approx(BUY)
+    assert ledger.battery_savings == 0.0
+    assert ledger.balance_residual_kwh == pytest.approx(0.0, abs=1e-9)
+
+
+def test_no_battery_preserves_export_tariffs_unpriced_energy_and_roundtrip():
+    ledger = Ledger(battery_enabled=False)
+    ledger.record(IntervalEnergy(imported=1, house_load=1), Prices(buy=3, sell=1))
+    ledger.record(IntervalEnergy(exported=2, pv=3, house_load=1), Prices(buy=-1, sell=-2))
+    ledger.record(IntervalEnergy(imported=0.5, exported=0.2, pv=1, house_load=1.3), None)
+    restored = Ledger.from_dict(ledger.as_dict())
+    restored.record(IntervalEnergy(imported=1, exported=0.5, house_load=1), PRICES)
+
+    assert restored.solar_only_baseline_cost == pytest.approx(3 + 4 + 2 - 0.25)
+    assert restored.import_spend == pytest.approx(5)
+    assert restored.export_income == pytest.approx(-3.75)
+    assert restored.unpriced_kwh == pytest.approx(0.7)
+    assert restored.solar_savings == pytest.approx(restored.total_savings)
+    assert restored.battery_savings == 0.0

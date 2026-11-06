@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+import json
 import logging
+import re
 from typing import Any
 
 from aiohttp import ClientError, ClientSession, ClientTimeout
@@ -26,6 +28,32 @@ _LOGGER = logging.getLogger(__name__)
 # defaults to 45s, so this leaves room for fetch + solve + write.
 ACTION_TIMEOUT = ClientTimeout(total=300)
 READ_TIMEOUT = ClientTimeout(total=30)
+
+# EMHASS answers a failed action with its run log as a JSON list of lines, e.g.
+# "ERROR - emhass.web_server - No data was retrieved ...". The first lines are
+# start-up chatter; the reason is in the ERROR lines and the tail.
+_LOG_PREFIX = re.compile(r"^(?:DEBUG|INFO|WARNING|ERROR|CRITICAL) - [\w.]+ - ")
+_ERROR_LEVELS = ("ERROR", "CRITICAL")
+_ERROR_SUMMARY_LIMIT = 300
+
+
+def summarise_error_body(body: str) -> str:
+    """Boil an EMHASS error response down to the lines that say what went wrong.
+
+    A body that is not a JSON list of strings is returned as it came, trimmed.
+    """
+    text = body.strip()
+    try:
+        lines = json.loads(text)
+    except ValueError:
+        return text[:_ERROR_SUMMARY_LIMIT]
+    if not isinstance(lines, list) or not all(isinstance(line, str) for line in lines):
+        return text[:_ERROR_SUMMARY_LIMIT]
+    errors = [line for line in lines if line.startswith(_ERROR_LEVELS)]
+    chosen = errors or lines[-3:]
+    cleaned = [_LOG_PREFIX.sub("", line).strip() for line in chosen]
+    summary = "; ".join(dict.fromkeys(line for line in cleaned if line))
+    return summary[:_ERROR_SUMMARY_LIMIT] or text[:_ERROR_SUMMARY_LIMIT]
 
 
 class EmhassError(Exception):
@@ -89,7 +117,7 @@ class EmhassClient:
                 body = await response.text()
                 if response.status >= 400:
                     raise EmhassApiError(
-                        f"{method} {path} returned {response.status}: {body.strip()[:300]}",
+                        f"{method} {path} returned {response.status}: {summarise_error_body(body)}",
                         status=response.status,
                         body=body,
                     )
@@ -109,13 +137,31 @@ class EmhassClient:
     # -- health & version -----------------------------------------------------
 
     async def async_healthz(self) -> dict[str, Any]:
-        """Liveness probe.
+        """Return health details from a responsive EMHASS server.
 
-        Note this reports ``ok`` whenever *a* run exists -- including one that
-        came back infeasible. It answers "is EMHASS alive", never "was the last
-        plan usable"; use :meth:`async_get_last_run` for that.
+        EMHASS reports HTTP 503 / ``degraded`` before its first run (or when
+        a requested freshness window expires). Accept that health payload for
+        discovery without treating it as a usable plan; use
+        :meth:`async_get_last_run` for the optimisation result.
         """
-        return await self._request("GET", ENDPOINT_HEALTHZ)
+        try:
+            return await self._request("GET", ENDPOINT_HEALTHZ)
+        except EmhassApiError as err:
+            if err.status != 503:
+                raise
+            try:
+                health = json.loads(err.body)
+            except ValueError:
+                raise err from None
+            if not isinstance(health, dict) or health.get("status") != "degraded":
+                raise
+            versions = health.get("versions")
+            if not isinstance(versions, dict):
+                raise
+            version = versions.get("emhass")
+            if not isinstance(version, str) or not version.strip():
+                raise
+            return health
 
     async def async_get_version(self) -> str | None:
         """Installed EMHASS version, or None if it cannot be determined."""
@@ -131,8 +177,9 @@ class EmhassClient:
     async def async_set_config(self, config: dict[str, Any]) -> None:
         """Write EMHASS's configuration verbatim.
 
-        Called once at setup so that ``params.pkl`` exists -- every ``/action/*``
-        request fails without it -- and thereafter only on explicit user request.
+        Called at setup (through :meth:`async_set_config_merged`) so that
+        ``params.pkl`` exists -- every ``/action/*`` request fails without it --
+        and by the manual settings export.
         Per-run values are sent as runtime parameters instead, which override
         whatever is stored here.
 

@@ -16,14 +16,26 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, patch
 
 from homeassistant.core import HomeAssistant
+from homeassistant.data_entry_flow import InvalidData
+from homeassistant.helpers import entity_registry as er
+import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.emhass_companion.api import EmhassClient
-from custom_components.emhass_companion.const import CONF_LOAD, CONF_PV, DOMAIN
+from custom_components.emhass_companion.configuration import EmhassConfig
+from custom_components.emhass_companion.const import (
+    CONF_HOUSE_LOAD_TOTAL_ENTITY,
+    CONF_LOAD,
+    CONF_PV,
+    DOMAIN,
+    NET_HOUSE_LOAD_KEY,
+)
 
 
-async def _setup_entry(hass: HomeAssistant) -> MockConfigEntry:
-    entry = MockConfigEntry(domain=DOMAIN, data={"url": "http://localhost:5000"})
+async def _setup_entry(hass: HomeAssistant, options: dict | None = None) -> MockConfigEntry:
+    entry = MockConfigEntry(
+        domain=DOMAIN, data={"url": "http://localhost:5000"}, options=options or {}
+    )
     entry.add_to_hass(hass)
 
     with patch("custom_components.emhass_companion.EmhassClient") as client_cls:
@@ -78,7 +90,7 @@ async def test_load_forecast_method_is_reachable_and_saves(hass: HomeAssistant) 
         result["flow_id"], {"next_step_id": "load"}
     )
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"advanced": {"profile": "load/sensor"}}
+        result["flow_id"], {"profile": "load/sensor"}
     )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
@@ -128,14 +140,27 @@ async def test_create_a_house_load_sensor_lets_you_pick_the_forecast_method(
     with no form shown -- the same forecast-method choice the plain "House
     load sensor" profile gets was unreachable through this path.
     """
-    entry = await _setup_entry(hass)
+    entry = await _setup_entry(
+        hass,
+        {
+            CONF_LOAD: {
+                "profile": "load/sensor",
+                "profile_options": {
+                    "entity": "sensor.external_house_load",
+                    "method": "mlforecaster",
+                },
+            },
+        },
+    )
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"next_step_id": "load"}
     )
+    (marker,) = result["data_schema"].schema
+    assert marker.description["suggested_value"] == "load/sensor"
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"profile": "__create__", "advanced": {}}
+        result["flow_id"], {"profile": "__create__"}
     )
     assert result["step_id"] == "load_create"
     result = await hass.config_entries.options.async_configure(
@@ -152,6 +177,13 @@ async def test_create_a_house_load_sensor_lets_you_pick_the_forecast_method(
         "profile_options": {"method": "mlforecaster"},
     }
     assert entry.options["house_load_total_entity"] == "sensor.total_house_power"
+
+    config = await _reload_and_get_config(hass, entry)
+    registry_entity = er.async_get(hass).async_get_entity_id(
+        "sensor", DOMAIN, f"{entry.entry_id}_{NET_HOUSE_LOAD_KEY}"
+    )
+    assert registry_entity is not None
+    assert config.load.options == {"entity": registry_entity, "method": "mlforecaster"}
 
 
 async def test_the_pv_profile_is_reachable_and_saves(hass: HomeAssistant) -> None:
@@ -333,7 +365,7 @@ async def test_the_live_pv_sensor_lives_on_the_inverter_step_and_survives_a_batt
     assert entry.options["battery"]["hybrid_inverter"] is False
 
 
-async def test_the_load_picker_offers_only_the_create_option_up_front(
+async def test_the_load_picker_has_one_mutually_exclusive_selector(
     hass: HomeAssistant,
 ) -> None:
     entry = await _setup_entry(hass)
@@ -343,15 +375,13 @@ async def test_the_load_picker_offers_only_the_create_option_up_front(
         result["flow_id"], {"next_step_id": "load"}
     )
     schema = result["data_schema"].schema
-    (basic,) = (key for key in schema if key == "profile")
-    assert [o["value"] for o in schema[basic].config["options"]] == ["__create__"]
-    (section_key,) = (key for key in schema if key == "advanced")
-    (inner,) = (key for key in schema[section_key].schema.schema if key == "profile")
-    values = [o["value"] for o in schema[section_key].schema.schema[inner].config["options"]]
-    assert "load/sensor" in values and "__create__" not in values
+    assert set(schema) == {"profile"}
+    (marker,) = schema
+    values = [o["value"] for o in schema[marker].config["options"]]
+    assert values == ["__create__", "load/sensor", "load/emhass_native", "load/forecast_entity"]
 
 
-async def test_the_load_picker_reports_no_choice_instead_of_guessing(
+async def test_the_load_picker_requires_a_choice(
     hass: HomeAssistant,
 ) -> None:
     entry = await _setup_entry(hass)
@@ -360,9 +390,8 @@ async def test_the_load_picker_reports_no_choice_instead_of_guessing(
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"next_step_id": "load"}
     )
-    result = await hass.config_entries.options.async_configure(result["flow_id"], {"advanced": {}})
-    assert result["type"] == "form"
-    assert result["errors"] == {"base": "profile_required"}
+    with pytest.raises(InvalidData):
+        await hass.config_entries.options.async_configure(result["flow_id"], {})
 
 
 async def test_template_mode_without_a_template_is_rejected_with_advanced_open(
@@ -390,3 +419,116 @@ async def test_template_mode_without_a_template_is_rejected_with_advanced_open(
     assert result["errors"] == {"base": "template_required"}
     (section_key,) = (key for key in result["data_schema"].schema if key == "advanced")
     assert result["data_schema"].schema[section_key].options["collapsed"] is False
+
+
+async def _reload_and_get_config(hass: HomeAssistant, entry: MockConfigEntry) -> EmhassConfig:
+    """Verify saved source choices survive an actual integration reload."""
+    with patch("custom_components.emhass_companion.EmhassClient") as client_cls:
+        client_cls.return_value = AsyncMock(spec=EmhassClient)
+        client_cls.return_value.async_get_version.return_value = "0.17.9"
+        client_cls.return_value.base_url = "http://localhost:5000"
+        await hass.async_block_till_done()
+        assert await hass.config_entries.async_reload(entry.entry_id)
+        await hass.async_block_till_done()
+    return entry.runtime_data.coordinator.config
+
+
+@pytest.mark.parametrize(
+    ("profile", "profile_options"),
+    [
+        ("load/sensor", {"entity": "sensor.external_house_load", "method": "mlforecaster"}),
+        ("load/emhass_native", {"average_w": 800}),
+    ],
+)
+async def test_switching_from_created_sensor_uses_the_selected_source_after_reload(
+    hass: HomeAssistant,
+    profile: str,
+    profile_options: dict,
+) -> None:
+    entry = await _setup_entry(
+        hass,
+        {
+            CONF_HOUSE_LOAD_TOTAL_ENTITY: "sensor.total_house_power",
+            CONF_LOAD: {"profile": "load/sensor", "profile_options": {"method": "typical"}},
+        },
+    )
+    generated_entity = er.async_get(hass).async_get_entity_id(
+        "sensor", DOMAIN, f"{entry.entry_id}_{NET_HOUSE_LOAD_KEY}"
+    )
+    assert generated_entity is not None
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "load"}
+    )
+    (marker,) = result["data_schema"].schema
+    assert marker.description["suggested_value"] == "__create__"
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"profile": profile}
+    )
+    assert result["step_id"] == "load_options"
+    # Merely navigating to the other source must not mutate the saved entry.
+    assert entry.options[CONF_HOUSE_LOAD_TOTAL_ENTITY] == "sensor.total_house_power"
+    user_input = dict(profile_options)
+    if "method" in user_input:
+        user_input["advanced"] = {"method": user_input.pop("method")}
+    result = await hass.config_entries.options.async_configure(result["flow_id"], user_input)
+    assert result["type"] == "create_entry"
+    assert CONF_HOUSE_LOAD_TOTAL_ENTITY not in entry.options
+    assert entry.options[CONF_LOAD] == {"profile": profile, "profile_options": profile_options}
+    config = await _reload_and_get_config(hass, entry)
+    assert config.load.key == profile
+    assert config.load.options == profile_options
+    assert not config.house_load_total_entity
+
+
+async def test_cancelling_a_switch_from_created_sensor_preserves_its_configuration(
+    hass: HomeAssistant,
+) -> None:
+    entry = await _setup_entry(
+        hass,
+        {
+            CONF_HOUSE_LOAD_TOTAL_ENTITY: "sensor.total_house_power",
+            CONF_LOAD: {"profile": "load/sensor", "profile_options": {"method": "mlforecaster"}},
+        },
+    )
+    original = dict(entry.options)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "load"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"profile": "load/sensor"}
+    )
+    assert result["step_id"] == "load_options"
+    hass.config_entries.options.async_abort(result["flow_id"])
+    assert dict(entry.options) == original
+
+
+async def test_legacy_total_sensor_setting_does_not_override_an_explicit_load_sensor(
+    hass: HomeAssistant,
+) -> None:
+    """Entries saved before the picker fix must also respect the external sensor."""
+    entry = await _setup_entry(
+        hass,
+        {
+            CONF_HOUSE_LOAD_TOTAL_ENTITY: "sensor.total_house_power",
+            CONF_LOAD: {
+                "profile": "load/sensor",
+                "profile_options": {
+                    "entity": "sensor.external_house_load",
+                    "method": "mlforecaster",
+                },
+            },
+        },
+    )
+    assert (
+        er.async_get(hass).async_get_entity_id(
+            "sensor", DOMAIN, f"{entry.entry_id}_{NET_HOUSE_LOAD_KEY}"
+        )
+        is not None
+    )
+    config = await _reload_and_get_config(hass, entry)
+    assert config.load.options == {
+        "entity": "sensor.external_house_load",
+        "method": "mlforecaster",
+    }

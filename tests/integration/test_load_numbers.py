@@ -62,7 +62,7 @@ def _numbers(hass: HomeAssistant, step_minutes: int) -> dict[str, LoadNumber]:
     # refresh a value change now kicks off (that belongs to the coordinator's
     # own tests) -- stub it out rather than letting a real refresh run against
     # a mocked client and leave its debounce timer ticking past the test.
-    coordinator.async_request_refresh = AsyncMock()
+    coordinator.async_request_settings_refresh = AsyncMock()
     load = loads.get(next(iter(entry.subentries)))
 
     return {

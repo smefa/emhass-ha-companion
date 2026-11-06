@@ -33,7 +33,7 @@ The add-on's address is filled in automatically if it is running.
 
 ## How it works
 
-Home Assistant owns all state. EMHASS is treated as a **stateless calculator**.
+Home Assistant owns all state. EMHASS is treated as a **stateless calculator**: every run is sent its inputs and the Companion's settings through the API. EMHASS still keeps its own connection settings, a saved baseline configuration and any trained load-forecast model (see [Settings ownership](docs/settings_ownership.md)).
 
 ```
                  Home Assistant                        EMHASS
@@ -51,7 +51,7 @@ Three consequences worth knowing:
 
 **Your existing integrations are the data sources.** This integration ships no API clients. Prices come from existing price integrations, solar from Solcast, hardware from whatever inverter integration you already run. See [Data sources](docs/data_sources.md).
 
-**Configuration cannot drift.** Every optimisation request carries the full set of settings as runtime parameters. EMHASS's own `config.json` is written once at setup and never consulted for those values afterwards. (A consequence: EMHASS's own web UI will show stale values.)
+**Configuration cannot drift.** The integration talks to EMHASS only through its HTTP API. Every optimisation request carries the static settings the integration owns, plus the live inputs, as runtime parameters, so what EMHASS has saved does not decide how a run behaves. Setup and reload no longer write any of your settings to EMHASS. (A consequence: EMHASS's own web UI can show values that differ from what the integration sends. The **Write settings to EMHASS** action saves them there on request; see [Settings ownership](docs/settings_ownership.md).)
 
 **It ships unable to touch your hardware.** `switch.emhass_control_enabled` starts **off**. The integration computes and records what it *would* do so you can compare its judgement against your existing setup before handing anything over. See [Handing over control](docs/handing_over_control.md).
 

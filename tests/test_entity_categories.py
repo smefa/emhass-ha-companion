@@ -47,6 +47,7 @@ def test_secondary_sensors_are_diagnostic() -> None:
         sensor.SolarSurplusEndSensor,
         sensor.LoadScheduledPowerSensor,
         sensor.LoadPlannedTemperatureSensor,
+        sensor.LoadMeasuredTemperatureSensor,
         sensor.LoadRuntimeTodaySensor,
         binary_sensor.PhaseGuardActiveBinarySensor,
     ):

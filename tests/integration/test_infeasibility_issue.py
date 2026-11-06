@@ -89,7 +89,7 @@ async def test_an_infeasible_run_names_its_cause(hass: HomeAssistant) -> None:
     assert placeholders["house"] == "900 W"
     assert int(placeholders["total"]) >= 1
     assert data.last_infeasibility
-    assert data.last_infeasibility[0].code == "timestep0_deficit"
+    assert any(finding.code == "timestep0_deficit" for finding in data.last_infeasibility)
 
 
 async def test_a_crash_in_the_diagnosis_still_raises_the_generic_issue(

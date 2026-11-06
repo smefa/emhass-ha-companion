@@ -23,7 +23,7 @@ from custom_components.emhass_companion.api import EmhassClient
 from custom_components.emhass_companion.const import ACTION_DAYAHEAD, ACTION_MPC, DOMAIN
 from custom_components.emhass_companion.coordinator import EmhassCoordinator
 from custom_components.emhass_companion.deferrable import DeferrableRegistry
-from custom_components.emhass_companion.models import floor_to_step
+from custom_components.emhass_companion.models import row_zero_start
 from custom_components.emhass_companion.network_calendar import (
     CapacityLimit,
     DemandCharge,
@@ -425,9 +425,9 @@ async def test_build_sends_capacity_interval_keys_on_a_supported_backend(
     coordinator.backend_version = "0.18.2"
     # _build() reads dt_util.utcnow() itself rather than taking `now` as a
     # parameter, so the open interval is anchored off the real clock -- three
-    # elapsed 15min timesteps back from the step boundary at or before it,
-    # the same boundary _build's own floor_to_step(now, step) will land on.
-    floored = floor_to_step(dt_util.utcnow(), timedelta(minutes=15))
+    # elapsed 15min timesteps back from the row-zero boundary nearest it,
+    # the same boundary _build's own row_zero_start(now, step) will land on.
+    floored = row_zero_start(dt_util.utcnow(), timedelta(minutes=15))
     coordinator.peak_tracker = _StubTracker(
         floor_kw=3.2,
         open_interval_start=floored - timedelta(minutes=45),

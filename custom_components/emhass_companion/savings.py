@@ -29,12 +29,17 @@ which decompose exactly, with nothing counted twice::
     battery savings = C1 - C2   (plus storage carry)
     total savings   = C0 - C2   (plus storage carry)
 
+When no battery is configured, W1 is the actual installation: its baseline
+uses measured grid transactions, not a second simulation of the same house.
+The independent load/PV model remains stored as ``solar_only_cost`` for
+diagnostics, with its signed difference published as ``accounting_difference``.
+
 One property of that split is worth keeping in mind while reading the rest:
 ``C0`` depends only on house load and the buy price, and ``C2`` is read
-straight off the grid meter, so **total savings does not depend on the PV
-measurement at all**. Only the solar/battery split does, because only ``C1``
-reads ``pv``. A DC-side PV meter or an optimistic inverter moves the split and
-leaves the headline alone.
+straight off the grid meter. With a measured house-load source, total savings
+does not depend on PV measurement. A derived load does depend on PV and can
+inherit its asynchronous timing errors. With a battery the modelled ``C1``
+also depends on PV; without one it is a diagnostic, not the W1 baseline.
 
 See ``docs/savings_plan.md`` for the design note and the alternatives rejected.
 """
@@ -181,8 +186,20 @@ class Ledger:
     day: str = ""
     """Local ISO date this ledger is accumulating. The rollover trigger."""
 
+    battery_enabled: bool = True
+    """Whether the installation can attribute savings to a battery.
+
+    The tracker supplies the current configuration, including on restore.
+    Older standalone ledgers default to the original battery-enabled formula.
+    """
+
     actual_cost: float = 0.0
     solar_only_cost: float = 0.0
+    """Independent load/PV model cost, retained even without a battery.
+
+    Use ``solar_only_baseline_cost`` for the topology-aware W1 baseline.
+    Keeping this accumulator preserves old ledgers and measurement diagnostics.
+    """
     grid_only_cost: float = 0.0
 
     imported_kwh: float = 0.0
@@ -297,7 +314,8 @@ class Ledger:
         self.discharge_price_weighted += energy.battery_discharge * prices.buy
         self.discharge_priced_kwh += energy.battery_discharge
 
-        self._post_battery(energy, prices)
+        if self.battery_enabled:
+            self._post_battery(energy, prices)
 
     def _post_battery(self, energy: IntervalEnergy, prices: Prices) -> None:
         """Move this interval's battery flows through the cost account."""
@@ -410,12 +428,26 @@ class Ledger:
         without it. That is the property the whole daily figure rests on, and
         it is asserted directly in ``tests/test_savings.py``.
         """
+        if not self.battery_enabled:
+            return 0.0
         return self.battery_book_value - self.battery_book_value_start
+
+    @property
+    def solar_only_baseline_cost(self) -> float:
+        """W1 uses actual grid transactions when there is no battery to remove.
+
+        This preserves real import/export switching and tariff boundaries
+        without guessing when a coarse PV counter's energy was produced.
+        It also corrects restored ledgers without altering their raw totals.
+        """
+        if not self.battery_enabled:
+            return self.actual_cost
+        return self.solar_only_cost
 
     @property
     def solar_savings(self) -> float:
         """C0 - C1. Self-consumed PV at the buy price, plus export income."""
-        return self.grid_only_cost - self.solar_only_cost
+        return self.grid_only_cost - self.solar_only_baseline_cost
 
     @property
     def battery_savings(self) -> float:
@@ -423,7 +455,21 @@ class Ledger:
         battery bought by moving PV into the evening, minus the export revenue
         it gave up and minus round-trip losses -- which need no separate term
         because they are already the gap between charge and discharge."""
+        if not self.battery_enabled:
+            return 0.0
         return self.solar_only_cost - self.actual_cost + self.storage_carry
+
+    @property
+    def accounting_difference(self) -> float:
+        """Independent model minus measured cost in a battery-free installation.
+
+        A diagnostic, not an extra savings component: the measured-grid W1
+        baseline already replaces this asynchronous model. The difference can
+        contain tariff timing, integration error and missing price coverage.
+        """
+        if self.battery_enabled:
+            return 0.0
+        return self.solar_only_cost - self.actual_cost
 
     @property
     def total_savings(self) -> float:
@@ -492,13 +538,21 @@ class Forecast:
     term and is not allocated across hours, so the savings column sums to
     ``total_savings - storage_carry``, not to ``total_savings`` itself.
     """
+    battery_enabled: bool = True
+
+    @property
+    def solar_only_baseline_cost(self) -> float:
+        """Use planned grid transactions when there is no battery to remove."""
+        return self.solar_only_cost if self.battery_enabled else self.actual_cost
 
     @property
     def solar_savings(self) -> float:
-        return self.grid_only_cost - self.solar_only_cost
+        return self.grid_only_cost - self.solar_only_baseline_cost
 
     @property
     def battery_savings(self) -> float:
+        if not self.battery_enabled:
+            return 0.0
         return self.solar_only_cost - self.actual_cost + self.storage_carry
 
     @property
@@ -520,6 +574,7 @@ def forecast_costs(
     sell: Series,
     stored_now_kwh: float | None = None,
     capacity_kwh: float | None = None,
+    battery_enabled: bool = True,
 ) -> Forecast | None:
     """Price the plan ahead in all three worlds.
 
@@ -633,11 +688,12 @@ def forecast_costs(
         actual_cost=actual,
         solar_only_cost=solar_only,
         grid_only_cost=grid_only,
-        storage_carry=carry,
+        storage_carry=carry if battery_enabled else 0.0,
         import_kwh=import_kwh,
         export_kwh=export_kwh,
         pv_kwh=pv_kwh,
         load_kwh=load_kwh,
+        battery_enabled=battery_enabled,
         hourly=sorted((when, cost, save) for when, (cost, save) in hourly.items()),
     )
 

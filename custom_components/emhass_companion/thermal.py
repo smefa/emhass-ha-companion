@@ -16,13 +16,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .water_tank import WaterTankConfig
 
 from homeassistant.util import dt as dt_util
 
 SENSE_HEAT = "heat"
 SENSE_COOL = "cool"
 SENSES = (SENSE_HEAT, SENSE_COOL)
+
+# Shared UI bounds for room and tank targets; these are input limits, not defaults.
+MIN_THERMAL_TEMPERATURE = 5.0
+MAX_THERMAL_TEMPERATURE = 95.0
 
 # Defaults chosen to be safe rather than efficient: a narrow band and a modest
 # heating rate produce a conservative plan until the user tunes them.
@@ -223,7 +230,7 @@ def _parse_time(value: Any, default: time) -> time:
 
 
 def build_def_load_config(
-    thermal_by_index: dict[int, ThermalConfig],
+    thermal_by_index: dict[int, ThermalConfig | WaterTankConfig],
     load_count: int,
     grid_start: datetime,
     step: timedelta,
@@ -247,5 +254,6 @@ def build_def_load_config(
         if thermal is None:
             entries.append({})
         else:
-            entries.append({"thermal_config": thermal.to_emhass(grid_start, step, horizon_steps)})
+            key = "thermal_config" if isinstance(thermal, ThermalConfig) else "thermal_battery"
+            entries.append({key: thermal.to_emhass(grid_start, step, horizon_steps)})
     return entries

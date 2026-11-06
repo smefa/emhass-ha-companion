@@ -1,6 +1,7 @@
 """Filling price hours the real source lacks with the eupowerprices forecast."""
 
 from datetime import UTC, datetime, timedelta
+import math
 
 import pytest
 
@@ -31,6 +32,7 @@ def test_forecast_is_scaled_to_the_real_prices_and_extends_them():
     spot = hourly(T0, [v * 0.0138 for v in day_shape(36)])
     fill = fill_with_forecast(spot, forecast, T0 + timedelta(hours=60))
     assert fill.scale == pytest.approx(0.0138)
+    assert fill.forecast_weight == pytest.approx(1.0)
     assert fill.overlap == 36
     assert fill.series.end >= T0 + timedelta(hours=60)
     assert fill.forecast_from == T0 + timedelta(hours=36)
@@ -100,18 +102,135 @@ def test_too_little_overlap_is_refused():
         fill_with_forecast(spot, forecast, T0 + timedelta(hours=40))
 
 
-def test_a_forecast_that_does_not_follow_the_prices_is_refused():
+def test_a_forecast_that_does_not_follow_the_prices_uses_the_repeat():
     forecast = hourly(T0, day_shape(72))
     spot = hourly(T0, [1.0 if h % 2 else 2.0 for h in range(30)])
-    with pytest.raises(PriceForecastError, match=r"move with|correlation"):
-        fill_with_forecast(spot, forecast, T0 + timedelta(hours=40))
+    until = T0 + timedelta(hours=40)
+    fill = fill_with_forecast(spot, forecast, until)
+    assert fill.forecast_weight == 0.0
+    assert list(fill.series) == list(spot.extended_with_previous_day(until))
 
 
-def test_non_positive_prices_are_refused():
+def test_negatively_correlated_prices_use_the_repeat_without_inverting_the_forecast():
     forecast = hourly(T0, day_shape(72))
     spot = hourly(T0, [-v for v in day_shape(30)])
-    with pytest.raises(PriceForecastError):
-        fill_with_forecast(spot, forecast, T0 + timedelta(hours=40))
+    until = T0 + timedelta(hours=40)
+    fill = fill_with_forecast(spot, forecast, until)
+    assert fill.correlation == pytest.approx(-1.0)
+    assert fill.scale == pytest.approx(1.0)
+    assert fill.forecast_weight == 0.0
+    assert list(fill.series) == list(spot.extended_with_previous_day(until))
+
+
+@pytest.mark.parametrize("correlation", [-0.6, 0.0, 0.47, 0.49, 0.5, 0.51, 0.9, 1.0])
+def test_confidence_blending_has_no_correlation_cutoff_or_double_shrinkage(correlation):
+    forecast = hourly(
+        T0,
+        [50 + 20 * math.cos(math.tau * hour / 24) + 5 * (hour // 24) for hour in range(72)],
+    )
+    spot = hourly(
+        T0,
+        [
+            0.7
+            + 0.2
+            * (
+                correlation * math.cos(math.tau * hour / 24)
+                + math.sqrt(1 - correlation**2) * math.sin(math.tau * hour / 24)
+            )
+            for hour in range(24)
+        ],
+    )
+    fill = fill_with_forecast(spot, forecast, T0 + 60 * HOUR)
+    weight = max(0, correlation) ** 2
+    assert fill.correlation == pytest.approx(correlation)
+    assert fill.forecast_weight == pytest.approx(weight, abs=1e-12)
+    assert fill.scale == pytest.approx(0.01)
+    assert fill.offset == pytest.approx(0.2)
+    assert list(fill.series)[: len(spot)] == list(spot)
+    repeated = spot.extended_with_previous_day(T0 + 60 * HOUR)
+    for point in fill.series:
+        if point.time <= spot.end:
+            continue
+        expected = weight * (forecast.value_at(point.time) * 0.01 + 0.2) + (
+            1 - weight
+        ) * repeated.value_at(point.time)
+        assert point.value == pytest.approx(expected)
+
+
+def test_blending_retains_quarter_hour_changes_from_the_previous_day():
+    forecast = hourly(T0, day_shape(72))
+    quarter = timedelta(minutes=15)
+    spot = Series(
+        Point(T0 + quarter * index, day_shape(24)[index // 4] * 0.01 + (index % 4) * 0.1)
+        for index in range(96)
+    )
+    fill = fill_with_forecast(spot, forecast, T0 + 48 * HOUR)
+    assert 0 < fill.forecast_weight < 1
+    assert fill.forecast_from == T0 + 24 * HOUR
+    for index in range(4):
+        when = T0 + 24 * HOUR + quarter * index
+        adjusted = forecast.value_at(when) * fill.scale + fill.offset
+        expected = adjusted * fill.forecast_weight + spot.value_at(T0 + quarter * index) * (
+            1 - fill.forecast_weight
+        )
+        assert fill.series.value_at(when) == pytest.approx(expected)
+    assert fill.series.value_at(T0 + 24 * HOUR) != fill.series.value_at(T0 + 24 * HOUR + quarter)
+
+
+@pytest.mark.parametrize("flat_spot,flat_forecast", [(True, False), (False, True), (True, True)])
+def test_flat_overlap_uses_only_the_previous_day(flat_spot, flat_forecast):
+    spot = hourly(T0, [0.7] * 24 if flat_spot else day_shape(24))
+    forecast = hourly(T0, [50.0] * 72 if flat_forecast else day_shape(72))
+    until = T0 + 48 * HOUR
+    fill = fill_with_forecast(spot, forecast, until)
+    assert fill.correlation == 0.0
+    assert fill.forecast_weight == 0.0
+    assert math.isfinite(fill.scale) and math.isfinite(fill.offset)
+    assert list(fill.series) == list(spot.extended_with_previous_day(until))
+
+
+def test_negative_prices_with_positive_correlation_are_not_rejected_or_clipped():
+    forecast = hourly(T0, day_shape(72))
+    spot = hourly(T0, [value * 0.01 - 2 for value in day_shape(24)])
+    fill = fill_with_forecast(spot, forecast, T0 + 48 * HOUR)
+    assert fill.forecast_weight == pytest.approx(1.0)
+    assert fill.series.value_at(T0 + 30 * HOUR) == pytest.approx(-1.5)
+
+
+@pytest.mark.parametrize("invalid", [math.nan, math.inf, -math.inf])
+@pytest.mark.parametrize("source", ["spot", "forecast"])
+def test_non_finite_input_prices_are_rejected(source, invalid):
+    spot = hourly(T0, day_shape(24))
+    forecast = hourly(T0, day_shape(72))
+    bad_series = Series([*(spot if source == "spot" else forecast), Point(T0, invalid)])
+    if source == "spot":
+        spot = bad_series
+    else:
+        forecast = bad_series
+    with pytest.raises(PriceForecastError, match="non-finite"):
+        fill_with_forecast(spot, forecast, T0 + 48 * HOUR)
+
+
+def test_a_short_forecast_still_extends_prices_without_claiming_full_coverage():
+    spot = hourly(T0, day_shape(24))
+    forecast = hourly(T0, day_shape(30))
+    until = T0 + 48 * HOUR
+    fill = fill_with_forecast(spot, forecast, until)
+    assert fill.series.end == forecast.end
+    assert fill.series.end > spot.end
+    assert not fill.series.covers(until)
+
+
+def test_missing_forecast_hours_in_the_overlap_are_rejected():
+    spot = hourly(T0, day_shape(24))
+    forecast = Series(point for point in hourly(T0, day_shape(72)) if point.time != T0 + 8 * HOUR)
+    with pytest.raises(PriceForecastError, match="missing"):
+        fill_with_forecast(spot, forecast, T0 + 48 * HOUR)
+
+
+def test_empty_forecast_is_rejected():
+    with pytest.raises(PriceForecastError, match="empty"):
+        fill_with_forecast(hourly(T0, day_shape(24)), Series.empty(), T0 + 48 * HOUR)
 
 
 def test_forecast_ending_before_the_spot_does_not_extend_it():
@@ -128,6 +247,7 @@ def test_empty_spot_is_refused():
 
 def body(**overrides):
     data = {
+        "area": "SE2",
         "unit": "EUR/MWh",
         "series": [
             {"ts_utc": "2026-10-13T22:00:00Z", "price_eur_mwh": 6.69},
@@ -235,3 +355,27 @@ async def test_client_without_any_data_raises_on_a_refused_key():
     )
     with pytest.raises(PriceForecastError, match="refused"):
         await client.async_get(T0)
+
+
+@pytest.mark.parametrize("area", ["SE3", 123])
+async def test_client_rejects_a_response_for_another_area(area):
+    from custom_components.emhass_companion.price_forecast import PriceForecastClient
+
+    client = PriceForecastClient(
+        _Session(_Response(200, body(area=area))), PriceForecastConfig("eupowerprices", "k", "SE2")
+    )
+    with pytest.raises(PriceForecastError, match="area"):
+        await client.async_get(T0)
+
+
+@pytest.mark.parametrize("area", ["se2", " SE2 ", None])
+async def test_client_accepts_normalized_or_optional_area_metadata(area):
+    from custom_components.emhass_companion.price_forecast import PriceForecastClient
+
+    data = body(area=area)
+    if area is None:
+        data.pop("area")
+    client = PriceForecastClient(
+        _Session(_Response(200, data)), PriceForecastConfig("eupowerprices", "k", "SE2")
+    )
+    assert len(await client.async_get(T0)) == 2

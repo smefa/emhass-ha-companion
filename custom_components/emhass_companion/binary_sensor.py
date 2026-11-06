@@ -208,6 +208,8 @@ class LoadShouldRunBinarySensor(EmhassLoadEntity, BinarySensorEntity):
 
     @property
     def is_on(self) -> bool | None:
+        if self.load.is_water_tank and self.coordinator.water_tank_error(self.load) is not None:
+            return None
         if self.load.mode != LOAD_MODE_AUTO:
             return resolve_should_run(self.load.mode, False)
         if not self.load.enabled or not self.load.participates:
@@ -219,6 +221,11 @@ class LoadShouldRunBinarySensor(EmhassLoadEntity, BinarySensorEntity):
     @property
     def _reason(self) -> str:
         """Why the state is what it is -- the question this sensor provokes."""
+        if (
+            self.load.is_water_tank
+            and (error := self.coordinator.water_tank_error(self.load)) is not None
+        ):
+            return error
         if self.load.mode != LOAD_MODE_AUTO:
             return self.load.mode
         if not self.load.enabled:

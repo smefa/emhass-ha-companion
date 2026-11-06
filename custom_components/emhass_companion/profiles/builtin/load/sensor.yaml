@@ -12,9 +12,10 @@ notes: >-
   total sensor -- it builds one that excludes them for you.
 
   Choosing "ML forecaster" adds a "Train load forecaster" button to the EMHASS
-  Companion device. Press it once after setup, and again whenever you want the
-  model retrained on more recent history -- day-ahead and MPC runs use
-  whatever was last trained and otherwise fail outright with no model file.
+  Companion device. Training starts automatically once enough sensor history
+  exists. Press the button whenever you want to retrain on more recent history.
+  Changing the sensor, timestep or model settings requires a compatible new fit;
+  day-ahead and MPC use recent sensor readings until training succeeds.
 
 detect:
   always: true

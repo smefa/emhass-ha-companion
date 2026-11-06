@@ -12,7 +12,39 @@ from __future__ import annotations
 from homeassistant.core import State
 
 from custom_components.emhass_companion.deferrable import DeferrableRuntime
-from custom_components.emhass_companion.sensor import _deferred_watts
+from custom_components.emhass_companion.savings import Ledger
+from custom_components.emhass_companion.sensor import (
+    _battery_attributes,
+    _deferred_watts,
+    _savings_attributes,
+    _solar_attributes,
+)
+
+
+def test_no_battery_savings_publish_unreconciled_difference():
+    ledger = Ledger(
+        battery_enabled=False,
+        actual_cost=46.23,
+        solar_only_cost=53.55,
+        grid_only_cost=63.08,
+        balance_residual_kwh=-0.089,
+        unpriced_kwh=0.148,
+    )
+    attributes = _savings_attributes(ledger)
+    assert attributes["battery_savings"] == 0.0
+    assert attributes["solar_savings"] == 16.85
+    assert attributes["baseline_cost_solar_only"] == 46.23
+    assert attributes["modeled_cost_solar_only"] == 53.55
+    assert attributes["solar_only_baseline_method"] == "measured_grid_without_battery"
+    assert attributes["accounting_difference"] == 7.32
+    assert attributes["battery_enabled"] is False
+    assert attributes["source_intervals_reconciled"] is False
+    assert attributes["balance_residual_kwh"] == -0.089
+    assert attributes["unpriced_kwh"] == 0.148
+    assert _battery_attributes(ledger)["accounting_difference"] == 7.32
+    assert _solar_attributes(ledger)["baseline_cost_solar_only"] == 46.23
+    assert _solar_attributes(ledger)["modeled_cost_solar_only"] == 53.55
+    assert _solar_attributes(ledger)["accounting_difference"] == 7.32
 
 
 def _load(**overrides) -> DeferrableRuntime:

@@ -206,6 +206,7 @@ SOURCE_SCHEMA = vol.Schema(
 ACTION_STEP_SCHEMA = vol.Schema(
     {
         vol.Required("service"): cv.string,
+        vol.Optional("required_target"): cv.boolean,
         vol.Optional("target"): dict,
         vol.Optional("data"): dict,
     }

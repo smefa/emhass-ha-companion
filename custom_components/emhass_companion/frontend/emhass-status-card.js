@@ -68,12 +68,37 @@ const SOC_LOW_PCT = 20;
  * full can still empty the battery at 3pm, and neither the fill nor the
  * peak band ever says so.
  */
+const SOC_RANGE_MODES = ["today", "ahead"];
+const SOC_MODE_KEY = "emhass-companion.soc-range";
+function readSocMode() {
+  try {
+    return window.localStorage.getItem(SOC_MODE_KEY);
+  } catch (_) {
+    return null;
+  }
+}
+
+function socExtremes({ low, high }, hass) {
+  return {
+    peak: high ? high.v : NaN,
+    peakAt: high ? formatTime(high.t, hass) : "",
+    low: low ? low.v : NaN,
+    lowAt: low ? formatTime(low.t, hass) : "",
+  };
+}
+
 function socBar(parent, label, tooltip) {
   const root = tag("div", "soc", parent);
   if (tooltip) root.title = tooltip;
   const head = tag("div", "meter-head", root);
   tag("span", null, head, label);
-  const value = tag("span", "meter-value", head, "");
+  const right = tag("span", "meter-right", head);
+  // Low and peak either cover all of today (what already happened included)
+  // or only the plan from now on. The choice is the viewer's, so it is kept
+  // in the browser rather than in the card's YAML.
+  const toggle = tag("button", "range-toggle", right, "");
+  toggle.type = "button";
+  const value = tag("span", "meter-value", right, "");
   const rail = tag("div", "rail", root);
   const reach = tag("div", "reach", rail);
   const fill = tag("div", "fill", rail);
@@ -101,10 +126,30 @@ function socBar(parent, label, tooltip) {
 
   const clamp = (value) => Math.max(0, Math.min(100, value));
 
+  let mode = SOC_RANGE_MODES.includes(readSocMode()) ? readSocMode() : "today";
+  let last = null;
+  toggle.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    mode = mode === "today" ? "ahead" : "today";
+    try {
+      window.localStorage.setItem(SOC_MODE_KEY, mode);
+    } catch (_) {
+      /* private mode: the choice just lasts until the card is rebuilt */
+    }
+    if (last) root.set(last);
+  });
+
   root.set = (info) => {
+    last = info;
+    const range = info[mode] || {};
+    toggle.textContent = mode === "today" ? "today" : "ahead";
+    toggle.title =
+      mode === "today"
+        ? "Low and peak for all of today, including what has already happened. Click for the plan ahead."
+        : "Low and peak of the plan from now on. Click for all of today.";
     const planned = info.planned;
-    const peak = info.peak;
-    const low = info.low;
+    const peak = range.peak;
+    const low = range.low;
     const measured = info.measured;
     const hasPlan = Number.isFinite(planned);
     // The same line the fill goes red on, so the rail never warns about the
@@ -140,12 +185,12 @@ function socBar(parent, label, tooltip) {
     legNow.set(Number.isFinite(measured) ? `now ${measured.toFixed(0)} %` : "");
     legPlan.set(hasPlan ? `plan ${planned.toFixed(0)} %` : "");
     legLow.set(
-      Number.isFinite(low) ? `low ${low.toFixed(0)} %${info.lowAt ? ` · ${info.lowAt}` : ""}` : "",
+      Number.isFinite(low) ? `low ${low.toFixed(0)} %${range.lowAt ? ` · ${range.lowAt}` : ""}` : "",
       isDeep ? "var(--emh-bad)" : "",
     );
     legPeak.set(
       Number.isFinite(peak)
-        ? `peak ${peak.toFixed(0)} %${info.peakAt ? ` · ${info.peakAt}` : ""}`
+        ? `peak ${peak.toFixed(0)} %${range.peakAt ? ` · ${range.peakAt}` : ""}`
         : "",
     );
   };
@@ -572,7 +617,8 @@ class EmhassStatusCard extends LiveCard {
 
     /* --- the battery level, planned against measured --- */
     const all = series(soc);
-    const { low, high } = this._socDayRange(soc);
+    const today = this._socRange(soc, "day");
+    const ahead = this._socRange(soc, "ahead");
 
     // The Companion already has to know this one -- it is what it sends EMHASS
     // as the plan's starting level -- so the card asks it rather than making
@@ -583,10 +629,8 @@ class EmhassStatusCard extends LiveCard {
     if (ui.soc) {
       ui.soc.set({
         planned: isUsable(soc) ? num(soc) : NaN,
-        peak: high ? high.v : NaN,
-        peakAt: high ? formatTime(high.t, hass) : "",
-        low: low ? low.v : NaN,
-        lowAt: low ? formatTime(low.t, hass) : "",
+        today: socExtremes(today, hass),
+        ahead: socExtremes(ahead, hass),
         measured,
       });
     }
@@ -636,6 +680,7 @@ class EmhassStatusCard extends LiveCard {
       last ? `${last.v.toFixed(0)} %` : "–",
       last ? formatTime(last.t, hass) : "",
     );
+    const { low, high } = today;
     setBox(ui.box.show_low, low ? `${low.v.toFixed(0)} %` : "–", low ? formatTime(low.t, hass) : "");
     setBox(
       ui.box.show_high,
@@ -700,25 +745,20 @@ class EmhassStatusCard extends LiveCard {
   }
 
   /**
-   * Today's planned low and high.
+   * A planned low and high, read from the attributes the sensor publishes.
    *
-   * Whichever is more extreme: the level the plan already reached today, or
-   * the level the current plan still has ahead today. The forecast series on
-   * this sensor is only the part still ahead, so the morning peak is not in
-   * it; the coordinator publishes the combined answer as day_low / day_high
-   * (see DayRange in coordinator.py). This just reads that.
+   * "day": whichever is more extreme, the level the plan already reached today
+   * or the one it still has ahead today (the forecast series only holds the
+   * part still ahead, so the coordinator latches the rest -- see DayRange in
+   * coordinator.py). "ahead": the plan from now on only.
    */
-  _socDayRange(soc) {
+  _socRange(soc, prefix) {
     const attrs = soc && soc.attributes ? soc.attributes : {};
-    const low =
-      Number.isFinite(attrs.day_low) && attrs.day_low_at
-        ? { v: Number(attrs.day_low), t: Date.parse(attrs.day_low_at) }
+    const read = (key) =>
+      Number.isFinite(attrs[key]) && attrs[`${key}_at`]
+        ? { v: Number(attrs[key]), t: Date.parse(attrs[`${key}_at`]) }
         : null;
-    const high =
-      Number.isFinite(attrs.day_high) && attrs.day_high_at
-        ? { v: Number(attrs.day_high), t: Date.parse(attrs.day_high_at) }
-        : null;
-    return { low, high };
+    return { low: read(`${prefix}_low`), high: read(`${prefix}_high`) };
   }
 
   _problems(attrs) {
@@ -784,6 +824,11 @@ EmhassStatusCard.css = `
   .soc { margin-top: 14px; }
   .meter-head { display: flex; justify-content: space-between; font-size: .74rem;
                 color: var(--emh-dim); margin-bottom: 5px; }
+  .meter-right { display: inline-flex; align-items: baseline; gap: 8px; }
+  .range-toggle { font: inherit; font-size: .68rem; color: var(--emh-dim); cursor: pointer;
+                  background: var(--emh-surface-2); border: 0; border-radius: 999px;
+                  padding: 1px 8px; text-transform: uppercase; letter-spacing: .04em; }
+  .range-toggle:hover { color: var(--primary-text-color); }
   .meter-value { font-variant-numeric: tabular-nums; color: var(--primary-text-color); }
   .soc .rail { position: relative; height: 10px; border-radius: 999px;
                background: var(--emh-surface-2); overflow: hidden; }

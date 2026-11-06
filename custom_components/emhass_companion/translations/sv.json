@@ -117,21 +117,12 @@
       },
       "load": {
         "title": "Husets förbrukning",
-        "description": "Hur EMHASS ska förutse hushållets grundförbrukning.\n\n**Create a house load sensor** — välj sensorn för husets totala effekt så byggs en ny sensor som utesluter dina styrbara laster.\n\nHar du redan en sensor, ingen alls eller en prognos från annat håll? Öppna **Avancerade inställningar**.",
+        "description": "Välj hur EMHASS ska förutsäga hushållets basförbrukning. Skapa en huslastsensor från din totala huseffekt, eller välj en befintlig lastkälla.",
         "data": {
           "profile": "Källa för förbrukningsprognos"
         },
-        "sections": {
-          "advanced": {
-            "name": "Avancerade inställningar",
-            "description": "Andra källor för husets förbrukning.",
-            "data": {
-              "profile": "Befintlig förbrukningskälla"
-            },
-            "data_description": {
-              "profile": "1. En sensor som redan utesluter dina styrbara laster; EMHASS lär sig av dess historik.\n2. En generisk dygnskurva skalad till en medeleffekt du anger. Ingen sensor behövs.\n3. Läser en färdig prognos från valfri entitet."
-            }
-          }
+        "data_description": {
+          "profile": "En sensor som redan utesluter dina styrbara laster; EMHASS lär sig av dess historik.\nEn generisk dygnskurva skalad till en medeleffekt du anger. Ingen sensor behövs.\nLäser en färdig prognos från valfri entitet."
         }
       },
       "load_create": {
@@ -374,21 +365,12 @@
       },
       "load": {
         "title": "Husets förbrukning",
-        "description": "Hur EMHASS ska förutse hushållets grundförbrukning.\n\nAndra källor finns under **Avancerade inställningar**.",
+        "description": "Välj hur EMHASS ska förutsäga hushållets basförbrukning. Skapa en huslastsensor från din totala huseffekt, eller välj en befintlig lastkälla.",
         "data": {
           "profile": "Källa för förbrukningsprognos"
         },
-        "sections": {
-          "advanced": {
-            "name": "Avancerade inställningar",
-            "description": "Andra källor för husets förbrukning.",
-            "data": {
-              "profile": "Befintlig förbrukningskälla"
-            },
-            "data_description": {
-              "profile": "1. En sensor som redan utesluter dina styrbara laster; EMHASS lär sig av dess historik.\n2. En generisk dygnskurva skalad till en medeleffekt du anger. Ingen sensor behövs.\n3. Läser en färdig prognos från valfri entitet."
-            }
-          }
+        "data_description": {
+          "profile": "En sensor som redan utesluter dina styrbara laster; EMHASS lär sig av dess historik.\nEn generisk dygnskurva skalad till en medeleffekt du anger. Ingen sensor behövs.\nLäser en färdig prognos från valfri entitet."
         }
       },
       "load_create": {
@@ -764,6 +746,12 @@
         "none": "Av",
         "eupowerprices": "eupowerprices.com (Europa)"
       }
+    },
+    "thermal_model": {
+      "options": {
+        "room": "Rum",
+        "water_tank": "Vattentank"
+      }
     }
   },
   "entity": {
@@ -818,6 +806,9 @@
       },
       "deferrable_number": {
         "name": "EMHASS-nummer för styrbar last"
+      },
+      "measured_temperature": {
+        "name": "Uppmätt temperatur"
       },
       "planned_temperature": {
         "name": "Planerad temperatur"
@@ -927,6 +918,9 @@
       },
       "battery_lockout": {
         "name": "21. Inget batteri för denna last"
+      },
+      "hot_water_period_enabled": {
+        "name": "Varmvattenperiod {period}"
       }
     },
     "select": {
@@ -956,14 +950,8 @@
       }
     },
     "button": {
-      "run_dayahead": {
-        "name": "Bygg om dygnsplanen"
-      },
       "run_mpc": {
         "name": "Räkna om nu"
-      },
-      "run_forecast_fit": {
-        "name": "Träna förbrukningsprognosen"
       },
       "run_now": {
         "name": "Kör nu"
@@ -1035,6 +1023,24 @@
       },
       "idle_time": {
         "name": "20. Klar efter overksam i"
+      },
+      "standby_loss": {
+        "name": "Värmeförlust i vila"
+      },
+      "tank_required_temperature": {
+        "name": "Önskad varmvattentemperatur"
+      },
+      "tank_standby_temperature": {
+        "name": "Lägsta vilotemperatur"
+      },
+      "hot_water_period_energy": {
+        "name": "Varmvattenperiod {period} förbrukning"
+      },
+      "heater_cop": {
+        "name": "Värmarens COP"
+      },
+      "comfort_penalty": {
+        "name": "Komfortstraff"
       }
     },
     "time": {
@@ -1049,6 +1055,12 @@
       },
       "comfort_end": {
         "name": "Komfort till"
+      },
+      "hot_water_period_start": {
+        "name": "Varmvattenperiod {period} start"
+      },
+      "hot_water_period_end": {
+        "name": "Varmvattenperiod {period} slut"
       }
     }
   },
@@ -1069,45 +1081,53 @@
       "title": "{name} kan inte nå sitt komfortschema",
       "description": "Vid {heating_rate} °C/h kan {name} inte gå från {current} °C till de {required} °C som schemat kräver till {time} -- det bästa den klarar för fullt är {achievable} °C. Detta kontrolleras utan att räkna med värmeförluster, så det verkliga underskottet är minst så här stort. Sänk komforttemperaturen, flytta komfortfönstret senare, eller höj uppvärmningstakten om den är satt för försiktigt för den här lasten."
     },
+    "water_tank_behind_schedule": {
+      "title": "{name} hinner inte upp till sitt varmvattenmål",
+      "description": "{name} är på {current} °C. Med sin värmare på {power} i full gång når den som mest {achievable} °C klockan {time}, under de {required} °C som schemat kräver då.\n\nPlanen räknas med ett lägre mål, så EMHASS värmer ändå tanken så fort den kan. Ett mål som inte går att nå skulle göra att EMHASS inte hittar någon plan alls. Tanken hinner ikapp schemat av sig själv.\n\n**Att göra:** inget, om det inte kommer tillbaka hela tiden. Sänk då den krävda eller lägsta vänteläge-temperaturen, ge lasten mer effekt, eller kontrollera att temperatursensorn verkligen hör till den här värmaren.\n\nDetta försvinner automatiskt när tanken ligger i fas med schemat."
+    },
     "optimization_infeasible": {
       "title": "EMHASS kunde inte hitta en genomförbar plan",
-      "description": "Den senaste körningen av {action} rapporterade att optimeringsproblemet var olösbart, även efter att EMHASS försökte igen med lättade villkor. Den tidigare planen behålls istället för en oanvändbar. EMHASS Companions egna kontroller hittade ingen specifik orsak. Ladda ner diagnostik från integrationens enhetssida och kör `scripts/check_infeasibility.py` på filen, och kontrollera EMHASS-tilläggets logg. Detta löser sig automatiskt så snart en körning löses framgångsrikt."
+      "description": "Den senaste körningen av {action} rapporterade att optimeringsproblemet var olösbart, även efter att EMHASS försökte igen med lättade villkor. Den tidigare planen behålls istället för en oanvändbar. EMHASS Companions egna kontroller hittade ingen specifik orsak.\n\n**Att göra:** Ladda ner diagnostik från integrationens enhetssida och kör `scripts/check_infeasibility.py` på filen, och kontrollera EMHASS-tilläggets logg.\n\nDetta löser sig automatiskt så snart en körning löses framgångsrikt."
     },
     "optimization_infeasible_timestep0_deficit": {
       "title": "EMHASS-planen är olösbar: inte tillräckligt med effekt just nu",
-      "description": "Den senaste körningen av {action} var olösbar: just nu behöver planen minst {needed} ({pins} går redan och hålls på den effekten, plus huset {house}), men högst {available} finns tillgängligt (nät {grid}, sol {pv}, batteri {battery}). EMHASS kan inte flytta en last som redan går ut ur första tidssteget, så den hittar ingen plan alls. Oftast har nätets importgräns precis sjunkit (en sensor för säkringsgräns) medan batteriet är tomt. Stäng av eller sänk någon av lasterna som går, eller kontrollera importgränsen. Den tidigare planen behålls. Totalt {total} blockerande orsak(er) hittades; Home Assistant-loggen listar alla fynd. Detta löser sig automatiskt så snart en körning löses framgångsrikt."
+      "description": "Den senaste körningen av {action} var olösbar: just nu behöver planen minst {needed} ({pins} går redan och hålls på den effekten, plus huset {house}), men högst {available} finns tillgängligt (nät {grid}, sol {pv}, batteri {battery}).\n\nEMHASS kan inte flytta en last som redan går ut ur första tidssteget, så den hittar ingen plan alls. Oftast har nätets importgräns precis sjunkit (en sensor för säkringsgräns) medan batteriet är tomt.\n\n**Att göra:** Stäng av eller sänk någon av lasterna som går, eller kontrollera importgränsen.\n\nDen tidigare planen behålls. Totalt {total} blockerande orsak(er) hittades; Home Assistant-loggen listar alla fynd. Detta löser sig automatiskt så snart en körning löses framgångsrikt."
     },
     "optimization_infeasible_battery_energy": {
       "title": "EMHASS-planen är olösbar: batteriet är för tomt just nu",
-      "description": "Den senaste körningen av {action} var olösbar: batteriet ligger på {soc} (minimum {soc_min}), så under nästa tidssteg kan det leverera högst {battery}, inte sina märkta {rated}. Med nätet begränsat till {grid} och sol på {pv} kan huslasten på {house} inte täckas. Kontrollera nätets importgräns och att batterinivåsensorn visar rätt. Den tidigare planen behålls. Totalt {total} blockerande orsak(er) hittades; Home Assistant-loggen listar alla fynd. Detta löser sig automatiskt så snart en körning löses framgångsrikt."
+      "description": "Den senaste körningen av {action} var olösbar: batteriet ligger på {soc} (minimum {soc_min}), så under nästa tidssteg kan det leverera högst {battery}, inte sina märkta {rated}. Med nätet begränsat till {grid} och sol på {pv} kan huslasten på {house} inte täckas.\n\n**Att göra:** Kontrollera nätets importgräns och att batterinivåsensorn visar rätt.\n\nDen tidigare planen behålls. Totalt {total} blockerande orsak(er) hittades; Home Assistant-loggen listar alla fynd. Detta löser sig automatiskt så snart en körning löses framgångsrikt."
     },
     "optimization_infeasible_pin_vs_window": {
       "title": "EMHASS-planen är olösbar: en last är både igång och parkerad",
-      "description": "Den senaste körningen av {action} var olösbar: {name} rapporterades gå på {power} just nu, men samma förfrågan bad om ingen körtid alls för den. EMHASS kan inte uppfylla båda. Detta är en bugg i EMHASS Companion; rapportera den gärna med en diagnostiknedladdning. Att byta lastens läge eller stänga av lasten brukar lösa det. Den tidigare planen behålls. Totalt {total} blockerande orsak(er) hittades; Home Assistant-loggen listar alla fynd. Detta löser sig automatiskt så snart en körning löses framgångsrikt."
+      "description": "Den senaste körningen av {action} var olösbar: {name} rapporterades gå på {power} just nu, men samma förfrågan bad om ingen körtid alls för den. EMHASS kan inte uppfylla båda.\n\n**Att göra:** Detta är en bugg i EMHASS Companion; rapportera den gärna med en diagnostiknedladdning. Att byta lastens läge eller stänga av lasten brukar lösa det.\n\nDen tidigare planen behålls. Totalt {total} blockerande orsak(er) hittades; Home Assistant-loggen listar alla fynd. Detta löser sig automatiskt så snart en körning löses framgångsrikt."
     },
     "optimization_infeasible_window_too_short": {
       "title": "EMHASS-planen är olösbar: {name} får inte plats i sitt tidsfönster",
-      "description": "Den senaste körningen av {action} var olösbar: {name} behöver {needed} tidssteg för att gå {hours} h, men dess tidsfönster (tidssteg {start} till {end}) har bara {available}. Korta körtiden, flytta deadline senare eller vidga de tillåtna timmarna. Den tidigare planen behålls. Totalt {total} blockerande orsak(er) hittades; Home Assistant-loggen listar alla fynd. Detta löser sig automatiskt så snart en körning löses framgångsrikt."
+      "description": "Den senaste körningen av {action} var olösbar: {name} behöver {needed} tidssteg för att gå {hours} h, men dess tidsfönster (tidssteg {start} till {end}) har bara {available}.\n\n**Att göra:** Korta körtiden, flytta deadline senare eller vidga de tillåtna timmarna.\n\nDen tidigare planen behålls. Totalt {total} blockerande orsak(er) hittades; Home Assistant-loggen listar alla fynd. Detta löser sig automatiskt så snart en körning löses framgångsrikt."
     },
     "optimization_infeasible_window_energy": {
       "title": "EMHASS-planen är olösbar: inte tillräckligt med energi före en deadline",
-      "description": "Den senaste körningen av {action} var olösbar: inom de närmaste {hours} h behöver planen {needed} ({loads}, huset {house}), men som mest {available} kan levereras under den tiden (nätgräns i snitt {grid}, sol {pv}, batteri {battery}). EMHASS måste leverera varje lasts hela körning inom dess tidsfönster, så den hittar ingen plan alls. Oftast har nätets importgräns sjunkit (en live-sensor för säkringsgräns eller fasvakten) under en lång körning med hög effekt. Korta körningen, flytta dess deadline senare eller kontrollera nätets importgräns. Den tidigare planen behålls. Totalt {total} blockerande orsak(er) hittades; Home Assistant-loggen listar alla fynd. Detta löser sig automatiskt så snart en körning löses framgångsrikt."
+      "description": "Den senaste körningen av {action} var olösbar: inom de närmaste {hours} h behöver planen {needed} ({loads}, huset {house}), men som mest {available} kan levereras under den tiden (nätgräns i snitt {grid}, sol {pv}, batteri {battery}).\n\nEMHASS måste leverera varje lasts hela körning inom dess tidsfönster, så den hittar ingen plan alls. Oftast har nätets importgräns sjunkit (en live-sensor för säkringsgräns eller fasvakten) under en lång körning med hög effekt.\n\n**Att göra:** Korta körningen, flytta dess deadline senare eller kontrollera nätets importgräns.\n\nDen tidigare planen behålls. Totalt {total} blockerande orsak(er) hittades; Home Assistant-loggen listar alla fynd. Detta löser sig automatiskt så snart en körning löses framgångsrikt."
+    },
+    "optimization_infeasible_thermal_unreachable": {
+      "title": "EMHASS-planen är olösbar: {name} hinner inte nå sin temperatur",
+      "description": "Den senaste körningen av {action} var olösbar: {name} måste vara minst {required} °C inom {hours} h (tidssteg {timestep}), men ligger på {current} °C och det bästa den klarar med värmaren på {power} hela vägen är {achievable} °C.\n\nEMHASS håller den temperaturen som en hård gräns, så den hittar ingen plan alls, och en tank som förblir för kall värms aldrig eftersom ingen plan används.\n\n**Att göra:** Sänk den krävda temperaturen eller lägsta vänteläge-temperaturen, ge lasten mer effekt, eller kontrollera att temperatursensorn verkligen hör till den här värmaren.\n\nDen tidigare planen behålls. Totalt {total} blockerande orsak(er) hittades; Home Assistant-loggen listar alla fynd. Detta löser sig automatiskt så snart en körning löses framgångsrikt."
     },
     "optimization_infeasible_power_deficit": {
       "title": "EMHASS-planen är olösbar: huslasten kan inte försörjas",
-      "description": "Den senaste körningen av {action} var olösbar: vid {count} tidssteg kan den prognostiserade huslasten inte försörjas ens med nätimport och batteriurladdning på max. Värst vid tidssteg {timestep}: huset {house}, sol {pv}, saknas {short}. Kontrollera nätets importgräns, batteriets och växelriktarens effektgränser samt huslastprognosen. Den tidigare planen behålls. Totalt {total} blockerande orsak(er) hittades; Home Assistant-loggen listar alla fynd. Detta löser sig automatiskt så snart en körning löses framgångsrikt."
+      "description": "Den senaste körningen av {action} var olösbar: vid {count} tidssteg kan den prognostiserade huslasten inte försörjas ens med nätimport och batteriurladdning på max. Värst vid tidssteg {timestep}: huset {house}, sol {pv}, saknas {short}.\n\n**Att göra:** Kontrollera nätets importgräns, batteriets och växelriktarens effektgränser samt huslastprognosen.\n\nDen tidigare planen behålls. Totalt {total} blockerande orsak(er) hittades; Home Assistant-loggen listar alla fynd. Detta löser sig automatiskt så snart en körning löses framgångsrikt."
     },
     "optimization_infeasible_pv_surplus": {
       "title": "EMHASS-planen är olösbar: solelsöverskottet har ingenstans att ta vägen",
-      "description": "Den senaste körningen av {action} var olösbar: vid {count} tidssteg överstiger solprognosen vad batteriet, huset och nätexporten kan ta emot. Värst vid tidssteg {timestep}: sol {pv}, huset {house}, {excess} för mycket. Aktivera PV curtailment i EMHASS, eller kontrollera nätets exportgräns och växelriktarens gränser. Den tidigare planen behålls. Totalt {total} blockerande orsak(er) hittades; Home Assistant-loggen listar alla fynd. Detta löser sig automatiskt så snart en körning löses framgångsrikt."
+      "description": "Den senaste körningen av {action} var olösbar: vid {count} tidssteg överstiger solprognosen vad batteriet, huset och nätexporten kan ta emot. Värst vid tidssteg {timestep}: sol {pv}, huset {house}, {excess} för mycket.\n\n**Att göra:** Aktivera PV curtailment i EMHASS, eller kontrollera nätets exportgräns och växelriktarens gränser.\n\nDen tidigare planen behålls. Totalt {total} blockerande orsak(er) hittades; Home Assistant-loggen listar alla fynd. Detta löser sig automatiskt så snart en körning löses framgångsrikt."
     },
     "optimization_infeasible_array_length": {
       "title": "EMHASS-planen är olösbar: förfrågans listor har olika längd",
-      "description": "Den senaste körningen av {action} var olösbar: förfrågans listor har olika längd ({details}). Detta är en bugg i EMHASS Companion eller i en datakällprofil; rapportera den gärna med en diagnostiknedladdning. Den tidigare planen behålls. Totalt {total} blockerande orsak(er) hittades; Home Assistant-loggen listar alla fynd. Detta löser sig automatiskt så snart en körning löses framgångsrikt."
+      "description": "Den senaste körningen av {action} var olösbar: förfrågans listor har olika längd ({details}).\n\n**Att göra:** Detta är en bugg i EMHASS Companion eller i en datakällprofil; rapportera den gärna med en diagnostiknedladdning.\n\nDen tidigare planen behålls. Totalt {total} blockerande orsak(er) hittades; Home Assistant-loggen listar alla fynd. Detta löser sig automatiskt så snart en körning löses framgångsrikt."
     },
     "optimization_infeasible_forecast_nan": {
       "title": "EMHASS-planen är olösbar: en prognos har luckor",
-      "description": "Den senaste körningen av {action} var olösbar: {key} har {count} tomma värde(n), det första vid tidssteg {first}. En datakälla returnerade inget för en del av horisonten; kontrollera källan bakom den prognosen. Den tidigare planen behålls. Totalt {total} blockerande orsak(er) hittades; Home Assistant-loggen listar alla fynd. Detta löser sig automatiskt så snart en körning löses framgångsrikt."
+      "description": "Den senaste körningen av {action} var olösbar: {key} har {count} tomma värde(n), det första vid tidssteg {first}.\n\nEn datakälla returnerade inget för en del av horisonten; kontrollera källan bakom den prognosen.\n\nDen tidigare planen behålls. Totalt {total} blockerande orsak(er) hittades; Home Assistant-loggen listar alla fynd. Detta löser sig automatiskt så snart en körning löses framgångsrikt."
     },
     "plan_degraded": {
       "title": "EMHASS-planen är en backuplösning, inte en fullständig lösning",
@@ -1115,7 +1135,7 @@
     },
     "run_failed": {
       "title": "Den senaste körningen av {action} misslyckades",
-      "description": "EMHASS producerade ingen plan: {error}\n\nDen tidigare planen behålls. Detta löser sig automatiskt så snart en körning lyckas igen -- kontrollera EMHASS-tilläggets loggar för hela felet om det inte löser sig av sig själv."
+      "description": "EMHASS producerade ingen plan. Felet som rapporterades:\n\n> {error}\n\n**Att göra:** om det inte försvinner efter nästa körning, kontrollera EMHASS-tilläggets logg för hela felet.\n\nDen tidigare planen behålls. Detta löser sig automatiskt så snart en körning lyckas igen."
     },
     "sources_blind": {
       "title": "{count} källvärde(n) rapporterar inte längre",
@@ -1164,6 +1184,14 @@
     "heat_topology_replaces_loads_upgrade": {
       "title": "EMHASS värmetopologi ersätter Companions laster",
       "description": "EMHASS-tillägget har en värmetopologi sparad i sin egen konfiguration. EMHASS ersätter då alla laster som Companion skickar med de som topologin bygger, så Companions laster planeras inte. Den här EMHASS är äldre än {required}, den första versionen som kan behålla Companions laster bredvid en topologi. Uppdatera tillägget och lägg till \"extend_deferrable_loads\": true överst i topologin, eller töm topologin i tilläggets konfiguration. Ladda sedan om den här integrationen."
+    },
+    "water_tank_unsupported": {
+      "title": "Vattentank stöds inte av denna backend",
+      "description": "Vattentank kräver EMHASS {required} eller senare. Upptäckt version: {version}. Uppdatera EMHASS och kontrollera att versionen kan läsas. Ny optimering och styrning blockeras; tankar behandlas aldrig som rum."
+    },
+    "water_tank_invalid": {
+      "title": "Ogiltiga vattentankdata för {name}",
+      "description": "{name}: {reason}. Ny optimering och styrning blockeras tills tankens inställningar och temperatursensor är giltiga. Enhetens egen termostat ansvarar fortfarande för säker drift."
     }
   },
   "services": {
@@ -1174,6 +1202,14 @@
     "run_mpc": {
       "name": "Räkna om nu",
       "description": "Kör en prediktiv optimering utifrån nuvarande läge."
+    },
+    "train_load_forecaster": {
+      "name": "Träna förbrukningsprognosen",
+      "description": "Tränar EMHASS maskininlärningsprognos för förbrukning på lastsensorns senaste historik. Behövs bara för att träna om på begäran: den tränar sig själv när sensorn har tillräckligt med historik, och sedan varje vecka. Misslyckas om prognosmetoden inte är maskininlärningsprognosen."
+    },
+    "export_settings": {
+      "name": "Skriv inställningar till EMHASS",
+      "description": "Sparar Companions statiska inställningar (batteri, växelriktare, lösare samt prognos- och tariffstandarder) i EMHASS egen konfiguration så att dess webbgränssnitt och manuella körningar liknar Companions. Orelaterade EMHASS-inställningar, som anslutningar och inloggningsuppgifter, behålls, men värden som Companion styr själv skrivs över, bland annat en sparad värmetopologi och tariffinställningar. Levande värden som laddningsnivå, prognoser och tillfälliga gränser skrivs aldrig. Endast för administratörer."
     },
     "test_profile": {
       "name": "Testa en datakällsprofil",
@@ -1204,6 +1240,19 @@
         "average_w": {
           "name": "Medeleffekt",
           "description": "Hushållets typiska medeleffekt, i watt."
+        }
+      }
+    },
+    "set_hot_water_plan": {
+      "name": "Ange varmvattenplan",
+      "description": "Ersätt alla perioder och optimera utan omladdning.",
+      "fields": {
+        "device_id": {
+          "name": "Varmvattenberedare"
+        },
+        "periods": {
+          "name": "Perioder",
+          "description": "1–8 objekt med draw_start, draw_end, draw_energy_kwh samt valfria name och enabled."
         }
       }
     }
@@ -1301,9 +1350,35 @@
       "step": {
         "user": {
           "title": "Lägg till en termisk last",
-          "description": "En last vars temperatur optimeringen styr i stället för dess körtid: en värmepump, direktverkande el, en luftkonditionering. I stället för \"kör N timmar\" anger du ett komfortband, och optimeringen hittar de billigaste timmarna som håller temperaturen inom det -- och förvärmer när elen är billig där bandet tillåter.\n\nDetta är värdena lasten börjar med -- när den lagts till blir vart och ett ett reglage på lastens egen sida, som du också kan ändra från en automation.\n\nModellen behöver också en utetemperaturprognos: välj en under Konfigurera > Utetemperatur, eller lämna det åt EMHASS om din solprognos är EMHASS inbyggd (Open-Meteo).",
+          "description": "Välj rum för uppvärmning eller kylning, eller vattentank med en elpatron. Modellen väljs vid skapandet och kan inte ändras senare.",
           "data": {
             "name": "Namn",
+            "thermal_model": "Modell"
+          },
+          "data_description": {
+            "thermal_model": "Rum behöver en utetemperaturprognos; vattentank gör det inte. Endast en elpatron stöds."
+          }
+        },
+        "reconfigure": {
+          "title": "Redigera termisk last",
+          "data": {
+            "name": "Namn",
+            "temperature_sensor": "Temperatursensor",
+            "sense": "Värmer eller kyler",
+            "power_sensor": "Körsensor",
+            "control_entity": "Styrenhet"
+          },
+          "data_description": {
+            "temperature_sensor": "Rummet (eller tanken) som temperaturerna nedan gäller. Rekommenderas starkt: utan den utgår varje plan från en gissad temperatur i stället för den verkliga.",
+            "sense": "Om lasten höjer temperaturen när den kör (värmepump, elpatron, varmvatten) eller sänker den (luftkonditionering).",
+            "power_sensor": "Valfritt. Talar om för optimeringen om lasten faktiskt är igång. En effektsensor ger mest detalj (alla enheter räknas om till watt automatiskt); en enkel på/av-binärsensor fungerar också.",
+            "control_entity": "Valfritt. Om satt slår integrationen på och av den här för att följa planen, när du aktiverat styrning -- och dess tillstånd fungerar som körsignal när effektsensor saknas. Lämna tomt för att behålla styrningen i egna automationer."
+          }
+        },
+        "settings": {
+          "title": "Rumsinställningar",
+          "description": "En last vars temperatur optimeringen styr i stället för dess körtid: en värmepump, direktverkande el, en luftkonditionering. I stället för \"kör N timmar\" anger du ett komfortband, och optimeringen hittar de billigaste timmarna som håller temperaturen inom det -- och förvärmer när elen är billig där bandet tillåter.\n\nDetta är värdena lasten börjar med -- när den lagts till blir vart och ett ett reglage på lastens egen sida, som du också kan ändra från en automation.\n\nModellen behöver också en utetemperaturprognos: välj en under Konfigurera > Utetemperatur, eller lämna det åt EMHASS om din solprognos är EMHASS inbyggd (Open-Meteo).",
+          "data": {
             "temperature_sensor": "Temperatursensor",
             "sense": "Värmer eller kyler",
             "nominal_power_w": "Effekt när den är igång",
@@ -1316,7 +1391,7 @@
             "control_entity": "Styrenhet"
           },
           "data_description": {
-            "temperature_sensor": "Rummet (eller tanken) som temperaturerna nedan gäller. Rekommenderas starkt: utan den utgår varje plan från en gissad temperatur i stället för den verkliga.",
+            "temperature_sensor": "Rummets temperatursensor. Utan den utgår planen från en uppskattad temperatur.",
             "sense": "Om lasten höjer temperaturen när den kör (värmepump, elpatron, varmvatten) eller sänker den (luftkonditionering).",
             "nominal_power_w": "Ungefär vad lasten drar när den är på.",
             "comfort_temperature": "Temperaturen som hålls medan komfortfönstret är aktivt. Optimeringen får gå över den när elen är billig, aldrig under.",
@@ -1344,22 +1419,88 @@
             }
           }
         },
-        "reconfigure": {
-          "title": "Redigera termisk last",
+        "water_tank": {
+          "title": "Vattentank med elpatron",
+          "description": "En tank med en elpatron. Ange tankens temperaturgränser och antal dagliga varmvattenperioder. Ange tider och uppskattad förbrukning för varje period på följande sidor. Optimeringen väljer när värmaren kör. Ingen utetemperaturprognos behövs.",
+          "data": {
+            "temperature_sensor": "Temperatursensor",
+            "nominal_power_w": "Effekt när den är igång",
+            "comfort_temperature": "Önskad varmvattentemperatur",
+            "setback_temperature": "Lägsta vilotemperatur",
+            "max_temperature": "Högsta temperatur",
+            "power_sensor": "Körsensor",
+            "control_entity": "Styrenhet",
+            "tank_volume_litres": "Tankvolym",
+            "hot_water_period_count": "Antal varmvattenperioder"
+          },
+          "data_description": {
+            "temperature_sensor": "Obligatorisk temperatursensor för tanken. Ogiltiga eller otillgängliga värden blockerar ny optimering och styrning.",
+            "nominal_power_w": "Ungefär vad lasten drar när den är på.",
+            "comfort_temperature": "Lägsta tanktemperatur under varje varmvattenperiod. Vattnet ska vara redo vid periodens start. Optimeringen får värma mer när elen är billig.",
+            "setback_temperature": "Lägsta tillåtna tanktemperatur mellan varmvattenperioderna.",
+            "max_temperature": "Ange ett säkert temperaturtak för tanken och elpatronen. Enhetens termostat och överhettningsskydd är alltid avgörande.",
+            "power_sensor": "Valfritt. Talar om för optimeringen om lasten faktiskt är igång. En effektsensor ger mest detalj (alla enheter räknas om till watt automatiskt); en enkel på/av-binärsensor fungerar också.",
+            "control_entity": "Valfritt. Om satt slår integrationen på och av den här för att följa planen, när du aktiverat styrning -- och dess tillstånd fungerar som körsignal när effektsensor saknas. Lämna tomt för att behålla styrningen i egna automationer.",
+            "tank_volume_litres": "Vattenvolym i liter.",
+            "hot_water_period_count": "1–8 dagliga perioder. Ange tider och uppskattad förbrukning på följande sidor. Befintliga perioder behålls när antalet ändras."
+          },
+          "sections": {
+            "advanced": {
+              "name": "Avancerade inställningar",
+              "description": "Värmeförlust i vila, värmarens verkningsgrad och hur strikt önskad temperatur hålls. Standardvärdena passar ett elpatronelement.",
+              "data": {
+                "standby_loss_w": "Värmeförlust i vila",
+                "heater_cop": "Värmarens COP",
+                "comfort_penalty": "Komfortstraff"
+              },
+              "data_description": {
+                "standby_loss_w": "Uppskattad konstant värmeförlust i watt, inte värmarens effekt. Ändras efter skapandet på lastens sida eller via automationer.",
+                "heater_cop": "Värme per enhet el. 1 för ett elpatronelement. För en varmvattenvärmepump: dess säsongs-COP vid tanktemperatur, ofta 2,5 till 3,5 och klart under märkvärdet. Effekt när den går är fortfarande eleffekten.",
+                "comfort_penalty": "0 gör önskad varmvattentemperatur till en hård gräns. Över 0 blir den ett mål: bara lägsta vilotemperatur är en hård gräns, och varje grad under målet kostar så här mycket per tidssteg. Högre är strängare: 1 eller mer fungerar som en hård gräns, 0,1 till 0,5 låter tanken sjunka när elen är dyr. Ökar lösningstiden något."
+              }
+            }
+          }
+        },
+        "reconfigure_water_tank": {
+          "title": "Redigera vattentank",
           "data": {
             "name": "Namn",
             "temperature_sensor": "Temperatursensor",
-            "sense": "Värmer eller kyler",
             "power_sensor": "Körsensor",
-            "control_entity": "Styrenhet"
+            "control_entity": "Styrenhet",
+            "tank_volume_litres": "Tankvolym",
+            "hot_water_period_count": "Antal varmvattenperioder"
           },
           "data_description": {
-            "temperature_sensor": "Rummet (eller tanken) som temperaturerna nedan gäller. Rekommenderas starkt: utan den utgår varje plan från en gissad temperatur i stället för den verkliga.",
-            "sense": "Om lasten höjer temperaturen när den kör (värmepump, elpatron, varmvatten) eller sänker den (luftkonditionering).",
+            "temperature_sensor": "Obligatorisk temperatursensor för tanken. Ogiltiga eller otillgängliga värden blockerar ny optimering och styrning.",
             "power_sensor": "Valfritt. Talar om för optimeringen om lasten faktiskt är igång. En effektsensor ger mest detalj (alla enheter räknas om till watt automatiskt); en enkel på/av-binärsensor fungerar också.",
-            "control_entity": "Valfritt. Om satt slår integrationen på och av den här för att följa planen, när du aktiverat styrning -- och dess tillstånd fungerar som körsignal när effektsensor saknas. Lämna tomt för att behålla styrningen i egna automationer."
+            "control_entity": "Valfritt. Om satt slår integrationen på och av den här för att följa planen, när du aktiverat styrning -- och dess tillstånd fungerar som körsignal när effektsensor saknas. Lämna tomt för att behålla styrningen i egna automationer.",
+            "tank_volume_litres": "Vattenvolym i liter.",
+            "hot_water_period_count": "1–8 dagliga perioder. Ange tider och uppskattad förbrukning på följande sidor. Befintliga perioder behålls när antalet ändras."
+          },
+          "description": "Ändra tankvolym och antal dagliga varmvattenperioder och gå sedan igenom varje period. Effekt, temperaturgränser och värmeförlust i vila ändras på lastens sida. Modellen kan inte ändras."
+        },
+        "water_tank_period": {
+          "title": "Varmvattenperiod {period} av {count}",
+          "description": "Varmt vatten ska vara redo vid start och tanken ska hålla önskad temperatur under hela perioden. Uppskattad förbrukning fördelas över denna period varje dag, inte över alla perioder. Detta är inte ett tidur för värmaren.",
+          "data": {
+            "name": "Namn (valfritt)",
+            "draw_start": "Varmvatten behövs från",
+            "draw_end": "Varmvatten behövs till",
+            "draw_energy_kwh": "Uppskattad förbrukning under perioden",
+            "enabled": "Aktiverad"
+          },
+          "data_description": {
+            "name": "Till exempel Morgon eller Kväll.",
+            "draw_start": "Lokal starttid varje dag. Vattnet ska redan vara varmt vid denna tid.",
+            "draw_end": "Kan gå över midnatt. Samma start och slut betyder ett helt dygn.",
+            "draw_energy_kwh": "Uppskattad värme som tas ur tanken under just denna period, i kWh. Inte värmarens elförbrukning. Ange 0 för ingen förväntad förbrukning. Överlappande perioders förbrukning adderas."
           }
         }
+      },
+      "error": {
+        "invalid_tank_value": "Ange ett giltigt värde; tal måste vara ändliga och inom tillåtet intervall.",
+        "invalid_tank_band": "Lägsta vilotemperatur måste vara högst önskad varmvattentemperatur, som måste vara högst maxtemperaturen."
       }
     },
     "load_group": {

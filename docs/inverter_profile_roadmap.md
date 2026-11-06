@@ -29,7 +29,7 @@ Shipped built-in inverter profiles:
   export-limit scaling history and the SBH pack's different Modbus path.
 - **Huawei SUN2000 M1 / MB0** *(untested)* — `wlcrs/huawei_solar`,
   `command_with_duration`, the first profile using `lifetime: expires`.
-- **Deye SUN-5K–25K-SG01HP3-EU** *(untested)* — `davidrapan/ha-solarman`.
+- **Deye SUN-5K–25K-SG01HP3-EU** *(tested OK, user report)* — `davidrapan/ha-solarman`.
 - **SolaX X3-Hybrid G4 / X3-Ultra** *(untested)* — `solax_modbus`, the first
   `signed_power` profile and the first using `invert_sign`.
 - **Growatt MOD / MID TL3-XH** *(untested)* — `solax_modbus`, the first
@@ -194,7 +194,7 @@ detection, no reordering, no cleverness — the user knows what is bolted to the
 wall:
 
 ```
-Deye SUN-5K-25K-SG01HP3-EU       (needs davidrapan/ha-solarman)               — UNTESTED
+Deye SUN-5K-25K-SG01HP3-EU       (needs davidrapan/ha-solarman)               — TESTED OK (user report)
 Fox ESS H1 / H3                  (needs nathanmarlor/foxess_modbus)           [not yet shipped]
 GoodWe ET / EH                   (needs the goodwe integration)               [not yet shipped]
 Growatt MOD / MID TL3-XH         (needs solax_modbus — not growatt_server)    — UNTESTED
@@ -442,7 +442,7 @@ These seven need only **three** archetypes: `signed_power`,
 
 | Profile | Route | Archetype | Status |
 |---|---|---|---|
-| Deye SUN-5K–25K-SG01HP3-EU | `davidrapan/ha-solarman` | — | **shipped, untested.** Brought forward. The `tou_rewrite` lifecycle that made this the deferred case turned out to be avoidable: the profile steers work mode and the battery **current** limits, which act immediately, and never touches the user's six TOU programs. The cost is that the plan becomes a ceiling rather than a setpoint, and that the watts-to-amps conversion needs the pack voltage |
+| Deye SUN-5K–25K-SG01HP3-EU | `davidrapan/ha-solarman` | `mode_and_magnitude` | **shipped, tested OK based on a user hardware report.** Toggles global TOU off for charge/idle and on for discharge/self-consumption, without rewriting the six programs. Current limits are power ceilings; configure pack voltage and review active TOU slots. Not independently verified across every listed model/firmware |
 | Growatt MOD / MID TL3-XH | `solax_modbus` | `tou_rewrite` | **shipped, untested.** Genuinely TOU-based — there is no setpoint register on this family — so it dedicates one slot to the plan and moves that slot's priority mode. Percentages of rated power, so it needs the nameplate rating. No curtailment: two candidate export-limit registers exist, in different units, and which one the family honours is unresolved |
 | Ferroamp EnergyHub | `jonasbkarlsson/ferroamp_operation_settings` | `mode_and_magnitude` | **shipped, untested.** Goes through the Portal's operation settings rather than `henricm/ha-ferroamp`'s charge/discharge services, which sidesteps the undocumented sign: direction is the Battery power mode select, magnitude an unsigned reference. Cloud, so a 30 s write floor. Modelled on a user's working scripts (Manual + Charge/Discharge/Off, Peak Shaving for self-consumption) |
 
@@ -534,7 +534,7 @@ has no watt setpoint at all).
 > **Note on the archetypes.** Shipping Deye and Growatt did not require the
 > executor to learn `tou_rewrite` semantics after all. Growatt's profile expresses
 > the whole slot rewrite — mode, times, enable flag, then the commit button — as
-> ordinary service calls, and Deye's sidesteps TOU entirely. `tou_rewrite`
+> ordinary service calls, and Deye toggles TOU without rewriting its programs. `tou_rewrite`
 > remains a label on the `control:` block describing what the hardware is, not a
 > code path in the executor. That is the outcome the original recommendation was
 > reaching for.
@@ -546,16 +546,17 @@ semantics for Sungrow, Huawei, SolarEdge, SolaX, Fox ESS, Sigenergy, GoodWe,
 Deye, Growatt; EMHASS's own sign convention (`p_batt_forecast` negative =
 charging).
 
-Only **Sungrow SH-RT** can be validated on this system. Everything else ships
-marked `untested: true` and carries what could not be confirmed in its own
-notes, where the person setting it up will actually read it. The specific gaps,
+Only **Sungrow SH-RT** can be validated on this system. **Deye SG01HP3** is
+also marked tested OK based on a user's working TOU-toggle profile. Other
+profiles retain their existing verification status and document open questions
+in their own notes, where the person setting it up will actually read it. The specific gaps,
 per profile:
 
 | Profile | What is not confirmed |
 |---|---|
 | Sungrow SH-T | Register 13052 is Watts per Sungrow's V1.1.9 spec, which lists these models in the same table — but no field report from a T-series owner exists. The export-limit register has had a factor-of-ten bug on SH15T |
 | Huawei | What the inverter does when a `forcible_charge` duration elapses; whether power 0 is a genuine hold (which is why the profile defines no `idle`); the exact battery sensor entity ids |
-| Deye | The battery and grid power sign — the two integrations that read this hardware disagree, one negating what the other passes through. Whether the global grid-charge switch or a per-program bit takes precedence |
+| Deye | The battery and grid power sign — the two integrations that read this hardware disagree, one negating what the other passes through. The TOU-toggle workaround is reported working; active-slot interactions and behavior across all listed models/firmware remain unverified |
 | SolaX | Whether a recent install's entity ids carry the "(mode 1)" suffix the current display names imply |
 | Growatt | Whether Battery First at a zero charge rate is a true idle; which of the two export-limit registers this family honours |
 | Sigenergy | Nothing load-bearing: the profile avoids the one undocumented fact (the signed setpoint's sign) rather than guessing it. Whether the per-inverter setpoint needs the plant-level enable is unconfirmed, but this profile uses the plant-level entities throughout |

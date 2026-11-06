@@ -52,8 +52,13 @@ from custom_components.emhass_companion.metering import (
     MeterSpec,
     PendingGapReplay,
     SavingsTracker,
+    read_meters,
 )
-from custom_components.emhass_companion.metering_replay import async_replay_gap
+from custom_components.emhass_companion.metering_replay import (
+    _walk,
+    async_prepare_gap,
+    async_replay_gap,
+)
 from custom_components.emhass_companion.savings import Ledger, Prices
 
 _PRICES = Prices(buy=1.0, sell=0.5)
@@ -106,6 +111,7 @@ def _tracker(
     *,
     prices: Callable[[datetime], Prices | None] = lambda _now: _PRICES,
     add_price_listener: Callable[[CALLBACK_TYPE], CALLBACK_TYPE] | None = None,
+    battery_enabled: bool = True,
 ) -> SavingsTracker:
     return SavingsTracker(
         hass,
@@ -116,6 +122,7 @@ def _tracker(
         prices=prices,
         plan_forecast=lambda _now, _window: None,
         add_price_listener=add_price_listener or (lambda _listener: lambda: None),
+        battery_enabled=battery_enabled,
     )
 
 
@@ -167,6 +174,123 @@ def _patched_history(per_entity: dict[str, list[State]]):
         "custom_components.emhass_companion.metering_replay.history.state_changes_during_period",
         side_effect=_history_stub(per_entity),
     )
+
+
+@pytest.mark.parametrize("buy,sell", [(2.0, 0.5), (-0.5, -1.0)])
+def test_no_battery_async_counters_match_live_and_replay(buy, sell):
+    start = datetime(2026, 11, 2, 9, tzinfo=UTC)
+    prices = Prices(buy=buy, sell=sell)
+    fetched = {
+        "sensor.grid_import": [
+            _energy_state("sensor.grid_import", minute / 60, start + timedelta(minutes=minute))
+            for minute in range(61)
+        ],
+        "sensor.grid_export": [_energy_state("sensor.grid_export", 0, start)],
+        "sensor.pv": [
+            _energy_state("sensor.pv", 0, start),
+            _energy_state("sensor.pv", 1, start + timedelta(hours=1)),
+        ],
+        "sensor.house": [
+            State("sensor.house", "2000", {"unit_of_measurement": "W"}, last_changed=start)
+        ],
+    }
+
+    def meters():
+        return MeterSpec(
+            grid_import=Meter("sensor.grid_import", kind="energy"),
+            grid_export=Meter("sensor.grid_export", kind="energy"),
+            pv=Meter("sensor.pv", kind="energy"),
+            house_load=Meter("sensor.house", kind="power"),
+        )
+
+    live = Ledger(battery_enabled=False)
+    live_meters = meters()
+    for minute in range(61):
+        when = start + timedelta(minutes=minute)
+        held = {
+            entity_id: [state for state in states if state.last_changed <= when][-1]
+            for entity_id, states in fetched.items()
+        }
+        live.record(read_meters(live_meters, when, held.get), prices)
+
+    replay = Ledger(battery_enabled=False)
+    _walk(fetched, meters(), lambda _when: prices, replay)
+
+    assert replay == live
+    assert live.imported_kwh == pytest.approx(1.0)
+    assert live.pv_kwh == pytest.approx(1.0)
+    assert live.house_load_kwh == pytest.approx(2.0)
+    assert live.balance_residual_kwh == pytest.approx(0.0, abs=1e-9)
+    assert live.solar_only_cost == pytest.approx(59 / 30 * buy - 29 / 30 * sell)
+    assert live.solar_only_baseline_cost == pytest.approx(buy)
+    assert live.solar_savings == pytest.approx(buy)
+    assert live.accounting_difference == pytest.approx(29 / 30 * (buy - sell))
+    assert live.battery_savings == 0.0
+    assert live.battery_charge_kwh == live.battery_discharge_kwh == 0.0
+    assert live.battery_book_kwh is None
+    assert live.total_savings == pytest.approx(live.solar_savings)
+
+
+@pytest.mark.parametrize("cross_midnight", [False, True])
+async def test_no_battery_restore_and_rollover_corrects_legacy_baseline(
+    hass: HomeAssistant, freezer, cross_midnight
+):
+    await hass.config.async_set_time_zone("UTC")
+    start = datetime(2026, 11, 2, 9, tzinfo=UTC)
+    freezer.move_to(start)
+    entry = _entry(hass)
+    legacy = _tracker(hass, entry, MeterSpec())
+    legacy.ledger = Ledger(
+        day="2026-11-02",
+        actual_cost=46.23,
+        solar_only_cost=53.55,
+        grid_only_cost=63.08,
+        battery_book_value=5.0,
+        battery_book_value_start=1.0,
+    )
+    await legacy.async_shutdown()
+    if cross_midnight:
+        freezer.move_to(start + timedelta(days=1))
+
+    restored = _tracker(hass, entry, MeterSpec(), battery_enabled=False)
+    await restored.async_load()
+    assert restored.ledger.battery_enabled is False
+    assert restored.ledger.battery_savings == 0.0
+    assert restored.ledger.storage_carry == 0.0
+    assert restored.ledger.accounting_difference == pytest.approx(0.0 if cross_midnight else 7.32)
+    assert restored.ledger.actual_cost == (0.0 if cross_midnight else 46.23)
+    assert restored.ledger.solar_only_cost == (0.0 if cross_midnight else 53.55)
+    assert restored.ledger.solar_only_baseline_cost == (0.0 if cross_midnight else 46.23)
+    assert restored.ledger.solar_savings == pytest.approx(0.0 if cross_midnight else 16.85)
+
+    restored._roll_over(dt_util.utcnow() + timedelta(days=1))
+    assert restored.ledger.battery_enabled is False
+    assert restored.ledger.battery_savings == 0.0
+    assert restored.ledger.accounting_difference == 0.0
+    await restored.async_shutdown()
+
+
+@pytest.mark.parametrize("battery_enabled", [False, True])
+async def test_soc_subscription_respects_battery_setting(hass, battery_enabled):
+    tracker = SavingsTracker(
+        hass,
+        _entry(hass),
+        MeterSpec(grid_import=Meter("sensor.grid_import", kind="energy")),
+        soc_entity="sensor.old_soc",
+        capacity_kwh=10.0,
+        prices=lambda _when: _PRICES,
+        plan_forecast=lambda _now, _window: None,
+        add_price_listener=lambda _listener: lambda: None,
+        battery_enabled=battery_enabled,
+    )
+    with patch(
+        "custom_components.emhass_companion.metering.async_track_state_change_event",
+        return_value=lambda: None,
+    ) as subscribe:
+        tracker.async_start()
+    entities = subscribe.call_args.args[1]
+    assert ("sensor.old_soc" in entities) is battery_enabled
+    await tracker.async_shutdown()
 
 
 async def test_all_meters_stale_builds_a_pending_gap_replay(hass: HomeAssistant, freezer) -> None:
@@ -358,6 +482,147 @@ async def test_a_counter_reset_mid_gap_is_summed_not_dropped(
     assert ok is True
     assert ledger.imported_kwh == pytest.approx(13.0)  # 5.0 + 2.0 + 6.0, reset included whole
     assert ledger.unpriced_kwh == pytest.approx(0.0)
+
+
+@pytest.mark.parametrize("seed_value", [19.424, 19.438])
+async def test_counter_correction_and_recovery_are_not_double_counted_in_replay(
+    recorder_mock, hass: HomeAssistant, freezer, seed_value
+) -> None:
+    await hass.config.async_set_time_zone("Europe/Stockholm")
+    start = datetime(2026, 11, 1, 13, 28, tzinfo=UTC)
+    freezer.move_to(start + timedelta(hours=1))
+    seed = GapSeed(
+        entity_id="sensor.grid_import",
+        kind="energy",
+        invert=False,
+        last_value=seed_value,
+        last_time=start,
+    )
+    missed = 19.463 - seed_value
+    pending = PendingGapReplay(
+        window_start=start,
+        window_end=start + timedelta(hours=1),
+        missed_kwh=missed,
+        seeds={"grid_import": seed},
+    )
+    fetched = {
+        "sensor.grid_import": [
+            _energy_state("sensor.grid_import", value, start + timedelta(seconds=index + 1))
+            for index, value in enumerate([19.438, 19.433, 19.435, 19.446, 19.463])
+        ]
+    }
+    meters = MeterSpec(grid_import=Meter("sensor.grid_import", kind="energy"))
+    ledger = Ledger(day="2026-11-01", unpriced_kwh=missed)
+    prices = Prices(buy=2.9, sell=0)
+    with _patched_history(fetched):
+        assert await async_replay_gap(hass, meters, lambda _now: prices, ledger, pending)
+    assert ledger.imported_kwh == pytest.approx(missed)
+    assert ledger.actual_cost == pytest.approx(missed * prices.buy)
+    assert ledger.unpriced_kwh == pytest.approx(0)
+
+
+async def test_live_correction_high_water_survives_tracker_reload(
+    hass: HomeAssistant, freezer
+) -> None:
+    await hass.config.async_set_time_zone("Europe/Stockholm")
+    freezer.move_to(datetime(2026, 11, 1, 13, 28, tzinfo=UTC))
+    entry = _entry(hass)
+    first = _tracker(hass, entry, MeterSpec(grid_import=Meter("sensor.grid_import", kind="energy")))
+    _set_energy(hass, "sensor.grid_import", 19.424)
+    await first.async_load()
+    first.async_start()
+    for value in (19.438, 19.433):
+        freezer.tick(timedelta(seconds=1))
+        _set_energy(hass, "sensor.grid_import", value)
+        await hass.async_block_till_done()
+    assert first.ledger.imported_kwh == pytest.approx(0.014)
+    await first.async_shutdown()
+    freezer.tick(timedelta(minutes=1))
+    _set_energy(hass, "sensor.grid_import", 19.446)
+    resumed = _tracker(
+        hass, entry, MeterSpec(grid_import=Meter("sensor.grid_import", kind="energy"))
+    )
+    await resumed.async_load()
+    resumed.async_start()
+    assert resumed.ledger.imported_kwh == pytest.approx(0.022)
+    assert resumed.ledger.actual_cost == pytest.approx(0.022 * _PRICES.buy)
+    await resumed.async_shutdown()
+
+
+@pytest.mark.parametrize("closing_reading", [19.435, 19.450])
+async def test_gap_high_water_is_restored_before_live_tracking_and_delayed_replay(
+    recorder_mock, hass: HomeAssistant, freezer, closing_reading
+) -> None:
+    await hass.config.async_set_time_zone("UTC")
+    start = datetime(2026, 11, 1, 13, 0, tzinfo=UTC)
+    freezer.move_to(start)
+    entry = _entry(hass)
+    first = _tracker(hass, entry, MeterSpec(grid_import=Meter("sensor.grid_import", kind="energy")))
+    _set_energy(hass, "sensor.grid_import", 19.438)
+    await first.async_load()
+    first.async_start()
+    await first.async_shutdown()
+    fetched = {
+        "sensor.grid_import": [
+            _energy_state("sensor.grid_import", value, start + timedelta(minutes=index + 1))
+            for index, value in enumerate([19.433, 19.446, 19.435])
+        ]
+    }
+    freezer.move_to(start + timedelta(minutes=20))
+    _set_energy(hass, "sensor.grid_import", closing_reading)
+    prices: dict[str, Prices | None] = {"value": None}
+    bus = _FakePriceListenerBus()
+    resumed = _tracker(
+        hass,
+        entry,
+        MeterSpec(grid_import=Meter("sensor.grid_import", kind="energy")),
+        prices=lambda _when: prices["value"],
+        add_price_listener=bus.add,
+    )
+    with _patched_history(fetched) as fetch:
+        await resumed.async_load()
+        assert fetch.call_count == 1
+    accepted = max(19.446, closing_reading)
+    replayed_kwh = accepted - 19.438
+    assert resumed.meters.grid_import.as_dict()["last_value"] == pytest.approx(accepted)
+    resumed.async_start()
+    for value in (accepted, accepted + 0.004):
+        freezer.tick(timedelta(seconds=1))
+        _set_energy(hass, "sensor.grid_import", value)
+        await hass.async_block_till_done()
+    assert resumed.ledger.imported_kwh == pytest.approx(0.004)
+    prices["value"] = _PRICES
+    with patch(
+        "custom_components.emhass_companion.metering_replay.history.state_changes_during_period",
+        side_effect=AssertionError("Prepared replay must reuse its exact baseline history"),
+    ):
+        bus.listener()
+        await hass.async_block_till_done()
+    assert resumed._pending_gap is None
+    assert resumed.ledger.imported_kwh == pytest.approx(replayed_kwh + 0.004)
+    assert resumed.ledger.actual_cost == pytest.approx(replayed_kwh * _PRICES.buy)
+    assert resumed.ledger.unpriced_kwh == pytest.approx(0.004)
+    await resumed.async_shutdown()
+
+
+async def test_failed_gap_preparation_cannot_replay_with_unaligned_baselines(
+    recorder_mock, hass: HomeAssistant
+) -> None:
+    start = datetime(2026, 11, 1, 13, 0, tzinfo=UTC)
+    seed = GapSeed("sensor.grid_import", "energy", False, 19.438, start)
+    pending = PendingGapReplay(start, start + timedelta(hours=1), 0, {"grid_import": seed})
+    meters = MeterSpec(grid_import=Meter("sensor.grid_import", kind="energy"))
+    with _patched_history({}):
+        prepared = await async_prepare_gap(hass, meters, pending)
+    assert prepared.prepared
+    assert prepared.history is None
+    ledger = Ledger(day="2026-11-01")
+    with patch(
+        "custom_components.emhass_companion.metering_replay.history.state_changes_during_period",
+        side_effect=AssertionError("A late history fetch would overlap live tracking"),
+    ):
+        assert not await async_replay_gap(hass, meters, lambda _when: _PRICES, ledger, prepared)
+    assert ledger.imported_kwh == 0
 
 
 async def test_one_meter_missing_coverage_leaves_the_ledger_untouched(

@@ -56,6 +56,7 @@ BUNDLES: tuple[tuple[str, str], ...] = (
     ("emhass-overview-card.js", f"/{DOMAIN}/emhass-overview-card.js"),
     ("emhass-tariff-card.js", f"/{DOMAIN}/emhass-tariff-card.js"),
     ("emhass-economy-card.js", f"/{DOMAIN}/emhass-economy-card.js"),
+    ("emhass-tank-card.js", f"/{DOMAIN}/emhass-tank-card.js"),
 )
 
 # The dashboard strategy ("Community dashboards" in HA 2026.5+'s Add dashboard

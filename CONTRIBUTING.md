@@ -58,6 +58,16 @@ It adds an existing `bug`, `enhancement`, `question`, or `documentation` label
 only when no type label is already present. It never removes labels, closes
 issues, or changes code. Area, priority, and effort remain comment-only suggestions.
 
+The default model is `gpt-6-luna`, suitable for focused classification and summaries.
+To use another model available to your Copilot account, set the repository Actions
+variable `ISSUE_TRIAGE_MODEL` to its Copilot CLI model ID. Model access depends on
+the token owner's subscription and model policies. Do not use `gpt-4.1`: GitHub
+retired it from Copilot on June 1, 2026.
+
+If classification fails with only a CLI exit code, enable Actions debug logging
+for a diagnostic rerun to see the CLI stderr. A nonempty token passes the setup
+check but does not prove the token is valid or has access to the selected model.
+
 One-time setup after merging the workflow:
 
 1. With an active Copilot subscription, create a

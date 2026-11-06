@@ -383,6 +383,26 @@ _CAUSES = {
         maximum_power_from_grid=2000,
         soc_init=0.11,
     ),
+    "thermal_unreachable": _payload(
+        number_of_deferrable_loads=1,
+        nominal_power_of_deferrable_loads=[2000],
+        def_load_config=[
+            {
+                "thermal_battery": {
+                    "volume": 0.2,
+                    "density": 997.0,
+                    "heat_capacity": 4.184,
+                    "thermal_loss": 0.06,
+                    "efficiency": 1.0,
+                    "sense": "heat",
+                    "start_temperature": 48.0,
+                    "min_temperatures": [60.0] * 5,
+                    "max_temperatures": [65.0] * 5,
+                    "draw_off_demand": [0.0375] * 5,
+                }
+            }
+        ],
+    ),
     "power_deficit": _payload(load_power_forecast=[500, 500, 20000, 500, 500]),
     "pv_surplus": _payload(pv_power_forecast=[0, 1000, 30000, 1000, 0]),
     "array_length": _payload(load_power_forecast=[500, 500, 500]),
@@ -402,3 +422,12 @@ def test_a_cause_fills_every_placeholder_its_translation_uses(code):
     for finding in findings:
         if finding.severity is Severity.CRITICAL:
             assert used <= set(finding.placeholders) | supplied, (code, used)
+
+
+def test_load_names_include_the_extra_rows_of_later_windows():
+    raw = {
+        "deferrable_order": ["a"],
+        "deferrable_extra_rows": ["Washer (day 2)"],
+        "loads": [{"subentry_id": "a", "name": "Washer"}],
+    }
+    assert load_names_from(raw) == ["Washer", "Washer (day 2)"]

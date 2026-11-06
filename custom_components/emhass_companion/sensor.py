@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+import math
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -46,11 +47,11 @@ from .const import (
     SAVINGS_KEY_SAVINGS_TODAY,
     SAVINGS_KEY_SOLAR_TODAY,
 )
-from .coordinator import DemandChargePricing, EmhassCoordinator, EmhassData
+from .coordinator import DemandChargePricing, EmhassCoordinator, EmhassData, plan_soc_ahead
 from .deferrable import DeferrableRuntime, state_to_watts
 from .entity import EmhassEntity, EmhassLoadEntity
 from .metering import SavingsTracker
-from .models import Series
+from .models import Point, Series
 from .naming import (
     emhass_series_payload,
     standard_names_enabled,
@@ -217,17 +218,25 @@ def _soc_day_range_attributes(data: EmhassData) -> dict[str, Any]:
     optimiser moves past it, and keeping every forecast ever issued keeps a
     peak the plan has since revised away.
     """
-    day_range = data.soc_day_range
-    if day_range is None:
-        return {}
     attrs: dict[str, Any] = {}
-    if day_range.low is not None:
-        attrs["day_low"] = round(day_range.low.value, 1)
-        attrs["day_low_at"] = dt_util.as_local(day_range.low.time).isoformat()
-    if day_range.high is not None:
-        attrs["day_high"] = round(day_range.high.value, 1)
-        attrs["day_high_at"] = dt_util.as_local(day_range.high.time).isoformat()
+    day_range = data.soc_day_range
+    if day_range is not None:
+        _put_extreme(attrs, "day_low", day_range.low)
+        _put_extreme(attrs, "day_high", day_range.high)
+    if data.plan is not None:
+        # The plan ahead, from now: the same question without what is already
+        # behind us. Computed here, not on the coordinator, so it moves with
+        # the clock between optimisation runs.
+        low, high = plan_soc_ahead(data.plan.series("soc_percent"), dt_util.utcnow())
+        _put_extreme(attrs, "ahead_low", low)
+        _put_extreme(attrs, "ahead_high", high)
     return attrs
+
+
+def _put_extreme(attrs: dict[str, Any], key: str, point: Point | None) -> None:
+    if point is not None:
+        attrs[key] = round(point.value, 1)
+        attrs[f"{key}_at"] = dt_util.as_local(point.time).isoformat()
 
 
 PRICE_SENSORS: tuple[EmhassSensorDescription, ...] = (
@@ -283,7 +292,8 @@ DIAGNOSTIC_SENSORS: tuple[EmhassSensorDescription, ...] = (
         attrs_fn=lambda data: {
             "payload": data.payload,
             "warnings": data.warnings,
-            "deferrable_order": data.load_order,
+            "deferrable_order": data.payload_order,
+            "deferrable_extra_rows": data.extra_row_names,
             "infeasibility": [finding.as_dict() for finding in data.last_infeasibility],
         },
     ),
@@ -427,6 +437,8 @@ async def async_setup_entry(
             LoadRuntimeTodaySensor(coordinator, load),
             LoadDeferrableNumberSensor(coordinator, load),
         ]
+        if load.is_water_tank:
+            entities.append(LoadMeasuredTemperatureSensor(coordinator, load))
         if load.is_thermal:
             entities.append(LoadPlannedTemperatureSensor(coordinator, load))
         else:
@@ -667,6 +679,54 @@ class LoadScheduledPowerSensor(EmhassLoadEntity, SensorEntity):
         }
 
 
+class LoadMeasuredTemperatureSensor(EmhassLoadEntity, SensorEntity):
+    """Expose the selected tank probe on the tank device's diagnostics card."""
+
+    _attr_translation_key = "measured_temperature"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 1
+
+    def __init__(self, coordinator: EmhassCoordinator, load: DeferrableRuntime) -> None:
+        super().__init__(coordinator, load, "measured_temperature")
+
+    # EmhassLoadEntity subscribes to load notifications. The load registry
+    # already tracks changes to the tank probe.
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        state = (
+            self.hass.states.get(self.load.temperature_sensor)
+            if self.load.temperature_sensor
+            else None
+        )
+        return (
+            state.attributes.get("unit_of_measurement") if state else None
+        ) or UnitOfTemperature.CELSIUS
+
+    @property
+    def native_value(self) -> float | None:
+        state = (
+            self.hass.states.get(self.load.temperature_sensor)
+            if self.load.temperature_sensor
+            else None
+        )
+        try:
+            value = float(state.state) if state else float("nan")
+        except (TypeError, ValueError):
+            return None
+        return value if math.isfinite(value) else None
+
+    @property
+    def available(self) -> bool:
+        return self.native_value is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {"source_entity": self.load.temperature_sensor}
+
+
 class LoadPlannedTemperatureSensor(EmhassLoadEntity, SensorEntity):
     """The temperature EMHASS expects this thermal load's room to be at now.
 
@@ -699,9 +759,48 @@ class LoadPlannedTemperatureSensor(EmhassLoadEntity, SensorEntity):
         planned = self._series().value_at(dt_util.utcnow())
         return None if planned is None else round(planned, 2)
 
+    def _band(self) -> tuple[Series, Series] | None:
+        """The comfort floor and ceiling the plan was solved against, per row.
+
+        Rebuilt from the load's own settings rather than stored: the band is a
+        pure function of them and the plan's first timestamp, and it is exactly
+        what the optimiser was sent. None when the load has no band to draw (a
+        disabled tank, or a tank whose temperature sensor is not readable).
+        """
+        if not self.load.enabled:
+            return None
+        data = self.coordinator.data
+        if not data or data.plan is None or not data.plan.rows:
+            return None
+        rows = data.plan.rows
+        try:
+            current = (
+                self.coordinator.loads.room_temperature(self.load)
+                if self.load.is_water_tank
+                else None
+            )
+            config = self.load.thermal_config(current)
+            if config is None:
+                return None
+            minimums, maximums = config.comfort_band(
+                rows[0].timestamp,
+                timedelta(minutes=self.coordinator.config.time_step_minutes),
+                len(rows),
+            )
+        except ValueError:
+            return None
+        return (
+            Series(Point(row.timestamp, value) for row, value in zip(rows, minimums, strict=True)),
+            Series(Point(row.timestamp, value) for row, value in zip(rows, maximums, strict=True)),
+        )
+
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        return {"forecast": self._series().to_attribute()}
+        attributes: dict[str, Any] = {"forecast": self._series().to_attribute()}
+        if (band := self._band()) is not None:
+            attributes["min_forecast"] = band[0].to_attribute()
+            attributes["max_forecast"] = band[1].to_attribute()
+        return attributes
 
 
 class LoadNextStartSensor(EmhassLoadEntity, SensorEntity):
@@ -735,8 +834,18 @@ class LoadNextStartSensor(EmhassLoadEntity, SensorEntity):
         # already-running silently swallowed the very next start whenever the
         # load was actually off and the immediately following timestep turns
         # it on -- exactly the case this sensor exists to report.
+        #
+        # row_at clamps a moment just before the plan to row zero, but row
+        # zero has not started yet then. Seeding from it would hide a start
+        # at row zero itself (and disagree with value_at, which reads 0 W
+        # before the first point), so there the plan says nothing about the
+        # present and the load's own measured state decides.
         current_row = data.plan.row_at(now)
-        previous_on = _is_running(current_row) if current_row is not None else False
+        before_plan = bool(data.plan.rows) and now < data.plan.rows[0].timestamp
+        if before_plan:
+            previous_on = self.load.is_running
+        else:
+            previous_on = _is_running(current_row) if current_row is not None else False
 
         for row in data.plan.rows:
             if row.timestamp <= now:
@@ -1436,9 +1545,16 @@ def _savings_attributes(ledger: Ledger) -> dict[str, Any]:
     return {
         "actual_cost": _round(ledger.actual_cost, 2),
         "baseline_cost_grid_only": _round(ledger.grid_only_cost, 2),
-        "baseline_cost_solar_only": _round(ledger.solar_only_cost, 2),
+        "baseline_cost_solar_only": _round(ledger.solar_only_baseline_cost, 2),
+        "modeled_cost_solar_only": _round(ledger.solar_only_cost, 2),
+        "solar_only_baseline_method": (
+            "load_minus_pv_model" if ledger.battery_enabled else "measured_grid_without_battery"
+        ),
         "solar_savings": _round(ledger.solar_savings, 2),
         "battery_savings": _round(ledger.battery_savings, 2),
+        "battery_enabled": ledger.battery_enabled,
+        "accounting_difference": _round(ledger.accounting_difference, 2),
+        "source_intervals_reconciled": False,
         "storage_carry": _round(ledger.storage_carry, 2),
         "savings_excl_carry": _round(ledger.savings_excl_carry, 2),
         "import_kwh": _round(ledger.imported_kwh),
@@ -1461,7 +1577,9 @@ def _solar_attributes(ledger: Ledger) -> dict[str, Any]:
         "solar_kwh": _round(ledger.pv_kwh),
         "house_load_kwh": _round(ledger.house_load_kwh),
         "baseline_cost_grid_only": _round(ledger.grid_only_cost, 2),
-        "baseline_cost_solar_only": _round(ledger.solar_only_cost, 2),
+        "baseline_cost_solar_only": _round(ledger.solar_only_baseline_cost, 2),
+        "modeled_cost_solar_only": _round(ledger.solar_only_cost, 2),
+        "accounting_difference": _round(ledger.accounting_difference, 2),
         "self_sufficiency_percent": _round(ledger.self_sufficiency, 1),
     }
 
@@ -1474,6 +1592,9 @@ def _battery_attributes(ledger: Ledger) -> dict[str, Any]:
     which is why both are here beside the headline rather than instead of it.
     """
     return {
+        "battery_enabled": ledger.battery_enabled,
+        "accounting_difference": _round(ledger.accounting_difference, 2),
+        "source_intervals_reconciled": False,
         "battery_charge_kwh": _round(ledger.battery_charge_kwh),
         "battery_discharge_kwh": _round(ledger.battery_discharge_kwh),
         "round_trip_loss_kwh": _round(
@@ -1528,7 +1649,9 @@ def _forecast_attributes(forecast: Forecast) -> dict[str, Any]:
         "window_end": forecast.end.isoformat(),
         "actual_cost": _round(forecast.actual_cost, 2),
         "baseline_cost_grid_only": _round(forecast.grid_only_cost, 2),
-        "baseline_cost_solar_only": _round(forecast.solar_only_cost, 2),
+        "baseline_cost_solar_only": _round(forecast.solar_only_baseline_cost, 2),
+        "modeled_cost_solar_only": _round(forecast.solar_only_cost, 2),
+        "battery_enabled": forecast.battery_enabled,
         "solar_savings": _round(forecast.solar_savings, 2),
         "battery_savings": _round(forecast.battery_savings, 2),
         "storage_carry": _round(forecast.storage_carry, 2),

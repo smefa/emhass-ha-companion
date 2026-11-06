@@ -9,7 +9,7 @@ entity owns it thereafter.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import timedelta
 
 from homeassistant.components.number import (
@@ -27,6 +27,7 @@ from homeassistant.const import (
     UnitOfTime,
 )
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
@@ -35,6 +36,8 @@ from .const import DOMAIN, ISSUE_THERMAL_UNREACHABLE
 from .coordinator import EmhassCoordinator
 from .deferrable import DeferrableRuntime
 from .entity import EmhassEntity, EmhassLoadEntity
+from .hot_water_plan import PeriodEnergy, async_setup_period_entities
+from .thermal import MAX_THERMAL_TEMPERATURE, MIN_THERMAL_TEMPERATURE
 
 PARALLEL_UPDATES = 0
 
@@ -147,6 +150,26 @@ def _set_cooling_constant(load: DeferrableRuntime, value: float) -> None:
 
 def _set_thermal_inertia(load: DeferrableRuntime, value: float) -> None:
     load.thermal_inertia = value
+
+
+def _set_standby_loss(load: DeferrableRuntime, value: float) -> None:
+    load.standby_loss_w = value
+
+
+def _set_heater_cop(load: DeferrableRuntime, value: float) -> None:
+    load.heater_cop = value
+
+
+def _set_comfort_penalty(load: DeferrableRuntime, value: float) -> None:
+    load.comfort_penalty = value
+
+
+def _is_water_tank(load: DeferrableRuntime) -> bool:
+    return load.is_water_tank
+
+
+def _is_room(load: DeferrableRuntime) -> bool:
+    return load.is_thermal and not load.is_water_tank
 
 
 def _is_standard(load: DeferrableRuntime) -> bool:
@@ -280,8 +303,8 @@ LOAD_NUMBERS: tuple[LoadNumberDescription, ...] = (
         entity_category=EntityCategory.CONFIG,
         device_class=NumberDeviceClass.TEMPERATURE,
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
-        native_min_value=5,
-        native_max_value=35,
+        native_min_value=MIN_THERMAL_TEMPERATURE,
+        native_max_value=MAX_THERMAL_TEMPERATURE,
         native_step=0.5,
         mode=NumberMode.BOX,
         get_fn=lambda load: load.comfort_temperature,
@@ -294,8 +317,8 @@ LOAD_NUMBERS: tuple[LoadNumberDescription, ...] = (
         entity_category=EntityCategory.CONFIG,
         device_class=NumberDeviceClass.TEMPERATURE,
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
-        native_min_value=5,
-        native_max_value=35,
+        native_min_value=MIN_THERMAL_TEMPERATURE,
+        native_max_value=MAX_THERMAL_TEMPERATURE,
         native_step=0.5,
         mode=NumberMode.BOX,
         get_fn=lambda load: load.setback_temperature,
@@ -307,8 +330,8 @@ LOAD_NUMBERS: tuple[LoadNumberDescription, ...] = (
         translation_key="max_temperature",
         device_class=NumberDeviceClass.TEMPERATURE,
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
-        native_min_value=5,
-        native_max_value=40,
+        native_min_value=MIN_THERMAL_TEMPERATURE,
+        native_max_value=MAX_THERMAL_TEMPERATURE,
         native_step=0.5,
         mode=NumberMode.BOX,
         entity_category=EntityCategory.CONFIG,
@@ -327,7 +350,7 @@ LOAD_NUMBERS: tuple[LoadNumberDescription, ...] = (
         entity_category=EntityCategory.CONFIG,
         get_fn=lambda load: load.heating_rate,
         set_fn=_set_heating_rate,
-        applies_fn=_is_thermal,
+        applies_fn=_is_room,
     ),
     LoadNumberDescription(
         key="cooling_constant",
@@ -339,7 +362,7 @@ LOAD_NUMBERS: tuple[LoadNumberDescription, ...] = (
         entity_category=EntityCategory.CONFIG,
         get_fn=lambda load: load.cooling_constant,
         set_fn=_set_cooling_constant,
-        applies_fn=_is_thermal,
+        applies_fn=_is_room,
     ),
     LoadNumberDescription(
         key="thermal_inertia",
@@ -352,7 +375,45 @@ LOAD_NUMBERS: tuple[LoadNumberDescription, ...] = (
         entity_category=EntityCategory.CONFIG,
         get_fn=lambda load: load.thermal_inertia,
         set_fn=_set_thermal_inertia,
-        applies_fn=_is_thermal,
+        applies_fn=_is_room,
+    ),
+    LoadNumberDescription(
+        key="standby_loss",
+        translation_key="standby_loss",
+        device_class=NumberDeviceClass.POWER,
+        native_unit_of_measurement=UnitOfPower.WATT,
+        native_min_value=0,
+        native_max_value=1000,
+        native_step=1,
+        mode=NumberMode.BOX,
+        entity_category=EntityCategory.CONFIG,
+        get_fn=lambda load: load.standby_loss_w,
+        set_fn=_set_standby_loss,
+        applies_fn=_is_water_tank,
+    ),
+    LoadNumberDescription(
+        key="heater_cop",
+        translation_key="heater_cop",
+        native_min_value=0.1,
+        native_max_value=10,
+        native_step=0.05,
+        mode=NumberMode.BOX,
+        entity_category=EntityCategory.CONFIG,
+        get_fn=lambda load: load.heater_cop,
+        set_fn=_set_heater_cop,
+        applies_fn=_is_water_tank,
+    ),
+    LoadNumberDescription(
+        key="comfort_penalty",
+        translation_key="comfort_penalty",
+        native_min_value=0,
+        native_max_value=1000,
+        native_step=0.1,
+        mode=NumberMode.BOX,
+        entity_category=EntityCategory.CONFIG,
+        get_fn=lambda load: load.comfort_penalty,
+        set_fn=_set_comfort_penalty,
+        applies_fn=_is_water_tank,
     ),
     LoadNumberDescription(
         key="startup_penalty",
@@ -440,6 +501,7 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     coordinator: EmhassCoordinator = entry.runtime_data.coordinator
+    async_setup_period_entities(entry, async_add_entities, PeriodEnergy)
     entities: list[EmhassEntity] = [SurplusThresholdNumber(coordinator), MixBetaNumber(coordinator)]
     if entry.runtime_data.peak_tracker is not None:
         # Same gate as sensor.PeriodPeakSensor/PeakHeadroomSensor: a demand
@@ -595,6 +657,14 @@ class LoadNumber(EmhassLoadEntity, RestoreNumber):
         description: LoadNumberDescription,
     ) -> None:
         super().__init__(coordinator, load, description.key)
+        if load.is_water_tank and description.key in ("comfort_temperature", "setback_temperature"):
+            description = replace(
+                description,
+                translation_key={
+                    "comfort_temperature": "tank_required_temperature",
+                    "setback_temperature": "tank_standby_temperature",
+                }[description.key],
+            )
         self.entity_description = description
         if description.step_is_time_step:
             # EMHASS can only run a load for a whole number of timesteps, so
@@ -636,11 +706,22 @@ class LoadNumber(EmhassLoadEntity, RestoreNumber):
         return value
 
     async def async_set_native_value(self, value: float) -> None:
+        band_fields = ("setback_temperature", "comfort_temperature", "max_temperature")
+        if self.load.is_water_tank and self.entity_description.key in band_fields:
+            setback, comfort, maximum = (
+                value if key == self.entity_description.key else getattr(self.load, key)
+                for key in band_fields
+            )
+            if not setback <= comfort <= maximum:
+                raise ServiceValidationError(
+                    "Water tank temperatures must satisfy lowest standby <= required hot water <= maximum"
+                )
         self.entity_description.set_fn(self.load, value)
         self.load.invalidate_battery_lockout()
         self.load.notify()
-        await self.coordinator.async_request_refresh()
-        if self.load.is_thermal:
+        if self.load.enabled:
+            await self.coordinator.async_request_settings_refresh()
+        if self.load.is_thermal and not self.load.is_water_tank:
             self._check_thermal_reachability()
 
     def _check_thermal_reachability(self) -> None:

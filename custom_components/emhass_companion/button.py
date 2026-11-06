@@ -21,26 +21,15 @@ PARALLEL_UPDATES = 1
 
 @dataclass(frozen=True, kw_only=True)
 class EmhassButtonDescription(ButtonEntityDescription):
-    press_fn: Callable[[EmhassCoordinator], Coroutine[Any, Any, None]]
+    press_fn: Callable[[EmhassCoordinator], Coroutine[Any, Any, Any]]
 
 
 BUTTONS: tuple[EmhassButtonDescription, ...] = (
-    EmhassButtonDescription(
-        key="run_dayahead",
-        translation_key="run_dayahead",
-        press_fn=lambda coordinator: coordinator.async_run_dayahead(),
-    ),
     EmhassButtonDescription(
         key="run_mpc",
         translation_key="run_mpc",
         press_fn=lambda coordinator: coordinator.async_run_mpc(),
     ),
-)
-
-FORECAST_FIT_BUTTON = EmhassButtonDescription(
-    key="run_forecast_fit",
-    translation_key="run_forecast_fit",
-    press_fn=lambda coordinator: coordinator.async_run_forecast_fit(),
 )
 
 
@@ -51,13 +40,7 @@ async def async_setup_entry(
 ) -> None:
     coordinator: EmhassCoordinator = entry.runtime_data.coordinator
 
-    descriptions = list(BUTTONS)
-    # Only meaningful when the load profile trains EMHASS's own mlforecaster --
-    # otherwise there is no model to fit and pressing it would just fail.
-    if coordinator.uses_mlforecaster:
-        descriptions.append(FORECAST_FIT_BUTTON)
-
-    async_add_entities(EmhassButton(coordinator, description) for description in descriptions)
+    async_add_entities(EmhassButton(coordinator, description) for description in BUTTONS)
 
     for load in entry.runtime_data.loads.all():
         # A thermal load's target is its comfort band, not a run-time total,

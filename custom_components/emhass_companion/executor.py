@@ -843,6 +843,8 @@ class Executor:
             load = self.coordinator.loads.get(subentry_id)
             if load is None:
                 continue
+            if load.is_water_tank and self.coordinator.water_tank_error(load) is not None:
+                continue
             # The commanded clock ticks here and nowhere else: this is the one
             # point at which the decision is known to have been acted on. A
             # decision computed while the control gate is off never reaches
@@ -870,6 +872,9 @@ class Executor:
         there is no switch to command at all.
         """
         entity_id = load.control_entity
+        if load.is_water_tank and self.coordinator.water_tank_error(load) is not None:
+            state = self.hass.states.get(entity_id) if entity_id else None
+            return state is not None and state.state == "on"
         state = self.hass.states.get(entity_id)
         if state is None:
             _LOGGER.warning("Control entity %s for %s does not exist", entity_id, load.name)

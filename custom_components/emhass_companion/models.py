@@ -9,8 +9,8 @@ so no part of this integration ever relies on an implicit local timezone.
 from __future__ import annotations
 
 from bisect import bisect_right
-from collections.abc import Iterable, Iterator
-from dataclasses import dataclass, field
+from collections.abc import Iterable, Iterator, Sequence
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, time, timedelta
 from itertools import pairwise
 import math
@@ -68,6 +68,7 @@ from .const import (
     DEFAULT_WEIGHT_BATTERY_DISCHARGE,
 )
 from .thermal import ThermalConfig
+from .water_tank import WaterTankConfig
 
 
 class SeriesError(ValueError):
@@ -621,9 +622,7 @@ class GridConfig:
     """Whether EMHASS itself should optimise PV curtailment, sent as a runtime
     parameter so the answer travels with the run instead of living only in the
     add-on's stored configuration. ``None`` means the entry predates this
-    setting: nothing is sent and EMHASS keeps whatever it has, which is the
-    only way to avoid switching off an add-on-side setting nobody asked us to
-    touch."""
+    setting and resolves to False, explicitly disabling inherited curtailment."""
     import_limit_entity: str | None = None
     export_limit_entity: str | None = None
     """Sensors read on every run whose value replaces the matching static limit
@@ -786,6 +785,16 @@ class DeferrableLoad:
     routine, not something to report every solve.
     """
 
+    repeats_daily: bool = False
+    """Whether the standing window recurs every day.
+
+    Set explicitly by :meth:`deferrable.DeferrableRuntime.to_load` (daily
+    recurrence, window switch on, both times set, neither surplus nor thermal)
+    because ``earliest_start``/``latest_end`` alone cannot tell a daily load from
+    an armed on-demand one. Only such a load gets one extra EMHASS row per
+    further whole window in the horizon (see :func:`payload.window_occurrences`).
+    """
+
     wants_to_run: bool = True
     """Whether this load is asking for its hours on this run.
 
@@ -807,7 +816,7 @@ class DeferrableLoad:
     current_on_timesteps: int = 0
     current_off_timesteps: int = 0
 
-    thermal: ThermalConfig | None = None
+    thermal: ThermalConfig | WaterTankConfig | None = None
     """Set only for a thermal load, whose temperature is optimised instead of
     its run time."""
 
@@ -1041,6 +1050,27 @@ class Plan:
             if index < len(row.deferrables)
         )
 
+    def folded(self, real_count: int, parents: Sequence[int]) -> Plan | None:
+        """A copy with the internal extra columns added into their parent loads.
+
+        ``parents[i]`` is the real load that deferrable column ``real_count + i``
+        belongs to. The result has exactly ``real_count`` columns, so everything
+        downstream reads it like a plan from a request with no extra rows. None
+        when any row has fewer columns than the request asked for, which is what
+        a plan carried over from an older request looks like: indexing it would
+        misattribute or overrun, so the caller treats it as no plan.
+        """
+        needed = real_count + len(parents)
+        if any(len(row.deferrables) < needed for row in self.rows):
+            return None
+        rows = []
+        for row in self.rows:
+            columns = list(row.deferrables[:real_count])
+            for offset, parent in enumerate(parents):
+                columns[parent] += row.deferrables[real_count + offset]
+            rows.append(replace(row, deferrables=tuple(columns)))
+        return replace(self, rows=rows)
+
     def temperature_series(self, index: int) -> Series:
         """Predicted temperature over the horizon for one thermal load."""
         return Series(
@@ -1128,6 +1158,39 @@ def ceil_to_step(when: datetime, step: timedelta) -> datetime:
         return when.astimezone(UTC)
     stamp = when.astimezone(UTC).timestamp()
     return datetime.fromtimestamp(math.ceil(stamp / size) * size, UTC)
+
+
+def round_to_step(when: datetime, step: timedelta) -> datetime:
+    """The grid boundary nearest ``when`` on the UTC clock, ties to even.
+
+    This is how EMHASS picks row zero under its default ``method_ts_round``
+    (``nearest``): a run launched 7 min 12 s into a 15-minute step starts that
+    step's plan, one launched 7 min 33 s in starts the next step's.
+    """
+    size = step.total_seconds()
+    if size <= 0:
+        return when.astimezone(UTC)
+    stamp = when.astimezone(UTC).timestamp()
+    return datetime.fromtimestamp(round(stamp / size) * size, UTC)
+
+
+ROW_ZERO_NEAREST = "nearest"
+ROW_ZERO_FIRST = "first"
+ROW_ZERO_LAST = "last"
+
+
+def row_zero_start(when: datetime, step: timedelta, mode: str = ROW_ZERO_NEAREST) -> datetime:
+    """Where EMHASS will stamp row zero for a run launched at ``when``.
+
+    ``mode`` mirrors EMHASS's runtime ``method_ts_round`` option:
+    ``nearest`` (the default), ``first`` (round down) or
+    ``last`` (round up).
+    """
+    if mode == ROW_ZERO_FIRST:
+        return floor_to_step(when, step)
+    if mode == ROW_ZERO_LAST:
+        return ceil_to_step(when, step)
+    return round_to_step(when, step)
 
 
 def floor_to_step(when: datetime, step: timedelta) -> datetime:

@@ -47,3 +47,7 @@ tools/end_soc_bench/data/
 
 # Solcast forecast cache and SOC history for the PV caution backtest
 tools/pv_caution_bench/data/
+
+# Agent instructions (local only)
+AGENTS.md
+CLAUDE.md

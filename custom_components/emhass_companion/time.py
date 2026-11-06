@@ -15,13 +15,16 @@ from datetime import time
 from homeassistant.components.time import TimeEntity, TimeEntityDescription
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
+from .const import DOMAIN
 from .coordinator import EmhassCoordinator
 from .deferrable import DeferrableRuntime
 from .entity import EmhassLoadEntity
+from .hot_water_plan import PeriodEnd, PeriodStart, async_setup_period_entities
 from .thermal import DEFAULT_COMFORT_END, DEFAULT_COMFORT_START
 
 PARALLEL_UPDATES = 0
@@ -90,7 +93,10 @@ LOAD_TIMES: tuple[LoadTimeDescription, ...] = (
         get_fn=lambda load: load.comfort_start,
         set_fn=_set_comfort_start,
         fallback=DEFAULT_COMFORT_START,
-        applies_fn=lambda load: load.is_thermal,
+        applies_fn=lambda load: (
+            load.is_thermal and not (load.is_water_tank and load.hot_water_periods is not None)
+        ),
+        available_fn=lambda load: not (load.is_water_tank and load.hot_water_periods is not None),
     ),
     LoadTimeDescription(
         key="comfort_end",
@@ -99,7 +105,10 @@ LOAD_TIMES: tuple[LoadTimeDescription, ...] = (
         get_fn=lambda load: load.comfort_end,
         set_fn=_set_comfort_end,
         fallback=DEFAULT_COMFORT_END,
-        applies_fn=lambda load: load.is_thermal,
+        applies_fn=lambda load: (
+            load.is_thermal and not (load.is_water_tank and load.hot_water_periods is not None)
+        ),
+        available_fn=lambda load: not (load.is_water_tank and load.hot_water_periods is not None),
     ),
 )
 
@@ -110,7 +119,24 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     coordinator: EmhassCoordinator = entry.runtime_data.coordinator
+    async_setup_period_entities(entry, async_add_entities, PeriodStart)
+    async_setup_period_entities(entry, async_add_entities, PeriodEnd)
+    registry = er.async_get(hass)
     for load in entry.runtime_data.loads.all():
+        if load.is_water_tank:
+
+            @callback
+            def remove_legacy_times(load=load) -> None:
+                if load.hot_water_periods is None:
+                    return
+                for key in ("comfort_start", "comfort_end"):
+                    if entity_id := registry.async_get_entity_id(
+                        "time", DOMAIN, f"{entry.entry_id}_{load.subentry_id}_{key}"
+                    ):
+                        registry.async_remove(entity_id)
+
+            remove_legacy_times()
+            entry.async_on_unload(load.add_listener(remove_legacy_times))
         async_add_entities(
             (
                 LoadTime(coordinator, load, description)
@@ -162,4 +188,5 @@ class LoadTime(EmhassLoadEntity, TimeEntity, RestoreEntity):
         self.entity_description.set_fn(self.load, value)
         self.load.invalidate_battery_lockout()
         self.load.notify()
-        await self.coordinator.async_request_refresh()
+        if self.load.enabled:
+            await self.coordinator.async_request_settings_refresh()

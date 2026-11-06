@@ -34,7 +34,7 @@ control switch says.
 | **Sungrow SH-RT hybrid** | mkaiser's Modbus package (HACS) | SH5.0RT–SH10RT. Needs local Modbus TCP — the cloud-based core Sungrow integration cannot write these registers |
 | **Sungrow SH-T 15–25 kW** — *untested* | mkaiser's Modbus package (HACS) | SH15T–SH25T. Same registers as the SH-RT, but raise the package's `sungrow_modbus_battery_max_power` secret first — it defaults to 5000 W |
 | **Huawei SUN2000 M1 / MB0** — *untested* | `wlcrs/huawei_solar` (HACS) | Needs the installer account and "elevate permissions" ticked at setup. Forced charge expires by itself and is re-issued each slot |
-| **Deye SUN-5K–25K-SG01HP3-EU** — *untested* | `davidrapan/ha-solarman` (HACS) | No power setpoint on this hardware; steered by work mode plus the battery current limits, so the plan is a ceiling rather than a target |
+| **Deye SUN-5K–25K-SG01HP3-EU — TOU Toggle** | `davidrapan/ha-solarman` (HACS), `deye_p3` | Tested OK based on a user hardware report. TOU switching: off for charge/idle, on for discharge/self-consumption. Check active TOU slots, actual pack voltage and current ceilings; not verified on every model/firmware |
 | **SolaX X3-Hybrid G4 / X3-Ultra** — *untested* | `wills106/homeassistant-solax-modbus` (HACS) | The core `solax` integration is read-only. Every command needs the trigger button, and self-reverts when its autorepeat runs out |
 | **Growatt MOD / MID TL3-XH** — *untested* | `wills106/homeassistant-solax-modbus` (HACS) | No power setpoint; dedicates one time-of-use slot to the plan. Percentages, so it needs your rated power. No curtailment |
 | **Sigenergy SigenStor** — *untested* | `TypQxQ/Sigenergy-Local-Modbus` (HACS) | Turn off the integration's read-only mode and enable the control entities first — they ship disabled. Direction from the EMS mode, magnitude from the ESS limits |
@@ -56,6 +56,13 @@ inverter's register map, but nobody has confirmed it against that hardware
 yet. They carry an **UNTESTED** marker in the picker and a warning on the
 setup form. They are worth trying — with the Control enabled switch as your
 undo — and reports back are what get the marker removed.
+
+**Deye upgrade:** The TOU-toggle profile replaces the earlier Deye profile
+under the same profile ID. Reconfigure the inverter to select its **Time of Use**
+entity before enabling control. Existing voltage, current and work-mode options
+are retained; review them for your installation. An unset TOU entity blocks
+battery commands. A saved 51 V value on a 400 V pack allows roughly eight times
+the intended current ceiling.
 
 More ship as they get contributed. If yours isn't listed, **Scripts** is the
 honest answer today, not a generic profile that doesn't quite match your

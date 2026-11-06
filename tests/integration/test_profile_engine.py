@@ -846,6 +846,7 @@ def test_deye_converts_the_plan_into_a_current_limit(hass: HomeAssistant) -> Non
     profile = _builtin("inverter/deye_sg01hp3")
     options = {
         **_options(profile),
+        "time_of_use_select": "select.tou",
         "charge_current_number": "number.charge",
         "discharge_current_number": "number.discharge",
     }
@@ -864,6 +865,7 @@ def test_deye_clamps_a_huge_plan_to_the_everyday_ceiling(hass: HomeAssistant) ->
     profile = _builtin("inverter/deye_sg01hp3")
     options = {
         **_options(profile),
+        "time_of_use_select": "select.tou",
         "charge_current_number": "number.charge",
         "discharge_current_number": "number.discharge",
     }
@@ -911,3 +913,91 @@ def test_a_ceiling_holds_for_a_guard_discharge_too(hass: HomeAssistant) -> None:
 def test_without_a_ceiling_discharge_rounds_to_the_nearest_step(hass: HomeAssistant) -> None:
     profile = _control_profile({"round_to": 100})
     assert convert_power(hass, profile, {}, "force_discharge", 2550) == 2600
+
+
+@pytest.mark.parametrize(
+    ("action", "tou", "grid_service", "work_mode", "charge_a", "discharge_a"),
+    [
+        ("force_charge", "Disabled", "switch.turn_on", None, 10, 0),
+        ("force_discharge", "Enabled", "switch.turn_off", "Export First", 0, 10),
+        ("idle", "Disabled", "switch.turn_off", None, 0, 0),
+        ("self_consume", "Enabled", "switch.turn_off", "Zero Export To CT", 180, 180),
+    ],
+)
+def test_deye_tou_toggle_modes(
+    hass: HomeAssistant,
+    action: str,
+    tou: str,
+    grid_service: str,
+    work_mode: str | None,
+    charge_a: int,
+    discharge_a: int,
+) -> None:
+    """Keep the reported workaround's mode permissions and current limits together."""
+    profile = _builtin("inverter/deye_sg01hp3")
+    options = {
+        **_options(profile),
+        "time_of_use_select": "select.tou",
+        "grid_charge_switch": "switch.grid_charge",
+        "work_mode_select": "select.work_mode",
+        "energy_pattern_select": "select.energy_pattern",
+        "charge_current_number": "number.charge",
+        "discharge_current_number": "number.discharge",
+    }
+    steps = render_action(hass, profile, options, action, power_w=4000)
+    assert steps[0] == {
+        "service": "select.select_option",
+        "target": {"entity_id": "select.tou"},
+        "data": {"option": tou},
+    }
+    assert steps[1] == {
+        "service": grid_service,
+        "target": {"entity_id": "switch.grid_charge"},
+    }
+    written = {
+        step["target"]["entity_id"]: step["data"]["value"]
+        for step in steps
+        if step["service"] == "number.set_value"
+    }
+    assert written == {"number.charge": charge_a, "number.discharge": discharge_a}
+    modes = [
+        step["data"]["option"]
+        for step in steps
+        if step["target"]["entity_id"] == "select.work_mode"
+    ]
+    assert modes == ([work_mode] if work_mode else [])
+    patterns = [
+        step["data"]["option"]
+        for step in steps
+        if step["target"]["entity_id"] == "select.energy_pattern"
+    ]
+    assert patterns == (
+        [] if action == "idle" else ["Battery First" if action == "force_charge" else "Load First"]
+    )
+
+
+@pytest.mark.parametrize(("action", "expected_w"), [("curtail", 2500), ("uncurtail", 15000)])
+def test_deye_tou_toggle_export_ceiling(hass: HomeAssistant, action: str, expected_w: int) -> None:
+    profile = _builtin("inverter/deye_sg01hp3")
+    options = {**_options(profile), "export_limit_number": "number.export_limit"}
+    steps = render_action(hass, profile, options, action, curtail_w=2500)
+    assert steps == [
+        {
+            "service": "number.set_value",
+            "target": {"entity_id": "number.export_limit"},
+            "data": {"value": expected_w},
+        }
+    ]
+
+
+@pytest.mark.parametrize("action", ["force_charge", "force_discharge", "idle", "self_consume"])
+@pytest.mark.parametrize("mapping", [None, "", "   "])
+def test_deye_requires_tou_mapping_before_rendering(
+    hass: HomeAssistant, action: str, mapping: str | None
+) -> None:
+    profile = _builtin("inverter/deye_sg01hp3")
+    options = _options(profile)
+    if mapping is not None:
+        options["time_of_use_select"] = mapping
+    with pytest.raises(ProfileError, match="time_of_use_select"):
+        render_action(hass, profile, options, action, power_w=4000)

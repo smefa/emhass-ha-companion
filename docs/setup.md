@@ -41,10 +41,11 @@ it, or when a picker's saved choice is in it.
 
 - **Nothing you must fill in is hidden.** A field with no default always
   stays in the main view.
-- **Source pickers** (price, solar, house load, outdoor temperature) list the
+- **Source pickers** (price, solar, outdoor temperature) list the
   common sources first. The others are under *Advanced settings* and numbered,
   with a matching numbered explanation underneath. If none of the common
-  sources is installed, all of them are listed together.
+  sources is installed, all of them are listed together. House consumption uses
+  one list for creating a house load sensor and choosing an existing source.
 - **Storage is unchanged.** Settings you saved before still load and save the
   same way; moving a field into or out of *Advanced settings* never resets it.
 
@@ -259,7 +260,11 @@ you'd rather trade detail for a faster solve; it isn't limited to a fixed
 list, type any number of minutes.
 
 This is only the *resolution EMHASS plans at*. How often the plan is
-recalculated (below) is a separate setting.
+recalculated (below) is a separate setting. The time step travels with every
+request the Companion sends; changing it does not write anything to EMHASS's
+saved configuration. If you use EMHASS's machine-learning load forecaster,
+changing it makes the saved model unusable until it is trained again (see
+[Settings ownership](settings_ownership.md#ml-settings-and-saved-model-compatibility)).
 
 A **capacity (demand) charge** is not set on this step any more: it belongs
 with the network tariff. Choose **Flat demand charge (manual)** under
@@ -318,15 +323,28 @@ How the fill works:
 
 - The forecast is quoted in EUR/MWh, your prices in whatever currency and unit
   you use, often with taxes folded in. Rather than a configured conversion, the
-  forecast is rescaled (one scale and offset) to your real prices over the
-  hours where both exist. That absorbs currency, MWh against kWh and VAT.
+  forecast is rescaled to match the standard deviation and mean of your real
+  prices over the hours where both exist. The positive scale and price offset
+  infer currency/unit differences and fixed additions; they are not a live
+  exchange-rate conversion. Unlike a regression slope, the scale does not
+  flatten the forecast merely because correlation is weak.
 - Only the hours after your source ends are filled. Real prices are never
   replaced, and the price-horizon observation still measures the real source.
-- The fill is refused, and the previous-day repeat is used as before, when the
-  fit looks wrong: fewer than 12 overlapping hours, a correlation below 0.5
-  (usually a wrong area), a flat series, or a forecast that does not reach past
-  your prices. The reason is shown as a plan warning, as is a successful fill
-  with its scale, offset and correlation.
+- Missing prices blend the adjusted forecast with the existing previous-day
+  repeat, retaining quarter-hour changes when your source provides them.
+  The forecast weight is `max(0, correlation)²`: strong positive agreement
+  gives it more influence, weak agreement gives it less. There is no longer
+  a cutoff at 0.5. Flat or negatively correlated series use only the repeat.
+  This weighting is a conservative heuristic, not a backtested confidence
+  probability. Repeating follows the existing fixed 24-hour lookback, including
+  its hold-last behaviour when no earlier point is available.
+- Invalid data still falls back to the previous-day repeat: fewer than 12
+  overlapping hours, non-finite prices, missing forecast hours, mismatched
+  response area, or a forecast that does not extend your prices. A warning
+  explains the fallback, or reports the blend weights, correlation, scale and
+  price offset.
+  If the forecast ends before the planning horizon, its available portion is
+  still used and the existing payload back-fill handles the uncovered tail.
 - The forecast is cached for 3 hours, a failed request is not retried for 15
   minutes, and a cached forecast up to 36 hours old is still used if the API
   is unreachable.

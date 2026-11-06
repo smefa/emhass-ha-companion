@@ -16,6 +16,7 @@ import pytest
 from custom_components.emhass_companion.coordinator import (
     DayRange,
     latch_past_soc,
+    plan_soc_ahead,
     publish_soc_day_range,
     recorded_soc_points,
 )
@@ -142,3 +143,27 @@ def test_a_level_held_since_yesterday_counts_at_midnight() -> None:
     assert points[0].value == 33.0
     # Local midnight is 22:00 UTC the previous calendar day.
     assert points[0].time == _at(22, 0, day=26)
+
+
+def test_ahead_ignores_rows_before_now() -> None:
+    """15 % at 01:30 is past; the level in force now is the plan's high."""
+    series = _series(
+        (_at(1, 30), 15.0), (_at(14, 30), 81.0), (_at(18, 0), 60.0), (_at(22, 0), 40.0)
+    )
+
+    low, high = plan_soc_ahead(series, _at(15, 0))
+
+    assert high == Point(_at(15, 0), 81.0)
+    assert low == Point(_at(22, 0), 40.0)
+
+
+def test_ahead_runs_past_midnight_and_moves_with_the_clock() -> None:
+    series = _series((_at(10, 0), 10.0), (_at(14, 0), 80.0), (_at(8, day=28), 20.0))
+
+    assert plan_soc_ahead(series, _at(10, 5))[0] == Point(_at(10, 5), 10.0)
+    # Same series, a step later: the trough is behind us.
+    assert plan_soc_ahead(series, _at(14, 5))[0] == Point(_at(8, day=28), 20.0)
+
+
+def test_ahead_of_an_empty_series_is_nothing() -> None:
+    assert plan_soc_ahead(Series.empty(), _at(9, 0)) == (None, None)

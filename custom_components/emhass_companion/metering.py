@@ -19,9 +19,10 @@ that resolution:
 * ``max(net, 0)`` is only exact when the interval is short. Over a
   quarter-hour bucket, a house that imported for five minutes and exported for
   ten nets out to a single direction and the other side's money vanishes.
-* Prices are piecewise constant per hour, so multiplying an interval's kWh by
-  the price at the interval's start *is* the exact integral -- as long as no
-  interval straddles a price boundary, which the tick sees to.
+* Power integration is split at billing boundaries. Energy-counter updates
+  can cover older spans, however: reading every meter on an event does not
+  synchronise their measurement intervals. Counterfactual costs remain an
+  estimate, explicitly reported as unreconciled in the sensor attributes.
 
 Writing four sensor states on every meter update would be a different problem,
 so publication is throttled separately (see ``_PUBLISH_INTERVAL``); the ledger
@@ -64,6 +65,7 @@ from .const import (
     CONF_PV_ENERGY_ENTITY,
     DOMAIN,
 )
+from .energy_counter import advance_counter
 from .savings import Forecast, IntervalEnergy, Ledger, Prices, forecast_costs
 
 _LOGGER = logging.getLogger(__name__)
@@ -197,29 +199,31 @@ class Meter:
 
     def _take_energy_from(self, state: State | None, now: datetime) -> float:
         reading = _energy_kwh(state)
-        if reading is None:
+        if reading is None or reading < 0:
             # Unavailable is not zero. Holding the previous reading means the
             # energy that flowed while the meter was out is picked up on the
             # next good sample instead of being lost -- and, because the same
             # branch also refuses to advance ``_last_time``, without pretending
             # it all happened in one instant.
             return 0.0
-        previous = self._last_value
-        self._last_value = reading
+        self._last_value, moved = advance_counter(self._last_value, reading)
         self._last_time = now
-        if previous is None:
-            # First sample: the counter's absolute value tells us nothing about
-            # what moved. Baseline it and start measuring from here.
-            return 0.0
-        if reading < previous:
-            # A reset. ``total_increasing`` sensors are allowed to do this, and
-            # the daily meters most inverters publish do it every midnight by
-            # design; the post-reset reading is the energy since the reset.
-            return max(reading, 0.0)
-        return reading - previous
+        return moved
 
     def _take_energy(self, hass: HomeAssistant, now: datetime) -> float:
         return self._take_energy_from(hass.states.get(self.entity_id), now)
+
+    def resume_counter(self, historical: Meter, state: State | None, *, now: datetime) -> None:
+        """Resume an energy counter at history's accepted high-water baseline.
+
+        Called before live tracking starts. Movement up to the current reading
+        belongs to the restart gap, not to a new priced live interval.
+        """
+        if self.kind != "energy":
+            return
+        self._last_value = historical._last_value
+        self._last_time = now
+        self._take_energy_from(state, now)
 
     # -- power sensors --------------------------------------------------------
 
@@ -332,6 +336,10 @@ class Meter:
         gap was short enough to price at the current tariff, or when nothing
         was restored.
 
+        A current reading still below a retained correction baseline keeps
+        that high-water mark even across a long gap, so later recovery cannot
+        be counted twice. Its timestamp starts fresh at restoration.
+
         The entity id is checked as well as the timestamp: a user who repoints
         this quantity at a different meter has a stored reading that is a
         perfectly plausible number from an entirely different counter, and
@@ -348,13 +356,18 @@ class Meter:
             # than dropped silently; for a power sensor there is nothing to
             # report, only a baseline to reset.
             missed = 0.0
+            retained = None
             stored = data.get("last_value")
             if self.kind == "energy" and stored is not None:
                 current = _energy_kwh(hass.states.get(self.entity_id))
                 if current is not None and current >= stored:
                     missed = current - stored
-            self._last_value = None
-            self._last_time = None
+                elif current is not None and current >= 0:
+                    accepted, _ = advance_counter(stored, current)
+                    if accepted == stored:
+                        retained = stored
+            self._last_value = retained
+            self._last_time = now if retained is not None else None
             return missed
         self._last_value = data.get("last_value")
         self._last_time = when
@@ -488,8 +501,12 @@ def build_meters(config: EmhassConfig, options: dict[str, Any] | None) -> MeterS
         grid_import=_energy(CONF_GRID_IMPORT_ENERGY_ENTITY),
         grid_export=_energy(CONF_GRID_EXPORT_ENERGY_ENTITY),
         pv=_energy(CONF_PV_ENERGY_ENTITY),
-        battery_charge=_energy(CONF_BATTERY_CHARGE_ENERGY_ENTITY),
-        battery_discharge=_energy(CONF_BATTERY_DISCHARGE_ENERGY_ENTITY),
+        battery_charge=_energy(CONF_BATTERY_CHARGE_ENERGY_ENTITY)
+        if config.battery.enabled
+        else None,
+        battery_discharge=_energy(CONF_BATTERY_DISCHARGE_ENERGY_ENTITY)
+        if config.battery.enabled
+        else None,
     )
 
     if spec.pv is None and config.pv_live_entity:
@@ -497,7 +514,8 @@ def build_meters(config: EmhassConfig, options: dict[str, Any] | None) -> MeterS
     if config.house_load_total_entity:
         spec.house_load = Meter(config.house_load_total_entity, kind="power")
     if (
-        spec.battery_charge is None
+        config.battery.enabled
+        and spec.battery_charge is None
         and spec.battery_discharge is None
         and config.battery_power_entity
     ):
@@ -596,6 +614,8 @@ class PendingGapReplay:
     window_end: datetime
     missed_kwh: float
     seeds: dict[str, GapSeed]
+    prepared: bool = False
+    history: dict[str, list[State]] | None = None
 
 
 class SavingsTracker:
@@ -618,6 +638,7 @@ class SavingsTracker:
         prices: Callable[[datetime], Prices | None],
         plan_forecast: Callable[[datetime, timedelta], Forecast | None],
         add_price_listener: Callable[[CALLBACK_TYPE], CALLBACK_TYPE],
+        battery_enabled: bool = True,
     ) -> None:
         self.hass = hass
         self.entry = entry
@@ -627,8 +648,9 @@ class SavingsTracker:
         self._prices = prices
         self._plan_forecast = plan_forecast
         self._add_price_listener = add_price_listener
+        self._battery_enabled = battery_enabled
 
-        self.ledger = Ledger(day=_local_day(dt_util.utcnow()))
+        self.ledger = Ledger(day=_local_day(dt_util.utcnow()), battery_enabled=battery_enabled)
         self._store: Store[dict[str, Any]] = Store(
             hass, _STORE_VERSION, f"{DOMAIN}_{entry.entry_id}_savings"
         )
@@ -667,6 +689,7 @@ class SavingsTracker:
                 battery_book_value=ledger.battery_book_value,
                 battery_book_value_start=ledger.battery_book_value,
             )
+        ledger.battery_enabled = self._battery_enabled
         self.ledger = ledger
 
         meter_state = stored.get("meters") or {}
@@ -712,6 +735,9 @@ class SavingsTracker:
                 missed_kwh=unpriced,
                 seeds=gap_seeds,
             )
+            from .metering_replay import async_prepare_gap
+
+            self._pending_gap = await async_prepare_gap(self.hass, self.meters, self._pending_gap)
             self._gap_replay_unsub = self._add_price_listener(self._on_coordinator_updated)
             # Covers a reload where prices are already loaded -- otherwise
             # replay would wait for the next coordinator refresh for no
@@ -734,7 +760,7 @@ class SavingsTracker:
         """Subscribe to the meters and to midnight."""
         self.async_stop()
         entities = self.meters.entities()
-        if self._soc_entity:
+        if self._battery_enabled and self._soc_entity:
             entities = sorted({*entities, self._soc_entity})
         if entities:
             self._unsubs.append(
@@ -913,6 +939,7 @@ class SavingsTracker:
         self.ledger.reconcile_storage(stored)
         self.ledger = Ledger(
             day=today,
+            battery_enabled=self._battery_enabled,
             stored_start_kwh=stored,
             stored_now_kwh=stored,
             battery_book_kwh=self.ledger.battery_book_kwh,
@@ -922,7 +949,7 @@ class SavingsTracker:
 
     def _stored_kwh(self) -> float | None:
         """Energy sitting in the battery right now, from SOC and capacity."""
-        if not self._soc_entity or not self._capacity_kwh:
+        if not self._battery_enabled or not self._soc_entity or not self._capacity_kwh:
             return None
         soc = _as_float(self.hass.states.get(self._soc_entity))
         if soc is None:
@@ -1026,6 +1053,7 @@ def build_forecast_callable(coordinator: Any) -> Callable[[datetime, timedelta],
             sell=data.sell_price,
             stored_now_kwh=stored,
             capacity_kwh=capacity_kwh,
+            battery_enabled=battery.enabled,
         )
 
     return _forecast

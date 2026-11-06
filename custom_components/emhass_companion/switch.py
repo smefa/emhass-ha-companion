@@ -31,6 +31,7 @@ from .const import (
 from .coordinator import EmhassCoordinator
 from .deferrable import DeferrableRuntime
 from .entity import EmhassEntity, EmhassLoadEntity
+from .hot_water_plan import PeriodEnabled, async_setup_period_entities
 
 PARALLEL_UPDATES = 1
 
@@ -296,6 +297,7 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     coordinator: EmhassCoordinator = entry.runtime_data.coordinator
+    async_setup_period_entities(entry, async_add_entities, PeriodEnabled)
     async_add_entities([EmhassControlSwitch(coordinator)])
 
     for load in entry.runtime_data.loads.all():
@@ -428,8 +430,12 @@ class LoadSwitch(EmhassLoadEntity, SwitchEntity, RestoreEntity):
         await self._set(False)
 
     async def _set(self, value: bool) -> None:
+        was_enabled = self.load.enabled
         self.entity_description.set_fn(self.load, value)
         if self.entity_description.invalidates_battery_lockout:
             self.load.invalidate_battery_lockout()
         self.load.notify()
-        await self.coordinator.async_request_refresh()
+        # Disabling must remove the load from the current plan. Other edits
+        # while off can wait for the refresh requested when it is re-enabled.
+        if was_enabled or self.load.enabled:
+            await self.coordinator.async_request_settings_refresh()

@@ -313,15 +313,26 @@ function recordedSeries(result, entityId, invert) {
  * spike -- a mean would just blend it in and leave a smaller bump either
  * side. The window that follows is sized by time rather than sample count,
  * because the recorder's points land irregularly.
+ *
+ * The recorder only stores a point when the value changes, so a point can
+ * stand for hours. One held longer than the window (the last one, up to `endT`)
+ * is a resting value, not jitter, and is left as recorded: averaging it with
+ * the readings just before it would draw a battery that stopped at 0 W as
+ * still discharging for as long as the point is held.
  */
-function smoothSeries(points, windowMs) {
+function smoothSeries(points, windowMs, endT) {
   if (points.length < 3) return points;
+  const held = (i) => {
+    const next = i + 1 < points.length ? points[i + 1].t : endT;
+    return Number.isFinite(next) && next - points[i].t > windowMs;
+  };
   const median = points.map((point, i) => {
     if (i === 0 || i === points.length - 1) return point;
     const neighbours = [points[i - 1].v, point.v, points[i + 1].v].sort((a, b) => a - b);
     return { t: point.t, v: neighbours[1] };
   });
   return median.map((point, i) => {
+    if (held(i)) return points[i];
     let sum = 0;
     let n = 0;
     for (let j = i; j >= 0 && point.t - median[j].t <= windowMs / 2; j--) {
@@ -391,7 +402,7 @@ function readHistory(card, hass, wanted, invert, span, now) {
         const points = {};
         for (const name of names) {
           const raw = recordedSeries(result, wanted[name], invert.indexOf(name) !== -1);
-          points[name] = SMOOTHED_HISTORY.indexOf(name) !== -1 ? smoothSeries(raw, 15 * 60000) : raw;
+          points[name] = SMOOTHED_HISTORY.indexOf(name) !== -1 ? smoothSeries(raw, 15 * 60000, now) : raw;
         }
         card._historyPoints = points;
         card.refresh();

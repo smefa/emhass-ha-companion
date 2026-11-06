@@ -64,7 +64,7 @@ load: Hot water
 
 ### `emhass-health-card` — is the optimiser healthy
 
-![The health card: plan freshness, last run stats, the where-the-time-went stage bar, warnings, and the Recalculate / Day-ahead / Train buttons](assets/health-card.png)
+![The health card: plan freshness, last run stats, the where-the-time-went stage bar, warnings, and the Recalculate and Day-ahead buttons](assets/health-card.png)
 
 Almost everything here already exists as attributes on **Optimisation status**,
 where nobody looks: the run's duration, its stage-by-stage breakdown, the
@@ -78,8 +78,8 @@ EMHASS version that answered and the warnings it collected.
   is which stage dominates, which is a length.
 - Warnings and `error_message`, or an explicit "no warnings" when there are
   none.
-- Buttons for **Recalculate now**, **Rebuild day-ahead** and **Train load
-  forecaster**.
+- Buttons for **Recalculate now** and **Rebuild day-ahead** (which calls the
+  `run_dayahead` action).
 
 Every section can be turned off from the card's own **visual editor** — no
 YAML needed. The switches write only what is off, so the config stays short:
@@ -96,7 +96,7 @@ show_stages: false
 | `show_stats` | `true` | the whole row of info boxes |
 | `show_stages` | `true` | the stage-timing bar and its key |
 | `show_problems` | `true` | the warnings and errors |
-| `show_actions` | `true` | the three buttons |
+| `show_actions` | `true` | the Recalculate and Day-ahead buttons |
 
 #### The two chosen boxes
 
@@ -165,7 +165,10 @@ entity, so the settings are one tap away rather than absent.
   gap between marker and fill is a plan running on a stale SOC, which no
   single-value display can show; the low tick is the other half of the same
   question, since a plan that ends the day full can still empty the battery
-  on the way, and it turns red when the trough goes under 20 %.
+  on the way, and it turns red when the trough goes under 20 %. A small
+  **today / ahead** button on the bar switches the low and peak between all of
+  today (what already happened included) and the plan from now on; the choice
+  is remembered in the browser.
 - Value boxes under **Battery** — the measured level with its gap to the
   plan, battery power with its charge/discharge sense, the end SOC target
   against where the plan actually ends, and the planned low and high with the

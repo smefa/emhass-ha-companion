@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from homeassistant.core import (
+    Context,
     HomeAssistant,
     ServiceCall,
     ServiceResponse,
@@ -18,6 +19,7 @@ from homeassistant.util import dt as dt_util
 import voluptuous as vol
 
 from .const import ACTION_DAYAHEAD, ACTION_MPC, DOMAIN, PROFILE_KIND_NETWORK
+from .hot_water_plan import async_set_plan
 from .network_calendar import HolidayCache, NetworkCalendar, NetworkCalendarError
 from .profiles import ProfileError, async_resolve_series, resolve_network, resolve_settings
 from .profiles.schema import humanize_error
@@ -25,8 +27,11 @@ from .typical_load import typical_day_records
 
 SERVICE_RUN_DAYAHEAD = "run_dayahead"
 SERVICE_RUN_MPC = "run_mpc"
+SERVICE_TRAIN_LOAD_FORECASTER = "train_load_forecaster"
+SERVICE_EXPORT_SETTINGS = "export_settings"
 SERVICE_TEST_PROFILE = "test_profile"
 SERVICE_TYPICAL_LOAD_FORECAST = "typical_load_forecast"
+SERVICE_SET_HOT_WATER_PLAN = "set_hot_water_plan"
 
 TEST_PROFILE_SCHEMA = vol.Schema(
     {
@@ -44,18 +49,22 @@ TYPICAL_LOAD_FORECAST_SCHEMA = vol.Schema(
 )
 
 
-async def _require_admin(hass: HomeAssistant, call: ServiceCall) -> None:
-    """Reject a non-admin caller of a diagnostic action.
+async def async_require_admin(hass: HomeAssistant, context: Context | None) -> None:
+    """Reject a non-admin caller of a diagnostic or configuration-writing action.
 
     ``context.user_id`` is None for anything Home Assistant itself triggered --
     an automation, a script, another integration -- and those stay allowed;
     only a real, non-admin user is turned away.
     """
-    if call.context.user_id is None:
+    if context is None or context.user_id is None:
         return
-    user = await hass.auth.async_get_user(call.context.user_id)
+    user = await hass.auth.async_get_user(context.user_id)
     if user is not None and not user.is_admin:
-        raise Unauthorized(context=call.context)
+        raise Unauthorized(context=context)
+
+
+async def _require_admin(hass: HomeAssistant, call: ServiceCall) -> None:
+    await async_require_admin(hass, call.context)
 
 
 def _coordinator(hass: HomeAssistant):
@@ -76,6 +85,38 @@ def async_register_services(hass: HomeAssistant) -> None:
 
     async def _run_mpc(call: ServiceCall) -> None:
         await _coordinator(hass).async_run(ACTION_MPC)
+
+    async def _train_load_forecaster(call: ServiceCall) -> None:
+        coordinator = _coordinator(hass)
+        if not coordinator.uses_mlforecaster:
+            raise ServiceValidationError(
+                "The load forecast method is not the machine-learning forecaster"
+            )
+        await coordinator.async_run_forecast_fit()
+
+    async def _export_settings(call: ServiceCall) -> None:
+        # Overwrites EMHASS's saved configuration, so not open to non-admin users.
+        await _require_admin(hass, call)
+        await _coordinator(hass).async_export_settings()
+
+    async def _set_hot_water_plan(call: ServiceCall) -> None:
+        # Resolve a device through its integration identifier, across all
+        # loaded entries, rather than assuming the first entry owns the tank.
+        from homeassistant.helpers import device_registry as dr
+
+        device = dr.async_get(hass).async_get(call.data["device_id"])
+        if device is not None:
+            for entry in hass.config_entries.async_loaded_entries(DOMAIN):
+                for load in entry.runtime_data.loads.all():
+                    if (DOMAIN, f"{entry.entry_id}_{load.subentry_id}") in device.identifiers:
+                        try:
+                            await async_set_plan(
+                                entry.runtime_data.coordinator, load, call.data["periods"]
+                            )
+                        except ValueError as err:
+                            raise ServiceValidationError(str(err)) from err
+                        return
+        raise ServiceValidationError("Select a hot-water tank device")
 
     async def _test_profile(call: ServiceCall) -> ServiceResponse:
         """Resolve a profile and return what it produced.
@@ -229,6 +270,14 @@ def async_register_services(hass: HomeAssistant) -> None:
 
     hass.services.async_register(DOMAIN, SERVICE_RUN_DAYAHEAD, _run_dayahead)
     hass.services.async_register(DOMAIN, SERVICE_RUN_MPC, _run_mpc)
+    hass.services.async_register(DOMAIN, SERVICE_TRAIN_LOAD_FORECASTER, _train_load_forecaster)
+    hass.services.async_register(DOMAIN, SERVICE_EXPORT_SETTINGS, _export_settings)
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SET_HOT_WATER_PLAN,
+        _set_hot_water_plan,
+        schema=vol.Schema({vol.Required("device_id"): str, vol.Required("periods"): list}),
+    )
     hass.services.async_register(
         DOMAIN,
         SERVICE_TEST_PROFILE,
@@ -250,7 +299,10 @@ def async_unregister_services(hass: HomeAssistant) -> None:
     for service in (
         SERVICE_RUN_DAYAHEAD,
         SERVICE_RUN_MPC,
+        SERVICE_TRAIN_LOAD_FORECASTER,
+        SERVICE_EXPORT_SETTINGS,
         SERVICE_TEST_PROFILE,
         SERVICE_TYPICAL_LOAD_FORECAST,
+        SERVICE_SET_HOT_WATER_PLAN,
     ):
         hass.services.async_remove(DOMAIN, service)

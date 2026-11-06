@@ -1,10 +1,8 @@
-"""The "Train load forecaster" button only exists when it means something.
+"""Which buttons the hub offers.
 
-Mirrors how sensor.py only creates the battery sensors when a battery is
-configured (they would otherwise be permanently None): a button that trains
-mlforecaster has nothing to do for the "typical"/"naive" load methods, or when
-no load profile has been chosen yet, so it should not exist at all rather
-than exist and fail every time it is pressed.
+"Rebuild day-ahead plan" and "Train load forecaster" are actions only -- the
+plan is rebuilt on its own schedule and the forecaster trains itself -- so the
+configuration card carries just "Recalculate now" (plus a per-load "Run now").
 """
 
 from __future__ import annotations
@@ -57,22 +55,10 @@ async def _setup(hass: HomeAssistant, *, options: dict) -> set[str]:
     return {button.entity_description.key for button in added}
 
 
-async def test_fit_button_exists_for_mlforecaster(hass: HomeAssistant) -> None:
-    keys = await _setup(
-        hass,
-        options={
-            CONF_LOAD: {
-                CONF_PROFILE: "load/sensor",
-                CONF_PROFILE_OPTIONS: {"entity": "sensor.house_load", "method": "mlforecaster"},
-            }
-        },
-    )
-    assert "run_forecast_fit" in keys
-    assert {"run_dayahead", "run_mpc"} <= keys
-
-
-@pytest.mark.parametrize("method", ["typical", "naive"])
-async def test_fit_button_absent_for_other_methods(hass: HomeAssistant, method: str) -> None:
+@pytest.mark.parametrize("method", ["mlforecaster", "typical", "naive"])
+async def test_training_and_day_ahead_are_actions_not_buttons(
+    hass: HomeAssistant, method: str
+) -> None:
     keys = await _setup(
         hass,
         options={
@@ -83,16 +69,12 @@ async def test_fit_button_absent_for_other_methods(hass: HomeAssistant, method: 
         },
     )
     assert "run_forecast_fit" not in keys
+    assert "run_dayahead" not in keys
 
 
-async def test_fit_button_absent_with_no_load_profile_chosen(hass: HomeAssistant) -> None:
+async def test_recalculate_is_the_only_hub_button(hass: HomeAssistant) -> None:
     keys = await _setup(hass, options={})
-    assert "run_forecast_fit" not in keys
-
-
-async def test_the_always_present_buttons_are_unaffected(hass: HomeAssistant) -> None:
-    keys = await _setup(hass, options={})
-    assert {"run_dayahead", "run_mpc"} <= keys
+    assert keys == {"run_mpc"}
 
 
 async def _run_now_button(hass: HomeAssistant):
@@ -148,3 +130,32 @@ async def test_run_now_follows_a_live_recurrence_change(hass: HomeAssistant) -> 
 
     load.recurrence = RECURRENCE_ON_DEMAND
     assert button.available is True
+
+
+async def test_retired_buttons_are_removed_from_the_registry(hass: HomeAssistant) -> None:
+    """Hosts that created the old buttons would otherwise keep dead entities."""
+    from homeassistant.helpers import entity_registry as er
+
+    from custom_components.emhass_companion import _async_remove_retired_buttons
+
+    entry = MockConfigEntry(domain=DOMAIN, data={"url": "http://localhost:5000"})
+    entry.add_to_hass(hass)
+    registry = er.async_get(hass)
+    for key in ("run_dayahead", "run_forecast_fit", "export_settings", "run_mpc"):
+        registry.async_get_or_create(
+            "button", DOMAIN, f"{entry.entry_id}_{key}", config_entry=entry
+        )
+    # Same key under another entry, and a different domain: both left alone.
+    other = registry.async_get_or_create("button", DOMAIN, "other_entry_run_dayahead")
+    sensor = registry.async_get_or_create("sensor", DOMAIN, f"{entry.entry_id}_run_dayahead")
+
+    _async_remove_retired_buttons(hass, entry)
+
+    remaining = {e.unique_id for e in registry.entities.values()}
+    assert remaining == {
+        f"{entry.entry_id}_run_mpc",
+        other.unique_id,
+        sensor.unique_id,
+    }
+
+    _async_remove_retired_buttons(hass, entry)  # idempotent

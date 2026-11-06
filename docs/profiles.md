@@ -202,9 +202,9 @@ emhass:
   pv_module_model: ["{{ options.peak_power_w }}"]
 ```
 
-Keys are EMHASS runtime parameters. Use the current long names (`operating_hours_of_each_deferrable_load`), not the legacy short aliases. Templates render with their real types, so numbers arrive as numbers.
+Keys are allowlisted EMHASS static runtime settings, using current long names rather than legacy short aliases. Templates render with their real types, so numbers arrive as numbers. See [settings ownership](settings_ownership.md) for supported settings and backend-version requirements.
 
-These settings are merged into every optimisation request, after the integration's own defaults — so a profile can override a default, which is how *No solar* works.
+Supported settings are merged into every optimisation request after the integration's defaults, so a profile can override a default, which is how *No solar* works. Profiles cannot override live inputs, load schedules/progress, timestep, rounding, battery count, topology or physical grid limits. Unknown, backend-owned, null and unsupported-version settings are ignored with key-only warnings. Backend credentials must never be placed in a profile.
 
 ## `inverter` profiles
 
@@ -327,3 +327,10 @@ worth an `emhass:` profile if EMHASS itself can fetch it.
 ## Versioning
 
 `version: 1` is the current profile schema. The schema is a public API: changing the meaning of an existing key requires a version bump and a documented migration. A profile declaring a version newer than the integration understands is rejected rather than being misread.
+
+
+Action steps may set `required_target: true` when a missing actuator must block
+an action. The engine checks its rendered `target` before executing any steps
+and reports a profile error if it is blank. Other steps retain the optional
+blank-target skip behavior. The Deye TOU step uses this to require reconfiguration
+when upgrading from the earlier profile without a TOU entity mapping.

@@ -142,16 +142,36 @@ hand-edited `.storage` or a backup restored from a different version. The
 default is used meanwhile; open the relevant options or load form, set the time
 again, and the repair clears itself.
 
-**"EMHASS's heat topology replaces the Companion's loads."** The EMHASS add-on
-has a `heat_topology` saved in its own configuration, in EMHASS's default
-replace mode. On every run EMHASS then overwrites the loads the Companion sends
-with the ones the topology builds, so your deferrable and thermal loads stop
-being planned, with no error anywhere else. The check runs when the integration
-loads and only fires if you have at least one Companion load. To fix it, add
-`"extend_deferrable_loads": true` at the top level of the topology (EMHASS
-0.18.5 or newer; older versions ignore the flag, and the repair then asks you to
-update the add-on), or clear the topology in the add-on configuration. Then
-reload the integration. See [Thermal loads](thermal_loads.md#emhass-heat-topology).
+**A heat topology saved in EMHASS.** The Companion no longer raises a repair
+for this. Every request it sends sets an empty `heat_topology`, so a topology
+saved in the EMHASS add-on cannot replace the loads the Companion plans. Any
+older repair of this kind is removed when the integration loads. The topology
+still applies to runs started from EMHASS's own UI. See
+[Thermal loads](thermal_loads.md#emhass-heat-topology).
+
+**EMHASS's own UI shows different values from the Companion's.** Expected. The
+Companion sends its settings with every request through the API and does not
+rely on what EMHASS has saved, and setup or reload no longer writes them there.
+The *Last request to EMHASS* sensor shows what a run actually used. To make
+EMHASS's UI and manual runs resemble the Companion's static settings, run the
+**Write settings to EMHASS** action (read [what it
+overwrites](guide/hub_controls.md#write-settings-to-emhass) first).
+
+**"Settings were not written to EMHASS".** The action stopped before or at the
+named step and changed nothing it did not confirm. Typical causes: EMHASS is
+unreachable or returned an error (the message names the HTTP status; the body
+is deliberately not shown), EMHASS returned an empty active configuration so
+writing would have reset every other setting, or a profile no longer resolves
+(fix it as under *A plan looks wrong* and try again).
+
+**"Machine-learning load forecaster is not trained yet", after changing the time
+step, load sensor or lag count.** The Companion remembers the settings of its
+last successful training. If the time step, load sensor, lag count, model or
+history settings differ, the saved model is not used; runs fall back to the
+sensor's recent readings until a new training succeeds, which happens
+automatically once the sensor has enough history, or when you call the
+`emhass_companion.train_load_forecaster` action. A model replaced or deleted inside EMHASS cannot be detected this
+way. See [Settings ownership](settings_ownership.md#ml-settings-and-saved-model-compatibility).
 
 **A plan looks wrong.** Enable the *Last request to EMHASS* sensor (disabled
 by default) — its `payload` attribute is precisely what EMHASS was asked to
@@ -202,6 +222,11 @@ The checks look for the patterns that actually turn out to cause this:
 - a battery too empty to cover the house load right now,
 - a load that is reported as running but asked for no run time,
 - a deferrable load whose window is narrower than its own run time,
+- a hot-water tank floor from an older version of this integration: a tank that
+  cannot reach its temperature floor in time even with its heater on the whole
+  way. EMHASS holds that floor as a hard limit, so the integration now lowers
+  such floors to what the heater can reach and raises a separate "cannot reach
+  its hot-water target in time" warning instead (see below),
 - forecast arrays that disagree on length or have gaps,
 - power deficits or surpluses that no combination of grid, battery and
   inverter limits can cover.

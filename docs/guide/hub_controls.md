@@ -39,14 +39,91 @@ device**.
 
 - **Recalculate now** — runs a model-predictive optimisation from the current
   state, without waiting for the next scheduled one.
-- **Rebuild day-ahead plan** — runs a full optimisation across the whole
-  planning horizon.
-- **Train load forecaster** — only present if your load forecast method is
-  *Machine-learning forecaster*. Press it once after setup, and again
-  whenever you want the model retrained on more recent history.
 
-The first two also exist as actions — `emhass_companion.run_mpc` and
-`emhass_companion.run_dayahead` — for use in scripts and automations.
+The same run is available as the `emhass_companion.run_mpc` action for scripts
+and automations. Two more things you might expect as buttons are actions only,
+because you rarely need them by hand. All the actions, with fields and
+examples, are listed under **[Actions (advanced)](actions.md)**.
+
+- **Rebuild day-ahead plan** (`emhass_companion.run_dayahead`) — a full
+  optimisation across the whole planning horizon. It already runs at startup,
+  when new prices arrive and at the fallback time; call it after a change you
+  want reflected across the whole horizon at once.
+- **Train load forecaster** (`emhass_companion.train_load_forecaster`) — only
+  works if your load forecast method is *Machine-learning forecaster*. The
+  model trains itself once the sensor has enough history, retrains whenever the
+  time step, load sensor or lag count changes, and is retrained every week
+  because a trained model does not keep learning from new data. Call it to
+  retrain immediately, for example after a big change in your consumption.
+
+Saving Companion's settings into EMHASS is an action only too; see
+[Write settings to EMHASS](#write-settings-to-emhass) below.
+
+## Write settings to EMHASS
+
+Companion talks to EMHASS only through its HTTP API, and every run carries the
+settings it owns, so EMHASS's own saved configuration never decides how a
+Companion run behaves. The side effect is that EMHASS's web UI, and any run you
+start there by hand, can show values that differ from what Companion sends.
+The **Write settings to EMHASS** action
+(`emhass_companion.export_settings`) is the optional way to bring them closer.
+It is deliberately an action and not a button, so it is not pressed by accident;
+run it from **Developer tools → Actions**, a script or an automation.
+
+**When to use it.** If you open EMHASS's own UI to look at or run something and
+want the battery, inverter, time step and similar values there to match
+Companion's. You never have to press it for Companion itself to work.
+
+**What it does.**
+
+1. Works out Companion's current static settings from your configuration and
+   selected profiles.
+2. Reads EMHASS's active configuration from the API.
+3. Replaces only the settings in Companion's list and saves the whole result
+   back through the API. Everything else EMHASS has saved — connection
+   settings, credentials, storage paths, solver choice, anything from a newer
+   EMHASS release — is kept exactly as it was.
+
+No EMHASS file is read or written directly and no YAML is produced. Only
+administrators can run it, and calls from automations and scripts are allowed.
+
+**What it overwrites.** Settings in Companion's list are written even where
+you had set something different in EMHASS, including *clearing* features that
+Companion manages itself:
+
+- Battery, hybrid inverter, grid-limit (configured value only), curtailment,
+  time step, rounding and solver settings, and the PV settings of the selected
+  PV profile.
+- The load sensor and, for the machine-learning forecaster, its model, lag and
+  history settings; history and preprocessing options reset to Companion's
+  defaults unless your load profile sets them.
+- Native forecast and tariff settings. Where no profile supplies them these are
+  Companion's placeholder defaults, **not real prices** — check them if you run
+  EMHASS manually with its own tariff forecasting.
+  That includes a placeholder peak-hours period, which EMHASS's own page needs
+  in order to render the Tariff section.
+- An **empty heat topology**, an empty battery charge taper, empty inverter
+  power curves and the one-battery setting. A heat topology or battery curve you
+  keep in EMHASS itself is cleared by this action.
+
+Settings the connected EMHASS version does not support are left alone.
+
+**What it never writes.** State of charge, forecast series, the temporary grid
+limits (sensor, phase guard, demand charge), deferrable-load definitions and
+progress, and the control switch. Those are supplied per run only.
+
+**What it does not do.** It does not make a manual EMHASS run identical to a
+Companion run. Reproducing a run also needs the original request data (see the
+*Last request to EMHASS* sensor) and an EMHASS with a compatible trained model.
+The action does not train a model, and EMHASS may apply its own rules when it
+saves the configuration.
+
+**If it fails.** An unreachable EMHASS, an empty or unreadable current
+configuration, a refused save or a profile that no longer resolves each stop
+the action with an error naming the step (and the HTTP status where there is
+one). Nothing is reported as saved unless EMHASS accepted it, and the fetched
+configuration is never logged. See
+[Settings ownership](../settings_ownership.md) for the full list.
 
 ## Sensors
 

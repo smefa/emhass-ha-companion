@@ -42,7 +42,10 @@ from custom_components.emhass_companion.config_flow import (
     grid_schema,
     inverter_schema,
     tariff_schema,
+    thermal_kind_schema,
     thermal_schema,
+    water_tank_period_schema,
+    water_tank_schema,
 )
 from custom_components.emhass_companion.const import (
     ADVANCED_SECTION,
@@ -73,6 +76,199 @@ def test_tariff_schema_builds(side):
 def test_tariff_schema_builds_with_stored_values():
     stored = {"mode": "linear", "multiplier": 1.25, "adder": 0.5375}
     assert vol.Schema(_tariff_side_schema("buy", stored))
+
+
+def test_thermal_model_picker_has_only_name_and_model():
+    assert {str(key) for key in thermal_kind_schema({})} == {"name", "thermal_model"}
+    assert vol.Schema(thermal_kind_schema({}))({"name": "Room"})["thermal_model"] == "room"
+
+
+def _tank_settings():
+    return {
+        "temperature_sensor": "sensor.tank_temperature",
+        "tank_volume_litres": 200,
+        "nominal_power_w": 2000,
+        "setback_temperature": 37,
+        "comfort_temperature": 45,
+        "max_temperature": 52,
+        "hot_water_period_count": 2,
+    }
+
+
+@pytest.mark.parametrize("initial", [True, False])
+def test_tank_schema_has_no_room_tuning_or_model_picker(initial):
+    schema = water_tank_schema({}, initial=initial)
+    keys = {str(key) for key in schema}
+    assert not keys.intersection(
+        {
+            "sense",
+            "heating_rate",
+            "cooling_constant",
+            "thermal_inertia",
+            "thermal_model",
+        }
+    )
+    assert {"tank_volume_litres", "hot_water_period_count"} <= keys
+    # Only the first setup offers the heater COP and comfort penalty, in Advanced.
+    assert ("advanced" in keys) is initial
+    if initial:
+        section = next(value for key, value in schema.items() if str(key) == "advanced")
+        assert {str(key) for key in section.schema.schema} == {
+            "standby_loss_w",
+            "heater_cop",
+            "comfort_penalty",
+        }
+    assert not {"comfort_start", "comfort_end", "draw_start", "draw_end", "draw_energy_kwh"} & keys
+    entity_owned = {
+        "nominal_power_w",
+        "setback_temperature",
+        "comfort_temperature",
+        "max_temperature",
+    }
+    assert entity_owned <= keys if initial else not entity_owned.intersection(keys)
+    assert "standby_loss_w" not in keys
+
+
+@pytest.mark.parametrize(
+    ("field", "default"),
+    [
+        ("setback_temperature", 50),
+        ("comfort_temperature", 60),
+        ("max_temperature", 65),
+        ("temperature_sensor", None),
+    ],
+)
+def test_tank_temperature_defaults_and_required_sensor(field, default):
+    schema = water_tank_schema({})
+    data = {**_tank_settings(), "advanced": {}}
+    marker = next(key for key in schema if str(key) == field)
+    assert isinstance(marker, vol.Required)
+    data.pop(field)
+    if default is None:
+        assert marker.default is vol.UNDEFINED
+        with pytest.raises(vol.Invalid):
+            vol.Schema(schema)(data)
+    else:
+        assert marker.default() == default
+        assert vol.Schema(schema)(data)[field] == default
+        stored_schema = water_tank_schema({field: default + 1})
+        assert vol.Schema(stored_schema)(data)[field] == default + 1
+
+
+def test_tank_advanced_defaults_are_an_immersion_element_with_hard_comfort():
+    schema = vol.Schema(water_tank_schema({}))
+    assert schema({**_tank_settings(), "advanced": {}})["advanced"] == {
+        "standby_loss_w": 60,
+        "heater_cop": 1.0,
+        "comfort_penalty": 0.0,
+    }
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("standby_loss_w", -1),
+        ("standby_loss_w", 1001),
+        ("standby_loss_w", float("nan")),
+        ("standby_loss_w", True),
+        ("heater_cop", 0),
+        ("heater_cop", 11),
+        ("heater_cop", float("nan")),
+        ("comfort_penalty", -1),
+        ("comfort_penalty", 1001),
+        ("comfort_penalty", float("inf")),
+    ],
+)
+def test_tank_advanced_values_are_bounded_and_finite(field, value):
+    with pytest.raises(vol.Invalid):
+        vol.Schema(water_tank_schema({}))({**_tank_settings(), "advanced": {field: value}})
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "tank_volume_litres",
+        "nominal_power_w",
+        "setback_temperature",
+        "comfort_temperature",
+        "max_temperature",
+        "hot_water_period_count",
+    ],
+)
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf"), True])
+def test_tank_numbers_must_be_finite(field, value):
+    data = {**_tank_settings(), "advanced": {}}
+    data[field] = value
+    with pytest.raises(vol.Invalid):
+        vol.Schema(water_tank_schema({}))(data)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("tank_volume_litres", 0),
+        ("nominal_power_w", 0),
+        ("hot_water_period_count", 0),
+        ("hot_water_period_count", 9),
+        ("hot_water_period_count", 1.5),
+        ("comfort_temperature", 96),
+    ],
+)
+def test_tank_numbers_must_be_within_bounds(field, value):
+    with pytest.raises(vol.Invalid):
+        vol.Schema(water_tank_schema({}))({**_tank_settings(), "advanced": {}, field: value})
+
+
+def test_tank_zero_consumption_supports_standby_only_and_cross_midnight():
+    data = vol.Schema(water_tank_period_schema({}))(
+        {"draw_energy_kwh": 0, "draw_start": "23:00:00", "draw_end": "01:00:00"}
+    )
+    assert data["draw_energy_kwh"] == 0
+    assert data["draw_start"] == "23:00:00"
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -1, True])
+def test_period_energy_is_finite_nonnegative(value):
+    with pytest.raises(vol.Invalid):
+        vol.Schema(water_tank_period_schema({}))(
+            {"draw_energy_kwh": value, "draw_start": "06:00:00", "draw_end": "08:00:00"}
+        )
+
+
+@pytest.mark.parametrize(("defaults", "expected"), [({}, 200), ({"tank_volume_litres": 150}, 150)])
+@pytest.mark.parametrize("initial", [True, False])
+def test_tank_volume_starts_at_a_realistic_size(defaults, expected, initial):
+    schema = water_tank_schema(defaults, initial=initial)
+    key = next(key for key in schema if str(key) == "tank_volume_litres")
+    assert key.default() == expected
+
+
+def test_tank_number_validation_retains_frontend_selector_serialization():
+    from homeassistant.helpers import config_validation as cv
+
+    schema = water_tank_schema({})
+    validator = next(value for key, value in schema.items() if str(key) == "tank_volume_litres")
+    serialized = cv.custom_serializer(validator)
+    assert serialized["selector"]["number"]["unit_of_measurement"] == "L"
+
+
+def test_whole_tank_form_serializes_without_replacing_global_number_selector():
+    from homeassistant.helpers import config_validation as cv
+    from homeassistant.helpers import selector
+    from probatio import to_field_list
+
+    original = selector.SELECTORS["number"]
+    serialized = to_field_list(
+        vol.Schema(water_tank_schema({})), custom_serializer=cv.custom_serializer
+    )
+    fields = {field["name"]: field for field in serialized}
+    assert fields["tank_volume_litres"]["selector"]["number"]["unit_of_measurement"] == "L"
+    advanced = {field["name"]: field for field in fields["advanced"]["schema"]}
+    assert advanced["standby_loss_w"]["selector"]["number"]["max"] == 1000
+    assert fields["hot_water_period_count"]["selector"]["number"]["min"] == 1
+    assert fields["hot_water_period_count"]["selector"]["number"]["max"] == 8
+    assert fields["temperature_sensor"]["selector"]["entity"]
+    assert selector.SELECTORS["number"] is original is selector.NumberSelector
 
 
 # --- export multiplier must never end up at 0 --------------------------------
@@ -217,6 +413,23 @@ def test_advanced_fields_without_a_default_are_optional():
     """Rule 1: a hidden field must stay valid untouched."""
     for key in _advanced_keys(grid_schema({})):
         assert not isinstance(key, vol.Required) or key.default is not vol.UNDEFINED, key
+
+
+def test_flatten_picker_prefers_the_list_the_user_changed():
+    """The prefilled list holds the current profile; a pick from the other wins."""
+    from custom_components.emhass_companion.forms import flatten_picker
+
+    # Current is in Advanced (prefilled); user picks Solcast in the basic list.
+    both = {"profile": "pv/solcast", ADVANCED_SECTION: {"profile": "pv/custom"}}
+    assert flatten_picker(both, "pv/custom")["profile"] == "pv/solcast"
+    # Current is in the basic list; user picks from Advanced.
+    both = {"profile": "pv/solcast", ADVANCED_SECTION: {"profile": "pv/custom"}}
+    assert flatten_picker(both, "pv/solcast")["profile"] == "pv/custom"
+    # Only one list answered, or both agree: unchanged behaviour.
+    assert flatten_picker({"profile": "pv/solcast"}, "pv/custom")["profile"] == "pv/solcast"
+    assert flatten_picker({ADVANCED_SECTION: {"profile": "pv/custom"}}, None)["profile"] == (
+        "pv/custom"
+    )
 
 
 def test_flatten_sections_merges_and_drops_the_section_key():
@@ -615,6 +828,20 @@ def test_profile_selector_with_no_order_keeps_the_given_order():
     ]
     options = _profile_selector(profiles).config["options"]
     assert [option["value"] for option in options] == ["price/b", "price/a"]
+
+
+@pytest.mark.parametrize("current", [None, LOAD_PROFILE_CREATE_SENTINEL, "load/sensor"])
+def test_load_picker_uses_a_single_required_profile_choice(current):
+    profiles = _picker_profiles("load", "load/sensor")
+    schema = vol.Schema(_load_picker_schema(profiles, current=current))
+    assert set(schema.schema) == {"profile"}
+    (marker,) = schema.schema
+    assert isinstance(marker, vol.Required)
+    assert marker.description["suggested_value"] == current
+    for value in [LOAD_PROFILE_CREATE_SENTINEL, "load/sensor"]:
+        assert schema({"profile": value}) == {"profile": value}
+    with pytest.raises(vol.Invalid):
+        schema({"profile": LOAD_PROFILE_CREATE_SENTINEL, "advanced": {"profile": "load/sensor"}})
 
 
 def test_load_profile_selector_puts_create_first_then_the_fixed_order():

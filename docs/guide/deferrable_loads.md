@@ -1,5 +1,18 @@
 # Deferrable loads
 
+Settings-triggered optimisation waits for three seconds without further
+changes. Each change restarts the timer, shared across all loads, so an
+automation can update several settings before one solve uses the final values.
+Settings save and entities update immediately. Automations with pauses longer
+than three seconds can still trigger intermediate solves.
+
+To update several parameters from an automation, turn the load's **Enabled**
+switch off, change its settings, then turn it on again. Disabling updates the
+plan to exclude the load; edits while disabled save without requesting
+optimisation; enabling requests a new plan using the final settings. This works
+for every deferrable load, including room heating and hot-water tanks.
+Scheduled optimisations and explicit run actions continue normally.
+
 A deferrable load is anything whose **timing** can move — a dishwasher, a
 car charger, a pool pump. Add one from **Settings → Devices & Services →
 EMHASS Companion → Add deferrable load**.
@@ -140,6 +153,36 @@ integration's menu:
 
 See **[Load groups](../load_groups.md)** in the technical reference for the
 full detail.
+
+## Longer forecast windows
+
+When the plan looks more than 24 hours ahead, a load that runs **every day**
+inside a **time window** is planned once per day, not once in total. Set it
+up as usual: *Hours needed per day*, plus *Earliest start* and *Latest
+finish*. A 48-hour plan then schedules the window today and the one
+tomorrow, each with the full hours.
+
+- **Partly covered windows wait.** A window that only half fits in the
+  forecast is not planned yet. Asking for a full day's hours inside half a
+  window would only force a bad schedule. It appears once the plan reaches
+  far enough.
+- **Today's run counts for today only.** Once today's run is done, tomorrow's
+  window still gets its full hours.
+- **Not for every load.** Loads on spare solar, thermal loads, on-demand
+  loads and daily loads without a time window are planned as before. Windows
+  that sit closer together than the load's *Minimum time off* are also
+  planned as one.
+- **Manual overrides cover the next run only.** *Run now* and a forced-on
+  state apply to the window that is open or next, not to later days.
+- **Limit:** an overnight run that began before midnight loses the hours it
+  already ran when the daily counter resets, so it can be asked for again
+  after midnight.
+
+The extra `P_deferrable` columns you may see in EMHASS's own output (a load
+named *Car (day 2)*, for example) are internal. The integration adds them
+back into the load before anything else reads the plan, so the sensors,
+the *Should run* switch and the executor only ever see one schedule per load.
+They are listed as `deferrable_extra_rows` in the diagnostics download.
 
 ## Controls & Sensors
 

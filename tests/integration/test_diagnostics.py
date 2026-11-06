@@ -25,8 +25,30 @@ from custom_components.emhass_companion.const import (
 )
 from custom_components.emhass_companion.diagnostics import async_get_config_entry_diagnostics
 from custom_components.emhass_companion.log_ring import MAX_MESSAGE_CHARS
+from custom_components.emhass_companion.savings import Ledger
 
 MISSING_ENTITY = "sensor.definitely_missing"
+
+
+async def test_no_battery_diagnostics_distinguish_baseline_from_raw_model(hass):
+    entry = await _setup_entry(hass)
+    entry.runtime_data.tracker.ledger = Ledger(
+        battery_enabled=False,
+        actual_cost=46.23,
+        solar_only_cost=53.55,
+        grid_only_cost=63.08,
+        balance_residual_kwh=-0.089,
+        unpriced_kwh=0.148,
+    )
+
+    section = (await async_get_config_entry_diagnostics(hass, entry))["savings"]
+    assert section["ledger"]["solar_only_cost"] == 53.55
+    assert section["derived"]["solar_only_baseline_cost"] == 46.23
+    assert round(section["derived"]["accounting_difference"], 2) == 7.32
+    assert round(section["derived"]["solar_savings"], 2) == 16.85
+    assert section["derived"]["battery_savings"] == 0.0
+    assert section["ledger"]["balance_residual_kwh"] == -0.089
+    assert section["ledger"]["unpriced_kwh"] == 0.148
 
 
 async def _setup_entry(hass: HomeAssistant) -> MockConfigEntry:
@@ -165,6 +187,23 @@ async def test_an_empty_series_emhass_computes_itself_is_not_flagged_in_triage(
         "load forecast" in finding["message"] and finding["severity"] == "error"
         for finding in diagnostics["triage"]
     )
+
+
+async def test_default_methods_do_not_hide_missing_forecast_sources(hass: HomeAssistant) -> None:
+    entry = await _setup_entry(hass)
+    coordinator = entry.runtime_data.coordinator
+    coordinator.data.payload = {
+        "load_forecast_method": "typical",
+        "load_cost_forecast_method": "hp_hc_periods",
+        "production_price_forecast_method": "constant",
+    }
+    coordinator.data.defaulted_forecast_methods = frozenset(coordinator.data.payload)
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+    for label in ("load forecast", "buy price", "sell price"):
+        assert any(
+            f"EMHASS was given no {label}" in finding["message"] and finding["severity"] == "error"
+            for finding in diagnostics["triage"]
+        )
 
 
 async def test_a_load_forecast_method_that_was_not_honoured_is_info_not_an_error(

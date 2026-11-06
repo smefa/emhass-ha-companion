@@ -7,15 +7,22 @@ band, and read the room temperature live when a payload is built.
 
 from __future__ import annotations
 
-from datetime import time
+from datetime import time, timedelta
+from unittest.mock import AsyncMock, patch
 
 from homeassistant.config_entries import SOURCE_USER, ConfigSubentryData
 from homeassistant.const import UnitOfTemperature
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
+import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+import voluptuous as vol
 
+from custom_components.emhass_companion.api import EmhassClient
+from custom_components.emhass_companion.config_flow import thermal_schema
 from custom_components.emhass_companion.const import (
     CONF_COMFORT_END,
     CONF_COMFORT_START,
@@ -33,6 +40,7 @@ from custom_components.emhass_companion.const import (
     SUBENTRY_TYPE_THERMAL,
 )
 from custom_components.emhass_companion.deferrable import DeferrableRegistry
+from custom_components.emhass_companion.models import LastRun
 from custom_components.emhass_companion.thermal import SENSE_COOL, SENSE_HEAT
 
 ROOM_SENSOR = "sensor.living_room_temperature"
@@ -59,7 +67,13 @@ def _thermal_subentry(**data) -> ConfigSubentryData:
 # --- the add flow ------------------------------------------------------------
 
 
-async def test_a_thermal_load_can_be_added_through_its_own_flow(hass: HomeAssistant) -> None:
+@pytest.mark.parametrize(
+    ("comfort", "setback", "maximum"),
+    [(21.0, 18.0, 24.0), (45.0, 37.0, 52.0), (90.0, 85.0, 95.0)],
+)
+async def test_a_thermal_load_can_be_added_through_its_own_flow(
+    hass: HomeAssistant, comfort: float, setback: float, maximum: float
+) -> None:
     hass.states.async_set(ROOM_SENSOR, "20.5", {"device_class": "temperature"})
     entry = _entry()
     entry.add_to_hass(hass)
@@ -71,24 +85,28 @@ async def test_a_thermal_load_can_be_added_through_its_own_flow(hass: HomeAssist
 
     result = await hass.config_entries.subentries.async_configure(
         result["flow_id"],
-        {
-            CONF_NAME: "Heat pump",
-            CONF_TEMPERATURE_SENSOR: ROOM_SENSOR,
-            CONF_SENSE: SENSE_HEAT,
-            CONF_NOMINAL_POWER: 3000,
-            CONF_COMFORT_TEMPERATURE: 21.0,
-            CONF_SETBACK_TEMPERATURE: 18.0,
-            CONF_MAX_TEMPERATURE: 24.0,
-            CONF_COMFORT_START: "06:30:00",
-            CONF_COMFORT_END: "23:00:00",
-            "advanced": {CONF_HEATING_RATE: 3.0, CONF_COOLING_CONSTANT: 0.1},
-        },
+        result["data_schema"](
+            {
+                CONF_NAME: "Heat pump",
+                CONF_TEMPERATURE_SENSOR: ROOM_SENSOR,
+                CONF_SENSE: SENSE_HEAT,
+                CONF_NOMINAL_POWER: 3000,
+                CONF_COMFORT_TEMPERATURE: comfort,
+                CONF_SETBACK_TEMPERATURE: setback,
+                CONF_MAX_TEMPERATURE: maximum,
+                CONF_COMFORT_START: "06:30:00",
+                CONF_COMFORT_END: "23:00:00",
+                "advanced": {CONF_HEATING_RATE: 3.0, CONF_COOLING_CONSTANT: 0.1},
+            }
+        ),
     )
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["title"] == "Heat pump"
     assert result["data"][CONF_TEMPERATURE_SENSOR] == ROOM_SENSOR
-    assert result["data"][CONF_COMFORT_TEMPERATURE] == 21.0
+    assert result["data"][CONF_COMFORT_TEMPERATURE] == comfort
+    assert result["data"][CONF_SETBACK_TEMPERATURE] == setback
+    assert result["data"][CONF_MAX_TEMPERATURE] == maximum
 
 
 async def test_a_thermal_load_can_be_added_with_no_sensors_at_all(hass: HomeAssistant) -> None:
@@ -253,3 +271,79 @@ async def test_standard_and_thermal_loads_share_one_stable_order(hass: HomeAssis
     projected = registry.to_loads(dt_util.utcnow(), 30)
     assert projected[0].thermal is None
     assert projected[1].thermal is not None
+
+
+@pytest.mark.parametrize(
+    "key", [CONF_COMFORT_TEMPERATURE, CONF_SETBACK_TEMPERATURE, CONF_MAX_TEMPERATURE]
+)
+def test_temperature_selectors_keep_bounded_inputs(key: str) -> None:
+    schema = thermal_schema({})
+    temperature = next(value for field, value in schema.items() if str(field) == key)
+    assert temperature(5.0) == 5.0
+    assert temperature(95.0) == 95.0
+    with pytest.raises(vol.Invalid):
+        temperature(4.5)
+    with pytest.raises(vol.Invalid):
+        temperature(95.5)
+
+
+async def test_tank_targets_can_be_adjusted_and_restored(hass: HomeAssistant) -> None:
+    """Exercise HA's range validation, native restore data and emitted thermal bounds."""
+    entry = _entry(subentries=[_thermal_subentry()])
+    entry.add_to_hass(hass)
+    subentry_id = next(iter(entry.subentries))
+    client = AsyncMock(spec=EmhassClient)
+    client.base_url = "http://localhost:5000"
+    client.async_get_version.return_value = "0.18.8"
+    client.async_optimize.return_value = (LastRun(status="no-run"), None)
+    targets = {
+        CONF_COMFORT_TEMPERATURE: 45.0,
+        CONF_SETBACK_TEMPERATURE: 37.0,
+        CONF_MAX_TEMPERATURE: 52.0,
+    }
+
+    with patch("custom_components.emhass_companion.EmhassClient", return_value=client):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done(wait_background_tasks=True)
+        entry.runtime_data.async_request_settings_refresh = AsyncMock()
+        registry = er.async_get(hass)
+        entity_ids = {
+            key: next(
+                entity.entity_id
+                for entity in registry.entities.values()
+                if entity.config_subentry_id == subentry_id and entity.unique_id.endswith(f"_{key}")
+            )
+            for key in targets
+        }
+        for key, value in targets.items():
+            state = hass.states.get(entity_ids[key])
+            assert state.attributes["min"] == 5.0
+            assert state.attributes["max"] == 95.0
+            assert state.attributes["step"] == 0.5
+            await hass.services.async_call(
+                "number", "set_value", {"entity_id": entity_ids[key], "value": value}, blocking=True
+            )
+            assert float(hass.states.get(entity_ids[key]).state) == value
+            for invalid in (4.5, 95.5):
+                with pytest.raises(ServiceValidationError):
+                    await hass.services.async_call(
+                        "number",
+                        "set_value",
+                        {"entity_id": entity_ids[key], "value": invalid},
+                        blocking=True,
+                    )
+                assert float(hass.states.get(entity_ids[key]).state) == value
+
+        # Unloading stores native number data, and reloading restores it over
+        # the room defaults still held in the original subentry.
+        assert await hass.config_entries.async_reload(entry.entry_id)
+        await hass.async_block_till_done(wait_background_tasks=True)
+
+        for key, value in targets.items():
+            assert float(hass.states.get(entity_ids[key]).state) == value
+        (load,) = entry.runtime_data.loads.to_loads(dt_util.utcnow(), 30)
+        assert load.thermal is not None
+        config = load.thermal.to_emhass(dt_util.utcnow(), timedelta(minutes=30), 48)
+        assert min(config["min_temperatures"]) == 37.0
+        assert max(config["min_temperatures"]) == 45.0
+        assert config["max_temperatures"] == [52.0] * 48

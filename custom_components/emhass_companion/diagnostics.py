@@ -164,7 +164,11 @@ async def async_get_config_entry_diagnostics(
         # the same key being redacted out of `backend.config`.
         "last_payload": _redact_config(data.payload or {}),
         "warnings": data.warnings,
-        "deferrable_order": data.load_order,
+        # Describes last_payload, so after an infeasible run it is the rejected
+        # request's order, not the kept plan's.
+        "deferrable_order": data.payload_order,
+        # Rows after the real loads in `last_payload`, one per later daily window.
+        "deferrable_extra_rows": data.extra_row_names,
         # What the Companion's own checks found when the last run came back
         # infeasible; empty otherwise. The same checks run from the bundle
         # with scripts/check_infeasibility.py.
@@ -202,6 +206,8 @@ def _savings_section(entry: ConfigEntry) -> dict[str, Any]:
         "has_battery": tracker.meters.has_battery,
         "ledger": tracker.ledger.as_dict(),
         "derived": {
+            "solar_only_baseline_cost": tracker.ledger.solar_only_baseline_cost,
+            "accounting_difference": tracker.ledger.accounting_difference,
             "solar_savings": tracker.ledger.solar_savings,
             "battery_savings": tracker.ledger.battery_savings,
             "total_savings": tracker.ledger.total_savings,
@@ -218,6 +224,8 @@ def _savings_section(entry: ConfigEntry) -> dict[str, Any]:
             "complete": forecast.complete,
             "actual_cost": forecast.actual_cost,
             "solar_only_cost": forecast.solar_only_cost,
+            "solar_only_baseline_cost": forecast.solar_only_baseline_cost,
+            "battery_enabled": forecast.battery_enabled,
             "grid_only_cost": forecast.grid_only_cost,
             "storage_carry": forecast.storage_carry,
             "total_savings": forecast.total_savings,
@@ -415,6 +423,18 @@ def _loads_section(coordinator: EmhassCoordinator, entry: ConfigEntry) -> list[d
                     "subentry_id": load.subentry_id,
                     "name": load.name,
                     "load_type": load.load_type,
+                    "thermal_model": load.thermal_model if load.is_thermal else None,
+                    "tank": (
+                        {
+                            "volume_litres": load.tank_volume_litres,
+                            "hot_water_periods": load.hot_water_periods,
+                            "draw_start": _jsonable(load.draw_start),
+                            "draw_end": _jsonable(load.draw_end),
+                            "draw_energy_kwh": load.draw_energy_kwh,
+                        }
+                        if load.is_water_tank
+                        else None
+                    ),
                     "settings": {key: _jsonable(value) for key, value in live.items()},
                     # Named rather than counted: which field drifted is the
                     # question a reader has, and it is also the only warning
@@ -671,7 +691,14 @@ def _triage_section(
                     "load_forecast_method",
                 ),
             ):
-                if len(series) or payload.get(array_key) or payload.get(method_key):
+                if (
+                    len(series)
+                    or payload.get(array_key)
+                    or (
+                        payload.get(method_key)
+                        and method_key not in data.defaulted_forecast_methods
+                    )
+                ):
                     continue
                 if name == "PV forecast" and payload.get("set_use_pv") is False:
                     continue
@@ -679,7 +706,8 @@ def _triage_section(
                     {
                         "severity": "error",
                         "message": f"EMHASS was given no {name} -- no {array_key} was sent and "
-                        f"no {method_key} was named",
+                        f"no profile supplied {method_key}; Companion fallback settings "
+                        "are not a configured forecast source",
                     }
                 )
 

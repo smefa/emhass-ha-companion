@@ -1,20 +1,10 @@
-"""Pushing EMHASS's own configuration into sync at setup.
+"""Setup initialises EMHASS's baseline without persisting Companion settings.
 
-EMHASS persists its configuration independently of what a run sends it, and
-its own ``/set-config`` is not additive (see ``test_api.py``). Two things
-specifically must never be left to drift, because each one was the actual
-root cause of a real outage before this existed:
-
-- ``optimization_time_step`` must match what every run sends, or a trained
-  mlforecaster model crashes the next optimisation outright.
-- ``sensor_power_load_no_var_loads`` and ``var_model`` are two independently
-  persisted copies of the same load sensor; EMHASS falls back to whichever
-  ``var_model`` is on disk regardless of a per-request override, so a fit
-  trained against the wrong (stale) sensor silently "succeeds" while
-  training on nothing useful.
-
-This exercises the coordinator method that pushes both, unconditionally, on
-every setup -- it must never try to detect drift, only assert the truth.
+Every ``/action/*`` request fails until EMHASS has a saved configuration, and
+``/set-config`` is not additive (see ``test_api.py``), so setup still makes sure
+one exists. It must carry no Companion setting, though: timestep, load sensor,
+``var_model``, lags and the rest travel with each request, and only the manual
+export writes them to the saved configuration.
 """
 
 from __future__ import annotations
@@ -93,44 +83,60 @@ async def test_does_not_use_mlforecaster_with_no_load_profile_chosen(
     assert coordinator.uses_mlforecaster is False
 
 
-# --- what gets pushed ----------------------------------------------------------
+# --- what setup does to the saved configuration ---------------------------------
 
 
-async def test_sync_pushes_time_step_sensor_var_model_and_num_lags(
+@pytest.mark.parametrize("method", ["mlforecaster", "typical"])
+async def test_bootstrap_carries_no_companion_setting(hass: HomeAssistant, method: str) -> None:
+    coordinator = await _coordinator(hass, method=method, time_step=15)
+
+    await coordinator.async_ensure_emhass_baseline()
+
+    coordinator.client.async_set_config_merged.assert_awaited_once_with({})
+
+
+async def test_bootstrap_saves_the_active_configuration_back_unchanged(
     hass: HomeAssistant,
 ) -> None:
+    """A timestep, load sensor or ML choice made in EMHASS survives a reload."""
     coordinator = await _coordinator(hass, method="mlforecaster", time_step=15)
+    saved = {
+        "optimization_time_step": 30,
+        "sensor_power_load_no_var_loads": "sensor.chosen_in_emhass",
+        "var_model": "sensor.chosen_in_emhass",
+        "num_lags": 48,
+        "solcast_api_key": "unrelated-secret",
+    }
+    client = EmhassClient(AsyncMock(), "http://localhost:5000")
+    client.async_get_config = AsyncMock(return_value=dict(saved))
+    client.async_set_config = AsyncMock()
+    coordinator.client = client
 
-    await coordinator.async_sync_emhass_config()
+    await coordinator.async_ensure_emhass_baseline()
 
-    coordinator.client.async_set_config_merged.assert_awaited_once()
-    (patch,), _kwargs = coordinator.client.async_set_config_merged.await_args
-    assert patch["optimization_time_step"] == 15
-    assert patch["sensor_power_load_no_var_loads"] == LOAD_SENSOR
-    assert patch["var_model"] == LOAD_SENSOR
-    # DEFAULT_HORIZON_HOURS=24 at 15-minute steps -> 96.
-    assert patch["num_lags"] == 96
-
-
-async def test_sync_only_pushes_time_step_when_not_mlforecaster(
-    hass: HomeAssistant,
-) -> None:
-    coordinator = await _coordinator(hass, method="typical", time_step=30)
-
-    await coordinator.async_sync_emhass_config()
-
-    (patch,), _kwargs = coordinator.client.async_set_config_merged.await_args
-    assert patch == {"optimization_time_step": 30}
+    client.async_set_config.assert_awaited_once_with(saved)
 
 
-async def test_sync_is_non_fatal_when_emhass_is_unreachable(hass: HomeAssistant) -> None:
+async def test_bootstrap_creates_a_baseline_when_emhass_has_none(hass: HomeAssistant) -> None:
+    coordinator = await _coordinator(hass)
+    client = EmhassClient(AsyncMock(), "http://localhost:5000")
+    client.async_get_config = AsyncMock(return_value={})
+    client.async_set_config = AsyncMock()
+    coordinator.client = client
+
+    await coordinator.async_ensure_emhass_baseline()
+
+    client.async_set_config.assert_awaited_once_with({})
+
+
+async def test_bootstrap_is_non_fatal_when_emhass_is_unreachable(hass: HomeAssistant) -> None:
     """EMHASS being briefly down at setup must not abort the whole integration."""
     coordinator = await _coordinator(hass)
     coordinator.client.async_set_config_merged = AsyncMock(
         side_effect=EmhassConnectionError("boom")
     )
 
-    await coordinator.async_sync_emhass_config()  # must not raise
+    await coordinator.async_ensure_emhass_baseline()  # must not raise
 
 
 # --- the fit button's own action ------------------------------------------------

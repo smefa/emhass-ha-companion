@@ -22,7 +22,10 @@ in much more depth.
    command your battery.
 7. **[Hub controls](hub_controls.md)** — the switches, selects and sensors on
    the integration's own device.
-8. **[Dashboard cards](dashboard_cards.md)** — the two cards that ship
+8. **[Actions (advanced)](actions.md)** — the actions for scripts,
+   automations and troubleshooting: re-planning, retraining the load
+   forecaster, saving settings into EMHASS.
+9. **[Dashboard cards](dashboard_cards.md)** — the two cards that ship
    in-box.
 
 Start with **Install** if you haven't added the integration yet.

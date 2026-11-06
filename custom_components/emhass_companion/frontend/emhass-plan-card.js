@@ -128,6 +128,30 @@ class EmhassPlanCard extends HTMLElement {
     this._render();
   }
 
+  connectedCallback() {
+    this._observe();
+  }
+
+  disconnectedCallback() {
+    if (this._resizer) this._resizer.disconnect();
+    this._resizer = null;
+  }
+
+  /**
+   * Redraw when the card's width changes. The chart is drawn in real pixels, so
+   * a new width is a new drawing; the guard stops the redraw's own layout from
+   * calling itself.
+   */
+  _observe() {
+    if (this._resizer || typeof ResizeObserver !== "function" || !this._root) return;
+    const body = this.shadowRoot.querySelector(".body");
+    if (!body) return;
+    this._resizer = new ResizeObserver(() => {
+      if (Math.abs(Math.round(body.clientWidth) - (this._width || 0)) > 1) this.refresh();
+    });
+    this._resizer.observe(body);
+  }
+
   /** Redraw with the state already in hand, for history that arrived late. */
   refresh() {
     if (this._hass) this._render();
@@ -187,7 +211,7 @@ class EmhassPlanCard extends HTMLElement {
           .title { font-size: 1.1em; font-weight: 500; }
           .status { color: var(--secondary-text-color); font-size: .85em; }
           .legend { display:flex; flex-wrap:wrap; gap:10px; padding: 4px 8px 8px 8px;
-                    font-size:.75em; color: var(--secondary-text-color); }
+                    font-size:.7em; color: var(--secondary-text-color); }
           .legend span { display:flex; align-items:center; gap:4px; }
           .swatch { width:10px; height:3px; border-radius:2px; display:inline-block; }
           .swatch.band { height:8px; opacity:.25; }
@@ -197,6 +221,10 @@ class EmhassPlanCard extends HTMLElement {
         <ha-card><div class="head"><div class="title"></div><div class="status"></div></div>
         <div class="body"></div><div class="legend"></div></ha-card>`;
       this._root = this.shadowRoot.querySelector("ha-card");
+      // The old observer watched the body that innerHTML just replaced.
+      if (this._resizer) this._resizer.disconnect();
+      this._resizer = null;
+      this._observe();
     }
 
     const hub = findHub(hass);
@@ -245,8 +273,11 @@ class EmhassPlanCard extends HTMLElement {
         }))
       : [];
 
+    // Measured once the body is empty, so it is the room the chart has. Not
+    // narrower than a phone in portrait: below that the labels collide anyway.
+    this._width = Math.max(300, Math.round(body.clientWidth) || 600);
     body.appendChild(
-      this._chart({ pv, load, grid, battery, soc, buy, sell, loads, now }),
+      this._chart({ pv, load, grid, battery, soc, buy, sell, loads, now, width: this._width }),
     );
     this._legend(loads.length > 0);
   }
@@ -297,25 +328,36 @@ class EmhassPlanCard extends HTMLElement {
   }
 
   _chart(data) {
-    const width = 600;
+    // Drawn in the pixels it is shown in. A fixed 600-unit viewBox stretched to
+    // the card's width scales every label with it, which on a full-width view
+    // is text three times the size it was designed at.
+    const width = data.width;
     const padL = 44;
     const padR = 44;
     const showPower = showsSection(this._config, "show_power");
     const showPrice = showsSection(this._config, "show_price");
     const showSoc = showsSection(this._config, "show_soc");
     const powerH = showPower ? 150 : 0;
-    const priceH = showPrice || showSoc ? 70 : 0;
-    const rowH = 16;
-    const gap = 26;
-    const loadsH = data.loads.length ? data.loads.length * rowH + 8 : 0;
+    const priceH = showPrice || showSoc ? 90 : 0;
+    // One box per deferrable load, with its name inside: a shared box ran the
+    // rows into each other, and a name in the gutter was cut to seven letters.
+    const loadH = 28;
+    const loadGap = 6;
+    const loadsH = data.loads.length
+      ? data.loads.length * loadH + (data.loads.length - 1) * loadGap
+      : 0;
+    // Room above each panel for its title.
+    const gap = 30;
     const panels = [powerH, priceH, loadsH].filter(Boolean);
-    const height = panels.reduce((sum, size) => sum + size, 0) + gap * (panels.length - 1) + 34;
+    const height = panels.reduce((sum, size) => sum + size, 0) + gap * panels.length + 22;
 
     const root = svg("svg", {
       viewBox: `0 0 ${width} ${height}`,
       preserveAspectRatio: "none",
       role: "img",
     });
+    // Pinned: the height must not follow the card's width.
+    root.style.height = `${height}px`;
 
     // A rolling window, not the data's own extent: the price series alone
     // reaches back to last midnight, and eleven hours of spent morning squeeze
@@ -332,7 +374,14 @@ class EmhassPlanCard extends HTMLElement {
     // that starts at last midnight cannot draw over the y-axis labels.
     const clip = (points) => clipSeries(points, t0, t1);
 
-    let top = 8;
+    // On a dark theme the secondary background is lighter than the card, so
+    // the boxes read as raised; sinking them into the card is the look wanted.
+    const dark = Boolean(this._hass && this._hass.themes && this._hass.themes.darkMode);
+    const fill = dark
+      ? "color-mix(in srgb, var(--card-background-color, #1c1c1c) 80%, black)"
+      : "var(--secondary-background-color, #f5f5f5)";
+    const ctx = { x, t0, t1, now: data.now, x0: padL, x1: width - padR, boxes: [], fill };
+    let top = gap;
 
     /* ---- power panel ---- */
     if (showPower) {
@@ -344,7 +393,7 @@ class EmhassPlanCard extends HTMLElement {
       const lo = Math.min(pLo, 0);
       const y = (v) => top + powerH - ((v - lo) / (pHi - lo || 1)) * powerH;
 
-      this._past(root, x, t0, data.now, top, powerH);
+      this._panel(root, ctx, top, powerH, "Power");
       this._axis(root, padL, width - padR, top, powerH, [lo, pHi], formatPower);
       if (lo < 0) {
         // Zero line matters here: above it is import, below is export.
@@ -370,7 +419,13 @@ class EmhassPlanCard extends HTMLElement {
     if (priceH) {
       const buy = clip(data.buy);
       const sell = clip(data.sell);
-      this._past(root, x, t0, data.now, top, priceH);
+      this._panel(
+        root,
+        ctx,
+        top,
+        priceH,
+        showPrice && showSoc ? "Price and charge level" : showPrice ? "Price" : "Charge level",
+      );
       if (showPrice) {
         const [cLo, cHi] = extent([buy, sell]);
         const yP = (v) => top + priceH - ((v - cLo) / (cHi - cLo || 1)) * priceH;
@@ -392,7 +447,7 @@ class EmhassPlanCard extends HTMLElement {
         for (const value of [0, 50, 100]) {
           svg("text", {
             x: width - padR + 4, y: yS(value) + 3,
-            fill: COLORS.soc, "font-size": 9,
+            fill: COLORS.soc, "font-size": 10,
           }, root).textContent = `${value}%`;
         }
       }
@@ -401,30 +456,40 @@ class EmhassPlanCard extends HTMLElement {
 
     /* ---- deferrable load rows ---- */
     if (loadsH) {
-      this._past(root, x, t0, data.now, top, loadsH);
+      svg("text", {
+        x: padL, y: top - 10, fill: COLORS.muted, "font-size": 11, "font-weight": 500,
+      }, root).textContent = "Deferrable loads";
       let rowY = top;
       data.loads.forEach((entry) => {
+        this._panel(root, ctx, rowY, loadH);
+        // The blocks fill the box, and the name is laid over them with a halo
+        // in the box's own colour so it stays readable where a run is under it.
+        this._blocks(root, clip(entry.points), x, rowY + 3, loadH - 6);
         svg("text", {
-          x: 0, y: rowY + 10, fill: COLORS.muted, "font-size": 9,
-        }, root).textContent = entry.name.slice(0, 7);
-        this._blocks(root, clip(entry.points), x, rowY, rowH - 5);
-        rowY += rowH;
+          x: padL + 8, y: rowY + loadH / 2 + 4, fill: "var(--primary-text-color, #212121)",
+          "font-size": 11, stroke: ctx.fill,
+          "stroke-width": 3, "paint-order": "stroke", "stroke-linejoin": "round",
+        }, root).textContent = entry.name;
+        rowY += loadH + loadGap;
       });
       top += loadsH + gap;
     }
 
-    /* ---- time axis and the now marker ---- */
+    /* ---- now marker, inside each box, and the time axis ---- */
     if (data.now >= t0 && data.now <= t1) {
-      svg("line", {
-        x1: x(data.now), x2: x(data.now), y1: 8, y2: height - 20,
-        stroke: COLORS.muted, "stroke-width": 1.5,
-      }, root);
+      for (const [boxTop, boxH] of ctx.boxes) {
+        svg("line", {
+          x1: x(data.now), x2: x(data.now), y1: boxTop, y2: boxTop + boxH,
+          stroke: COLORS.muted, "stroke-width": 1.5,
+        }, root);
+      }
     }
-    for (let i = 0; i <= 4; i++) {
-      const t = t0 + ((t1 - t0) * i) / 4;
+    const ticks = Math.max(2, Math.min(12, Math.round((width - padL - padR) / 130)));
+    for (let i = 0; i <= ticks; i++) {
+      const t = t0 + ((t1 - t0) * i) / ticks;
       svg("text", {
         x: x(t), y: height - 6, fill: COLORS.muted,
-        "font-size": 9, "text-anchor": i === 0 ? "start" : i === 4 ? "end" : "middle",
+        "font-size": 10, "text-anchor": i === 0 ? "start" : i === ticks ? "end" : "middle",
       }, root).textContent = formatTime(t, this._hass);
     }
 
@@ -432,18 +497,36 @@ class EmhassPlanCard extends HTMLElement {
   }
 
   /**
-   * A darker band over the part of a panel that has already happened.
+   * One framed box: a fill, the part that has already happened shaded, and a
+   * border. A title goes above it when given.
    *
    * The now marker alone is not enough once a panel carries history as well as
    * plan: it is a single line, and the eye reads the whole chart as one kind of
    * thing. Shading says which half is a record and which is an intention.
    */
-  _past(root, x, t0, now, top, height) {
-    if (!(now > t0)) return;
-    svg("rect", {
-      x: x(t0), y: top, width: Math.max(x(now) - x(t0), 0), height,
-      fill: COLORS.past, "fill-opacity": 0.12,
-    }, root);
+  _panel(root, ctx, top, height, title) {
+    const { x, t0, now, x0, x1 } = ctx;
+    this._clips = (this._clips || 0) + 1;
+    const id = `emh-box-${this._clips}`;
+    const frame = { x: x0, y: top, width: x1 - x0, height, rx: 6 };
+    svg("rect", Object.assign({ fill: ctx.fill }, frame), root);
+    if (now > t0) {
+      const clip = svg("clipPath", { id }, root);
+      svg("rect", frame, clip);
+      svg("rect", {
+        x: x(t0), y: top, width: Math.max(x(now) - x(t0), 0), height,
+        fill: COLORS.past, "fill-opacity": 0.12, "clip-path": `url(#${id})`,
+      }, root);
+    }
+    svg("rect", Object.assign({
+      fill: "none", stroke: COLORS.grid, "stroke-width": 1,
+    }, frame), root);
+    if (title) {
+      svg("text", {
+        x: x0, y: top - 10, fill: COLORS.muted, "font-size": 11, "font-weight": 500,
+      }, root).textContent = title;
+    }
+    ctx.boxes.push([top, height]);
   }
 
   _axis(root, x0, x1, top, height, bounds, format) {
@@ -457,7 +540,7 @@ class EmhassPlanCard extends HTMLElement {
       }, root);
       svg("text", {
         x: x0 - 4, y: top + offset + 3, fill: COLORS.muted,
-        "font-size": 9, "text-anchor": "end",
+        "font-size": 10, "text-anchor": "end",
       }, root).textContent = format(value);
     }
   }

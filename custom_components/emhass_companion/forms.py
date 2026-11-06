@@ -43,6 +43,22 @@ def flatten_sections(user_input: dict[str, Any]) -> dict[str, Any]:
     return flat
 
 
+def flatten_picker(user_input: dict[str, Any], current: str | None) -> dict[str, Any]:
+    """:func:`flatten_sections` for a profile picker that prefills ``current``.
+
+    The picker offers the same ``profile`` key in the form and in the Advanced
+    section, and the one holding ``current`` arrives prefilled. Letting the
+    section always win would make a pick from the other list lose to the
+    untouched prefill, so when the two disagree the one that changed wins.
+    """
+    flat = flatten_sections(user_input)
+    top = user_input.get("profile")
+    inner = (user_input.get(ADVANCED_SECTION) or {}).get("profile")
+    if top and inner and top != inner:
+        flat["profile"] = top if inner == current else inner
+    return flat
+
+
 def nest_suggested(values: dict[str, Any], advanced_keys: set[str]) -> dict[str, Any]:
     """Suggested values for a form with an Advanced section: move its keys under it."""
     nested = {key: value for key, value in values.items() if key not in advanced_keys}
