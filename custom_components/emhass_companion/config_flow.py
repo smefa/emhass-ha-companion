@@ -33,8 +33,10 @@ from .configuration import EmhassConfig
 from .const import (
     ADVANCED_SECTION,
     CONF_ADDER,
+    CONF_ANNUAL_HDD,
     CONF_API_KEY,
     CONF_AREA,
+    CONF_BASE_TEMPERATURE,
     CONF_BATTERY_CHARGE_ENERGY_ENTITY,
     CONF_BATTERY_DISCHARGE_ENERGY_ENTITY,
     CONF_BATTERY_POWER_ENTITY,
@@ -46,6 +48,7 @@ from .const import (
     CONF_BATTERY_SOC_SURPLUS_THRESHOLD,
     CONF_BATTERY_STRESS_COST,
     CONF_BATTERY_STRESS_SEGMENTS,
+    CONF_CARNOT_EFFICIENCY,
     CONF_CHARGE_EFFICIENCY,
     CONF_CHARGE_POWER_DERATING,
     CONF_COMFORT_END,
@@ -65,6 +68,7 @@ from .const import (
     CONF_EMHASS_STANDARD_NAMES,
     CONF_END_SOC_MODE,
     CONF_ENERGY_NEEDED,
+    CONF_FLOOR_AREA,
     CONF_GRID_EXPORT_ENERGY_ENTITY,
     CONF_GRID_EXPORT_LIMIT_ENTITY,
     CONF_GRID_IMPORT_ENERGY_ENTITY,
@@ -79,6 +83,7 @@ from .const import (
     CONF_HOT_WATER_PERIODS,
     CONF_HOUSE_LOAD_TOTAL_ENTITY,
     CONF_HYBRID_INVERTER,
+    CONF_INERTIA_TIME_CONSTANT,
     CONF_INVERTER,
     CONF_INVERTER_AC_INPUT_MAX,
     CONF_INVERTER_AC_OUTPUT_MAX,
@@ -124,8 +129,10 @@ from .const import (
     CONF_SOLVER,
     CONF_SOLVER_MIP_REL_GAP,
     CONF_SOLVER_TIMEOUT,
+    CONF_SPECIFIC_HEATING_DEMAND,
     CONF_STANDBY_LOSS,
     CONF_STARTUP_PENALTY,
+    CONF_SUPPLY_TEMPERATURE,
     CONF_SURPLUS_HEADROOM,
     CONF_SURPLUS_PRIORITY,
     CONF_TANK_VOLUME,
@@ -133,6 +140,7 @@ from .const import (
     CONF_TEMPERATURE_SENSOR,
     CONF_TEMPLATE,
     CONF_THERMAL_INERTIA,
+    CONF_THERMAL_MASS,
     CONF_THERMAL_MODEL,
     CONF_TIME_STEP,
     CONF_URL,
@@ -203,6 +211,7 @@ from .const import (
     SUBENTRY_TYPE_THERMAL,
     TEMPERATURE_ADVANCED_PROFILES,
     TEMPERATURE_PROFILE_ORDER,
+    THERMAL_MODEL_HEAT_PUMP_ROOM,
     THERMAL_MODEL_ROOM,
     THERMAL_MODEL_WATER_TANK,
 )
@@ -217,6 +226,15 @@ from .forms import (
 )
 from .forms import (
     with_advanced as _with_advanced,
+)
+from .heat_pump_room import (
+    DEFAULT_ANNUAL_HDD,
+    DEFAULT_BASE_TEMPERATURE,
+    DEFAULT_CARNOT_EFFICIENCY,
+    DEFAULT_INERTIA_HOURS,
+    DEFAULT_SUPPLY_TEMPERATURE,
+    MAX_INERTIA_HOURS,
+    HeatPumpModel,
 )
 from .metering import async_energy_dashboard_defaults
 from .models import parse_charge_power_derating
@@ -1674,7 +1692,11 @@ def thermal_kind_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
             selector.SelectSelectorConfig(
                 mode=selector.SelectSelectorMode.DROPDOWN,
                 translation_key="thermal_model",
-                options=[THERMAL_MODEL_ROOM, THERMAL_MODEL_WATER_TANK],
+                options=[
+                    THERMAL_MODEL_ROOM,
+                    THERMAL_MODEL_HEAT_PUMP_ROOM,
+                    THERMAL_MODEL_WATER_TANK,
+                ],
             )
         ),
     }
@@ -1773,6 +1795,94 @@ def water_tank_schema(
                 selector.NumberSelectorConfig(min=0, max=1000, step="any", mode="box")
             ),
         },
+    )
+
+
+def heat_pump_room_schema(
+    defaults: dict[str, Any], step_minutes: int = DEFAULT_TIME_STEP, *, initial: bool = True
+) -> dict[Any, Any]:
+    """A room heated by a heat pump, described by EMHASS's ``thermal_battery`` model.
+
+    No entity owns the building and heat pump settings, so they stay here on
+    every edit. The power and comfort band become controls, as for a Room,
+    and are offered only at creation.
+    """
+    room_fields = thermal_schema(defaults, step_minutes, initial=initial)
+    excluded = {CONF_SENSE, CONF_NAME, ADVANCED_SECTION, CONF_COP_CURVE, CONF_TEMPERATURE_SENSOR}
+    if not initial:
+        excluded.discard(CONF_NAME)
+    entity_fields = {CONF_POWER_SENSOR, CONF_CONTROL_ENTITY}
+    schema = {
+        key: value for key, value in room_fields.items() if str(key) not in excluded | entity_fields
+    }
+    sensor_key = (
+        vol.Required(CONF_TEMPERATURE_SENSOR, default=defaults[CONF_TEMPERATURE_SENSOR])
+        if defaults.get(CONF_TEMPERATURE_SENSOR)
+        else vol.Required(CONF_TEMPERATURE_SENSOR)
+    )
+    schema[sensor_key] = selector.EntitySelector(
+        selector.EntitySelectorConfig(filter=[{"domain": "sensor", "device_class": "temperature"}])
+    )
+
+    def number(key: str, default: float | None, **config: Any) -> tuple[Any, Any]:
+        value = defaults.get(key, default)
+        field = vol.Required(key) if value is None else vol.Required(key, default=value)
+        return field, _FiniteNumberSelector(
+            selector.NumberSelectorConfig(step="any", mode="box", **config)
+        )
+
+    schema.update(
+        dict(
+            (
+                number(CONF_THERMAL_MASS, None, min=0.1, max=10000, unit_of_measurement="m³"),
+                number(CONF_FLOOR_AREA, None, min=1, max=10000, unit_of_measurement="m²"),
+                number(
+                    CONF_SPECIFIC_HEATING_DEMAND,
+                    None,
+                    min=0,
+                    max=1000,
+                    unit_of_measurement="kWh/m²",
+                ),
+                number(
+                    CONF_SUPPLY_TEMPERATURE,
+                    DEFAULT_SUPPLY_TEMPERATURE,
+                    min=20,
+                    max=80,
+                    unit_of_measurement="°C",
+                ),
+            )
+        )
+    )
+    schema.update({key: value for key, value in room_fields.items() if str(key) in entity_fields})
+    basic = {
+        key: _FiniteNumberSelector(value.config)
+        if isinstance(value, selector.NumberSelector)
+        and not isinstance(value, _FiniteNumberSelector)
+        else value
+        for key, value in schema.items()
+    }
+    return _with_advanced(
+        basic,
+        dict(
+            (
+                number(CONF_CARNOT_EFFICIENCY, DEFAULT_CARNOT_EFFICIENCY, min=0.05, max=1),
+                number(
+                    CONF_BASE_TEMPERATURE,
+                    DEFAULT_BASE_TEMPERATURE,
+                    min=5,
+                    max=30,
+                    unit_of_measurement="°C",
+                ),
+                number(CONF_ANNUAL_HDD, DEFAULT_ANNUAL_HDD, min=1, max=10000),
+                number(
+                    CONF_INERTIA_TIME_CONSTANT,
+                    DEFAULT_INERTIA_HOURS,
+                    min=0,
+                    max=MAX_INERTIA_HOURS,
+                    unit_of_measurement="h",
+                ),
+            )
+        ),
     )
 
 
@@ -2024,7 +2134,64 @@ class ThermalLoadSubentryFlow(DeferrableLoadSubentryFlow):
                 data_schema=vol.Schema(schema),
                 description_placeholders=self._placeholders(),
             )
+        if model == THERMAL_MODEL_HEAT_PUMP_ROOM:
+            return self._heat_pump_form("heat_pump_room", user_input, initial=True)
         return self._tank_form("water_tank", user_input, initial=True)
+
+    async def async_step_heat_pump_room(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        return self._heat_pump_form("heat_pump_room", user_input, initial=True)
+
+    async def async_step_reconfigure_heat_pump_room(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        return self._heat_pump_form("reconfigure_heat_pump_room", user_input, initial=False)
+
+    def _heat_pump_form(
+        self, step_id: str, user_input: dict[str, Any] | None, *, initial: bool
+    ) -> SubentryFlowResult:
+        stored = {} if initial else dict(self._get_reconfigure_subentry().data)
+        schema = vol.Schema(heat_pump_room_schema(stored, self._step_minutes, initial=initial))
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            try:
+                data = _clean_deferrable(_flatten_sections(schema(user_input)))
+            except vol.Invalid as err:
+                field = str(err.path[0]) if err.path else "base"
+                errors["base" if field == ADVANCED_SECTION else field] = "invalid_heat_pump_value"
+            else:
+                merged = {**stored, **data}
+                try:
+                    HeatPumpModel.from_data(merged)
+                except ValueError:
+                    errors["base"] = "invalid_heat_pump_value"
+                else:
+                    if initial and not (
+                        data[CONF_SETBACK_TEMPERATURE]
+                        <= data[CONF_COMFORT_TEMPERATURE]
+                        <= data[CONF_MAX_TEMPERATURE]
+                    ):
+                        errors["base"] = "invalid_heat_pump_band"
+                    else:
+                        for key in (CONF_POWER_SENSOR, CONF_CONTROL_ENTITY):
+                            if key not in data:
+                                merged.pop(key, None)
+                        merged[CONF_SENSE] = SENSE_HEAT
+                        if initial:
+                            return self._create({**merged, **self._kind})
+                        return self.async_update_and_abort(
+                            self._get_entry(),
+                            self._get_reconfigure_subentry(),
+                            title=merged[CONF_NAME],
+                            data=merged,
+                        )
+        return self.async_show_form(
+            step_id=step_id,
+            data_schema=schema,
+            errors=errors,
+            description_placeholders=self._placeholders(),
+        )
 
     async def async_step_water_tank(
         self, user_input: dict[str, Any] | None = None
@@ -2125,6 +2292,8 @@ class ThermalLoadSubentryFlow(DeferrableLoadSubentryFlow):
         stored = self._get_reconfigure_subentry().data
         if stored.get(CONF_THERMAL_MODEL, THERMAL_MODEL_ROOM) == THERMAL_MODEL_WATER_TANK:
             return self._tank_form("reconfigure_water_tank", user_input, initial=False)
+        if stored.get(CONF_THERMAL_MODEL) == THERMAL_MODEL_HEAT_PUMP_ROOM:
+            return self._heat_pump_form("reconfigure_heat_pump_room", user_input, initial=False)
         if user_input is not None:
             user_input = {
                 key: value for key, value in user_input.items() if key != CONF_THERMAL_MODEL

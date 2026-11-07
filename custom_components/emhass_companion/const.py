@@ -355,6 +355,17 @@ CONF_TEMPERATURE_SENSOR: Final = "temperature_sensor"
 CONF_THERMAL_MODEL: Final = "thermal_model"
 THERMAL_MODEL_ROOM: Final = "room"
 THERMAL_MODEL_WATER_TANK: Final = "water_tank"
+# A room described by its building and heat pump (EMHASS thermal_battery);
+# these settings are owned by the subentry. See heat_pump_room.py.
+THERMAL_MODEL_HEAT_PUMP_ROOM: Final = "heat_pump_room"
+CONF_THERMAL_MASS: Final = "thermal_mass_m3"
+CONF_FLOOR_AREA: Final = "floor_area_m2"
+CONF_SPECIFIC_HEATING_DEMAND: Final = "specific_heating_demand"
+CONF_SUPPLY_TEMPERATURE: Final = "supply_temperature"
+CONF_CARNOT_EFFICIENCY: Final = "carnot_efficiency"
+CONF_BASE_TEMPERATURE: Final = "base_temperature"
+CONF_ANNUAL_HDD: Final = "annual_reference_hdd"
+CONF_INERTIA_TIME_CONSTANT: Final = "thermal_inertia_time_constant"
 CONF_TANK_VOLUME: Final = "tank_volume_litres"
 # A common domestic hot-water cylinder; only the form's starting value.
 DEFAULT_TANK_VOLUME: Final = 200

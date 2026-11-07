@@ -949,7 +949,8 @@
     "thermal_model": {
       "options": {
         "room": "Room",
-        "water_tank": "Water tank"
+        "water_tank": "Water tank",
+        "heat_pump_room": "Room, advanced heat pump"
       }
     }
   },
@@ -1559,7 +1560,7 @@
             "thermal_model": "Model"
           },
           "data_description": {
-            "thermal_model": "Room needs an outdoor forecast; immersion water tank does not. Only a single immersion element is supported."
+            "thermal_model": "Room uses a measured heating rate. Room, advanced heat pump describes the building and lets EMHASS calculate heat pump efficiency and heat demand from the outdoor temperature. Both need an outdoor forecast; immersion water tank does not. Only a single immersion element is supported."
           }
         },
         "reconfigure": {
@@ -1703,12 +1704,107 @@
             "draw_end": "May cross midnight. Equal start and end means a full day.",
             "draw_energy_kwh": "Estimated heat withdrawn during this period, in kWh, not heater electricity. Enter 0 for no expected withdrawal. Consumption from overlapping periods is added."
           }
+        },
+        "heat_pump_room": {
+          "title": "Room, advanced heat pump",
+          "description": "A room or house heated by a heat pump. EMHASS calculates the heat pump's efficiency and the house's heat demand from the outdoor forecast, so no measured heating rate is needed. Heating only. Needs an outdoor temperature forecast the Companion can read, such as a weather entity.",
+          "data": {
+            "temperature_sensor": "Room temperature sensor",
+            "nominal_power_w": "Electrical power when running",
+            "comfort_temperature": "Comfort temperature",
+            "setback_temperature": "Setback temperature",
+            "max_temperature": "Maximum temperature",
+            "comfort_start": "Comfort starts",
+            "comfort_end": "Comfort ends",
+            "thermal_mass_m3": "Thermal mass",
+            "floor_area_m2": "Heated floor area",
+            "specific_heating_demand": "Specific heating demand",
+            "supply_temperature": "Supply temperature",
+            "power_sensor": "Running sensor",
+            "control_entity": "Control entity"
+          },
+          "data_description": {
+            "temperature_sensor": "Required. The plan starts from this reading.",
+            "nominal_power_w": "Electrical power the heat pump draws while it runs. EMHASS multiplies it by the calculated COP.",
+            "comfort_temperature": "Lowest room temperature during the comfort period.",
+            "setback_temperature": "Lowest room temperature outside the comfort period.",
+            "max_temperature": "Highest room temperature the optimiser may heat to.",
+            "comfort_start": "Start of the daily comfort period.",
+            "comfort_end": "End of the daily comfort period.",
+            "thermal_mass_m3": "Volume of concrete-equivalent mass that stores the heat, in cubic metres. EMHASS uses concrete density and heat capacity. A larger value means the temperature changes more slowly.",
+            "floor_area_m2": "Heated floor area in square metres.",
+            "specific_heating_demand": "The building's yearly heat demand per square metre, in kWh/m², for a year with the annual heating degree days set under Advanced settings. Often 50 to 150 for a house.",
+            "supply_temperature": "Water temperature the heat pump delivers to the radiators or floor heating. Lower means a higher COP. Typically 30 to 35 for floor heating and 45 to 55 for radiators.",
+            "power_sensor": "Optional. Tells the optimiser whether this load is actually running. A power sensor gives the most detail (any unit is converted to watts automatically); a plain on/off binary_sensor works too.",
+            "control_entity": "Optional. If set, the integration switches this on and off to follow the plan, once you enable control -- and its state doubles as the running signal when there is no power sensor. Leave empty to keep control in your own automations."
+          },
+          "sections": {
+            "advanced": {
+              "name": "Advanced settings",
+              "description": "EMHASS model settings. The defaults suit most houses.",
+              "data": {
+                "carnot_efficiency": "Carnot efficiency",
+                "base_temperature": "Base temperature",
+                "annual_reference_hdd": "Annual heating degree days",
+                "thermal_inertia_time_constant": "Thermal inertia"
+              },
+              "data_description": {
+                "carnot_efficiency": "How close the heat pump gets to the ideal Carnot COP. 0.4 is typical; EMHASS clips the resulting COP to 1-8.",
+                "base_temperature": "Outdoor temperature above which the house needs no heating.",
+                "annual_reference_hdd": "Heating degree days of the year the specific heating demand refers to.",
+                "thermal_inertia_time_constant": "Hours before delivered heat shows in the room temperature, such as for floor heating. 0 means immediately."
+              }
+            }
+          }
+        },
+        "reconfigure_heat_pump_room": {
+          "title": "Reconfigure advanced heat pump room",
+          "description": "Change the sensors and the building and heat pump settings. Power and the comfort band are controls on the load page.",
+          "data": {
+            "name": "Name",
+            "temperature_sensor": "Room temperature sensor",
+            "thermal_mass_m3": "Thermal mass",
+            "floor_area_m2": "Heated floor area",
+            "specific_heating_demand": "Specific heating demand",
+            "supply_temperature": "Supply temperature",
+            "power_sensor": "Running sensor",
+            "control_entity": "Control entity"
+          },
+          "data_description": {
+            "temperature_sensor": "Required. The plan starts from this reading.",
+            "thermal_mass_m3": "Volume of concrete-equivalent mass that stores the heat, in cubic metres. EMHASS uses concrete density and heat capacity. A larger value means the temperature changes more slowly.",
+            "floor_area_m2": "Heated floor area in square metres.",
+            "specific_heating_demand": "The building's yearly heat demand per square metre, in kWh/m², for a year with the annual heating degree days set under Advanced settings. Often 50 to 150 for a house.",
+            "supply_temperature": "Water temperature the heat pump delivers to the radiators or floor heating. Lower means a higher COP. Typically 30 to 35 for floor heating and 45 to 55 for radiators.",
+            "power_sensor": "Optional. Tells the optimiser whether this load is actually running. A power sensor gives the most detail (any unit is converted to watts automatically); a plain on/off binary_sensor works too.",
+            "control_entity": "Optional. If set, the integration switches this on and off to follow the plan, once you enable control -- and its state doubles as the running signal when there is no power sensor. Leave empty to keep control in your own automations."
+          },
+          "sections": {
+            "advanced": {
+              "name": "Advanced settings",
+              "description": "EMHASS model settings. The defaults suit most houses.",
+              "data": {
+                "carnot_efficiency": "Carnot efficiency",
+                "base_temperature": "Base temperature",
+                "annual_reference_hdd": "Annual heating degree days",
+                "thermal_inertia_time_constant": "Thermal inertia"
+              },
+              "data_description": {
+                "carnot_efficiency": "How close the heat pump gets to the ideal Carnot COP. 0.4 is typical; EMHASS clips the resulting COP to 1-8.",
+                "base_temperature": "Outdoor temperature above which the house needs no heating.",
+                "annual_reference_hdd": "Heating degree days of the year the specific heating demand refers to.",
+                "thermal_inertia_time_constant": "Hours before delivered heat shows in the room temperature, such as for floor heating. 0 means immediately."
+              }
+            }
+          }
         }
       },
       "error": {
         "invalid_tank_value": "Enter a valid value; numbers must be finite and within the allowed range.",
         "invalid_tank_band": "Lowest standby temperature must not exceed required hot-water temperature, which must not exceed maximum temperature.",
-        "invalid_cop_curve": "Enter at least two pairs of \"outdoor temperature: COP\", separated by commas, with a COP above 0 and each temperature listed once, such as \"7: 5.2, 0: 4.0, -10: 3.0\"."
+        "invalid_cop_curve": "Enter at least two pairs of \"outdoor temperature: COP\", separated by commas, with a COP above 0 and each temperature listed once, such as \"7: 5.2, 0: 4.0, -10: 3.0\".",
+        "invalid_heat_pump_value": "Enter a valid value; numbers must be finite and within the allowed range.",
+        "invalid_heat_pump_band": "Setback temperature must not exceed comfort temperature, which must not exceed maximum temperature."
       }
     },
     "load_group": {

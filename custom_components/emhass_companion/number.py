@@ -169,7 +169,7 @@ def _is_water_tank(load: DeferrableRuntime) -> bool:
 
 
 def _is_room(load: DeferrableRuntime) -> bool:
-    return load.is_thermal and not load.is_water_tank
+    return load.is_measured_room
 
 
 def _is_standard(load: DeferrableRuntime) -> bool:
@@ -707,7 +707,9 @@ class LoadNumber(EmhassLoadEntity, RestoreNumber):
 
     async def async_set_native_value(self, value: float) -> None:
         band_fields = ("setback_temperature", "comfort_temperature", "max_temperature")
-        if self.load.is_water_tank and self.entity_description.key in band_fields:
+        if (
+            self.load.is_water_tank or self.load.is_heat_pump_room
+        ) and self.entity_description.key in band_fields:
             setback, comfort, maximum = (
                 value if key == self.entity_description.key else getattr(self.load, key)
                 for key in band_fields
@@ -715,13 +717,15 @@ class LoadNumber(EmhassLoadEntity, RestoreNumber):
             if not setback <= comfort <= maximum:
                 raise ServiceValidationError(
                     "Water tank temperatures must satisfy lowest standby <= required hot water <= maximum"
+                    if self.load.is_water_tank
+                    else "Temperatures must satisfy setback <= comfort <= maximum"
                 )
         self.entity_description.set_fn(self.load, value)
         self.load.invalidate_battery_lockout()
         self.load.notify()
         if self.load.enabled:
             await self.coordinator.async_request_settings_refresh()
-        if self.load.is_thermal and not self.load.is_water_tank:
+        if self.load.is_measured_room:
             self._check_thermal_reachability()
 
     def _check_thermal_reachability(self) -> None:

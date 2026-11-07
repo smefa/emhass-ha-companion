@@ -67,6 +67,7 @@ from .const import (
     DEFAULT_WEIGHT_BATTERY_CHARGE,
     DEFAULT_WEIGHT_BATTERY_DISCHARGE,
 )
+from .heat_pump_room import HeatPumpRoomConfig
 from .thermal import ThermalConfig
 from .water_tank import WaterTankConfig
 
@@ -826,7 +827,7 @@ class DeferrableLoad:
     current_on_timesteps: int = 0
     current_off_timesteps: int = 0
 
-    thermal: ThermalConfig | WaterTankConfig | None = None
+    thermal: ThermalConfig | WaterTankConfig | HeatPumpRoomConfig | None = None
     """Set only for a thermal load, whose temperature is optimised instead of
     its run time."""
 

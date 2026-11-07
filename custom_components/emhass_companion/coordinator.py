@@ -82,6 +82,7 @@ from .const import (
 from .deferrable import DeferrableRegistry, DeferrableRuntime, state_to_watts
 from .effective_settings import ML_MODEL_SETTING_NAMES, ML_SETTING_NAMES, resolve_effective_settings
 from .health import SourceHealth
+from .heat_pump_room import HeatPumpRoomConfig
 from .infeasibility import Finding, Severity, diagnose, format_power, headline
 from .models import (
     ROW_ZERO_FIRST,
@@ -98,7 +99,13 @@ from .models import (
     row_zero_start,
 )
 from .network_calendar import HolidayCache, NetworkCalendar, NetworkCalendarError
-from .payload import PayloadError, PayloadInputs, PayloadResult, build_payload
+from .payload import (
+    PayloadError,
+    PayloadInputs,
+    PayloadResult,
+    build_payload,
+    outdoor_per_step,
+)
 from .peaks import PeakTracker, days_in_current_period, effective_rate_per_kw
 from .phase_guard import PhaseGuard
 from .price_forecast import (
@@ -1272,6 +1279,8 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
                 temperature = self.loads.room_temperature(load)
                 projected.append(load.to_load(now, self.config.time_step_minutes, temperature))
             except ValueError as err:
+                if load.is_heat_pump_room:
+                    raise UpdateFailed(str(err)) from err
                 if not load.is_water_tank:
                     raise
                 message = f"Water tank {load.name}: {err}"
@@ -1303,16 +1312,23 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
 
     def effective_thermal_config(
         self, load: DeferrableRuntime, current_temperature: float | None
-    ) -> ThermalConfig | WaterTankConfig | None:
+    ) -> ThermalConfig | WaterTankConfig | HeatPumpRoomConfig | None:
         """A load's thermal model as the last request saw it.
 
         For displays and checks, which must judge the same heating rate the
         optimiser was sent. Unscaled until a forecast has been fetched.
         """
         config = load.thermal_config(current_temperature)
+        now = dt_util.utcnow()
+        if isinstance(config, HeatPumpRoomConfig):
+            if not self._outdoor_forecast:
+                return config
+            step = timedelta(minutes=self.config.time_step_minutes)
+            return config.with_outdoor_forecast(
+                outdoor_per_step(self._outdoor_forecast, now, step, self.config.horizon_steps)
+            )
         if not isinstance(config, ThermalConfig) or not config.cop_curve:
             return config
-        now = dt_util.utcnow()
         horizon = timedelta(minutes=self.config.time_step_minutes * self.config.horizon_steps)
         window = self._outdoor_forecast.window_covering(now, now + horizon)
         return config.with_outdoor_forecast(window.values) if window else config

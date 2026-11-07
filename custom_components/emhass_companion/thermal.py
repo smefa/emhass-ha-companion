@@ -22,6 +22,7 @@ from math import isfinite
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from .heat_pump_room import HeatPumpRoomConfig
     from .water_tank import WaterTankConfig
 
 from homeassistant.util import dt as dt_util
@@ -333,7 +334,7 @@ def _parse_time(value: Any, default: time) -> time:
 
 
 def build_def_load_config(
-    thermal_by_index: dict[int, ThermalConfig | WaterTankConfig],
+    thermal_by_index: dict[int, ThermalConfig | WaterTankConfig | HeatPumpRoomConfig],
     load_count: int,
     grid_start: datetime,
     step: timedelta,

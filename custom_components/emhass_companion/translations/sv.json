@@ -949,7 +949,8 @@
     "thermal_model": {
       "options": {
         "room": "Rum",
-        "water_tank": "Vattentank"
+        "water_tank": "Vattentank",
+        "heat_pump_room": "Rum, avancerad värmepump"
       }
     }
   },
@@ -1559,7 +1560,7 @@
             "thermal_model": "Modell"
           },
           "data_description": {
-            "thermal_model": "Rum behöver en utetemperaturprognos; vattentank gör det inte. Endast en elpatron stöds."
+            "thermal_model": "Rum använder en uppmätt uppvärmningstakt. Rum, avancerad värmepump beskriver huset och låter EMHASS räkna ut värmepumpens verkningsgrad och värmebehovet från utetemperaturen. Båda behöver en utetemperaturprognos; vattentank gör det inte. Endast en elpatron stöds."
           }
         },
         "reconfigure": {
@@ -1703,12 +1704,107 @@
             "draw_end": "Kan gå över midnatt. Samma start och slut betyder ett helt dygn.",
             "draw_energy_kwh": "Uppskattad värme som tas ur tanken under just denna period, i kWh. Inte värmarens elförbrukning. Ange 0 för ingen förväntad förbrukning. Överlappande perioders förbrukning adderas."
           }
+        },
+        "heat_pump_room": {
+          "title": "Rum, avancerad värmepump",
+          "description": "Ett rum eller hus som värms av en värmepump. EMHASS räknar ut värmepumpens verkningsgrad och husets värmebehov från utetemperaturprognosen, så ingen uppmätt uppvärmningstakt behövs. Endast värme. Kräver en utetemperaturprognos som Companion kan läsa, till exempel en väderentitet.",
+          "data": {
+            "temperature_sensor": "Rumstemperatursensor",
+            "nominal_power_w": "Eleffekt när den är igång",
+            "comfort_temperature": "Komforttemperatur",
+            "setback_temperature": "Sänkt temperatur",
+            "max_temperature": "Högsta temperatur",
+            "comfort_start": "Komfort börjar",
+            "comfort_end": "Komfort slutar",
+            "thermal_mass_m3": "Termisk massa",
+            "floor_area_m2": "Uppvärmd golvyta",
+            "specific_heating_demand": "Specifikt värmebehov",
+            "supply_temperature": "Framledningstemperatur",
+            "power_sensor": "Körsensor",
+            "control_entity": "Styrenhet"
+          },
+          "data_description": {
+            "temperature_sensor": "Obligatorisk. Planen utgår från detta värde.",
+            "nominal_power_w": "Eleffekten värmepumpen drar när den går. EMHASS multiplicerar den med den beräknade COP:n.",
+            "comfort_temperature": "Lägsta rumstemperatur under komfortperioden.",
+            "setback_temperature": "Lägsta rumstemperatur utanför komfortperioden.",
+            "max_temperature": "Högsta rumstemperatur som optimeringen får värma till.",
+            "comfort_start": "Början på den dagliga komfortperioden.",
+            "comfort_end": "Slutet på den dagliga komfortperioden.",
+            "thermal_mass_m3": "Volym betongekvivalent massa som lagrar värmen, i kubikmeter. EMHASS använder betongens densitet och värmekapacitet. Ett större värde gör att temperaturen ändras långsammare.",
+            "floor_area_m2": "Uppvärmd golvyta i kvadratmeter.",
+            "specific_heating_demand": "Husets årliga värmebehov per kvadratmeter, i kWh/m², för ett år med de graddagar som anges under Avancerade inställningar. Ofta 50 till 150 för ett hus.",
+            "supply_temperature": "Vattentemperaturen som värmepumpen levererar till element eller golvvärme. Lägre ger högre COP. Ofta 30 till 35 för golvvärme och 45 till 55 för element.",
+            "power_sensor": "Valfritt. Talar om för optimeringen om lasten faktiskt är igång. En effektsensor ger mest detalj (alla enheter räknas om till watt automatiskt); en enkel på/av-binärsensor fungerar också.",
+            "control_entity": "Valfritt. Om satt slår integrationen på och av den här för att följa planen, när du aktiverat styrning -- och dess tillstånd fungerar som körsignal när effektsensor saknas. Lämna tomt för att behålla styrningen i egna automationer."
+          },
+          "sections": {
+            "advanced": {
+              "name": "Avancerade inställningar",
+              "description": "Inställningar för EMHASS-modellen. Standardvärdena passar de flesta hus.",
+              "data": {
+                "carnot_efficiency": "Carnotverkningsgrad",
+                "base_temperature": "Balanstemperatur",
+                "annual_reference_hdd": "Årliga graddagar",
+                "thermal_inertia_time_constant": "Termisk tröghet"
+              },
+              "data_description": {
+                "carnot_efficiency": "Hur nära värmepumpen kommer den ideala Carnot-COP:n. 0,4 är typiskt; EMHASS begränsar COP:n till 1-8.",
+                "base_temperature": "Utetemperatur över vilken huset inte behöver värme.",
+                "annual_reference_hdd": "Graddagar för det år som det specifika värmebehovet avser.",
+                "thermal_inertia_time_constant": "Timmar innan levererad värme syns i rumstemperaturen, till exempel för golvvärme. 0 betyder direkt."
+              }
+            }
+          }
+        },
+        "reconfigure_heat_pump_room": {
+          "title": "Ändra avancerat värmepumpsrum",
+          "description": "Ändra sensorerna och inställningarna för huset och värmepumpen. Effekt och komfortintervall är reglage på lastens sida.",
+          "data": {
+            "name": "Namn",
+            "temperature_sensor": "Rumstemperatursensor",
+            "thermal_mass_m3": "Termisk massa",
+            "floor_area_m2": "Uppvärmd golvyta",
+            "specific_heating_demand": "Specifikt värmebehov",
+            "supply_temperature": "Framledningstemperatur",
+            "power_sensor": "Körsensor",
+            "control_entity": "Styrenhet"
+          },
+          "data_description": {
+            "temperature_sensor": "Obligatorisk. Planen utgår från detta värde.",
+            "thermal_mass_m3": "Volym betongekvivalent massa som lagrar värmen, i kubikmeter. EMHASS använder betongens densitet och värmekapacitet. Ett större värde gör att temperaturen ändras långsammare.",
+            "floor_area_m2": "Uppvärmd golvyta i kvadratmeter.",
+            "specific_heating_demand": "Husets årliga värmebehov per kvadratmeter, i kWh/m², för ett år med de graddagar som anges under Avancerade inställningar. Ofta 50 till 150 för ett hus.",
+            "supply_temperature": "Vattentemperaturen som värmepumpen levererar till element eller golvvärme. Lägre ger högre COP. Ofta 30 till 35 för golvvärme och 45 till 55 för element.",
+            "power_sensor": "Valfritt. Talar om för optimeringen om lasten faktiskt är igång. En effektsensor ger mest detalj (alla enheter räknas om till watt automatiskt); en enkel på/av-binärsensor fungerar också.",
+            "control_entity": "Valfritt. Om satt slår integrationen på och av den här för att följa planen, när du aktiverat styrning -- och dess tillstånd fungerar som körsignal när effektsensor saknas. Lämna tomt för att behålla styrningen i egna automationer."
+          },
+          "sections": {
+            "advanced": {
+              "name": "Avancerade inställningar",
+              "description": "Inställningar för EMHASS-modellen. Standardvärdena passar de flesta hus.",
+              "data": {
+                "carnot_efficiency": "Carnotverkningsgrad",
+                "base_temperature": "Balanstemperatur",
+                "annual_reference_hdd": "Årliga graddagar",
+                "thermal_inertia_time_constant": "Termisk tröghet"
+              },
+              "data_description": {
+                "carnot_efficiency": "Hur nära värmepumpen kommer den ideala Carnot-COP:n. 0,4 är typiskt; EMHASS begränsar COP:n till 1-8.",
+                "base_temperature": "Utetemperatur över vilken huset inte behöver värme.",
+                "annual_reference_hdd": "Graddagar för det år som det specifika värmebehovet avser.",
+                "thermal_inertia_time_constant": "Timmar innan levererad värme syns i rumstemperaturen, till exempel för golvvärme. 0 betyder direkt."
+              }
+            }
+          }
         }
       },
       "error": {
         "invalid_tank_value": "Ange ett giltigt värde; tal måste vara ändliga och inom tillåtet intervall.",
         "invalid_tank_band": "Lägsta vilotemperatur måste vara högst önskad varmvattentemperatur, som måste vara högst maxtemperaturen.",
-        "invalid_cop_curve": "Ange minst två par av \"utomhustemperatur: COP\", åtskilda med kommatecken, med COP över 0 och varje temperatur högst en gång, till exempel \"7: 5.2, 0: 4.0, -10: 3.0\"."
+        "invalid_cop_curve": "Ange minst två par av \"utomhustemperatur: COP\", åtskilda med kommatecken, med COP över 0 och varje temperatur högst en gång, till exempel \"7: 5.2, 0: 4.0, -10: 3.0\".",
+        "invalid_heat_pump_value": "Ange ett giltigt värde; tal måste vara ändliga och inom tillåtet intervall.",
+        "invalid_heat_pump_band": "Sänkt temperatur får inte överstiga komforttemperaturen, som inte får överstiga högsta temperaturen."
       }
     },
     "load_group": {

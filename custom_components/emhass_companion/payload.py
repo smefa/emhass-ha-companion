@@ -25,6 +25,7 @@ from .const import (
     DEFAULT_COST_FUN,
 )
 from .effective_settings import resolve_effective_settings
+from .heat_pump_room import HeatPumpRoomConfig
 from .models import (
     ROW_ZERO_NEAREST,
     BatteryConfig,
@@ -1318,6 +1319,17 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
         for load in inputs.loads
         if load.subentry_id in tank_shortfalls
     )
+    warnings.extend(
+        f"{load.name}: its comfort temperature cannot be reached in time, so the plan "
+        "aims for the warmest the heat pump can reach instead."
+        for load in inputs.loads
+        if isinstance(load.thermal, HeatPumpRoomConfig)
+        and load.wants_to_run
+        and _with_outdoor_forecast(load.thermal, load.name, inputs, step).first_unreachable_step(
+            inputs.row_zero(step), step, inputs.horizon_steps
+        )
+        is not None
+    )
 
     # After everything the check reads is in place: the import limit, the
     # blended house load, and def_load_config for which loads are thermal.
@@ -1378,14 +1390,31 @@ def _thermal_settings(inputs: PayloadInputs, step: timedelta, load_count: int) -
 
 
 def _with_outdoor_forecast(
-    thermal: ThermalConfig | WaterTankConfig, name: str, inputs: PayloadInputs, step: timedelta
-) -> ThermalConfig | WaterTankConfig:
-    """Scale a room's heating rate for its COP curve from the horizon's forecast.
+    thermal: ThermalConfig | WaterTankConfig | HeatPumpRoomConfig,
+    name: str,
+    inputs: PayloadInputs,
+    step: timedelta,
+) -> ThermalConfig | WaterTankConfig | HeatPumpRoomConfig:
+    """Give a room the horizon's outdoor forecast its model depends on.
 
+    A COP curve scales the heating rate; a heat pump room gets the temperature
+    at every step, to replay what EMHASS will compute from the same forecast.
     Failing is deliberate: without the forecast, silently sending the unscaled
-    rate is exactly the optimistic plan the curve was added to avoid. EMHASS's
-    own weather source gives the Companion no series to read.
+    rate (or floors no one has checked) is exactly the optimistic plan these
+    models exist to avoid. EMHASS's own weather source gives the Companion no
+    series to read.
     """
+    if isinstance(thermal, HeatPumpRoomConfig):
+        start = inputs.row_zero(step)
+        series = inputs.outdoor_temperature
+        if not series:
+            raise PayloadError(
+                f"{name}: its heat pump model needs an outdoor temperature forecast the "
+                "Companion can read. Choose a weather entity as the temperature source."
+            )
+        return thermal.with_outdoor_forecast(
+            outdoor_per_step(series, start, step, inputs.horizon_steps)
+        )
     if (
         not isinstance(thermal, ThermalConfig)
         or not thermal.cop_curve
@@ -1405,6 +1434,26 @@ def _with_outdoor_forecast(
             "or clear the COP curve."
         )
     return thermal.with_outdoor_forecast(outdoor.values)
+
+
+def outdoor_per_step(series: Series, start: datetime, step: timedelta, steps: int) -> list[float]:
+    """The forecast at each step, aligned the way EMHASS aligns a timestamp map.
+
+    ``_align_runtime_forecast_mapping`` averages the points in each step-wide
+    bucket anchored on the first step, holds a bucket until the next one, and
+    lets the earliest bucket stand in for the steps before it.
+    """
+    buckets: dict[int, list[float]] = {}
+    for point in series:
+        buckets.setdefault((point.time - start) // step, []).append(point.value)
+    means = sorted((index, sum(values) / len(values)) for index, values in buckets.items())
+    result = []
+    position = -1
+    for index in range(steps):
+        while position + 1 < len(means) and means[position + 1][0] <= index:
+            position += 1
+        result.append(means[max(position, 0)][1])
+    return result
 
 
 def _tank_shortfalls(inputs: PayloadInputs, step: timedelta) -> dict[str, TankShortfall]:
