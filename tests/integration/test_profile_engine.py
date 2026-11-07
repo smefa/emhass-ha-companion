@@ -219,6 +219,29 @@ async def test_unknown_response_path_lists_the_available_keys(
         )
 
 
+async def test_response_path_digs_through_a_dotted_entity_id(hass: HomeAssistant) -> None:
+    """`weather.home.forecast` must resolve `weather.home` as one key."""
+
+    async def _handler(call):
+        return {
+            "weather.home": {
+                "forecast": [
+                    {"datetime": "2026-11-07T10:00:00+00:00", "temperature": 4.5},
+                    {"datetime": "2026-11-07T11:00:00+00:00", "temperature": 5.0},
+                ]
+            }
+        }
+
+    hass.services.async_register(
+        "weather", "get_forecasts", _handler, supports_response=SupportsResponse.ONLY
+    )
+
+    series = await async_resolve_series(
+        hass, _builtin("temperature/weather_entity"), {"entity": "weather.home"}
+    )
+    assert list(series.values) == [4.5, 5.0]
+
+
 # --- typical household load ---------------------------------------------------
 
 
