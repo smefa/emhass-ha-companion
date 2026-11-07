@@ -743,7 +743,7 @@ class LoadNumber(EmhassLoadEntity, RestoreNumber):
             ir.async_delete_issue(self.hass, DOMAIN, issue_id)
             return
 
-        thermal = self.load.thermal_config(current)
+        thermal = self.coordinator.effective_thermal_config(self.load, current)
         result = (
             thermal.first_unreachable_step(
                 current,

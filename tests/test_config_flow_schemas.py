@@ -106,6 +106,7 @@ def test_tank_schema_has_no_room_tuning_or_model_picker(initial):
             "cooling_constant",
             "thermal_inertia",
             "thermal_model",
+            "cop_curve",
         }
     )
     assert {"tank_volume_litres", "hot_water_period_count"} <= keys
@@ -1076,3 +1077,16 @@ def test_a_basic_only_save_keeps_the_stored_end_soc_reward_factor():
         {"use_battery": True, ADVANCED_SECTION: {}}
     )[ADVANCED_SECTION]
     assert section["battery_soc_final_reward_factor"] == 0.6
+
+
+def test_room_offers_the_cop_curve_in_advanced_at_setup_and_flat_on_reconfigure():
+    setup = thermal_schema({}, initial=True)
+    advanced = next(value for key, value in setup.items() if str(key) == "advanced")
+    assert "cop_curve" in {str(key) for key in advanced.schema.schema}
+    assert "cop_curve" not in {str(key) for key in setup}
+    assert "cop_curve" in {str(key) for key in thermal_schema({}, initial=False)}
+
+
+def test_the_cop_curve_field_can_be_left_blank():
+    schema = vol.Schema(thermal_schema({}, initial=False))
+    assert "cop_curve" not in schema({"name": "Heat pump", "sense": "heat"})

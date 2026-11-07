@@ -14,8 +14,11 @@ wall-clock comfort window into those lists.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Iterable
+from dataclasses import dataclass, replace
 from datetime import datetime, time, timedelta
+from itertools import pairwise
+from math import isfinite
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -43,6 +46,74 @@ DEFAULT_COMFORT_START = time(6, 30)
 DEFAULT_COMFORT_END = time(23, 0)
 
 
+CopCurve = tuple[tuple[float, float], ...]
+"""Outdoor temperature (deg C) and COP pairs; the first pair is the reference."""
+
+MAX_COP = 12.0
+
+
+def parse_cop_curve(text: str | None) -> CopCurve:
+    """Parse ``"7: 5.2, 0: 4.0, -10: 3.0"`` into temperature/COP pairs.
+
+    Blank means no curve. The first pair is the point the user's heating rate
+    was measured at, so order is kept as typed. Raises ``ValueError`` with a
+    message fit to show the user.
+    """
+    if text is None or not str(text).strip():
+        return ()
+    points: list[tuple[float, float]] = []
+    for part in str(text).replace(";", ",").replace("\n", ",").split(","):
+        if not part.strip():
+            continue
+        temperature, separator, cop = part.partition(":")
+        try:
+            if not separator:
+                raise ValueError
+            point = (float(temperature), float(cop))
+        except ValueError:
+            raise ValueError(f"'{part.strip()}' is not in the form 'temperature: COP'") from None
+        if not (isfinite(point[0]) and isfinite(point[1])) or not 0 < point[1] <= MAX_COP:
+            raise ValueError(f"'{part.strip()}': the COP must be between 0 and {MAX_COP:g}")
+        points.append(point)
+    if len(points) < 2:
+        raise ValueError("give at least two points")
+    temperatures = [temperature for temperature, _ in points]
+    if len(set(temperatures)) != len(temperatures):
+        raise ValueError("each outdoor temperature can only be listed once")
+    return tuple(points)
+
+
+def format_cop_curve(curve: CopCurve) -> str:
+    return ", ".join(f"{temperature:g}: {cop:g}" for temperature, cop in curve)
+
+
+def cop_at(curve: CopCurve, temperature: float) -> float:
+    """Linear interpolation between the points; the end points hold beyond them."""
+    ordered = sorted(curve)
+    if temperature <= ordered[0][0]:
+        return ordered[0][1]
+    if temperature >= ordered[-1][0]:
+        return ordered[-1][1]
+    for (t0, c0), (t1, c1) in pairwise(ordered):
+        if t0 <= temperature <= t1:
+            return c0 + (c1 - c0) * (temperature - t0) / (t1 - t0)
+    return ordered[-1][1]  # pragma: no cover - the bounds above cover every case
+
+
+def cop_rate_factor(curve: CopCurve, outdoor: Iterable[float]) -> float:
+    """How much of the reference heating rate survives the coldest forecast hour.
+
+    The rate is one number per solve, so it is set by the worst COP the horizon
+    reaches (the minimum of the interpolated curve, which also holds for a
+    curve that is not monotonic). Never above 1: a mild forecast does not make
+    the load faster than the user's own measurement.
+    """
+    coldest = min((cop_at(curve, temperature) for temperature in outdoor), default=None)
+    if coldest is None:
+        raise ValueError("no outdoor temperature forecast")
+    return min(1.0, coldest / curve[0][1])
+
+
 @dataclass(slots=True)
 class ThermalConfig:
     """How one thermal load behaves, and the comfort it must maintain."""
@@ -65,6 +136,23 @@ class ThermalConfig:
 
     current_temperature: float | None = None
     """Read live each run, so the plan starts from the actual room."""
+
+    cop_curve: CopCurve = ()
+    """Heat pump COP against outdoor temperature; empty leaves the rate alone."""
+
+    clamp_floors: bool = False
+    """Lower floors the load cannot reach from ``current_temperature`` in time."""
+
+    def with_outdoor_forecast(self, outdoor: Iterable[float]) -> ThermalConfig:
+        """This load with its heating rate scaled for the forecast's coldest hour.
+
+        Shared by the request and every display of it, so the comfort ramp, the
+        reachability check and the floors EMHASS receives all use one rate.
+        """
+        if not self.cop_curve or self.sense != SENSE_HEAT:
+            return self
+        factor = cop_rate_factor(self.cop_curve, outdoor)
+        return replace(self, heating_rate=self.heating_rate * factor, clamp_floors=factor < 1)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> ThermalConfig:
@@ -193,6 +281,21 @@ class ThermalConfig:
     ) -> dict[str, Any]:
         """The ``thermal_config`` entry for this load."""
         minimums, maximums = self.comfort_band(grid_start, step, horizon_steps)
+        if self.clamp_floors and self.current_temperature is not None and self.heating_rate > 0:
+            # A slower rate stretches the ramp backwards, so a floor that was
+            # reachable under the full rate can now sit above the flat-out
+            # trajectory. EMHASS holds floors hard, which would make the whole
+            # solve infeasible; ask for what the load can still deliver.
+            minimums = [
+                min(
+                    floor,
+                    self.current_temperature
+                    + self.heating_rate * (step * index) / timedelta(hours=1),
+                )
+                if index
+                else floor
+                for index, floor in enumerate(minimums)
+            ]
         config: dict[str, Any] = {
             "heating_rate": self.heating_rate,
             "cooling_constant": self.cooling_constant,

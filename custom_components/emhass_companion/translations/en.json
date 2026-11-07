@@ -1569,13 +1569,15 @@
             "temperature_sensor": "Temperature sensor",
             "sense": "Heats or cools",
             "power_sensor": "Running sensor",
-            "control_entity": "Control entity"
+            "control_entity": "Control entity",
+            "cop_curve": "Heat pump COP curve"
           },
           "data_description": {
             "temperature_sensor": "The room (or tank) the temperatures below apply to. Strongly recommended: without it, every plan starts from a guessed temperature instead of the actual one.",
             "sense": "Whether running this load raises the temperature (a heat pump, a heater, hot water) or lowers it (an air conditioner).",
             "power_sensor": "Optional. Tells the optimiser whether this load is actually running. A power sensor gives the most detail (any unit is converted to watts automatically); a plain on/off binary_sensor works too.",
-            "control_entity": "Optional. If set, the integration switches this on and off to follow the plan, once you enable control -- and its state doubles as the running signal when there is no power sensor. Leave empty to keep control in your own automations."
+            "control_entity": "Optional. If set, the integration switches this on and off to follow the plan, once you enable control -- and its state doubles as the running signal when there is no power sensor. Leave empty to keep control in your own automations.",
+            "cop_curve": "Optional. For a heat pump whose efficiency falls in the cold: pairs of outdoor temperature and COP, such as \"7: 5.2, 0: 4.0, -10: 3.0\". The heating rate is taken as measured at the first pair and is lowered to match the coldest hour of the forecast, so cold spells get more heating hours. Needs a weather entity as the temperature source. Leave empty to ignore. Heating only."
           }
         },
         "settings": {
@@ -1612,12 +1614,14 @@
               "data": {
                 "heating_rate": "Heating rate",
                 "cooling_constant": "Heat loss constant",
-                "thermal_inertia": "Response delay"
+                "thermal_inertia": "Response delay",
+                "cop_curve": "Heat pump COP curve"
               },
               "data_description": {
                 "heating_rate": "How fast the temperature changes with the load running at full power. Watch a cold morning: a house that climbs from 18 to 21 °C in two hours with the heating flat out has a rate of 1.5 °C/h. For cooling, how fast it drops.",
                 "cooling_constant": "How fast heat leaks to the outdoors: degrees lost per hour, per degree of difference to the outdoor temperature. Most homes land between 0.05 (well insulated) and 0.3 (draughty). If the planned heating comes too early, lower it; too late, raise it.",
-                "thermal_inertia": "How long after switching on before the temperature responds. Underfloor heating in concrete can take an hour or more; a radiator or fan is nearly immediate. Leave at 0 if unsure."
+                "thermal_inertia": "How long after switching on before the temperature responds. Underfloor heating in concrete can take an hour or more; a radiator or fan is nearly immediate. Leave at 0 if unsure.",
+                "cop_curve": "Optional. For a heat pump whose efficiency falls in the cold: pairs of outdoor temperature and COP, such as \"7: 5.2, 0: 4.0, -10: 3.0\". The heating rate is taken as measured at the first pair and is lowered to match the coldest hour of the forecast, so cold spells get more heating hours. Needs a weather entity as the temperature source. Leave empty to ignore. Heating only."
               }
             }
           }
@@ -1703,7 +1707,8 @@
       },
       "error": {
         "invalid_tank_value": "Enter a valid value; numbers must be finite and within the allowed range.",
-        "invalid_tank_band": "Lowest standby temperature must not exceed required hot-water temperature, which must not exceed maximum temperature."
+        "invalid_tank_band": "Lowest standby temperature must not exceed required hot-water temperature, which must not exceed maximum temperature.",
+        "invalid_cop_curve": "Enter at least two pairs of \"outdoor temperature: COP\", separated by commas, with a COP above 0 and each temperature listed once, such as \"7: 5.2, 0: 4.0, -10: 3.0\"."
       }
     },
     "load_group": {

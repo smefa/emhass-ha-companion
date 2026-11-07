@@ -35,7 +35,7 @@ from .models import (
     Series,
     row_zero_start,
 )
-from .thermal import build_def_load_config
+from .thermal import SENSE_HEAT, ThermalConfig, build_def_load_config
 from .water_tank import TankShortfall, WaterTankConfig, _resolve_endpoint
 
 _LOGGER = logging.getLogger(__name__)
@@ -1366,7 +1366,7 @@ def _thermal_settings(inputs: PayloadInputs, step: timedelta, load_count: int) -
     operating hours it is being sent with.
     """
     thermal_by_index = {
-        index: load.thermal
+        index: _with_outdoor_forecast(load.thermal, load.name, inputs, step)
         for index, load in enumerate(inputs.loads)
         if load.thermal is not None and load.wants_to_run
     }
@@ -1375,6 +1375,36 @@ def _thermal_settings(inputs: PayloadInputs, step: timedelta, load_count: int) -
         thermal_by_index, load_count, inputs.row_zero(step), step, inputs.horizon_steps
     )
     return {"def_load_config": config if config is not None else [{} for _ in range(load_count)]}
+
+
+def _with_outdoor_forecast(
+    thermal: ThermalConfig | WaterTankConfig, name: str, inputs: PayloadInputs, step: timedelta
+) -> ThermalConfig | WaterTankConfig:
+    """Scale a room's heating rate for its COP curve from the horizon's forecast.
+
+    Failing is deliberate: without the forecast, silently sending the unscaled
+    rate is exactly the optimistic plan the curve was added to avoid. EMHASS's
+    own weather source gives the Companion no series to read.
+    """
+    if (
+        not isinstance(thermal, ThermalConfig)
+        or not thermal.cop_curve
+        or thermal.sense != SENSE_HEAT
+    ):
+        return thermal
+    start = inputs.row_zero(step)
+    outdoor = (
+        inputs.outdoor_temperature.window_covering(start, start + step * inputs.horizon_steps)
+        if inputs.outdoor_temperature
+        else None
+    )
+    if not outdoor:
+        raise PayloadError(
+            f"{name}: its heat pump COP curve needs an outdoor temperature forecast the "
+            "Companion can read. Choose a weather entity as the temperature source, "
+            "or clear the COP curve."
+        )
+    return thermal.with_outdoor_forecast(outdoor.values)
 
 
 def _tank_shortfalls(inputs: PayloadInputs, step: timedelta) -> dict[str, TankShortfall]:

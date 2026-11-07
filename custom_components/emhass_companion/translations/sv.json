@@ -1569,13 +1569,15 @@
             "temperature_sensor": "Temperatursensor",
             "sense": "Värmer eller kyler",
             "power_sensor": "Körsensor",
-            "control_entity": "Styrenhet"
+            "control_entity": "Styrenhet",
+            "cop_curve": "Värmepumpens COP-kurva"
           },
           "data_description": {
             "temperature_sensor": "Rummet (eller tanken) som temperaturerna nedan gäller. Rekommenderas starkt: utan den utgår varje plan från en gissad temperatur i stället för den verkliga.",
             "sense": "Om lasten höjer temperaturen när den kör (värmepump, elpatron, varmvatten) eller sänker den (luftkonditionering).",
             "power_sensor": "Valfritt. Talar om för optimeringen om lasten faktiskt är igång. En effektsensor ger mest detalj (alla enheter räknas om till watt automatiskt); en enkel på/av-binärsensor fungerar också.",
-            "control_entity": "Valfritt. Om satt slår integrationen på och av den här för att följa planen, när du aktiverat styrning -- och dess tillstånd fungerar som körsignal när effektsensor saknas. Lämna tomt för att behålla styrningen i egna automationer."
+            "control_entity": "Valfritt. Om satt slår integrationen på och av den här för att följa planen, när du aktiverat styrning -- och dess tillstånd fungerar som körsignal när effektsensor saknas. Lämna tomt för att behålla styrningen i egna automationer.",
+            "cop_curve": "Valfritt. För en värmepump vars verkningsgrad sjunker i kylan: par av utomhustemperatur och COP, till exempel \"7: 5.2, 0: 4.0, -10: 3.0\". Uppvärmningshastigheten gäller vid första paret och sänks efter prognosens kallaste timme, så att köldperioder får fler värmetimmar. Kräver en väderentitet som temperaturkälla. Lämna tomt för att ignorera. Endast uppvärmning."
           }
         },
         "settings": {
@@ -1612,12 +1614,14 @@
               "data": {
                 "heating_rate": "Uppvärmningstakt",
                 "cooling_constant": "Värmeförlustkonstant",
-                "thermal_inertia": "Svarsfördröjning"
+                "thermal_inertia": "Svarsfördröjning",
+                "cop_curve": "Värmepumpens COP-kurva"
               },
               "data_description": {
                 "heating_rate": "Hur fort temperaturen ändras med lasten på full effekt. Titta en kall morgon: ett hus som går från 18 till 21 °C på två timmar med värmen för fullt har 1,5 °C/h. För kyla: hur fort den sjunker.",
                 "cooling_constant": "Hur fort värmen läcker ut: grader förlorade per timme, per grads skillnad mot utetemperaturen. De flesta hus ligger mellan 0,05 (välisolerat) och 0,3 (dragigt). Kommer den planerade värmen för tidigt, sänk; för sent, höj.",
-                "thermal_inertia": "Hur lång tid efter påslag innan temperaturen svarar. Golvvärme i betong kan ta en timme eller mer; en radiator eller fläkt svarar nästan direkt. Lämna på 0 om du är osäker."
+                "thermal_inertia": "Hur lång tid efter påslag innan temperaturen svarar. Golvvärme i betong kan ta en timme eller mer; en radiator eller fläkt svarar nästan direkt. Lämna på 0 om du är osäker.",
+                "cop_curve": "Valfritt. För en värmepump vars verkningsgrad sjunker i kylan: par av utomhustemperatur och COP, till exempel \"7: 5.2, 0: 4.0, -10: 3.0\". Uppvärmningshastigheten gäller vid första paret och sänks efter prognosens kallaste timme, så att köldperioder får fler värmetimmar. Kräver en väderentitet som temperaturkälla. Lämna tomt för att ignorera. Endast uppvärmning."
               }
             }
           }
@@ -1703,7 +1707,8 @@
       },
       "error": {
         "invalid_tank_value": "Ange ett giltigt värde; tal måste vara ändliga och inom tillåtet intervall.",
-        "invalid_tank_band": "Lägsta vilotemperatur måste vara högst önskad varmvattentemperatur, som måste vara högst maxtemperaturen."
+        "invalid_tank_band": "Lägsta vilotemperatur måste vara högst önskad varmvattentemperatur, som måste vara högst maxtemperaturen.",
+        "invalid_cop_curve": "Ange minst två par av \"utomhustemperatur: COP\", åtskilda med kommatecken, med COP över 0 och varje temperatur högst en gång, till exempel \"7: 5.2, 0: 4.0, -10: 3.0\"."
       }
     },
     "load_group": {

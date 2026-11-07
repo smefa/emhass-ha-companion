@@ -50,6 +50,7 @@ from .const import (
     CONF_COMFORT_TEMPERATURE,
     CONF_CONTROL_ENTITY,
     CONF_COOLING_CONSTANT,
+    CONF_COP_CURVE,
     CONF_DRAW_END,
     CONF_DRAW_ENERGY,
     CONF_DRAW_START,
@@ -124,7 +125,9 @@ from .thermal import (
     DEFAULT_SETBACK_TEMPERATURE,
     DEFAULT_THERMAL_INERTIA,
     SENSE_HEAT,
+    CopCurve,
     ThermalConfig,
+    parse_cop_curve,
 )
 from .water_tank import WaterTankConfig, hot_water_periods_from_data
 
@@ -189,6 +192,8 @@ class DeferrableRuntime:
     temperature_sensor: str | None = None
     sense: str = SENSE_HEAT
     thermal_model: str = THERMAL_MODEL_ROOM
+    cop_curve: CopCurve = ()
+    """Room heat pump COP against outdoor temperature, owned by the subentry."""
     tank_volume_litres: float = 0.0
     standby_loss_w: float = 0.0
     heater_cop: float = DEFAULT_HEATER_COP
@@ -1111,6 +1116,7 @@ class DeferrableRuntime:
             comfort_start=self.comfort_start,
             comfort_end=self.comfort_end,
             current_temperature=current_temperature,
+            cop_curve=self.cop_curve,
         )
 
     def to_load(
@@ -1947,6 +1953,11 @@ def _apply_subentry_fields(
     load.temperature_sensor = data.get(CONF_TEMPERATURE_SENSOR) or None
     load.sense = data.get(CONF_SENSE) or SENSE_HEAT
     load.thermal_model = data.get(CONF_THERMAL_MODEL, THERMAL_MODEL_ROOM)
+    try:
+        load.cop_curve = parse_cop_curve(data.get(CONF_COP_CURVE))
+    except ValueError:
+        # The form rejects a bad curve; a hand-edited one runs without it.
+        load.cop_curve = ()
     load.tank_volume_litres = float(data.get(CONF_TANK_VOLUME, 0))
     load.draw_energy_kwh = float(data.get(CONF_DRAW_ENERGY, 0))
     load.hot_water_periods = (

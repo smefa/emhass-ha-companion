@@ -98,7 +98,7 @@ from .models import (
     row_zero_start,
 )
 from .network_calendar import HolidayCache, NetworkCalendar, NetworkCalendarError
-from .payload import PayloadInputs, PayloadResult, build_payload
+from .payload import PayloadError, PayloadInputs, PayloadResult, build_payload
 from .peaks import PeakTracker, days_in_current_period, effective_rate_per_kw
 from .phase_guard import PhaseGuard
 from .price_forecast import (
@@ -126,8 +126,9 @@ from .terminal import (
 from .terminal import (
     LOOKAHEAD as END_SOC_LOOKAHEAD,
 )
+from .thermal import ThermalConfig
 from .util import schema_major, version_at_least
-from .water_tank import TankShortfall
+from .water_tank import TankShortfall, WaterTankConfig
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -493,6 +494,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         # conservative and treats it as unsupported.
         self.backend_version: str | None = None
         self._water_tank_plan_blocked: str | None = None
+        self._outdoor_forecast: Series = Series.empty()
         # Set once, right after __init__.async_setup_entry builds them (may be
         # empty -- see _build_peak_trackers). Held here, not just on
         # EmhassRuntimeData, because demand_charge_pricing / _build need each
@@ -1299,6 +1301,22 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             )
         return None
 
+    def effective_thermal_config(
+        self, load: DeferrableRuntime, current_temperature: float | None
+    ) -> ThermalConfig | WaterTankConfig | None:
+        """A load's thermal model as the last request saw it.
+
+        For displays and checks, which must judge the same heating rate the
+        optimiser was sent. Unscaled until a forecast has been fetched.
+        """
+        config = load.thermal_config(current_temperature)
+        if not isinstance(config, ThermalConfig) or not config.cop_curve:
+            return config
+        now = dt_util.utcnow()
+        horizon = timedelta(minutes=self.config.time_step_minutes * self.config.horizon_steps)
+        window = self._outdoor_forecast.window_covering(now, now + horizon)
+        return config.with_outdoor_forecast(window.values) if window else config
+
     def water_tank_error(self, load: DeferrableRuntime) -> str | None:
         """Fail closed before tank dispatch, including between optimiser runs."""
         if not load.is_water_tank or not load.enabled:
@@ -1944,6 +1962,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         outdoor = Series.empty()
         if self.loads.needs_outdoor_temperature and config.temperature:
             outdoor = await self._series(config.temperature, PROFILE_KIND_TEMPERATURE)
+        self._outdoor_forecast = outdoor
 
         buy = sell = None
         network_warnings: list[str] = []
@@ -2239,7 +2258,10 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             send_soc_final_reward=self.soc_final_reward_supported,
             solver_settings=config.solver,
         )
-        built = build_payload(inputs)
+        try:
+            built = build_payload(inputs)
+        except PayloadError as err:
+            raise UpdateFailed(str(err)) from err
         for series, method, label in (
             (buy, "load_cost_forecast_method", "buy price"),
             (sell, "production_price_forecast_method", "sell price"),

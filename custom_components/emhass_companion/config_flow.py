@@ -55,6 +55,7 @@ from .const import (
     CONF_COMPUTE_CURTAILMENT,
     CONF_CONTROL_ENTITY,
     CONF_COOLING_CONSTANT,
+    CONF_COP_CURVE,
     CONF_DAYAHEAD_FALLBACK_TIME,
     CONF_DISCHARGE_EFFICIENCY,
     CONF_DRAW_END,
@@ -242,6 +243,7 @@ from .thermal import (
     MIN_THERMAL_TEMPERATURE,
     SENSE_HEAT,
     SENSES,
+    parse_cop_curve,
 )
 from .util import version_at_least
 from .water_tank import MAX_HOT_WATER_PERIODS
@@ -1339,7 +1341,7 @@ window, and the two entities. Only used when adding -- reconfigure is short
 enough to stay flat."""
 
 THERMAL_ADVANCED_KEYS: Final = frozenset(
-    {CONF_HEATING_RATE, CONF_COOLING_CONSTANT, CONF_THERMAL_INERTIA}
+    {CONF_HEATING_RATE, CONF_COOLING_CONSTANT, CONF_THERMAL_INERTIA, CONF_COP_CURVE}
 )
 """The thermal model's tuning. All have defaults, so the section can stay closed."""
 
@@ -1653,6 +1655,7 @@ def thermal_schema(
             _optional_blank(CONF_CONTROL_ENTITY, defaults): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain=list(CONTROL_ENTITY_DOMAINS))
             ),
+            _optional_blank(CONF_COP_CURVE, defaults): selector.TextSelector(),
         }
     )
     return _split_advanced(schema, THERMAL_ADVANCED_KEYS) if initial else schema
@@ -1697,7 +1700,14 @@ def water_tank_schema(
 ) -> dict[Any, Any]:
     """Immersion tank settings, with entity-owned values offered only at creation."""
     room_fields = thermal_schema(defaults, step_minutes, initial=initial)
-    excluded = {CONF_SENSE, CONF_NAME, ADVANCED_SECTION, CONF_COMFORT_START, CONF_COMFORT_END}
+    excluded = {
+        CONF_SENSE,
+        CONF_NAME,
+        ADVANCED_SECTION,
+        CONF_COMFORT_START,
+        CONF_COMFORT_END,
+        CONF_COP_CURVE,
+    }
     if not initial:
         excluded.discard(CONF_NAME)
     schema = {key: value for key, value in room_fields.items() if str(key) not in excluded}
@@ -1831,6 +1841,10 @@ class DeferrableLoadSubentryFlow(ConfigSubentryFlow):
     def _step_minutes(self) -> int:
         return int(self._get_entry().options.get(CONF_TIME_STEP, DEFAULT_TIME_STEP))
 
+    def _form_errors(self, data: dict[str, Any]) -> dict[str, str]:
+        """Problems with a submitted form that its selectors cannot catch."""
+        return {}
+
     def _placeholders(self) -> dict[str, str]:
         """Values the form's own text refers to.
 
@@ -1902,6 +1916,17 @@ class DeferrableLoadSubentryFlow(ConfigSubentryFlow):
             # The fields this step no longer offers are still part of the
             # subentry -- they are what a load starts from, and dropping them
             # here would reset a load to the defaults on its next reload.
+            if errors := self._form_errors(user_input):
+                return self.async_show_form(
+                    step_id="reconfigure",
+                    data_schema=vol.Schema(
+                        self._schema(
+                            {**subentry.data, **user_input}, self._step_minutes, initial=False
+                        )
+                    ),
+                    errors=errors,
+                    description_placeholders=self._placeholders(),
+                )
             data = {**subentry.data, **_clean_deferrable(user_input)}
             for key in self._clearable_keys:
                 if key not in user_input:
@@ -1924,7 +1949,19 @@ class ThermalLoadSubentryFlow(DeferrableLoadSubentryFlow):
 
     _schema = staticmethod(thermal_schema)
     _kind_schema = staticmethod(thermal_kind_schema)
-    _clearable_keys = (CONF_POWER_SENSOR, CONF_CONTROL_ENTITY, CONF_TEMPERATURE_SENSOR)
+    _clearable_keys = (
+        CONF_POWER_SENSOR,
+        CONF_CONTROL_ENTITY,
+        CONF_TEMPERATURE_SENSOR,
+        CONF_COP_CURVE,
+    )
+
+    def _form_errors(self, data: dict[str, Any]) -> dict[str, str]:
+        try:
+            parse_cop_curve(data.get(CONF_COP_CURVE))
+        except ValueError:
+            return {CONF_COP_CURVE: "invalid_cop_curve"}
+        return {}
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
         if (
@@ -1932,7 +1969,16 @@ class ThermalLoadSubentryFlow(DeferrableLoadSubentryFlow):
             and CONF_SENSE in user_input
             and user_input.get(CONF_THERMAL_MODEL, THERMAL_MODEL_ROOM) == THERMAL_MODEL_ROOM
         ):
-            return self._create(_clean_deferrable(_flatten_sections(user_input)))
+            flat = _flatten_sections(user_input)
+            if not self._form_errors(flat):
+                return self._create(_clean_deferrable(flat))
+            return self.async_show_form(
+                last_step=False,
+                step_id="user",
+                data_schema=vol.Schema(thermal_kind_schema({}), extra=vol.ALLOW_EXTRA),
+                errors={"base": "invalid_cop_curve"},
+                description_placeholders=self._placeholders(),
+            )
         if user_input is None:
             return self.async_show_form(
                 last_step=False,
@@ -1959,8 +2005,19 @@ class ThermalLoadSubentryFlow(DeferrableLoadSubentryFlow):
                 if str(key) != CONF_NAME
             }
             if user_input is not None:
-                return self._create(
-                    {**_clean_deferrable(_flatten_sections(user_input)), **self._kind}
+                flat = _flatten_sections(user_input)
+                if not self._form_errors(flat):
+                    return self._create({**_clean_deferrable(flat), **self._kind})
+                schema = {
+                    key: value
+                    for key, value in thermal_schema(flat, self._step_minutes).items()
+                    if str(key) != CONF_NAME
+                }
+                return self.async_show_form(
+                    step_id="settings",
+                    data_schema=vol.Schema(schema),
+                    errors={"base": "invalid_cop_curve"},
+                    description_placeholders=self._placeholders(),
                 )
             return self.async_show_form(
                 step_id="settings",
