@@ -1,20 +1,30 @@
-name: Austria (Leistungspreis, 15-minute peak)
+name: Austria (SNE-G-V Leistungspreis, 15-minute peak)
 kind: network
 version: 1
 description: >-
-  A demand tariff where the single highest 15-minute interval inside a daily
-  window sets a per-kW charge for the whole month.
+  Austria's new network tariff (SNE-G-V): the single highest 15-minute average
+  power of the month, at any time of day, sets a per-kW charge for the whole
+  month. Optionally also the reduced SNAP and WiNAP energy windows.
 notes: >-
-  Austria's demand-based network tariff is still being prepared, so the window
-  and rate here are placeholders -- take both from your Netzbetreiber's tariff
-  sheet (Systemnutzungsentgelte) once it is published. The rate is entered
-  per kW per month, as on the sheet. Set "Time resolution" (Setup) to 15
-  minutes while this profile is active -- the peak is metered in 15-minute
-  intervals, and a coarser optimisation step under-protects it.
+  Based on E-Control's press kit of 12 October 2026. The demand charge
+  follows the highest 15-minute average import of the month, with no daily
+  window. It starts between 1 January 2027 and 1 July 2028, depending on your
+  network area (Netzbereich) -- until your operator switches over, leave the
+  rate at 0. Rates are set per network area in the Systemnutzungsentgelte-
+  Tarifverordnung, so enter yours per kW per month from your operator's
+  sheet. Set "Time resolution" (Setup) to 15 minutes while this profile is
+  active.
 
-  If your price source already includes network fees, set its tariff mode to
-  "already includes costs" rather than stacking them twice. This profile adds
-  no per-kWh bands, only the demand charge.
+  Reduced energy windows: SNAP, 10:00-16:00 from 1 April to 30 September
+  (a 20% cut of the network energy price so far), and WiNAP, 23:00-05:00 from
+  1 October to 31 March (from October 2027; the cut is not set yet). To use
+  them, enter your network energy price, which stacks on the price source --
+  leave it at 0 if your price source already includes network fees, or if
+  you only want the demand charge.
+
+  Not modelled: the flexible-draw discount (about 25% of the regular demand
+  price for the flexible part of your power), the 10 kW connection allowance,
+  and the transition from today's 90:10 to a 50:50 energy to demand split.
 
 detect:
   always: true
@@ -22,53 +32,49 @@ detect:
 options:
   demand_rate:
     name: Demand charge
-    description: Euro per kW per month, as quoted by your Netzbetreiber.
-    selector: {number: {min: 0, max: 500, step: any, mode: box}}
-  window_start:
-    advanced: true
-    name: Demand window start
-    description: Local time the daily demand window opens.
-    default: "06:00:00"
-    selector: {time: {}}
-  window_end:
-    advanced: true
-    name: Demand window end
-    description: Local time the daily demand window closes.
-    default: "22:00:00"
-    selector: {time: {}}
-  window_months:
-    advanced: true
-    name: Months the window applies
     description: >-
-      Leave every box unticked if the window runs all year. Tick only the
-      months it applies in for a seasonal window.
-    required: false
-    selector:
-      select:
-        multiple: true
-        mode: list
-        options:
-          - {value: "1", label: January}
-          - {value: "2", label: February}
-          - {value: "3", label: March}
-          - {value: "4", label: April}
-          - {value: "5", label: May}
-          - {value: "6", label: June}
-          - {value: "7", label: July}
-          - {value: "8", label: August}
-          - {value: "9", label: September}
-          - {value: "10", label: October}
-          - {value: "11", label: November}
-          - {value: "12", label: December}
+      Euro per kW per month on your highest 15-minute value, as on your
+      operator's sheet. 0 turns it off.
+    default: 0
+    selector: {number: {min: 0, max: 500, step: any, mode: box}}
+  energy_price_ct:
+    advanced: true
+    name: Network energy price
+    description: >-
+      Cent per kWh network energy price, only needed for the SNAP and WiNAP
+      windows. 0 adds no energy band.
+    default: 0
+    selector: {number: {min: 0, max: 100, step: any, mode: box}}
+  snap_reduction_pct:
+    advanced: true
+    name: SNAP reduction
+    description: Percent off the network energy price, 10:00-16:00, April to September.
+    default: 20
+    selector: {number: {min: 0, max: 100, step: any, mode: box}}
+  winap_reduction_pct:
+    advanced: true
+    name: WiNAP reduction
+    description: >-
+      Percent off the network energy price, 23:00-05:00, October to March. Not
+      set yet; starts October 2027.
+    default: 0
+    selector: {number: {min: 0, max: 100, step: any, mode: box}}
 
-energy_bands: []        # the per-kWh side is the price source; tariff.py owns it
+energy_bands:
+  - name: SNAP
+    months: [4, 5, 6, 7, 8, 9]
+    hours: "10:00-16:00"
+    buy: { adder: "{{ options.energy_price_ct * (1 - options.snap_reduction_pct / 100) / 100 }}" }
+  - name: WiNAP
+    months: [10, 11, 12, 1, 2, 3]
+    hours: "23:00-05:00"
+    buy: { adder: "{{ options.energy_price_ct * (1 - options.winap_reduction_pct / 100) / 100 }}" }
+  - name: standard
+    buy: { adder: "{{ options.energy_price_ct / 100 }}" }
 
 demand_charge:
   rate_per_kw: "{{ options.demand_rate }}"
   rate_basis: month
-  window:
-    months: "{{ options.get('window_months') or None }}"
-    hours: "{{ options.window_start }}-{{ options.window_end }}"
   measure:
     interval: 15min
     aggregate: max

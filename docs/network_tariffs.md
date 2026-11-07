@@ -37,11 +37,14 @@ other profile kind uses. Several ship built in:
   source to read, the same way `price/amber_express.yaml` already reads its
   price sensor's `forecast` attribute — but nothing wires that up today, so
   the window and rate above are entered by hand.
-- **Austria** (`network/austria_demand`) — a prepared demand tariff: the single
-  highest 15-minute interval inside a daily window sets a per-kW-per-month
-  charge for the whole month. The rate and window are entered by hand, since
-  the tariff sheets are not published yet. Set the time resolution to 15
-  minutes while it is active.
+- **Austria** (`network/austria_demand`) — the SNE-G-V tariff from E-Control: the
+  single highest 15-minute average power of the month, at any hour, sets a
+  per-kW-per-month charge. It starts between January 2027 and July 2028
+  depending on your network area, and the rate is entered by hand from your
+  operator's sheet. It can also model the reduced SNAP (10:00–16:00,
+  April–September) and WiNAP (23:00–05:00, October–March) energy windows if you
+  enter your network energy price. Set the time resolution to 15 minutes while
+  it is active. The flexible-draw discount is not modelled.
 
 Nothing on this page is specific to those utilities; see
 [Writing a profile](profiles.md) to describe your own operator's tariff sheet
