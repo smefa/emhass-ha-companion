@@ -3710,7 +3710,8 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
             description_placeholders={
                 "profiles": "\n".join(
                     f"- **{profile.name}** — {profile.description or ''}" for profile in choices
-                )
+                ),
+                "discord": DISCORD_INVITE_URL,
             },
         )
 

@@ -1,0 +1,75 @@
+name: Austria (Leistungspreis, 15-minute peak)
+kind: network
+version: 1
+description: >-
+  A demand tariff where the single highest 15-minute interval inside a daily
+  window sets a per-kW charge for the whole month.
+notes: >-
+  Austria's demand-based network tariff is still being prepared, so the window
+  and rate here are placeholders -- take both from your Netzbetreiber's tariff
+  sheet (Systemnutzungsentgelte) once it is published. The rate is entered
+  per kW per month, as on the sheet. Set "Time resolution" (Setup) to 15
+  minutes while this profile is active -- the peak is metered in 15-minute
+  intervals, and a coarser optimisation step under-protects it.
+
+  If your price source already includes network fees, set its tariff mode to
+  "already includes costs" rather than stacking them twice. This profile adds
+  no per-kWh bands, only the demand charge.
+
+detect:
+  always: true
+
+options:
+  demand_rate:
+    name: Demand charge
+    description: Euro per kW per month, as quoted by your Netzbetreiber.
+    selector: {number: {min: 0, max: 500, step: any, mode: box}}
+  window_start:
+    advanced: true
+    name: Demand window start
+    description: Local time the daily demand window opens.
+    default: "06:00:00"
+    selector: {time: {}}
+  window_end:
+    advanced: true
+    name: Demand window end
+    description: Local time the daily demand window closes.
+    default: "22:00:00"
+    selector: {time: {}}
+  window_months:
+    advanced: true
+    name: Months the window applies
+    description: >-
+      Leave every box unticked if the window runs all year. Tick only the
+      months it applies in for a seasonal window.
+    required: false
+    selector:
+      select:
+        multiple: true
+        mode: list
+        options:
+          - {value: "1", label: January}
+          - {value: "2", label: February}
+          - {value: "3", label: March}
+          - {value: "4", label: April}
+          - {value: "5", label: May}
+          - {value: "6", label: June}
+          - {value: "7", label: July}
+          - {value: "8", label: August}
+          - {value: "9", label: September}
+          - {value: "10", label: October}
+          - {value: "11", label: November}
+          - {value: "12", label: December}
+
+energy_bands: []        # the per-kWh side is the price source; tariff.py owns it
+
+demand_charge:
+  rate_per_kw: "{{ options.demand_rate }}"
+  rate_basis: month
+  window:
+    months: "{{ options.get('window_months') or None }}"
+    hours: "{{ options.window_start }}-{{ options.window_end }}"
+  measure:
+    interval: 15min
+    aggregate: max
+  period: month

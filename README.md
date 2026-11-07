@@ -94,7 +94,7 @@ Every source is a **YAML profile** — so adding support for another integration
 | Solar | Solcast, EMHASS built-in (Open-Meteo), Any entity attribute, No solar |
 | Load | House load sensor, Any entity attribute, Typical household (no sensor needed) |
 | Inverter | Deye, Ferroamp, Growatt, Sungrow, Sigenergy, Solax, Solis, Generic |
-| Tariffs | Amber Electric, Göteborg Energi |
+| Tariffs | Amber Electric, Austria (demand), Dala Energi, Göteborg Energi |
 
 
 See **[docs/data_sources.md](docs/data_sources.md)** for more detail, and **[docs/profiles.md](docs/profiles.md)** to write or contribute your own profile.
