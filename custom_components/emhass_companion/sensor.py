@@ -779,7 +779,7 @@ class LoadPlannedTemperatureSensor(EmhassLoadEntity, SensorEntity):
                 if self.load.is_water_tank
                 else None
             )
-            config = self.load.thermal_config(current)
+            config = self.coordinator.effective_thermal_config(self.load, current)
             if config is None:
                 return None
             minimums, maximums = config.comfort_band(

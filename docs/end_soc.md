@@ -45,6 +45,17 @@ solar forecast entities (**Configure → Solar forecast**) lets *Optimized*
 see one more day of sun past the horizon, instead of inferring it from the
 previous day's shape.
 
+### Longer horizons
+
+*Optimized* always looks one day past the end of your planning horizon, so a
+24 h horizon plans 48 h and a 48 h horizon plans 72 h; the target is the level
+the cheapest 72 h plan holds at hour 48. Prices, solar and load past what is
+known are inferred from the same time one day earlier, so the more of the
+window that is a guess, the less the target can be trusted. A longer horizon
+also costs more to compute (roughly in proportion to its steps), and the first
+run after a restart falls back to *Same as start* until a previous plan exists
+to borrow the load shape from.
+
 ## Value of leftover energy
 
 *Backend requirement: EMHASS **≥ v0.18.5**. Advanced section of

@@ -252,16 +252,24 @@ def _dig(data: Any, path: str | None) -> Any:
     if not path:
         return data
     current = data
-    for part in str(path).split("."):
-        if isinstance(current, dict):
-            if part not in current:
-                available = ", ".join(sorted(map(str, current))) or "(empty)"
-                raise ProfileError(f"Response path '{path}' not found; available keys: {available}")
-            current = current[part]
-        else:
+    parts = str(path).split(".")
+    index = 0
+    while index < len(parts):
+        if not isinstance(current, dict):
             raise ProfileError(
                 f"Response path '{path}' expected a mapping, got {type(current).__name__}"
             )
+        # Keys can contain dots themselves (entity ids such as ``weather.home``),
+        # so take the shortest run of parts that names a key.
+        for end in range(index + 1, len(parts) + 1):
+            key = ".".join(parts[index:end])
+            if key in current:
+                current = current[key]
+                index = end
+                break
+        else:
+            available = ", ".join(sorted(map(str, current))) or "(empty)"
+            raise ProfileError(f"Response path '{path}' not found; available keys: {available}")
     return current
 
 

@@ -8,6 +8,12 @@ from typing import Any
 
 from packaging.version import InvalidVersion, Version
 
+from .const import (
+    CONF_SOLVER_MIP_REL_GAP,
+    CONF_SOLVER_TIMEOUT,
+    DEFAULT_SOLVER_MIP_REL_GAP,
+    DEFAULT_SOLVER_TIMEOUT,
+)
 from .models import BatteryConfig, GridConfig, HybridInverterConfig
 from .profiles.schema import ProfileError
 
@@ -22,9 +28,11 @@ class Setting:
     profile_override: bool = True
 
 
+_SOLVER_SETTINGS = frozenset({CONF_SOLVER_TIMEOUT, CONF_SOLVER_MIP_REL_GAP})
+
 _DEFAULTS: dict[str, Any] = {
-    "lp_solver_timeout": 45,
-    "lp_solver_mip_rel_gap": 0.01,
+    CONF_SOLVER_TIMEOUT: DEFAULT_SOLVER_TIMEOUT,
+    CONF_SOLVER_MIP_REL_GAP: DEFAULT_SOLVER_MIP_REL_GAP,
     "num_threads": 0,
     "historic_days_to_retrieve": 2,
     "load_negative": False,
@@ -225,6 +233,7 @@ def resolve_effective_settings(
     send_derating: bool = True,
     send_soc_final_reward: bool = True,
     use_pv: bool = False,
+    solver_settings: dict[str, Any] | None = None,
 ) -> EffectiveSettings:
     """Apply defaults, Companion settings, supported profiles, then invariants.
 
@@ -258,6 +267,15 @@ def resolve_effective_settings(
             continue
         overrides[name] = deepcopy(value)
     values.update(overrides)
+    # The user's own Advanced choice outranks a profile: it is the one place
+    # they said what they want these limits to be.
+    values.update(
+        {
+            name: value
+            for name, value in (solver_settings or {}).items()
+            if name in _SOLVER_SETTINGS and value is not None
+        }
+    )
     if values["load_forecast_method"] == "mlforecaster":
         for name, default in _ML_DEFAULTS.items():
             values.setdefault(name, deepcopy(default))
