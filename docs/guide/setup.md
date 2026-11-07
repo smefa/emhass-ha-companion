@@ -32,8 +32,8 @@ creating a house load sensor and selecting an existing source.
       integration's `get_prices_for_date` action to fetch today's and
       tomorrow's day-ahead prices.
     - **Nord Pool (custom-components/nordpool)** — reads the `raw_today` /
-      `raw_tomorrow` attributes of a sensor from the HACS Nord Pool
-      integration.
+      `raw_tomorrow` attributes of a sensor from the Nord Pool
+      integration installed from the Marketplace.
     - **ENTSO-E** — reads the `prices` attribute of the ENTSO-E
       integration's average-price sensor.
     - **Tibber** — asks Tibber for the price series of one of your homes.

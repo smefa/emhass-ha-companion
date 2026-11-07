@@ -8,7 +8,7 @@
 #
 #  Reload the integration. Your profile appears in
 #  Configure → Battery control. That directory is outside the integration, so
-#  a HACS update never deletes it.
+#  a Marketplace update never deletes it.
 #
 #  To contribute it back, put it in
 #  custom_components/emhass_companion/profiles/builtin/inverter/ instead.
@@ -64,11 +64,11 @@ models:
 
 # The integration this profile needs, shown next to the name in the picker.
 # Say this even when it seems obvious. Several brands have a core integration
-# that is read-only and a HACS one that can actually write, and a user who
+# that is read-only and a Marketplace one that can actually write, and a user who
 # picks their brand and then finds control impossible has had the worst
 # possible experience. Naming the route up front is the only thing that
 # prevents it.
-requires: examplecorp_modbus (HACS) — not the core examplecorp integration
+requires: examplecorp_modbus (Marketplace) — not the core examplecorp integration
 
 docs: https://github.com/someone/examplecorp-modbus
 
@@ -91,7 +91,7 @@ notes: >-
 # NOTE: no `detect:` block. Inverter profiles are always offered and the user
 # picks their own hardware. Auto-detection was deliberately dropped: two of the
 # most common routes cannot be detected at all (the Sungrow Modbus package has
-# no integration domain; core GoodWe and its HACS fork share one), and a wrong
+# no integration domain; core GoodWe and its Marketplace fork share one), and a wrong
 # guess about the control model is far more dangerous than a list to scroll.
 
 # --- What the numbers mean ---------------------------------------------------

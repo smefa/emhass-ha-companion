@@ -1,7 +1,7 @@
 # Dashboard cards
 
 Two cards ship with the integration and register themselves — no separate
-HACS install, and no way for the cards and the integration to drift to
+Marketplace install, and no way for the cards and the integration to drift to
 different versions.
 
 **`custom:emhass-plan-card`** — the whole plan in one view: solar as a filled
