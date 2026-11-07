@@ -1114,6 +1114,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             send_soc_final_reward=self.soc_final_reward_supported,
             # Configured enablement, not whether a series happens to be present.
             use_pv=bool(config.pv.key),
+            solver_settings=config.solver,
         )
         return effective.persistent(), effective.warnings
 
@@ -2236,6 +2237,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
                 and version_at_least(self.backend_version, MIN_EMHASS_VERSION_CHARGE_DERATING)
             ),
             send_soc_final_reward=self.soc_final_reward_supported,
+            solver_settings=config.solver,
         )
         built = build_payload(inputs)
         for series, method, label in (

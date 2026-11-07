@@ -453,7 +453,8 @@
           "temperature": "Utetemperatur",
           "network": "Nättariff",
           "metering": "Kostnad och besparing",
-          "compatibility": "EMHASS entitetsnamn"
+          "compatibility": "EMHASS entitetsnamn",
+          "advanced": "Avancerade inställningar"
         }
       },
       "load": {
@@ -887,6 +888,18 @@
               "battery_discharge_energy_entity": "Energi ut ur batteriet."
             }
           }
+        }
+      },
+      "advanced": {
+        "title": "Avancerade inställningar",
+        "description": "Gränser för optimerarens lösare, som skickas med varje körning och går före det som är sparat i EMHASS. Standardvärdena passar de flesta; höj tidsgränsen om körningar ibland slutar utan en möjlig plan.",
+        "data": {
+          "lp_solver_timeout": "Lösarens tidsgräns",
+          "lp_solver_mip_rel_gap": "Lösarens godtagna avvikelse"
+        },
+        "data_description": {
+          "lp_solver_timeout": "Sekunder som lösaren får söka innan den måste stoppa (lp_solver_timeout). Standard 45, högst 240 (anropet till EMHASS ger upp efter 300). Långa horisonter eller många styrbara laster och värmetankar kan behöva mer.",
+          "lp_solver_mip_rel_gap": "Relativ avvikelse där lösaren godtar en plan som tillräckligt bra (lp_solver_mip_rel_gap). Standard 0,01 = inom 1 % av lägsta möjliga kostnad. Lägre ger bättre plan men kan ta längre tid; högre blir klart snabbare."
         }
       }
     },

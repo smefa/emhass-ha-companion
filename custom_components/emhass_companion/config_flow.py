@@ -120,6 +120,9 @@ from .const import (
     CONF_SETBACK_TEMPERATURE,
     CONF_SINGLE_CONSTANT,
     CONF_SOC_ENTITY,
+    CONF_SOLVER,
+    CONF_SOLVER_MIP_REL_GAP,
+    CONF_SOLVER_TIMEOUT,
     CONF_STANDBY_LOSS,
     CONF_STARTUP_PENALTY,
     CONF_SURPLUS_HEADROOM,
@@ -163,6 +166,8 @@ from .const import (
     DEFAULT_SOC_MAX,
     DEFAULT_SOC_MIN,
     DEFAULT_SOC_TARGET,
+    DEFAULT_SOLVER_MIP_REL_GAP,
+    DEFAULT_SOLVER_TIMEOUT,
     DEFAULT_SURPLUS_HEADROOM_W,
     DEFAULT_SURPLUS_PRIORITY,
     DEFAULT_TANK_VOLUME,
@@ -3030,7 +3035,48 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
                 "network",
                 "metering",
                 "compatibility",
+                "advanced",
             ],
+        )
+
+    async def async_step_advanced(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """The LP solver limits, sent with every run.
+
+        Its own menu entry, last in the list: these are tuning knobs for a
+        problem that is slow or infeasible within the time allowed, not
+        something describing the house.
+        """
+        options = dict(self.config_entry.options)
+        stored = options.get(CONF_SOLVER) or {}
+        if user_input is not None:
+            options[CONF_SOLVER] = {
+                CONF_SOLVER_TIMEOUT: int(user_input[CONF_SOLVER_TIMEOUT]),
+                CONF_SOLVER_MIP_REL_GAP: float(user_input[CONF_SOLVER_MIP_REL_GAP]),
+            }
+            return self.async_create_entry(data=options)
+
+        return self.async_show_form(
+            step_id="advanced",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_SOLVER_TIMEOUT,
+                        default=stored.get(CONF_SOLVER_TIMEOUT, DEFAULT_SOLVER_TIMEOUT),
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=5, max=240, step=1, unit_of_measurement="s", mode="box"
+                        )
+                    ),
+                    vol.Required(
+                        CONF_SOLVER_MIP_REL_GAP,
+                        default=stored.get(CONF_SOLVER_MIP_REL_GAP, DEFAULT_SOLVER_MIP_REL_GAP),
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(min=0, max=0.5, step=0.001, mode="box")
+                    ),
+                }
+            ),
         )
 
     async def async_step_metering(

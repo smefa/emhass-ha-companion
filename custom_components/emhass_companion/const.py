@@ -934,6 +934,13 @@ SAVINGS_FORECAST_HOURS: Final = 24
 # nothing to warn the user. A wrong number on a silent sensor is worse than no
 # sensor, so those are left out.
 CONF_EMHASS_STANDARD_NAMES: Final = "emhass_standard_names"
+# Advanced options: the LP solver limits sent with every run. Stored as a dict
+# under CONF_SOLVER; an entry that never opened the page keeps the defaults.
+CONF_SOLVER: Final = "solver"
+CONF_SOLVER_TIMEOUT: Final = "lp_solver_timeout"
+CONF_SOLVER_MIP_REL_GAP: Final = "lp_solver_mip_rel_gap"
+DEFAULT_SOLVER_TIMEOUT: Final = 45
+DEFAULT_SOLVER_MIP_REL_GAP: Final = 0.01
 # The entity ids these sensors had before the option was first switched on.
 # Kept so that switching it off restores exactly what the user had, rather than
 # whatever Home Assistant would generate today -- a friendly name or a

@@ -453,7 +453,8 @@
           "temperature": "Outdoor temperature",
           "network": "Network tariff",
           "metering": "Cost and savings",
-          "compatibility": "EMHASS entity names"
+          "compatibility": "EMHASS entity names",
+          "advanced": "Advanced settings"
         }
       },
       "load": {
@@ -887,6 +888,18 @@
               "battery_discharge_energy_entity": "Energy out of the battery."
             }
           }
+        }
+      },
+      "advanced": {
+        "title": "Advanced settings",
+        "description": "Limits for the optimiser's solver, sent with every run and overriding what is stored in EMHASS. The defaults suit most setups; raise the time limit if runs sometimes end without a feasible plan.",
+        "data": {
+          "lp_solver_timeout": "Solver time limit",
+          "lp_solver_mip_rel_gap": "Solver accepted gap"
+        },
+        "data_description": {
+          "lp_solver_timeout": "Seconds the solver may search before it must stop (lp_solver_timeout). Default 45, maximum 240 (the request to EMHASS gives up after 300). Long horizons or many deferrable loads and thermal tanks can need more.",
+          "lp_solver_mip_rel_gap": "Relative gap at which the solver accepts a plan as good enough (lp_solver_mip_rel_gap). Default 0.01 = within 1% of the best possible cost. Lower finds a better plan but can take longer; higher finishes sooner."
         }
       }
     },

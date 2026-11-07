@@ -351,3 +351,25 @@ def test_the_pv_sensor_reaches_the_request():
     """EMHASS's history fetch for a series-less MPC run reads it."""
     settings = _resolve(profile_settings={"sensor_power_photovoltaics": "sensor.pv_now"})
     assert settings.runtime()["sensor_power_photovoltaics"] == "sensor.pv_now"
+
+
+def test_solver_limits_default_and_follow_the_advanced_setting():
+    default = _resolve().runtime()
+    assert default["lp_solver_timeout"] == 45
+    assert default["lp_solver_mip_rel_gap"] == 0.01
+
+    chosen = _resolve(
+        solver_settings={"lp_solver_timeout": 120, "lp_solver_mip_rel_gap": 0.02, "other": 1}
+    )
+    assert chosen.runtime()["lp_solver_timeout"] == 120
+    assert chosen.runtime()["lp_solver_mip_rel_gap"] == 0.02
+    assert chosen.persistent()["lp_solver_timeout"] == 120
+    assert "other" not in chosen.runtime()
+
+
+def test_solver_advanced_setting_outranks_a_profile():
+    settings = _resolve(
+        profile_settings={"lp_solver_timeout": 10},
+        solver_settings={"lp_solver_timeout": 90},
+    )
+    assert settings.runtime()["lp_solver_timeout"] == 90

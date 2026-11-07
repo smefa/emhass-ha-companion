@@ -545,6 +545,8 @@ class PayloadInputs:
     """Whether this backend accepts ``battery_soc_final_reward_factor``
     (EMHASS 0.18.5+). The factor still lives on :attr:`battery`; this only
     gates sending it. Unknown/older backends keep the two-sided soft target."""
+    solver_settings: dict[str, Any] | None = None
+    """The user's LP solver limits (Advanced settings); None keeps the defaults."""
     row_zero_mode: str = ROW_ZERO_NEAREST
     """Rounding asserted through ``method_ts_round`` and used by every array."""
     backend_version: str | None = None
@@ -1018,6 +1020,7 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
         send_derating=inputs.send_charge_power_derating,
         send_soc_final_reward=inputs.send_soc_final_reward,
         use_pv=bool(inputs.pv) if inputs.use_pv is None else inputs.use_pv,
+        solver_settings=inputs.solver_settings,
     )
     warnings = list(effective.warnings)
     payload = effective.runtime()
