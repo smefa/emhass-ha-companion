@@ -34,6 +34,14 @@ load*.
 - **Response delay** — how long after switching on before the temperature
   responds. An hour or more for underfloor heating in concrete, 0 for a
   radiator or fan.
+- **Heat pump COP curve** — optional, also under **Advanced settings**. For a
+  heat pump whose efficiency drops in the cold, enter outdoor temperature and
+  COP pairs, such as `7: 5.2, 0: 4.0, -10: 3.0`. The first pair is the outdoor
+  temperature where you measured the **Heating rate**. The heating rate is
+  lowered to match the coldest hour of the forecast, so cold spells get more
+  heating hours. This needs a **Home Assistant weather entity** or an entity
+  attribute as the outdoor temperature source. Leave it empty to ignore it.
+  Heating only.
 - **Running sensor** — optional; tells the optimiser whether the load is
   actually running.
 - **Control entity** — optional; if set, the integration switches this on
@@ -63,7 +71,8 @@ It also gets one extra sensor:
 **Edit thermal load** in the integration's menu only asks for the things that
 aren't controls: **Name**, **Temperature sensor**, **Heats or cools**,
 **Running sensor** and **Control entity**. Everything else is on the load's
-own page.
+own page. A **Room, advanced heat pump** load also edits its house and heat
+pump settings there (see below).
 
 ## Outdoor temperature
 
@@ -72,7 +81,8 @@ own page.
 Once you have at least one thermal load, **Configure → Outdoor
 temperature** appears, asking where the outdoor temperature forecast comes
 from — it's what the room drifts towards while the load is off. A source is
-required:
+required. A **Room, advanced heat pump** load, or a room with a **Heat pump
+COP curve**, needs one of the first two sources:
 
 - **Home Assistant weather entity** — hourly forecast via
   `weather.get_forecasts`. Pick one that actually offers hourly data; daily or
@@ -93,6 +103,83 @@ an entity attribute** wants a **Forecast entity**, an **Attribute name**, a
 **Timestamp field** and a **Temperature field** — values must be in degrees
 Celsius, which is what EMHASS's thermal model assumes. **EMHASS built-in**
 asks for nothing.
+
+## Room, advanced heat pump
+
+Choose **Room, advanced heat pump** under **Add thermal load** if you would
+rather describe your house than measure a heating rate. EMHASS then calculates
+the heat pump's efficiency (COP) and the house's heat demand from the outdoor
+forecast at each step. A cold night costs more heat and more electricity
+without any tuning. Use **Room** instead if you have measured a heating rate
+that works, or if the load cools.
+
+### Before you start
+
+- An outdoor temperature source the Companion can read: a **Home Assistant
+  weather entity** or a **Temperature forecast from an entity attribute**.
+  **EMHASS built-in (Open-Meteo)** is not enough, because the Companion needs
+  the forecast itself. Without one, no plan is made and the error names the
+  load.
+- EMHASS **0.18.8 or newer**.
+- A rough idea of the house's yearly heat demand. An energy certificate, or
+  last year's delivered heat divided by the heated floor area, is a good
+  start. Delivered heat is not the electricity bought: multiply the heat
+  pump's yearly electricity use by its seasonal COP.
+
+### The setup form
+
+- **Room temperature sensor** — required. Every plan starts from this reading.
+- **Electrical power when running** — what the heat pump draws while it runs,
+  in W. EMHASS multiplies it by the calculated COP to get the heat delivered.
+- **Comfort / Setback / Maximum temperature** and **Comfort starts / ends** —
+  the same band as for a **Room** load. Setback must not be above comfort, and
+  comfort must not be above maximum.
+- **Thermal mass** — the volume of concrete-equivalent mass that stores the
+  heat, in m³. A larger value means the temperature changes more slowly. If
+  you are unsure, start low and raise it if the plan expects the room to cool
+  faster than it really does.
+- **Heated floor area** — in m².
+- **Specific heating demand** — the house's yearly heat demand per m², in
+  kWh/m². Often 50 to 150 for a house.
+- **Supply temperature** — the water temperature sent to the radiators or
+  floor heating. Typically 30 to 35 °C for floor heating and 45 to 55 °C for
+  radiators. A lower value gives a higher COP. Starts at 35.
+- **Running sensor** / **Control entity** — optional, as for any thermal load.
+- **Advanced settings** — the defaults suit most houses:
+  - **Carnot efficiency** — how close the heat pump gets to an ideal one.
+    0.4 is typical. EMHASS keeps the resulting COP between 1 and 8.
+  - **Base temperature** — the outdoor temperature above which the house needs
+    no heating. Starts at 18 °C.
+  - **Annual heating degree days** — the degree days of the year your specific
+    heating demand refers to. Starts at 3000.
+  - **Thermal inertia** — hours before delivered heat shows in the room, for
+    example 1 to 3 for floor heating in concrete. Starts at 0 (immediately).
+
+### After setup
+
+Power, the three temperatures and the comfort times become controls on the
+load's device page, like for a **Room** load. The house and heat pump settings
+are not device controls. To change them, use **Edit thermal load**, which asks
+for the name, sensors, control entity and every model setting above. The
+**Heating rate**, **Heat loss constant** and **Response delay** controls do not
+exist for this type.
+
+If the room is too cold to reach its comfort temperature in time, the plan
+does not fail. It aims for the warmest temperature the heat pump can reach
+instead, and the *Last request to EMHASS* sensor's `warnings` attribute says so.
+If the room sensor is unavailable, EMHASS starts the plan from 20 °C.
+
+### Getting the numbers right
+
+Compare **Planned temperature** with the real room temperature over a few
+days:
+
+- The planned temperature **falls faster** than the real one → raise
+  **Thermal mass**, or lower **Specific heating demand**.
+- The plan **runs more** than the heat pump really needs → lower **Specific
+  heating demand**, or check **Supply temperature**.
+- Comfort is **missed** at the start of the window → raise **Specific heating
+  demand**, or set **Thermal inertia** if heat takes time to arrive.
 
 ## Water tank with an immersion heater
 
