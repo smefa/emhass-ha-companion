@@ -835,7 +835,7 @@
       },
       "network": {
         "title": "Nättariff",
-        "description": "Nätägarens egen tariffstruktur, ovanpå det som Köp- och säljpriser redan sätter samman: tidsdifferentierade energiavgifter och (bevakas ännu, men styr inget i planen) en effektavgift. Lämna tomt om nätavgiften är en fast avgift per kWh utan tidsstyrning eller effektkomponent -- då finns inget här att lägga till.\n\n{profiles}\n\nSaknas din nätägare? Lägg en egen YAML-fil i `/config/emhass_companion/profiles/network/` och ladda om integrationen - se dokumentationen för exempel. Färdiga profiler hittar och delar du på [Discord]({discord}).",
+        "description": "Välj din nätägares nättariff, eller lämna tomt om nätavgiften är en fast avgift per kWh. Se [dokumentationen]({docs}) för vad varje profil gör och hur du lägger till en egen. Färdiga profiler hittar och delar du på [Discord]({discord}).",
         "data": {
           "profile": "Nättariffprofil"
         }

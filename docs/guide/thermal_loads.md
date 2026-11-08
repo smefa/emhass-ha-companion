@@ -148,6 +148,16 @@ that works, or if the load cools.
 - **Advanced settings** — the defaults suit most houses:
   - **Carnot efficiency** — how close the heat pump gets to an ideal one.
     0.4 is typical. EMHASS keeps the resulting COP between 1 and 8.
+  - **Constant COP** — optional, 1 to 8. Use a flat COP instead of the
+    calculation, for example the B0/W35 or B0/W45 figure from the manual of a
+    ground-source heat pump, whose COP barely follows the outdoor air. The
+    outdoor temperature then no longer affects the COP, but it still drives
+    the house's heat demand.
+  - **Source temperature** — optional, in °C. The cold-side temperature the
+    COP is calculated from, instead of the outdoor air: a typical brine
+    temperature for a ground-source heat pump. It is a fixed estimate, not a
+    sensor, and must be below the supply temperature. A **Constant COP**
+    takes precedence. Leave both empty for an air-source heat pump.
   - **Base temperature** — the outdoor temperature above which the house needs
     no heating. Starts at 18 °C.
   - **Annual heating degree days** — the degree days of the year your specific

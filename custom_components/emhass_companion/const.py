@@ -10,7 +10,9 @@ DOMAIN: Final = "emhass_companion"
 # Community invite shown in the inverter step. Strings may not hold URLs (hassfest),
 # so the link reaches the text through a description placeholder.
 DISCORD_INVITE_URL: Final = "https://discord.gg/ugDwJwynC5"
-NETWORK_TARIFF_DOCS_URL: Final = "https://smefa.github.io/emhass-ha-companion/guide/network_tariffs/"
+NETWORK_TARIFF_DOCS_URL: Final = (
+    "https://smefa.github.io/emhass-ha-companion/guide/network_tariffs/"
+)
 
 # --- EMHASS backend contract -------------------------------------------------
 
