@@ -8,7 +8,7 @@ Built in today:
 
 | Kind | Profiles |
 |---|---|
-| Price | Nord Pool (core), Nord Pool (HACS), ENTSO-E, Tibber, Fixed tariff, Any entity attribute |
+| Price | Nord Pool (core), Nord Pool (Marketplace), ENTSO-E, Tibber, Fixed tariff, Any entity attribute |
 | Solar | Solcast, EMHASS built-in (Open-Meteo), Any entity attribute, No solar |
 | Load | House load sensor, Any entity attribute, Typical household (no sensor needed) |
 | Inverter | Mode select plus power number, Scripts |

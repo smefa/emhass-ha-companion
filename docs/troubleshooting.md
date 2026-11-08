@@ -204,6 +204,15 @@ Setting *Energy needed* to less than the day's surplus gives the clamp something
 firmer to work with — and it is delivered in full, never derated. See
 [Surplus loads](surplus_loads.md#the-modulation-margin).
 
+**Runs sometimes end without a feasible plan, or take very long.** The
+optimiser's solver stops after a time limit (45 s by default) and accepts a plan
+once it is within 1 % of the best possible cost. A long horizon, or many
+deferrable loads and hot-water tanks, can need more time. Open **Configure →
+Advanced settings** and raise *Solver time limit* (up to 240 s). *Solver accepted
+gap* trades plan quality for speed: a higher value finishes sooner, a lower one
+finds a better plan but takes longer. These values are sent with every run and
+replace what is stored in EMHASS.
+
 **"The optimisation problem is infeasible."** EMHASS itself only says
 "infeasible", for the whole problem. When that happens, the integration checks
 the request it just sent and the repair issue names the most likely cause,

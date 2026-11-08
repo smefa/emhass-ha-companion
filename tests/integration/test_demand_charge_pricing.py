@@ -31,6 +31,7 @@ from custom_components.emhass_companion.network_calendar import (
     NetworkCalendar,
     Window,
 )
+from custom_components.emhass_companion.sensor import DemandChargeRateSensor
 
 NOW = datetime(2026, 8, 4, 12, 0, tzinfo=UTC)
 
@@ -344,6 +345,68 @@ async def test_build_sends_the_priced_peak_and_the_floor_on_mpc(hass: HomeAssist
     assert built.payload["capacity_cost_per_kw"] == 45.0
     assert built.payload["current_period_peak"] == 3200
     assert "capacity_charge_window" not in built.payload  # all-day window, no mask needed
+
+
+async def test_build_raises_each_components_floor_to_its_min_peak(hass: HomeAssistant) -> None:
+    coordinator = _coordinator(hass)
+    upper = _demand(window=None, rate_per_kw=3.0)
+    upper.min_peak_kw = 10.0
+    upper.name = "upper"
+    lower = _demand(window=None, rate_per_kw=5.0)
+    lower.name = "lower"
+    coordinator.network_calendar = NetworkCalendar(demand_charges=[lower, upper])
+    coordinator.backend_version = "0.18.3"
+    coordinator.peak_trackers = [_StubTracker(floor_kw=4.0), _StubTracker(floor_kw=4.0)]
+
+    _, built = await coordinator._build(ACTION_MPC)
+    assert built.payload["current_period_peak"] == [4000, 10000]
+
+    coordinator.peak_trackers = [_StubTracker(floor_kw=12.0), _StubTracker(floor_kw=12.0)]
+    _, built = await coordinator._build(ACTION_MPC)
+    assert built.payload["current_period_peak"] == [12000, 12000]
+
+
+async def test_rate_sensor_reports_the_tier_limit_and_the_real_second_rate(
+    hass: HomeAssistant,
+) -> None:
+    coordinator = _coordinator(hass)
+    lower = _demand(window=None, rate_per_kw=5.0)
+    lower.name = "lower"
+    upper = _demand(window=None, rate_per_kw=3.0)
+    upper.name = "upper"
+    upper.min_peak_kw = 10.0
+    coordinator.network_calendar = NetworkCalendar(demand_charges=[lower, upper])
+    coordinator.backend_version = "0.18.3"
+
+    attributes = DemandChargeRateSensor(coordinator).extra_state_attributes
+
+    assert attributes["tier_limit_kw"] == 10.0
+    assert attributes["rate_above"] == 8.0
+
+
+async def test_rate_sensor_has_no_tier_attributes_without_a_limit(hass: HomeAssistant) -> None:
+    coordinator = _coordinator(hass)
+    coordinator.network_calendar = NetworkCalendar(demand_charges=[_demand(window=None)])
+    coordinator.backend_version = "0.18.3"
+
+    attributes = DemandChargeRateSensor(coordinator).extra_state_attributes
+
+    assert "tier_limit_kw" not in attributes
+    assert "rate_above" not in attributes
+
+
+async def test_build_sends_tier_floor_without_a_peak_tracker(hass: HomeAssistant) -> None:
+    coordinator = _coordinator(hass)
+    upper = _demand(window=None, rate_per_kw=3.0)
+    upper.min_peak_kw = 10.0
+    upper.name = "upper"
+    lower = _demand(window=None, rate_per_kw=5.0)
+    lower.name = "lower"
+    coordinator.network_calendar = NetworkCalendar(demand_charges=[lower, upper])
+    coordinator.backend_version = "0.18.3"
+
+    _, built = await coordinator._build(ACTION_MPC)
+    assert built.payload["current_period_peak"] == [0, 10000]
 
 
 async def test_build_sends_the_priced_peak_with_a_mask_on_a_masking_backend(

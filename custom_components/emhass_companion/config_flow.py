@@ -33,8 +33,10 @@ from .configuration import EmhassConfig
 from .const import (
     ADVANCED_SECTION,
     CONF_ADDER,
+    CONF_ANNUAL_HDD,
     CONF_API_KEY,
     CONF_AREA,
+    CONF_BASE_TEMPERATURE,
     CONF_BATTERY_CHARGE_ENERGY_ENTITY,
     CONF_BATTERY_DISCHARGE_ENERGY_ENTITY,
     CONF_BATTERY_POWER_ENTITY,
@@ -46,6 +48,7 @@ from .const import (
     CONF_BATTERY_SOC_SURPLUS_THRESHOLD,
     CONF_BATTERY_STRESS_COST,
     CONF_BATTERY_STRESS_SEGMENTS,
+    CONF_CARNOT_EFFICIENCY,
     CONF_CHARGE_EFFICIENCY,
     CONF_CHARGE_POWER_DERATING,
     CONF_COMFORT_END,
@@ -55,6 +58,7 @@ from .const import (
     CONF_COMPUTE_CURTAILMENT,
     CONF_CONTROL_ENTITY,
     CONF_COOLING_CONSTANT,
+    CONF_COP_CURVE,
     CONF_DAYAHEAD_FALLBACK_TIME,
     CONF_DISCHARGE_EFFICIENCY,
     CONF_DRAW_END,
@@ -64,6 +68,7 @@ from .const import (
     CONF_EMHASS_STANDARD_NAMES,
     CONF_END_SOC_MODE,
     CONF_ENERGY_NEEDED,
+    CONF_FLOOR_AREA,
     CONF_GRID_EXPORT_ENERGY_ENTITY,
     CONF_GRID_EXPORT_LIMIT_ENTITY,
     CONF_GRID_IMPORT_ENERGY_ENTITY,
@@ -78,6 +83,7 @@ from .const import (
     CONF_HOT_WATER_PERIODS,
     CONF_HOUSE_LOAD_TOTAL_ENTITY,
     CONF_HYBRID_INVERTER,
+    CONF_INERTIA_TIME_CONSTANT,
     CONF_INVERTER,
     CONF_INVERTER_AC_INPUT_MAX,
     CONF_INVERTER_AC_OUTPUT_MAX,
@@ -120,8 +126,13 @@ from .const import (
     CONF_SETBACK_TEMPERATURE,
     CONF_SINGLE_CONSTANT,
     CONF_SOC_ENTITY,
+    CONF_SOLVER,
+    CONF_SOLVER_MIP_REL_GAP,
+    CONF_SOLVER_TIMEOUT,
+    CONF_SPECIFIC_HEATING_DEMAND,
     CONF_STANDBY_LOSS,
     CONF_STARTUP_PENALTY,
+    CONF_SUPPLY_TEMPERATURE,
     CONF_SURPLUS_HEADROOM,
     CONF_SURPLUS_PRIORITY,
     CONF_TANK_VOLUME,
@@ -129,6 +140,7 @@ from .const import (
     CONF_TEMPERATURE_SENSOR,
     CONF_TEMPLATE,
     CONF_THERMAL_INERTIA,
+    CONF_THERMAL_MASS,
     CONF_THERMAL_MODEL,
     CONF_TIME_STEP,
     CONF_URL,
@@ -163,6 +175,8 @@ from .const import (
     DEFAULT_SOC_MAX,
     DEFAULT_SOC_MIN,
     DEFAULT_SOC_TARGET,
+    DEFAULT_SOLVER_MIP_REL_GAP,
+    DEFAULT_SOLVER_TIMEOUT,
     DEFAULT_SURPLUS_HEADROOM_W,
     DEFAULT_SURPLUS_PRIORITY,
     DEFAULT_TANK_VOLUME,
@@ -170,6 +184,7 @@ from .const import (
     DEFAULT_URL,
     DEFAULT_WEIGHT_BATTERY_CHARGE,
     DEFAULT_WEIGHT_BATTERY_DISCHARGE,
+    DISCORD_INVITE_URL,
     DOMAIN,
     END_SOC_MODES,
     INVERTER_FALLBACK_PROFILE,
@@ -196,6 +211,7 @@ from .const import (
     SUBENTRY_TYPE_THERMAL,
     TEMPERATURE_ADVANCED_PROFILES,
     TEMPERATURE_PROFILE_ORDER,
+    THERMAL_MODEL_HEAT_PUMP_ROOM,
     THERMAL_MODEL_ROOM,
     THERMAL_MODEL_WATER_TANK,
 )
@@ -210,6 +226,15 @@ from .forms import (
 )
 from .forms import (
     with_advanced as _with_advanced,
+)
+from .heat_pump_room import (
+    DEFAULT_ANNUAL_HDD,
+    DEFAULT_BASE_TEMPERATURE,
+    DEFAULT_CARNOT_EFFICIENCY,
+    DEFAULT_INERTIA_HOURS,
+    DEFAULT_SUPPLY_TEMPERATURE,
+    MAX_INERTIA_HOURS,
+    HeatPumpModel,
 )
 from .metering import async_energy_dashboard_defaults
 from .models import parse_charge_power_derating
@@ -236,6 +261,7 @@ from .thermal import (
     MIN_THERMAL_TEMPERATURE,
     SENSE_HEAT,
     SENSES,
+    parse_cop_curve,
 )
 from .util import version_at_least
 from .water_tank import MAX_HOT_WATER_PERIODS
@@ -1062,6 +1088,7 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema(
                 {vol.Optional(CONF_PROFILE): _inverter_profile_selector(choices)}
             ),
+            description_placeholders={"discord": DISCORD_INVITE_URL},
         )
 
     async def async_step_inverter_options(
@@ -1332,7 +1359,7 @@ window, and the two entities. Only used when adding -- reconfigure is short
 enough to stay flat."""
 
 THERMAL_ADVANCED_KEYS: Final = frozenset(
-    {CONF_HEATING_RATE, CONF_COOLING_CONSTANT, CONF_THERMAL_INERTIA}
+    {CONF_HEATING_RATE, CONF_COOLING_CONSTANT, CONF_THERMAL_INERTIA, CONF_COP_CURVE}
 )
 """The thermal model's tuning. All have defaults, so the section can stay closed."""
 
@@ -1646,6 +1673,7 @@ def thermal_schema(
             _optional_blank(CONF_CONTROL_ENTITY, defaults): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain=list(CONTROL_ENTITY_DOMAINS))
             ),
+            _optional_blank(CONF_COP_CURVE, defaults): selector.TextSelector(),
         }
     )
     return _split_advanced(schema, THERMAL_ADVANCED_KEYS) if initial else schema
@@ -1664,7 +1692,11 @@ def thermal_kind_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
             selector.SelectSelectorConfig(
                 mode=selector.SelectSelectorMode.DROPDOWN,
                 translation_key="thermal_model",
-                options=[THERMAL_MODEL_ROOM, THERMAL_MODEL_WATER_TANK],
+                options=[
+                    THERMAL_MODEL_ROOM,
+                    THERMAL_MODEL_HEAT_PUMP_ROOM,
+                    THERMAL_MODEL_WATER_TANK,
+                ],
             )
         ),
     }
@@ -1690,7 +1722,14 @@ def water_tank_schema(
 ) -> dict[Any, Any]:
     """Immersion tank settings, with entity-owned values offered only at creation."""
     room_fields = thermal_schema(defaults, step_minutes, initial=initial)
-    excluded = {CONF_SENSE, CONF_NAME, ADVANCED_SECTION, CONF_COMFORT_START, CONF_COMFORT_END}
+    excluded = {
+        CONF_SENSE,
+        CONF_NAME,
+        ADVANCED_SECTION,
+        CONF_COMFORT_START,
+        CONF_COMFORT_END,
+        CONF_COP_CURVE,
+    }
     if not initial:
         excluded.discard(CONF_NAME)
     schema = {key: value for key, value in room_fields.items() if str(key) not in excluded}
@@ -1759,6 +1798,94 @@ def water_tank_schema(
     )
 
 
+def heat_pump_room_schema(
+    defaults: dict[str, Any], step_minutes: int = DEFAULT_TIME_STEP, *, initial: bool = True
+) -> dict[Any, Any]:
+    """A room heated by a heat pump, described by EMHASS's ``thermal_battery`` model.
+
+    No entity owns the building and heat pump settings, so they stay here on
+    every edit. The power and comfort band become controls, as for a Room,
+    and are offered only at creation.
+    """
+    room_fields = thermal_schema(defaults, step_minutes, initial=initial)
+    excluded = {CONF_SENSE, CONF_NAME, ADVANCED_SECTION, CONF_COP_CURVE, CONF_TEMPERATURE_SENSOR}
+    if not initial:
+        excluded.discard(CONF_NAME)
+    entity_fields = {CONF_POWER_SENSOR, CONF_CONTROL_ENTITY}
+    schema = {
+        key: value for key, value in room_fields.items() if str(key) not in excluded | entity_fields
+    }
+    sensor_key = (
+        vol.Required(CONF_TEMPERATURE_SENSOR, default=defaults[CONF_TEMPERATURE_SENSOR])
+        if defaults.get(CONF_TEMPERATURE_SENSOR)
+        else vol.Required(CONF_TEMPERATURE_SENSOR)
+    )
+    schema[sensor_key] = selector.EntitySelector(
+        selector.EntitySelectorConfig(filter=[{"domain": "sensor", "device_class": "temperature"}])
+    )
+
+    def number(key: str, default: float | None, **config: Any) -> tuple[Any, Any]:
+        value = defaults.get(key, default)
+        field = vol.Required(key) if value is None else vol.Required(key, default=value)
+        return field, _FiniteNumberSelector(
+            selector.NumberSelectorConfig(step="any", mode="box", **config)
+        )
+
+    schema.update(
+        dict(
+            (
+                number(CONF_THERMAL_MASS, None, min=0.1, max=10000, unit_of_measurement="m³"),
+                number(CONF_FLOOR_AREA, None, min=1, max=10000, unit_of_measurement="m²"),
+                number(
+                    CONF_SPECIFIC_HEATING_DEMAND,
+                    None,
+                    min=0,
+                    max=1000,
+                    unit_of_measurement="kWh/m²",
+                ),
+                number(
+                    CONF_SUPPLY_TEMPERATURE,
+                    DEFAULT_SUPPLY_TEMPERATURE,
+                    min=20,
+                    max=80,
+                    unit_of_measurement="°C",
+                ),
+            )
+        )
+    )
+    schema.update({key: value for key, value in room_fields.items() if str(key) in entity_fields})
+    basic = {
+        key: _FiniteNumberSelector(value.config)
+        if isinstance(value, selector.NumberSelector)
+        and not isinstance(value, _FiniteNumberSelector)
+        else value
+        for key, value in schema.items()
+    }
+    return _with_advanced(
+        basic,
+        dict(
+            (
+                number(CONF_CARNOT_EFFICIENCY, DEFAULT_CARNOT_EFFICIENCY, min=0.05, max=1),
+                number(
+                    CONF_BASE_TEMPERATURE,
+                    DEFAULT_BASE_TEMPERATURE,
+                    min=5,
+                    max=30,
+                    unit_of_measurement="°C",
+                ),
+                number(CONF_ANNUAL_HDD, DEFAULT_ANNUAL_HDD, min=1, max=10000),
+                number(
+                    CONF_INERTIA_TIME_CONSTANT,
+                    DEFAULT_INERTIA_HOURS,
+                    min=0,
+                    max=MAX_INERTIA_HOURS,
+                    unit_of_measurement="h",
+                ),
+            )
+        ),
+    )
+
+
 def _stored_tank_periods(defaults: dict[str, Any]) -> list[dict[str, Any]]:
     """Offer legacy consumption as one period without changing it on read."""
     if CONF_HOT_WATER_PERIODS in defaults:
@@ -1823,6 +1950,10 @@ class DeferrableLoadSubentryFlow(ConfigSubentryFlow):
     @property
     def _step_minutes(self) -> int:
         return int(self._get_entry().options.get(CONF_TIME_STEP, DEFAULT_TIME_STEP))
+
+    def _form_errors(self, data: dict[str, Any]) -> dict[str, str]:
+        """Problems with a submitted form that its selectors cannot catch."""
+        return {}
 
     def _placeholders(self) -> dict[str, str]:
         """Values the form's own text refers to.
@@ -1895,6 +2026,17 @@ class DeferrableLoadSubentryFlow(ConfigSubentryFlow):
             # The fields this step no longer offers are still part of the
             # subentry -- they are what a load starts from, and dropping them
             # here would reset a load to the defaults on its next reload.
+            if errors := self._form_errors(user_input):
+                return self.async_show_form(
+                    step_id="reconfigure",
+                    data_schema=vol.Schema(
+                        self._schema(
+                            {**subentry.data, **user_input}, self._step_minutes, initial=False
+                        )
+                    ),
+                    errors=errors,
+                    description_placeholders=self._placeholders(),
+                )
             data = {**subentry.data, **_clean_deferrable(user_input)}
             for key in self._clearable_keys:
                 if key not in user_input:
@@ -1917,7 +2059,19 @@ class ThermalLoadSubentryFlow(DeferrableLoadSubentryFlow):
 
     _schema = staticmethod(thermal_schema)
     _kind_schema = staticmethod(thermal_kind_schema)
-    _clearable_keys = (CONF_POWER_SENSOR, CONF_CONTROL_ENTITY, CONF_TEMPERATURE_SENSOR)
+    _clearable_keys = (
+        CONF_POWER_SENSOR,
+        CONF_CONTROL_ENTITY,
+        CONF_TEMPERATURE_SENSOR,
+        CONF_COP_CURVE,
+    )
+
+    def _form_errors(self, data: dict[str, Any]) -> dict[str, str]:
+        try:
+            parse_cop_curve(data.get(CONF_COP_CURVE))
+        except ValueError:
+            return {CONF_COP_CURVE: "invalid_cop_curve"}
+        return {}
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
         if (
@@ -1925,7 +2079,16 @@ class ThermalLoadSubentryFlow(DeferrableLoadSubentryFlow):
             and CONF_SENSE in user_input
             and user_input.get(CONF_THERMAL_MODEL, THERMAL_MODEL_ROOM) == THERMAL_MODEL_ROOM
         ):
-            return self._create(_clean_deferrable(_flatten_sections(user_input)))
+            flat = _flatten_sections(user_input)
+            if not self._form_errors(flat):
+                return self._create(_clean_deferrable(flat))
+            return self.async_show_form(
+                last_step=False,
+                step_id="user",
+                data_schema=vol.Schema(thermal_kind_schema({}), extra=vol.ALLOW_EXTRA),
+                errors={"base": "invalid_cop_curve"},
+                description_placeholders=self._placeholders(),
+            )
         if user_input is None:
             return self.async_show_form(
                 last_step=False,
@@ -1952,15 +2115,83 @@ class ThermalLoadSubentryFlow(DeferrableLoadSubentryFlow):
                 if str(key) != CONF_NAME
             }
             if user_input is not None:
-                return self._create(
-                    {**_clean_deferrable(_flatten_sections(user_input)), **self._kind}
+                flat = _flatten_sections(user_input)
+                if not self._form_errors(flat):
+                    return self._create({**_clean_deferrable(flat), **self._kind})
+                schema = {
+                    key: value
+                    for key, value in thermal_schema(flat, self._step_minutes).items()
+                    if str(key) != CONF_NAME
+                }
+                return self.async_show_form(
+                    step_id="settings",
+                    data_schema=vol.Schema(schema),
+                    errors={"base": "invalid_cop_curve"},
+                    description_placeholders=self._placeholders(),
                 )
             return self.async_show_form(
                 step_id="settings",
                 data_schema=vol.Schema(schema),
                 description_placeholders=self._placeholders(),
             )
+        if model == THERMAL_MODEL_HEAT_PUMP_ROOM:
+            return self._heat_pump_form("heat_pump_room", user_input, initial=True)
         return self._tank_form("water_tank", user_input, initial=True)
+
+    async def async_step_heat_pump_room(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        return self._heat_pump_form("heat_pump_room", user_input, initial=True)
+
+    async def async_step_reconfigure_heat_pump_room(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        return self._heat_pump_form("reconfigure_heat_pump_room", user_input, initial=False)
+
+    def _heat_pump_form(
+        self, step_id: str, user_input: dict[str, Any] | None, *, initial: bool
+    ) -> SubentryFlowResult:
+        stored = {} if initial else dict(self._get_reconfigure_subentry().data)
+        schema = vol.Schema(heat_pump_room_schema(stored, self._step_minutes, initial=initial))
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            try:
+                data = _clean_deferrable(_flatten_sections(schema(user_input)))
+            except vol.Invalid as err:
+                field = str(err.path[0]) if err.path else "base"
+                errors["base" if field == ADVANCED_SECTION else field] = "invalid_heat_pump_value"
+            else:
+                merged = {**stored, **data}
+                try:
+                    HeatPumpModel.from_data(merged)
+                except ValueError:
+                    errors["base"] = "invalid_heat_pump_value"
+                else:
+                    if initial and not (
+                        data[CONF_SETBACK_TEMPERATURE]
+                        <= data[CONF_COMFORT_TEMPERATURE]
+                        <= data[CONF_MAX_TEMPERATURE]
+                    ):
+                        errors["base"] = "invalid_heat_pump_band"
+                    else:
+                        for key in (CONF_POWER_SENSOR, CONF_CONTROL_ENTITY):
+                            if key not in data:
+                                merged.pop(key, None)
+                        merged[CONF_SENSE] = SENSE_HEAT
+                        if initial:
+                            return self._create({**merged, **self._kind})
+                        return self.async_update_and_abort(
+                            self._get_entry(),
+                            self._get_reconfigure_subentry(),
+                            title=merged[CONF_NAME],
+                            data=merged,
+                        )
+        return self.async_show_form(
+            step_id=step_id,
+            data_schema=schema,
+            errors=errors,
+            description_placeholders=self._placeholders(),
+        )
 
     async def async_step_water_tank(
         self, user_input: dict[str, Any] | None = None
@@ -2061,6 +2292,8 @@ class ThermalLoadSubentryFlow(DeferrableLoadSubentryFlow):
         stored = self._get_reconfigure_subentry().data
         if stored.get(CONF_THERMAL_MODEL, THERMAL_MODEL_ROOM) == THERMAL_MODEL_WATER_TANK:
             return self._tank_form("reconfigure_water_tank", user_input, initial=False)
+        if stored.get(CONF_THERMAL_MODEL) == THERMAL_MODEL_HEAT_PUMP_ROOM:
+            return self._heat_pump_form("reconfigure_heat_pump_room", user_input, initial=False)
         if user_input is not None:
             user_input = {
                 key: value for key, value in user_input.items() if key != CONF_THERMAL_MODEL
@@ -3028,7 +3261,48 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
                 "network",
                 "metering",
                 "compatibility",
+                "advanced",
             ],
+        )
+
+    async def async_step_advanced(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """The LP solver limits, sent with every run.
+
+        Its own menu entry, last in the list: these are tuning knobs for a
+        problem that is slow or infeasible within the time allowed, not
+        something describing the house.
+        """
+        options = dict(self.config_entry.options)
+        stored = options.get(CONF_SOLVER) or {}
+        if user_input is not None:
+            options[CONF_SOLVER] = {
+                CONF_SOLVER_TIMEOUT: int(user_input[CONF_SOLVER_TIMEOUT]),
+                CONF_SOLVER_MIP_REL_GAP: float(user_input[CONF_SOLVER_MIP_REL_GAP]),
+            }
+            return self.async_create_entry(data=options)
+
+        return self.async_show_form(
+            step_id="advanced",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_SOLVER_TIMEOUT,
+                        default=stored.get(CONF_SOLVER_TIMEOUT, DEFAULT_SOLVER_TIMEOUT),
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=5, max=240, step=1, unit_of_measurement="s", mode="box"
+                        )
+                    ),
+                    vol.Required(
+                        CONF_SOLVER_MIP_REL_GAP,
+                        default=stored.get(CONF_SOLVER_MIP_REL_GAP, DEFAULT_SOLVER_MIP_REL_GAP),
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(min=0, max=0.5, step=0.001, mode="box")
+                    ),
+                }
+            ),
         )
 
     async def async_step_metering(
@@ -3436,7 +3710,8 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
             description_placeholders={
                 "profiles": "\n".join(
                     f"- **{profile.name}** — {profile.description or ''}" for profile in choices
-                )
+                ),
+                "discord": DISCORD_INVITE_URL,
             },
         )
 
@@ -3503,6 +3778,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
                     ): _inverter_profile_selector(choices)
                 }
             ),
+            description_placeholders={"discord": DISCORD_INVITE_URL},
         )
 
     async def async_step_inverter_options(
