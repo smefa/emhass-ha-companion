@@ -7,6 +7,13 @@ from typing import Final
 
 DOMAIN: Final = "emhass_companion"
 
+# Community invite shown in the inverter step. Strings may not hold URLs (hassfest),
+# so the link reaches the text through a description placeholder.
+DISCORD_INVITE_URL: Final = "https://discord.gg/ugDwJwynC5"
+NETWORK_TARIFF_DOCS_URL: Final = (
+    "https://smefa.github.io/emhass-ha-companion/guide/network_tariffs/"
+)
+
 # --- EMHASS backend contract -------------------------------------------------
 
 # Minimum EMHASS version. 0.17.9 introduced GET /api/v1/plan, /api/v1/last-run and
@@ -351,6 +358,20 @@ CONF_TEMPERATURE_SENSOR: Final = "temperature_sensor"
 CONF_THERMAL_MODEL: Final = "thermal_model"
 THERMAL_MODEL_ROOM: Final = "room"
 THERMAL_MODEL_WATER_TANK: Final = "water_tank"
+# A room described by its building and heat pump (EMHASS thermal_battery);
+# these settings are owned by the subentry. See heat_pump_room.py.
+THERMAL_MODEL_HEAT_PUMP_ROOM: Final = "heat_pump_room"
+CONF_THERMAL_MASS: Final = "thermal_mass_m3"
+CONF_FLOOR_AREA: Final = "floor_area_m2"
+CONF_SPECIFIC_HEATING_DEMAND: Final = "specific_heating_demand"
+CONF_SUPPLY_TEMPERATURE: Final = "supply_temperature"
+CONF_CARNOT_EFFICIENCY: Final = "carnot_efficiency"
+# Optional, for a heat pump whose cold side is not the outdoor air (ground source).
+CONF_CONSTANT_COP: Final = "constant_cop"
+CONF_SOURCE_TEMPERATURE: Final = "source_temperature"
+CONF_BASE_TEMPERATURE: Final = "base_temperature"
+CONF_ANNUAL_HDD: Final = "annual_reference_hdd"
+CONF_INERTIA_TIME_CONSTANT: Final = "thermal_inertia_time_constant"
 CONF_TANK_VOLUME: Final = "tank_volume_litres"
 # A common domestic hot-water cylinder; only the form's starting value.
 DEFAULT_TANK_VOLUME: Final = 200
@@ -370,6 +391,7 @@ CONF_SENSE: Final = "sense"
 CONF_HEATING_RATE: Final = "heating_rate"
 CONF_COOLING_CONSTANT: Final = "cooling_constant"
 CONF_THERMAL_INERTIA: Final = "thermal_inertia"
+CONF_COP_CURVE: Final = "cop_curve"
 CONF_COMFORT_TEMPERATURE: Final = "comfort_temperature"
 CONF_SETBACK_TEMPERATURE: Final = "setback_temperature"
 CONF_MAX_TEMPERATURE: Final = "max_temperature"
@@ -930,6 +952,13 @@ SAVINGS_FORECAST_HOURS: Final = 24
 # nothing to warn the user. A wrong number on a silent sensor is worse than no
 # sensor, so those are left out.
 CONF_EMHASS_STANDARD_NAMES: Final = "emhass_standard_names"
+# Advanced options: the LP solver limits sent with every run. Stored as a dict
+# under CONF_SOLVER; an entry that never opened the page keeps the defaults.
+CONF_SOLVER: Final = "solver"
+CONF_SOLVER_TIMEOUT: Final = "lp_solver_timeout"
+CONF_SOLVER_MIP_REL_GAP: Final = "lp_solver_mip_rel_gap"
+DEFAULT_SOLVER_TIMEOUT: Final = 45
+DEFAULT_SOLVER_MIP_REL_GAP: Final = 0.01
 # The entity ids these sensors had before the option was first switched on.
 # Kept so that switching it off restores exactly what the user had, rather than
 # whatever Home Assistant would generate today -- a friendly name or a
@@ -1124,6 +1153,7 @@ INFEASIBLE_CAUSE_CODES: Final = frozenset(
         "window_too_short",
         "window_energy",
         "thermal_unreachable",
+        "thermal_window",
         "power_deficit",
         "pv_surplus",
         "array_length",

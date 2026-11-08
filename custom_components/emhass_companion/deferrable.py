@@ -50,6 +50,7 @@ from .const import (
     CONF_COMFORT_TEMPERATURE,
     CONF_CONTROL_ENTITY,
     CONF_COOLING_CONSTANT,
+    CONF_COP_CURVE,
     CONF_DRAW_END,
     CONF_DRAW_ENERGY,
     CONF_DRAW_START,
@@ -98,9 +99,11 @@ from .const import (
     RECURRENCE_SURPLUS,
     RECURRENCES,
     SUBENTRY_TYPE_THERMAL,
+    THERMAL_MODEL_HEAT_PUMP_ROOM,
     THERMAL_MODEL_ROOM,
     THERMAL_MODEL_WATER_TANK,
 )
+from .heat_pump_room import HeatPumpModel, HeatPumpRoomConfig
 from .models import BatteryConfig, DeferrableLoad, HybridInverterConfig, Plan, PlanRow, Series
 from .payload import operating_timesteps
 from .stored_time import parse_stored_time
@@ -124,7 +127,9 @@ from .thermal import (
     DEFAULT_SETBACK_TEMPERATURE,
     DEFAULT_THERMAL_INERTIA,
     SENSE_HEAT,
+    CopCurve,
     ThermalConfig,
+    parse_cop_curve,
 )
 from .water_tank import WaterTankConfig, hot_water_periods_from_data
 
@@ -189,6 +194,10 @@ class DeferrableRuntime:
     temperature_sensor: str | None = None
     sense: str = SENSE_HEAT
     thermal_model: str = THERMAL_MODEL_ROOM
+    cop_curve: CopCurve = ()
+    """Room heat pump COP against outdoor temperature, owned by the subentry."""
+    heat_pump_model: HeatPumpModel | None = None
+    """The building and heat pump of a heat pump room; None if incomplete."""
     tank_volume_litres: float = 0.0
     standby_loss_w: float = 0.0
     heater_cop: float = DEFAULT_HEATER_COP
@@ -369,6 +378,16 @@ class DeferrableRuntime:
     def is_water_tank(self) -> bool:
         """Whether this is an explicitly configured immersion tank."""
         return self.is_thermal and self.thermal_model == THERMAL_MODEL_WATER_TANK
+
+    @property
+    def is_heat_pump_room(self) -> bool:
+        """Whether this room is described by its building and heat pump."""
+        return self.is_thermal and self.thermal_model == THERMAL_MODEL_HEAT_PUMP_ROOM
+
+    @property
+    def is_measured_room(self) -> bool:
+        """A room described by its measured heating rate and cooling constant."""
+        return self.is_thermal and not self.is_water_tank and not self.is_heat_pump_room
 
     @property
     def is_running(self) -> bool:
@@ -1066,7 +1085,7 @@ class DeferrableRuntime:
 
     def thermal_config(
         self, current_temperature: float | None
-    ) -> ThermalConfig | WaterTankConfig | None:
+    ) -> ThermalConfig | WaterTankConfig | HeatPumpRoomConfig | None:
         """This load's thermal model, or None for an ordinary load.
 
         Built fresh on every request from the entity-owned live values, the
@@ -1100,6 +1119,25 @@ class DeferrableRuntime:
                     else None
                 ),
             )
+        if self.is_heat_pump_room:
+            # Like a disabled tank: a load that will not run blocks no plan.
+            if not self.enabled:
+                return None
+            if self.heat_pump_model is None:
+                raise ValueError(
+                    f"{self.name}: the heat pump model settings are incomplete; "
+                    "reconfigure the load"
+                )
+            return HeatPumpRoomConfig(
+                model=self.heat_pump_model,
+                nominal_power_w=self.nominal_power_w,
+                comfort_temperature=self.comfort_temperature,
+                setback_temperature=self.setback_temperature,
+                max_temperature=self.max_temperature,
+                comfort_start=self.comfort_start,
+                comfort_end=self.comfort_end,
+                current_temperature=current_temperature,
+            )
         return ThermalConfig(
             sense=self.sense,
             heating_rate=self.heating_rate,
@@ -1111,6 +1149,7 @@ class DeferrableRuntime:
             comfort_start=self.comfort_start,
             comfort_end=self.comfort_end,
             current_temperature=current_temperature,
+            cop_curve=self.cop_curve,
         )
 
     def to_load(
@@ -1160,6 +1199,14 @@ class DeferrableRuntime:
                 and windowed
                 and not surplus
                 and not self.is_thermal
+                and self.earliest_start is not None
+                and self.latest_end is not None
+            ),
+            spans_daily_windows=(
+                self.recurrence == RECURRENCE_DAILY
+                and windowed
+                and not surplus
+                and self.is_water_tank
                 and self.earliest_start is not None
                 and self.latest_end is not None
             ),
@@ -1843,6 +1890,12 @@ def live_settings(load: DeferrableRuntime) -> dict[str, Any]:
     The counterpart to a subentry's ``data`` -- same keys, current values.
     """
     fields = SEEDED_FIELDS + (SEEDED_THERMAL_FIELDS if load.is_thermal else ())
+    if load.is_heat_pump_room:
+        fields = tuple(
+            (key, attr)
+            for key, attr in fields
+            if attr not in {"heating_rate", "cooling_constant", "thermal_inertia"}
+        )
     if load.is_water_tank:
         fields = (
             *(
@@ -1939,6 +1992,20 @@ def _apply_subentry_fields(
     load.temperature_sensor = data.get(CONF_TEMPERATURE_SENSOR) or None
     load.sense = data.get(CONF_SENSE) or SENSE_HEAT
     load.thermal_model = data.get(CONF_THERMAL_MODEL, THERMAL_MODEL_ROOM)
+    try:
+        load.cop_curve = parse_cop_curve(data.get(CONF_COP_CURVE))
+    except ValueError:
+        # The form rejects a bad curve; a hand-edited one runs without it.
+        load.cop_curve = ()
+    try:
+        load.heat_pump_model = (
+            HeatPumpModel.from_data(data)
+            if load.thermal_model == THERMAL_MODEL_HEAT_PUMP_ROOM
+            else None
+        )
+    except ValueError:
+        # The form rejects these; a hand-edited one is reported at request time.
+        load.heat_pump_model = None
     load.tank_volume_litres = float(data.get(CONF_TANK_VOLUME, 0))
     load.draw_energy_kwh = float(data.get(CONF_DRAW_ENERGY, 0))
     load.hot_water_periods = (

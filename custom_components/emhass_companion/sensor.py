@@ -779,7 +779,7 @@ class LoadPlannedTemperatureSensor(EmhassLoadEntity, SensorEntity):
                 if self.load.is_water_tank
                 else None
             )
-            config = self.load.thermal_config(current)
+            config = self.coordinator.effective_thermal_config(self.load, current)
             if config is None:
                 return None
             minimums, maximums = config.comfort_band(
@@ -1281,7 +1281,26 @@ class DemandChargeRateSensor(EmhassEntity, SensorEntity):
                 }
                 for component in pricing.components
             ]
+        tier = self._tier()
+        if tier is not None:
+            attributes["tier_limit_kw"], attributes["rate_above"] = tier
         return attributes
+
+    def _tier(self) -> tuple[float, float] | None:
+        """(limit kW, rate above it) when the profile prices a progressive tier.
+
+        Such a profile sends two components -- rate 1, then rate 2 - rate 1 on
+        a peak floored at the limit (``DemandCharge.min_peak_kw``) -- so the
+        operator's rate 2 is the two sheet rates added back together.
+        """
+        calendar = self.coordinator.network_calendar
+        pricing = self._pricing
+        if calendar is None or pricing is None or len(calendar.demand_charges) != 2:
+            return None
+        base, upper = calendar.demand_charges
+        if upper.min_peak_kw <= 0 or base.rate_per_kw is None or upper.rate_per_kw is None:
+            return None
+        return upper.min_peak_kw, base.rate_per_kw + upper.rate_per_kw
 
 
 class PhaseHeadroomSensor(EmhassEntity, SensorEntity):

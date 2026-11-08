@@ -251,7 +251,7 @@
       },
       "inverter": {
         "title": "Inverter profile",
-        "description": "How the battery is actually controlled. Leave this unset and the integration only ever reads.\n\nDon't see your inverter? **Scripts** works with any inverter you can already control from Home Assistant, and advanced users can write their own YAML profile for a dedicated entry - see the profiles guide in the documentation.\n\nPlease report if you get an untested profile running on [Discord](https://discord.gg/ugDwJwynC5).\n\nNothing is written to your hardware until you also turn on the Control enabled switch.",
+        "description": "How the battery is actually controlled. Leave this unset and the integration only ever reads.\n\nDon't see your inverter? **Scripts** works with any inverter you can already control from Home Assistant, and advanced users can write their own YAML profile for a dedicated entry - see the profiles guide in the documentation.\n\nPlease report if you get an untested profile running on [Discord]({discord}).\n\nNothing is written to your hardware until you also turn on the Control enabled switch.",
         "data": {
           "profile": "Inverter profile"
         }
@@ -453,7 +453,8 @@
           "temperature": "Outdoor temperature",
           "network": "Network tariff",
           "metering": "Cost and savings",
-          "compatibility": "EMHASS entity names"
+          "compatibility": "EMHASS entity names",
+          "advanced": "Advanced settings"
         }
       },
       "load": {
@@ -691,7 +692,7 @@
       },
       "inverter": {
         "title": "Inverter profile",
-        "description": "How the battery is actually controlled. Leave this unset and the integration only ever reads.\n\nDon't see your inverter? **Scripts** works with any inverter you can already control from Home Assistant, and advanced users can write their own YAML profile for a dedicated entry - see the profiles guide in the documentation.\n\nPlease report if you get an untested profile running on [Discord](https://discord.gg/ugDwJwynC5).\n\nNothing is written to your hardware until you also turn on the Control enabled switch.",
+        "description": "How the battery is actually controlled. Leave this unset and the integration only ever reads.\n\nDon't see your inverter? **Scripts** works with any inverter you can already control from Home Assistant, and advanced users can write their own YAML profile for a dedicated entry - see the profiles guide in the documentation.\n\nPlease report if you get an untested profile running on [Discord]({discord}).\n\nNothing is written to your hardware until you also turn on the Control enabled switch.",
         "data": {
           "profile": "Inverter profile"
         }
@@ -834,7 +835,7 @@
       },
       "network": {
         "title": "Network tariff",
-        "description": "Your grid operator's own tariff structure, layered on top of whatever Buy and sell prices already composes: time-differentiated energy fees, and (tracked for now, not yet acted on by the plan) a demand charge. Leave blank if your network fee is a flat per-kWh rate with no time-of-day or capacity component -- there is nothing here for it to add.\n\n{profiles}",
+        "description": "Pick your grid operator's network tariff, or leave blank if you have a flat per-kWh fee. See the [documentation]({docs}) for what each profile does and how to add your own. Find and share ready-made profiles on [Discord]({discord}).",
         "data": {
           "profile": "Network tariff profile"
         }
@@ -888,6 +889,18 @@
             }
           }
         }
+      },
+      "advanced": {
+        "title": "Advanced settings",
+        "description": "Limits for the optimiser's solver, sent with every run and overriding what is stored in EMHASS. The defaults suit most setups; raise the time limit if runs sometimes end without a feasible plan.",
+        "data": {
+          "lp_solver_timeout": "Solver time limit",
+          "lp_solver_mip_rel_gap": "Solver accepted gap"
+        },
+        "data_description": {
+          "lp_solver_timeout": "Seconds the solver may search before it must stop (lp_solver_timeout). Default 45, maximum 240 (the request to EMHASS gives up after 300). Long horizons or many deferrable loads and thermal tanks can need more.",
+          "lp_solver_mip_rel_gap": "Relative gap at which the solver accepts a plan as good enough (lp_solver_mip_rel_gap). Default 0.01 = within 1% of the best possible cost. Lower finds a better plan but can take longer; higher finishes sooner."
+        }
       }
     },
     "error": {
@@ -936,7 +949,8 @@
     "thermal_model": {
       "options": {
         "room": "Room",
-        "water_tank": "Water tank"
+        "water_tank": "Water tank",
+        "heat_pump_room": "Room, advanced heat pump"
       }
     }
   },
@@ -1299,6 +1313,10 @@
       "title": "EMHASS plan infeasible: {name} cannot reach its temperature in time",
       "description": "The last {action} run was infeasible: {name} must be at least {required} °C within {hours} h (timestep {timestep}), but it is at {current} °C and the best it can do with its heater at {power} the whole way is {achievable} °C.\n\nEMHASS holds that temperature as a hard limit, so it finds no plan at all, and a tank that stays too cold is never heated because no plan is applied.\n\n**What to do:** Lower the required or lowest standby temperature, give the load more power, or check that the temperature sensor really belongs to this heater.\n\nThe previous plan is being kept. {total} blocking cause(s) found in all; the Home Assistant log lists every finding. This resolves automatically once a run solves successfully."
     },
+    "optimization_infeasible_thermal_window": {
+      "title": "EMHASS plan infeasible: {name} cannot heat in time inside its window",
+      "description": "The last {action} run was infeasible: {name} must be at least {required} °C at timestep {timestep}, but its heating window only covers timesteps {start}-{end} and inside it the best it can reach is {achievable} °C.\n\nEMHASS only lets a tank heat inside that window, and holds the temperature as a hard limit, so it finds no plan at all.\n\n**What to do:** Widen the heating window, lower the required temperature, or turn the time window off for this tank.\n\nThe previous plan is being kept. {total} blocking cause(s) found in all; the Home Assistant log lists every finding. This resolves automatically once a run solves successfully."
+    },
     "optimization_infeasible_power_deficit": {
       "title": "EMHASS plan infeasible: the house load cannot be supplied",
       "description": "The last {action} run was infeasible: at {count} timestep(s) the forecast house load cannot be supplied even with grid import and battery discharge at their limits. Worst at timestep {timestep}: house {house}, solar {pv}, short by {short}.\n\n**What to do:** Check the grid import limit, the battery and inverter power limits, and the house load forecast.\n\nThe previous plan is being kept. {total} blocking cause(s) found in all; the Home Assistant log lists every finding. This resolves automatically once a run solves successfully."
@@ -1542,7 +1560,7 @@
             "thermal_model": "Model"
           },
           "data_description": {
-            "thermal_model": "Room needs an outdoor forecast; immersion water tank does not. Only a single immersion element is supported."
+            "thermal_model": "Room uses a measured heating rate. Room, advanced heat pump describes the building and lets EMHASS calculate heat pump efficiency and heat demand from the outdoor temperature. Both need an outdoor forecast; immersion water tank does not. Only a single immersion element is supported."
           }
         },
         "reconfigure": {
@@ -1552,13 +1570,15 @@
             "temperature_sensor": "Temperature sensor",
             "sense": "Heats or cools",
             "power_sensor": "Running sensor",
-            "control_entity": "Control entity"
+            "control_entity": "Control entity",
+            "cop_curve": "Heat pump COP curve"
           },
           "data_description": {
             "temperature_sensor": "The room (or tank) the temperatures below apply to. Strongly recommended: without it, every plan starts from a guessed temperature instead of the actual one.",
             "sense": "Whether running this load raises the temperature (a heat pump, a heater, hot water) or lowers it (an air conditioner).",
             "power_sensor": "Optional. Tells the optimiser whether this load is actually running. A power sensor gives the most detail (any unit is converted to watts automatically); a plain on/off binary_sensor works too.",
-            "control_entity": "Optional. If set, the integration switches this on and off to follow the plan, once you enable control -- and its state doubles as the running signal when there is no power sensor. Leave empty to keep control in your own automations."
+            "control_entity": "Optional. If set, the integration switches this on and off to follow the plan, once you enable control -- and its state doubles as the running signal when there is no power sensor. Leave empty to keep control in your own automations.",
+            "cop_curve": "Optional. For a heat pump whose efficiency falls in the cold: pairs of outdoor temperature and COP, such as \"7: 5.2, 0: 4.0, -10: 3.0\". The heating rate is taken as measured at the first pair and is lowered to match the coldest hour of the forecast, so cold spells get more heating hours. Needs a weather entity as the temperature source. Leave empty to ignore. Heating only."
           }
         },
         "settings": {
@@ -1595,12 +1615,14 @@
               "data": {
                 "heating_rate": "Heating rate",
                 "cooling_constant": "Heat loss constant",
-                "thermal_inertia": "Response delay"
+                "thermal_inertia": "Response delay",
+                "cop_curve": "Heat pump COP curve"
               },
               "data_description": {
                 "heating_rate": "How fast the temperature changes with the load running at full power. Watch a cold morning: a house that climbs from 18 to 21 °C in two hours with the heating flat out has a rate of 1.5 °C/h. For cooling, how fast it drops.",
                 "cooling_constant": "How fast heat leaks to the outdoors: degrees lost per hour, per degree of difference to the outdoor temperature. Most homes land between 0.05 (well insulated) and 0.3 (draughty). If the planned heating comes too early, lower it; too late, raise it.",
-                "thermal_inertia": "How long after switching on before the temperature responds. Underfloor heating in concrete can take an hour or more; a radiator or fan is nearly immediate. Leave at 0 if unsure."
+                "thermal_inertia": "How long after switching on before the temperature responds. Underfloor heating in concrete can take an hour or more; a radiator or fan is nearly immediate. Leave at 0 if unsure.",
+                "cop_curve": "Optional. For a heat pump whose efficiency falls in the cold: pairs of outdoor temperature and COP, such as \"7: 5.2, 0: 4.0, -10: 3.0\". The heating rate is taken as measured at the first pair and is lowered to match the coldest hour of the forecast, so cold spells get more heating hours. Needs a weather entity as the temperature source. Leave empty to ignore. Heating only."
               }
             }
           }
@@ -1682,11 +1704,115 @@
             "draw_end": "May cross midnight. Equal start and end means a full day.",
             "draw_energy_kwh": "Estimated heat withdrawn during this period, in kWh, not heater electricity. Enter 0 for no expected withdrawal. Consumption from overlapping periods is added."
           }
+        },
+        "heat_pump_room": {
+          "title": "Room, advanced heat pump",
+          "description": "A room or house heated by a heat pump. EMHASS calculates the heat pump's efficiency and the house's heat demand from the outdoor forecast, so no measured heating rate is needed. Heating only. Needs an outdoor temperature forecast the Companion can read, such as a weather entity.",
+          "data": {
+            "temperature_sensor": "Room temperature sensor",
+            "nominal_power_w": "Electrical power when running",
+            "comfort_temperature": "Comfort temperature",
+            "setback_temperature": "Setback temperature",
+            "max_temperature": "Maximum temperature",
+            "comfort_start": "Comfort starts",
+            "comfort_end": "Comfort ends",
+            "thermal_mass_m3": "Thermal mass",
+            "floor_area_m2": "Heated floor area",
+            "specific_heating_demand": "Specific heating demand",
+            "supply_temperature": "Supply temperature",
+            "power_sensor": "Running sensor",
+            "control_entity": "Control entity"
+          },
+          "data_description": {
+            "temperature_sensor": "Required. The plan starts from this reading.",
+            "nominal_power_w": "Electrical power the heat pump draws while it runs. EMHASS multiplies it by the calculated COP.",
+            "comfort_temperature": "Lowest room temperature during the comfort period.",
+            "setback_temperature": "Lowest room temperature outside the comfort period.",
+            "max_temperature": "Highest room temperature the optimiser may heat to.",
+            "comfort_start": "Start of the daily comfort period.",
+            "comfort_end": "End of the daily comfort period.",
+            "thermal_mass_m3": "Volume of concrete-equivalent mass that stores the heat, in cubic metres. EMHASS uses concrete density and heat capacity. A larger value means the temperature changes more slowly.",
+            "floor_area_m2": "Heated floor area in square metres.",
+            "specific_heating_demand": "The building's yearly heat demand per square metre, in kWh/m², for a year with the annual heating degree days set under Advanced settings. Often 50 to 150 for a house.",
+            "supply_temperature": "Water temperature the heat pump delivers to the radiators or floor heating. Lower means a higher COP. Typically 30 to 35 for floor heating and 45 to 55 for radiators.",
+            "power_sensor": "Optional. Tells the optimiser whether this load is actually running. A power sensor gives the most detail (any unit is converted to watts automatically); a plain on/off binary_sensor works too.",
+            "control_entity": "Optional. If set, the integration switches this on and off to follow the plan, once you enable control -- and its state doubles as the running signal when there is no power sensor. Leave empty to keep control in your own automations."
+          },
+          "sections": {
+            "advanced": {
+              "name": "Advanced settings",
+              "description": "EMHASS model settings. The defaults suit most houses.",
+              "data": {
+                "carnot_efficiency": "Carnot efficiency",
+                "constant_cop": "Constant COP",
+                "source_temperature": "Source temperature",
+                "base_temperature": "Base temperature",
+                "annual_reference_hdd": "Annual heating degree days",
+                "thermal_inertia_time_constant": "Thermal inertia"
+              },
+              "data_description": {
+                "carnot_efficiency": "How close the heat pump gets to the ideal Carnot COP. 0.4 is typical; EMHASS clips the resulting COP to 1-8.",
+                "constant_cop": "Optional. A flat COP, for example the B0/W35 or B0/W45 figure from the heat pump manual. Overrides the Carnot calculation, so the outdoor temperature no longer affects the COP. It still drives the building's heat demand.",
+                "source_temperature": "Optional. Cold-side temperature in °C for the COP, such as a typical brine temperature for a ground-source heat pump. Replaces the outdoor temperature in the Carnot formula, which still drives the heat demand. Ignored when a constant COP is set.",
+                "base_temperature": "Outdoor temperature above which the house needs no heating.",
+                "annual_reference_hdd": "Heating degree days of the year the specific heating demand refers to.",
+                "thermal_inertia_time_constant": "Hours before delivered heat shows in the room temperature, such as for floor heating. 0 means immediately."
+              }
+            }
+          }
+        },
+        "reconfigure_heat_pump_room": {
+          "title": "Reconfigure advanced heat pump room",
+          "description": "Change the sensors and the building and heat pump settings. Power and the comfort band are controls on the load page.",
+          "data": {
+            "name": "Name",
+            "temperature_sensor": "Room temperature sensor",
+            "thermal_mass_m3": "Thermal mass",
+            "floor_area_m2": "Heated floor area",
+            "specific_heating_demand": "Specific heating demand",
+            "supply_temperature": "Supply temperature",
+            "power_sensor": "Running sensor",
+            "control_entity": "Control entity"
+          },
+          "data_description": {
+            "temperature_sensor": "Required. The plan starts from this reading.",
+            "thermal_mass_m3": "Volume of concrete-equivalent mass that stores the heat, in cubic metres. EMHASS uses concrete density and heat capacity. A larger value means the temperature changes more slowly.",
+            "floor_area_m2": "Heated floor area in square metres.",
+            "specific_heating_demand": "The building's yearly heat demand per square metre, in kWh/m², for a year with the annual heating degree days set under Advanced settings. Often 50 to 150 for a house.",
+            "supply_temperature": "Water temperature the heat pump delivers to the radiators or floor heating. Lower means a higher COP. Typically 30 to 35 for floor heating and 45 to 55 for radiators.",
+            "power_sensor": "Optional. Tells the optimiser whether this load is actually running. A power sensor gives the most detail (any unit is converted to watts automatically); a plain on/off binary_sensor works too.",
+            "control_entity": "Optional. If set, the integration switches this on and off to follow the plan, once you enable control -- and its state doubles as the running signal when there is no power sensor. Leave empty to keep control in your own automations."
+          },
+          "sections": {
+            "advanced": {
+              "name": "Advanced settings",
+              "description": "EMHASS model settings. The defaults suit most houses.",
+              "data": {
+                "carnot_efficiency": "Carnot efficiency",
+                "constant_cop": "Constant COP",
+                "source_temperature": "Source temperature",
+                "base_temperature": "Base temperature",
+                "annual_reference_hdd": "Annual heating degree days",
+                "thermal_inertia_time_constant": "Thermal inertia"
+              },
+              "data_description": {
+                "carnot_efficiency": "How close the heat pump gets to the ideal Carnot COP. 0.4 is typical; EMHASS clips the resulting COP to 1-8.",
+                "constant_cop": "Optional. A flat COP, for example the B0/W35 or B0/W45 figure from the heat pump manual. Overrides the Carnot calculation, so the outdoor temperature no longer affects the COP. It still drives the building's heat demand.",
+                "source_temperature": "Optional. Cold-side temperature in °C for the COP, such as a typical brine temperature for a ground-source heat pump. Replaces the outdoor temperature in the Carnot formula, which still drives the heat demand. Ignored when a constant COP is set.",
+                "base_temperature": "Outdoor temperature above which the house needs no heating.",
+                "annual_reference_hdd": "Heating degree days of the year the specific heating demand refers to.",
+                "thermal_inertia_time_constant": "Hours before delivered heat shows in the room temperature, such as for floor heating. 0 means immediately."
+              }
+            }
+          }
         }
       },
       "error": {
         "invalid_tank_value": "Enter a valid value; numbers must be finite and within the allowed range.",
-        "invalid_tank_band": "Lowest standby temperature must not exceed required hot-water temperature, which must not exceed maximum temperature."
+        "invalid_tank_band": "Lowest standby temperature must not exceed required hot-water temperature, which must not exceed maximum temperature.",
+        "invalid_cop_curve": "Enter at least two pairs of \"outdoor temperature: COP\", separated by commas, with a COP above 0 and each temperature listed once, such as \"7: 5.2, 0: 4.0, -10: 3.0\".",
+        "invalid_heat_pump_value": "Enter a valid value; numbers must be finite and within the allowed range.",
+        "invalid_heat_pump_band": "Setback temperature must not exceed comfort temperature, which must not exceed maximum temperature."
       }
     },
     "load_group": {
