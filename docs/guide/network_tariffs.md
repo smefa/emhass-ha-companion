@@ -10,15 +10,28 @@ Services → EMHASS Companion → Configure → Network tariff**.
 
 ## Network tariff step
 
-You're offered every `network`-kind profile available — two ship in-box:
+You're offered every `network`-kind profile available — five ship in-box:
 
 - **Göteborg Energi** — a Swedish high-load-season tariff: a winter weekday
   window with a higher per-kWh fee, plus a demand charge on your three highest
   hourly peaks.
+- **Dala Energi** — a Swedish dual-peak tariff: two independently billed
+  mean-of-top-3 peaks every month (höglast on weekday days, låglast at all
+  other times), plus a flat transmission fee. Needs EMHASS 0.18.3 or newer.
 - **Amber Electric** — an Australian demand tariff: a single daily window in
   which your highest 30-minute draw sets a charge for the whole month.
+- **Austria SNE-G-V** — the new Austrian network tariff: your highest
+  15-minute average power of the month, at any hour, sets a two-tier per-kW
+  charge. Optionally models the reduced SNAP and WiNAP energy windows. It
+  starts between January 2027 and July 2028 depending on your network area,
+  so leave the rates at 0 until your operator switches over.
+- **Flat demand charge (manual)** — a single kr/kW charge on your worst
+  import peak over the planning horizon. No time window and no memory of the
+  month's peak so far, so it suits a rough estimate or an operator that bills
+  your highest power at any hour. If your operator bills inside a time
+  window, pick a real tariff instead.
 
-Neither matches your operator? Leave this step unset — nothing changes — or
+None matches your operator? Leave this step unset — nothing changes — or
 write your own profile; see [Writing a profile](../profiles.md).
 
 ## Configuring the profile
@@ -48,9 +61,30 @@ For **Amber Electric**:
 - **Months the window applies** — leave every box unticked for a window that
   runs all year; tick specific months only if yours is seasonal.
 
+For **Dala Energi**:
+
+- **Transmission energy fee** — öre/kWh, flat.
+- **Höglast demand charge (winter)** / **(summer)** and **Låglast demand
+  charge** — kr/kW/month on each of the two peaks. Defaults are the household
+  sheet from 2026-01-01 including VAT; check them against your invoice.
+- **Workday sensor** — a Workday `binary_sensor` for Sweden, as above.
+
+For **Austria SNE-G-V**:
+
+- **Demand charge, first tier** and **above the limit** — per kW per month,
+  from your operator's sheet; **Tier limit** is 10 kW by default.
+- **Network energy price**, **SNAP reduction** and **WiNAP reduction** —
+  only needed if you want the reduced energy windows modelled. Leave the
+  energy price at 0 if your price source already includes network fees.
+
+For **Flat demand charge (manual)**:
+
+- **Capacity (demand) charge** — price per kW of the highest import power
+  over the planning horizon, charged once on the peak. 0 turns it off.
+
 Once saved, set **Time resolution** (under **Configure → Setup**) to match the
-tariff's own metering interval — 60 minutes for Göteborg, 30 minutes for
-Amber. A coarser optimisation step under-protects the window; a finer one is
+tariff's own metering interval — 60 minutes for Göteborg and Dala, 30 minutes
+for Amber, 15 minutes for Austria. A coarser optimisation step under-protects the window; a finer one is
 just extra caution.
 
 ## What you'll see
@@ -79,7 +113,7 @@ New sensors appear on the integration's hub device:
     Pricing a demand charge so the optimiser can trade it off against energy
     cost needs a feature (a "demand window mask") that reached a stable EMHASS
     release in **0.18.1**. On that version or newer, a tariff with a real time
-    window (both built-in profiles have one) prices cleanly. On an older
+    window (the Göteborg, Dala and Amber profiles have one) prices cleanly. On an older
     add-on it's enforced as a hard ceiling using the **Peak target** number
     instead of a price — it works, but it's a blunter tool than the priced
     version.

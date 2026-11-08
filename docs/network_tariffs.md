@@ -46,6 +46,14 @@ other profile kind uses. Several ship built in:
   April–September) and WiNAP (23:00–05:00, October–March) energy windows if you
   enter your network energy price. Set the time resolution to 15 minutes while
   it is active. The flexible-draw discount is not modelled.
+- **Dala Energi** (`network/dala_energi`) — two independent mean-of-top-3
+  hourly peaks every month (höglast on weekday days, låglast otherwise; summer
+  only equalises the rates) as a two-component demand charge, plus a flat
+  transmission energy fee. Needs EMHASS 0.18.3+ and a Workday sensor. Set the
+  time resolution to 60 minutes.
+- **Flat demand charge** (`network/manual_demand_charge`) — one kr/kW charge on
+  the worst import peak over the horizon. No window and no peak memory; a rough
+  estimate for operators that bill the highest power at any hour.
 
 Nothing on this page is specific to those utilities; see
 [Writing a profile](profiles.md) to describe your own operator's tariff sheet

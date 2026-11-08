@@ -185,6 +185,7 @@ from .const import (
     DEFAULT_WEIGHT_BATTERY_CHARGE,
     DEFAULT_WEIGHT_BATTERY_DISCHARGE,
     DISCORD_INVITE_URL,
+    NETWORK_TARIFF_DOCS_URL,
     DOMAIN,
     END_SOC_MODES,
     INVERTER_FALLBACK_PROFILE,
@@ -3708,9 +3709,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
                 }
             ),
             description_placeholders={
-                "profiles": "\n".join(
-                    f"- **{profile.name}** — {profile.description or ''}" for profile in choices
-                ),
+                "docs": NETWORK_TARIFF_DOCS_URL,
                 "discord": DISCORD_INVITE_URL,
             },
         )
