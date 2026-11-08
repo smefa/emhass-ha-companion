@@ -132,6 +132,41 @@ class HeatPumpModel:
         cop = self.carnot_efficiency * (self.supply_temperature + 273.15) / lift
         return min(MAX_COP, max(MIN_COP, cop))
 
+    def demand_keys(self) -> dict[str, float]:
+        """The ``thermal_battery`` keys that carry this model's heat demand.
+
+        TEMPORARY WORKAROUND, remove once EMHASS fixes the degree-day refresh.
+        EMHASS 0.18.8 builds the degree-day demand (``specific_heating_demand``
+        + ``area``) correctly on a fresh problem, but its cache-hit refresh
+        (``update_thermal_params``) only knows the physics keys and otherwise
+        sets ``heating_demand`` to zero. Every warm-started solve then plans a
+        building with no heat loss and switches the heat pump off for the day.
+
+        The physics model is the same straight line through ``base_temperature``,
+        so it is sent instead: ``u_value * envelope_area`` is the loss in W/K
+        (``ventilation_rate`` 0 drops the second term; ``heated_volume`` only has
+        to be present). ``calculate_thermal_balance_physics`` floors at zero like
+        ``calculate_heating_demand``, so the two agree step for step. Checked
+        against EMHASS 0.18.8 (identical demand and plan, on build and refresh).
+
+        To remove: send ``specific_heating_demand``, ``area``, ``base_temperature``
+        and ``annual_reference_hdd`` again and delete this method, its test and
+        the note in docs/thermal_loads.md.
+        """
+        loss_w_per_k = (
+            self.specific_heating_demand
+            * self.floor_area_m2
+            / (self.annual_reference_hdd * 24)
+            * 1000
+        )
+        return {
+            "u_value": 1.0,
+            "envelope_area": loss_w_per_k,
+            "ventilation_rate": 0.0,
+            "heated_volume": 1.0,
+            "indoor_target_temperature": self.base_temperature,
+        }
+
     def demand_kwh(self, outdoor: float, step_hours: float) -> float:
         """``calculate_heating_demand`` for one step."""
         degrees = max(self.base_temperature - outdoor, 0.0)
@@ -309,10 +344,7 @@ class HeatPumpRoomConfig:
             "heat_capacity": CONCRETE_HEAT_CAPACITY_KJ_KG_K,
             "supply_temperature": self.model.supply_temperature,
             "carnot_efficiency": self.model.carnot_efficiency,
-            "specific_heating_demand": self.model.specific_heating_demand,
-            "area": self.model.floor_area_m2,
-            "base_temperature": self.model.base_temperature,
-            "annual_reference_hdd": self.model.annual_reference_hdd,
+            **self.model.demand_keys(),
             "sense": "heat",
             "min_temperatures": minimums,
             "max_temperatures": maximums,

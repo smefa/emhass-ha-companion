@@ -1,18 +1,23 @@
-name: Austria (SNE-G-V Leistungspreis, 15-minute peak)
+name: Austria SNE-G-V (tiered demand charge)
 kind: network
 version: 1
 description: >-
   Austria's new network tariff (SNE-G-V): the single highest 15-minute average
-  power of the month, at any time of day, sets a per-kW charge for the whole
-  month. Optionally also the reduced SNAP and WiNAP energy windows.
+  power of the month, at any time of day, sets a two-tier per-kW charge: the
+  first 10 kW at one rate, only the part above at a second. Optionally also
+  the reduced SNAP and WiNAP energy windows.
 notes: >-
   Based on E-Control's press kit of 12 October 2026. The demand charge
   follows the highest 15-minute average import of the month, with no daily
   window. It starts between 1 January 2027 and 1 July 2028, depending on your
   network area (Netzbereich) -- until your operator switches over, leave the
-  rate at 0. Rates are set per network area in the Systemnutzungsentgelte-
+  rates at 0. Rates are set per network area in the Systemnutzungsentgelte-
   Tarifverordnung, so enter yours per kW per month from your operator's
-  sheet. Set "Time resolution" (Setup) to 15 minutes while this profile is
+  sheet. A 15 kW peak costs 10 kW at rate 1 plus 5 kW at rate 2. It is sent
+  to EMHASS as two components over the same peak: rate 1, and (rate 2 - rate
+  1) on the peak raised to at least the tier limit. That differs from your
+  bill by a constant, so plans are the same; day-ahead runs carry no peak
+  memory, so they price the upper tier a little high below the limit. Set "Time resolution" (Setup) to 15 minutes while this profile is
   active.
 
   Reduced energy windows: SNAP, 10:00-16:00 from 1 April to 30 September
@@ -31,12 +36,25 @@ detect:
 
 options:
   demand_rate:
-    name: Demand charge
+    name: Demand charge, first tier (rate 1)
     description: >-
-      Euro per kW per month on your highest 15-minute value, as on your
-      operator's sheet. 0 turns it off.
+      Euro per kW per month for the part of your highest 15-minute value up
+      to the tier limit, as on your operator's sheet. 0 turns it off.
     default: 0
     selector: {number: {min: 0, max: 500, step: any, mode: box}}
+  demand_rate_above:
+    name: Demand charge, above the limit (rate 2)
+    description: >-
+      Euro per kW per month for only the part of the peak above the tier
+      limit. Leave at 0 to charge everything at rate 1.
+    default: 0
+    selector: {number: {min: 0, max: 500, step: any, mode: box}}
+  tier_limit_kw:
+    advanced: true
+    name: Tier limit
+    description: kW of the monthly peak charged at rate 1; the rest at rate 2.
+    default: 10
+    selector: {number: {min: 0, max: 1000, step: any, mode: box}}
   energy_price_ct:
     advanced: true
     name: Network energy price
@@ -72,10 +90,21 @@ energy_bands:
   - name: standard
     buy: { adder: "{{ options.energy_price_ct / 100 }}" }
 
-demand_charge:
-  rate_per_kw: "{{ options.demand_rate }}"
-  rate_basis: month
-  measure:
-    interval: 15min
-    aggregate: max
-  period: month
+demand_charges:
+  - name: tier 1
+    rate_per_kw: "{{ options.demand_rate | float }}"
+    rate_basis: month
+    measure:
+      interval: 15min
+      aggregate: max
+    period: month
+  - name: tier 2
+    rate_per_kw: >-
+      {{ 0 if (options.demand_rate_above | default(0) | float) == 0
+         else (options.demand_rate_above | float) - (options.demand_rate | float) }}
+    min_peak_kw: "{{ options.tier_limit_kw | default(10) | float }}"
+    rate_basis: month
+    measure:
+      interval: 15min
+      aggregate: max
+    period: month

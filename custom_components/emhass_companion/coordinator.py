@@ -2125,16 +2125,32 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         trackers = self.peak_trackers or (
             [self.peak_tracker] if self.peak_tracker is not None else []
         )
-        if demand_pricing is not None and rates is not None and action == ACTION_MPC and trackers:
+        tier_floors = bool(
+            self.network_calendar
+            and any(charge.min_peak_kw > 0 for charge in self.network_calendar.demand_charges)
+        )
+        if (
+            demand_pricing is not None
+            and rates is not None
+            and action == ACTION_MPC
+            and (trackers or tier_floors)
+        ):
             # Watts, matching every other power figure this integration sends
             # -- current_period_peak is MPC-only in EMHASS (see
             # docs/network_tariffs_plan.md, "Day-ahead versus MPC"), so a
             # day-ahead run gets no floor and no memory either way.
-            peaks_w = [tracker.floor_kw * 1000 for tracker in trackers[: len(rates)]]
-            # Pad / truncate to K if trackers and rates somehow diverge.
-            while len(peaks_w) < len(rates):
-                peaks_w.append(0.0)
-            peaks_w = peaks_w[: len(rates)]
+            charges = self.network_calendar.demand_charges if self.network_calendar else []
+            # A component's tier limit floors its peak even when no tracker
+            # backs it (no grid-import meter), or the upper tier would price
+            # the whole peak. Trackers and rates that diverge are padded.
+            peaks_w = [
+                max(
+                    trackers[i].floor_kw if i < len(trackers) else 0.0,
+                    charges[i].min_peak_kw if i < len(charges) else 0.0,
+                )
+                * 1000
+                for i in range(len(rates))
+            ]
             ns = demand_pricing.interval_timesteps_list
             histories = [
                 self._capacity_interval_history_w(

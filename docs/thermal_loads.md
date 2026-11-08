@@ -69,6 +69,14 @@ for step-by-step setup.
 
 EMHASS's fixed `thermal_loss` of 0.045 kW is left at its default.
 
+**Temporary workaround (EMHASS 0.18.8).** EMHASS drops the degree-day demand on
+warm-started solves and plans with no heat demand, so the heat pump would be
+switched off for the day. The request therefore carries the same demand as
+EMHASS's physics keys (`u_value`, `envelope_area`, `ventilation_rate`,
+`heated_volume`, `indoor_target_temperature`) in place of `specific_heating_demand`,
+`area`, `base_temperature` and `annual_reference_hdd`. The numbers are
+equivalent. Remove `HeatPumpModel.demand_keys` once EMHASS fixes this.
+
 **Ownership.** Power, the band and the comfort times are seeded and then owned
 by device entities, like any thermal load. The house and heat pump settings
 are stored on the subentry and edited through **Edit thermal load**. The

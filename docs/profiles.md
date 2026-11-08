@@ -255,6 +255,13 @@ K=3 — that is still one component priced as `rate / n`. Needs EMHASS
 0.18.3+. Complementary windows can use `window: {invert: <other name>}`.
 Defining both `demand_charge` and `demand_charges` is rejected.
 
+A progressive (tiered) charge on one peak is two components over the same
+window: rate 1, and `rate 2 - rate 1` with `min_peak_kw: <tier limit>`. The
+second component's peak is sent as `max(tracked peak, min_peak_kw)`, so it
+prices only the part above the limit; its cost differs from the real bill by a
+constant, which does not change the plan. Day-ahead runs send no peak memory,
+so they lack that floor.
+
 ```yaml
 name: Example network operator
 kind: network

@@ -115,15 +115,33 @@ def test_to_emhass_sends_the_thermal_battery_model():
     assert (entry["density"], entry["heat_capacity"]) == (2400.0, 0.88)
     assert entry["supply_temperature"] == 35.0
     assert entry["carnot_efficiency"] == 0.4
-    assert entry["specific_heating_demand"] == 100.0
-    assert entry["area"] == 150.0
-    assert (entry["base_temperature"], entry["annual_reference_hdd"]) == (18.0, 3000.0)
     assert entry["sense"] == "heat"
     assert entry["thermal_inertia_time_constant"] == 2.0
     assert entry["start_temperature"] == 21.0
     assert len(entry["min_temperatures"]) == len(entry["max_temperatures"]) == 48
     assert "thermal_loss" not in entry
     assert "heating_rate" not in entry
+
+
+@pytest.mark.parametrize("outdoor", [-2.5, 0.0, 17.9, 18.0, 25.0])
+def test_demand_keys_match_the_degree_day_demand(outdoor):
+    """Temporary EMHASS 0.18.8 workaround: the physics keys stand in for the
+    degree-day ones, so EMHASS's cache-hit refresh does not zero the demand."""
+    model = _model(base_temperature=18.0, annual_reference_hdd=3300.0, specific_heating_demand=57.9)
+    keys = model.demand_keys()
+    assert "specific_heating_demand" not in keys
+    assert "area" not in keys
+    # EMHASS calculate_thermal_balance_physics, heating, one 60-minute step.
+    kw = (
+        keys["u_value"] * keys["envelope_area"] / 1000
+        + keys["ventilation_rate"] * keys["heated_volume"] * 1.2 * 1.005 / 3600
+    ) * max(keys["indoor_target_temperature"] - outdoor, 0.0)
+    assert kw == pytest.approx(model.demand_kwh(outdoor, 1.0))
+
+
+def test_to_emhass_carries_the_demand_keys():
+    entry = _room().with_outdoor_forecast([0.0] * 48).to_emhass(NOW, STEP, 48)
+    assert {k: entry[k] for k in _model().demand_keys()} == _model().demand_keys()
 
 
 def test_no_inertia_and_no_reading_leave_the_keys_out():

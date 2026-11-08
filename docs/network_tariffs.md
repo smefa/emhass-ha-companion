@@ -39,7 +39,8 @@ other profile kind uses. Several ship built in:
   the window and rate above are entered by hand.
 - **Austria** (`network/austria_demand`) — the SNE-G-V tariff from E-Control: the
   single highest 15-minute average power of the month, at any hour, sets a
-  per-kW-per-month charge. It starts between January 2027 and July 2028
+  two-tier per-kW-per-month charge (first 10 kW at rate 1, only the part above
+  at rate 2). It starts between January 2027 and July 2028
   depending on your network area, and the rate is entered by hand from your
   operator's sheet. It can also model the reduced SNAP (10:00–16:00,
   April–September) and WiNAP (23:00–05:00, October–March) energy windows if you
