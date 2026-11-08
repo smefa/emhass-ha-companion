@@ -173,6 +173,32 @@ async def test_reconfigure_edits_the_model_and_keeps_entity_owned_values(hass: H
     assert updated["thermal_model"] == "heat_pump_room"
 
 
+async def test_reconfigure_stores_and_clears_the_fixed_cop_settings(hass: HomeAssistant):
+    stored = _stored(supply_temperature=35, source_temperature=30, constant_cop=4.2)
+    entry, result = await _start(hass, data=stored)
+    form = {
+        "name": "House",
+        "temperature_sensor": SENSOR,
+        "thermal_mass_m3": 10,
+        "floor_area_m2": 150,
+        "specific_heating_demand": 100,
+        # Lower than the stored source temperature: valid only once that is cleared.
+        "supply_temperature": 25,
+        "advanced": {},
+    }
+    result = await hass.config_entries.subentries.async_configure(result["flow_id"], form)
+    assert result["type"] is FlowResultType.ABORT
+    updated = next(iter(entry.subentries.values())).data
+    assert "constant_cop" not in updated
+    assert "source_temperature" not in updated
+
+    _entry, result = await _start(hass, data=_stored())
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {**form, "advanced": {"source_temperature": 0, "constant_cop": 4.5}}
+    )
+    assert result["type"] is FlowResultType.ABORT
+
+
 def _coordinator(hass: HomeAssistant, **overrides) -> EmhassCoordinator:
     entry = MockConfigEntry(
         domain=DOMAIN,

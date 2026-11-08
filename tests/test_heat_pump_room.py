@@ -58,6 +58,47 @@ def test_cop_follows_emhass_carnot_formula_and_clip():
     assert _model(carnot_efficiency=0.05).cop(-30.0) == 1.0
 
 
+def test_constant_cop_ignores_the_outdoor_air():
+    model = _model(constant_cop=4.5, source_temperature=0.0)
+    assert model.cop(-20.0) == model.cop(15.0) == 4.5
+
+
+def test_source_temperature_replaces_the_outdoor_air_in_carnot():
+    model = _model(supply_temperature=35.0, carnot_efficiency=0.4, source_temperature=0.0)
+    assert model.cop(-20.0) == model.cop(15.0) == pytest.approx(0.4 * 308.15 / 35)
+
+
+def test_fixed_cop_is_sent_as_efficiency_and_demand_still_follows_outdoor():
+    room = _room(model=_model(constant_cop=4.2)).with_outdoor_forecast([-5.0] * 48)
+    entry = room.to_emhass(NOW, STEP, 48)
+    assert entry["efficiency"] == 4.2
+    assert entry["u_value"] == _model().demand_keys()["u_value"]
+    assert "efficiency" not in _room().with_outdoor_forecast([0.0] * 48).to_emhass(NOW, STEP, 48)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"constant_cop": 0.5},
+        {"constant_cop": 9},
+        {"constant_cop": float("nan")},
+        {"source_temperature": 35.0},
+        {"source_temperature": float("inf")},
+    ],
+)
+def test_invalid_fixed_cop_inputs_are_rejected(overrides):
+    with pytest.raises(ValueError):
+        _model(**overrides)
+
+
+def test_from_data_reads_the_optional_cop_keys_and_blank_means_unset():
+    base = {"thermal_mass_m3": 10, "floor_area_m2": 150, "specific_heating_demand": 100}
+    model = HeatPumpModel.from_data({**base, "constant_cop": 4, "source_temperature": 1})
+    assert (model.constant_cop, model.source_temperature) == (4.0, 1.0)
+    blank = HeatPumpModel.from_data({**base, "constant_cop": None, "source_temperature": ""})
+    assert blank.fixed_cop() is None
+
+
 def test_demand_is_degree_days_and_heating_only():
     model = _model()
     assert model.demand_kwh(8.0, 0.5) == pytest.approx(100 * 150 * 10 * (0.5 / 24) / 3000)

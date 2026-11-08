@@ -49,6 +49,7 @@ from .const import (
     CONF_BATTERY_STRESS_COST,
     CONF_BATTERY_STRESS_SEGMENTS,
     CONF_CARNOT_EFFICIENCY,
+    CONF_CONSTANT_COP,
     CONF_CHARGE_EFFICIENCY,
     CONF_CHARGE_POWER_DERATING,
     CONF_COMFORT_END,
@@ -129,6 +130,7 @@ from .const import (
     CONF_SOLVER,
     CONF_SOLVER_MIP_REL_GAP,
     CONF_SOLVER_TIMEOUT,
+    CONF_SOURCE_TEMPERATURE,
     CONF_SPECIFIC_HEATING_DEMAND,
     CONF_STANDBY_LOSS,
     CONF_STARTUP_PENALTY,
@@ -1832,6 +1834,16 @@ def heat_pump_room_schema(
             selector.NumberSelectorConfig(step="any", mode="box", **config)
         )
 
+    def optional_number(key: str, **config: Any) -> tuple[Any, Any]:
+        """Blank means unset, so the stored value is a suggestion, not a default."""
+        value = defaults.get(key)
+        return (
+            vol.Optional(key, description={"suggested_value": value})
+            if value is not None
+            else vol.Optional(key),
+            _FiniteNumberSelector(selector.NumberSelectorConfig(step="any", mode="box", **config)),
+        )
+
     schema.update(
         dict(
             (
@@ -1867,6 +1879,8 @@ def heat_pump_room_schema(
         dict(
             (
                 number(CONF_CARNOT_EFFICIENCY, DEFAULT_CARNOT_EFFICIENCY, min=0.05, max=1),
+                optional_number(CONF_CONSTANT_COP, min=1, max=8),
+                optional_number(CONF_SOURCE_TEMPERATURE, min=-30, max=40, unit_of_measurement="°C"),
                 number(
                     CONF_BASE_TEMPERATURE,
                     DEFAULT_BASE_TEMPERATURE,
@@ -2163,6 +2177,15 @@ class ThermalLoadSubentryFlow(DeferrableLoadSubentryFlow):
                 errors["base" if field == ADVANCED_SECTION else field] = "invalid_heat_pump_value"
             else:
                 merged = {**stored, **data}
+                # A blank optional field clears the stored value, before validation.
+                for key in (
+                    CONF_POWER_SENSOR,
+                    CONF_CONTROL_ENTITY,
+                    CONF_CONSTANT_COP,
+                    CONF_SOURCE_TEMPERATURE,
+                ):
+                    if key not in data:
+                        merged.pop(key, None)
                 try:
                     HeatPumpModel.from_data(merged)
                 except ValueError:
@@ -2175,9 +2198,6 @@ class ThermalLoadSubentryFlow(DeferrableLoadSubentryFlow):
                     ):
                         errors["base"] = "invalid_heat_pump_band"
                     else:
-                        for key in (CONF_POWER_SENSOR, CONF_CONTROL_ENTITY):
-                            if key not in data:
-                                merged.pop(key, None)
                         merged[CONF_SENSE] = SENSE_HEAT
                         if initial:
                             return self._create({**merged, **self._kind})

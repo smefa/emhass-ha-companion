@@ -35,8 +35,10 @@ from .const import (
     CONF_ANNUAL_HDD,
     CONF_BASE_TEMPERATURE,
     CONF_CARNOT_EFFICIENCY,
+    CONF_CONSTANT_COP,
     CONF_FLOOR_AREA,
     CONF_INERTIA_TIME_CONSTANT,
+    CONF_SOURCE_TEMPERATURE,
     CONF_SPECIFIC_HEATING_DEMAND,
     CONF_SUPPLY_TEMPERATURE,
     CONF_THERMAL_MASS,
@@ -61,6 +63,10 @@ DEFAULT_INERTIA_HOURS = 0.0
 MAX_INERTIA_HOURS = 24.0
 
 
+def _optional_float(value: Any) -> float | None:
+    return None if value in (None, "") else float(value)
+
+
 @dataclass(frozen=True, slots=True)
 class HeatPumpModel:
     """The building and heat pump, as the subentry stores them."""
@@ -74,6 +80,10 @@ class HeatPumpModel:
     base_temperature: float = DEFAULT_BASE_TEMPERATURE
     annual_reference_hdd: float = DEFAULT_ANNUAL_HDD
     inertia_hours: float = DEFAULT_INERTIA_HOURS
+    constant_cop: float | None = None
+    """A flat COP, for a heat pump whose COP barely follows the outdoor air."""
+    source_temperature: float | None = None
+    """Cold-side temperature in °C (brine, ground) used instead of the outdoor air for the COP."""
 
     def __post_init__(self) -> None:
         for name in (
@@ -94,6 +104,19 @@ class HeatPumpModel:
                 raise ValueError(f"{name} must be positive")
         if self.specific_heating_demand < 0:
             raise ValueError("specific_heating_demand must be nonnegative")
+        for name in ("constant_cop", "source_temperature"):
+            value = getattr(self, name)
+            if value is not None and (
+                isinstance(value, bool) or not isinstance(value, int | float) or not isfinite(value)
+            ):
+                raise ValueError(f"{name} must be a finite number")
+        if self.constant_cop is not None and not MIN_COP <= self.constant_cop <= MAX_COP:
+            raise ValueError(f"constant_cop must be between {MIN_COP:g} and {MAX_COP:g}")
+        if (
+            self.source_temperature is not None
+            and self.source_temperature >= self.supply_temperature
+        ):
+            raise ValueError("source_temperature must be below supply_temperature")
         if not 0 < self.carnot_efficiency <= 1:
             raise ValueError("carnot_efficiency must be above 0 and at most 1")
         if not 0 <= self.inertia_hours <= MAX_INERTIA_HOURS:
@@ -116,6 +139,8 @@ class HeatPumpModel:
                 base_temperature=float(data.get(CONF_BASE_TEMPERATURE, DEFAULT_BASE_TEMPERATURE)),
                 annual_reference_hdd=float(data.get(CONF_ANNUAL_HDD, DEFAULT_ANNUAL_HDD)),
                 inertia_hours=float(data.get(CONF_INERTIA_TIME_CONSTANT, DEFAULT_INERTIA_HOURS)),
+                constant_cop=_optional_float(data.get(CONF_CONSTANT_COP)),
+                source_temperature=_optional_float(data.get(CONF_SOURCE_TEMPERATURE)),
             )
         except (KeyError, TypeError) as err:
             raise ValueError("the heat pump model settings are incomplete") from err
@@ -124,9 +149,26 @@ class HeatPumpModel:
     def capacity_kwh_per_k(self) -> float:
         return CONCRETE_DENSITY_KG_M3 * CONCRETE_HEAT_CAPACITY_KJ_KG_K * self.thermal_mass_m3 / 3600
 
+    def fixed_cop(self) -> float | None:
+        """The COP EMHASS is given as ``efficiency``, or None to let it use the outdoor air.
+
+        A constant COP wins. Otherwise a source temperature gives one Carnot COP
+        that does not change over the horizon, which ``efficiency`` can carry.
+        """
+        if self.constant_cop is not None:
+            return self.constant_cop
+        if self.source_temperature is not None:
+            return self._carnot_cop(self.source_temperature)
+        return None
+
     def cop(self, outdoor: float) -> float:
-        """``calculate_cop_heatpump`` in heating mode, for one outdoor temperature."""
-        lift = self.supply_temperature - outdoor
+        """The COP EMHASS will use, for one outdoor temperature."""
+        fixed = self.fixed_cop()
+        return fixed if fixed is not None else self._carnot_cop(outdoor)
+
+    def _carnot_cop(self, cold_side: float) -> float:
+        """``calculate_cop_heatpump`` in heating mode, for one cold-side temperature."""
+        lift = self.supply_temperature - cold_side
         if lift <= 0:
             return MIN_COP
         cop = self.carnot_efficiency * (self.supply_temperature + 273.15) / lift
@@ -351,6 +393,10 @@ class HeatPumpRoomConfig:
         }
         if self.model.inertia_hours > 0:
             entry["thermal_inertia_time_constant"] = self.model.inertia_hours
+        if (fixed_cop := self.model.fixed_cop()) is not None:
+            # EMHASS then uses this as the COP and ignores the outdoor air for it;
+            # the outdoor forecast still drives the heat demand.
+            entry["efficiency"] = fixed_cop
         if self.current_temperature is not None:
             entry["start_temperature"] = self.current_temperature
         return entry

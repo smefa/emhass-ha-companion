@@ -1744,12 +1744,16 @@
               "description": "EMHASS model settings. The defaults suit most houses.",
               "data": {
                 "carnot_efficiency": "Carnot efficiency",
+                "constant_cop": "Constant COP",
+                "source_temperature": "Source temperature",
                 "base_temperature": "Base temperature",
                 "annual_reference_hdd": "Annual heating degree days",
                 "thermal_inertia_time_constant": "Thermal inertia"
               },
               "data_description": {
                 "carnot_efficiency": "How close the heat pump gets to the ideal Carnot COP. 0.4 is typical; EMHASS clips the resulting COP to 1-8.",
+                "constant_cop": "Optional. A flat COP, for example the B0/W35 or B0/W45 figure from the heat pump manual. Overrides the Carnot calculation, so the outdoor temperature no longer affects the COP. It still drives the building's heat demand.",
+                "source_temperature": "Optional. Cold-side temperature in °C for the COP, such as a typical brine temperature for a ground-source heat pump. Replaces the outdoor temperature in the Carnot formula, which still drives the heat demand. Ignored when a constant COP is set.",
                 "base_temperature": "Outdoor temperature above which the house needs no heating.",
                 "annual_reference_hdd": "Heating degree days of the year the specific heating demand refers to.",
                 "thermal_inertia_time_constant": "Hours before delivered heat shows in the room temperature, such as for floor heating. 0 means immediately."
@@ -1785,12 +1789,16 @@
               "description": "EMHASS model settings. The defaults suit most houses.",
               "data": {
                 "carnot_efficiency": "Carnot efficiency",
+                "constant_cop": "Constant COP",
+                "source_temperature": "Source temperature",
                 "base_temperature": "Base temperature",
                 "annual_reference_hdd": "Annual heating degree days",
                 "thermal_inertia_time_constant": "Thermal inertia"
               },
               "data_description": {
                 "carnot_efficiency": "How close the heat pump gets to the ideal Carnot COP. 0.4 is typical; EMHASS clips the resulting COP to 1-8.",
+                "constant_cop": "Optional. A flat COP, for example the B0/W35 or B0/W45 figure from the heat pump manual. Overrides the Carnot calculation, so the outdoor temperature no longer affects the COP. It still drives the building's heat demand.",
+                "source_temperature": "Optional. Cold-side temperature in °C for the COP, such as a typical brine temperature for a ground-source heat pump. Replaces the outdoor temperature in the Carnot formula, which still drives the heat demand. Ignored when a constant COP is set.",
                 "base_temperature": "Outdoor temperature above which the house needs no heating.",
                 "annual_reference_hdd": "Heating degree days of the year the specific heating demand refers to.",
                 "thermal_inertia_time_constant": "Hours before delivered heat shows in the room temperature, such as for floor heating. 0 means immediately."

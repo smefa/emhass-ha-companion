@@ -63,6 +63,8 @@ for step-by-step setup.
 | Specific heating demand (kWh/m² per year) | `specific_heating_demand` | Heat, not electricity. |
 | Supply temperature (°C) | `supply_temperature` | Default 35. |
 | Carnot efficiency (*Advanced*) | `carnot_efficiency` | Default 0.4. COP = efficiency × (supply + 273.15) / (supply − outdoor), clipped by EMHASS to 1–8. |
+| Constant COP (*Advanced*) | `efficiency` | Optional, 1–8. A flat COP, such as the manufacturer's B0/W35 or B0/W45 figure. EMHASS then ignores the outdoor temperature for the COP; it still drives the heat demand. Wins over source temperature. |
+| Source temperature (*Advanced*, °C) | `efficiency` | Optional. Cold-side temperature for a ground-source heat pump (typical brine temperature). The companion computes one Carnot COP from it, `carnot_efficiency × (supply + 273.15) / (supply − source)`, and sends it as `efficiency`. Must be below the supply temperature. |
 | Base temperature (*Advanced*) | `base_temperature` | Default 18 °C. Degree-day demand is zero above it. |
 | Annual heating degree days (*Advanced*) | `annual_reference_hdd` | Default 3000. |
 | Thermal inertia (*Advanced*, h) | `thermal_inertia_time_constant` | Default 0, and then omitted. |
