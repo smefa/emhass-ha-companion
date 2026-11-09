@@ -1061,6 +1061,16 @@
       "network_tariff_band": {
         "name": "Nättariffskikt"
       },
+      "network_tariff_status": {
+        "name": "Nätavgiftsstatus",
+        "state": {
+          "not_configured": "Inte konfigurerad",
+          "profile_error": "Profilfel",
+          "peak_tracking_off": "Toppspårning av",
+          "demand_charge_not_priced": "Effektavgift ej prissatt",
+          "active": "Aktiv"
+        }
+      },
       "period_peak": {
         "name": "Effekttopp denna period"
       },
@@ -1368,6 +1378,10 @@
     "standard_names_taken": {
       "title": "{count} EMHASS-entitetsnamn är redan upptagna",
       "description": "EMHASS Companion ombads publicera under EMHASS egna entitets-id, men dessa används redan:\n\n{details}\n\nNästan alltid är det EMHASS-tillägget som publicerar dem själv. De sensorerna behåller sina Companion-namn tills vidare. För att slutföra bytet: stäng av publiceringen i EMHASS (töm `publish_prefix`, eller sluta anropa dess publish-data), ta bort de kvarvarande entiteterna och ladda om EMHASS Companion. För att sluta försöka: slå av alternativet under Inställningar > Enheter och tjänster > EMHASS Companion > Konfigurera > EMHASS entitetsnamn."
+    },
+    "peak_tracking_off": {
+      "title": "Effekttoppen spåras inte",
+      "description": "Din nätavgift har en effektavgift, men ingen energisensor för nätimport är angiven, så månadens effekttopp kan inte mätas. Sensorerna Faktureringsperiodens topp och Toppmarginal skapas inte, och planen vet inte hur hög periodens topp redan är, så den kan inte avgöra vilka toppar som faktiskt höjer fakturan. Aktivera kostnadsspårning och ange en energisensor för nätimport under Inställningar > Enheter och tjänster > EMHASS Companion > Konfigurera > Kostnad och besparing."
     },
     "phase_clamp_off": {
       "title": "Fasvakten kan inte sänka batteriladdningen",

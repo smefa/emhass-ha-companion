@@ -880,6 +880,14 @@ PEAK_HEADROOM_KEY: Final = "peak_headroom"
 PHASE_HEADROOM_KEY: Final = "phase_headroom"
 PHASE_GUARD_ACTIVE_KEY: Final = "phase_guard_active"
 DEMAND_CHARGE_RATE_KEY: Final = "demand_charge_rate"
+# Always-present diagnostic: is a network tariff selected, resolved and, if it
+# has a demand charge, actually being tracked.
+NETWORK_TARIFF_STATUS_KEY: Final = "network_tariff_status"
+NETWORK_STATUS_NOT_CONFIGURED: Final = "not_configured"
+NETWORK_STATUS_PROFILE_ERROR: Final = "profile_error"
+NETWORK_STATUS_PEAK_TRACKING_OFF: Final = "peak_tracking_off"
+NETWORK_STATUS_NOT_PRICED: Final = "demand_charge_not_priced"
+NETWORK_STATUS_ACTIVE: Final = "active"
 
 # The EMHASS release ``current_period_peak`` shipped in -- see
 # docs/network_tariffs_plan.md's version-gating table. Below this, a network
@@ -1218,6 +1226,7 @@ ISSUE_STANDARD_NAMES_TAKEN: Final = "standard_names_taken"
 # The phase guard's real-time clamp cannot run on this install. One issue id,
 # one translation per reason (see phase_guard.clamp_blocker).
 ISSUE_PHASE_CLAMP_OFF: Final = "phase_clamp_off"
+ISSUE_PEAK_TRACKING_OFF: Final = "peak_tracking_off"
 # A heat_topology saved in the EMHASS add-on's own configuration, in EMHASS's
 # default replace mode, overwrites every deferrable load the Companion sends.
 # One issue id, a second translation for a backend too old for the fix.

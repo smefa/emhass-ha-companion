@@ -448,16 +448,26 @@ def _numbered(label: str, key: str, numbering: tuple[str, ...]) -> str:
     return f"{numbering.index(key) + 1}. {label}" if key in numbering else label
 
 
+PROFILE_NONE = "none"
+
+
 def _profile_selector(
     profiles: list[Profile],
     order: tuple[str, ...] = (),
     *,
     numbering: tuple[str, ...] = (),
+    none_option: tuple[str, str] | None = None,
 ) -> selector.SelectSelector:
+    leading = (
+        [selector.SelectOptionDict(value=none_option[0], label=none_option[1])]
+        if none_option
+        else []
+    )
     return selector.SelectSelector(
         selector.SelectSelectorConfig(
             mode=selector.SelectSelectorMode.LIST,
-            options=[
+            options=leading
+            + [
                 selector.SelectOptionDict(
                     value=profile.key,
                     label=_numbered(_profile_label(profile), profile.key, numbering),
@@ -544,8 +554,11 @@ def _inverter_profile_selector(profiles: list[Profile]) -> selector.SelectSelect
         selector.SelectSelectorConfig(
             mode=selector.SelectSelectorMode.LIST,
             options=[
-                selector.SelectOptionDict(value=profile.key, label=_profile_label(profile))
-                for profile in ranked
+                selector.SelectOptionDict(value=PROFILE_NONE, label="None (read-only)"),
+                *(
+                    selector.SelectOptionDict(value=profile.key, label=_profile_label(profile))
+                    for profile in ranked
+                ),
             ],
         )
     )
@@ -1079,7 +1092,7 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             key = user_input.get(CONF_PROFILE)
-            if not key:
+            if not key or key == PROFILE_NONE:
                 self._options[CONF_INVERTER] = {}
                 return await self.async_step_grid()
             self._options[CONF_INVERTER] = {CONF_PROFILE: key, CONF_PROFILE_OPTIONS: {}}
@@ -3710,23 +3723,24 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
 
         if user_input is not None:
             key = user_input.get(CONF_PROFILE)
-            if not key:
+            if not key or key == PROFILE_NONE:
                 options[CONF_NETWORK] = {}
                 return self.async_create_entry(data=options)
             self._network_key = key
             self._network_profiles = profiles
             return await self.async_step_network_options()
 
-        current = (options.get(CONF_NETWORK) or {}).get(CONF_PROFILE)
+        current = (options.get(CONF_NETWORK) or {}).get(CONF_PROFILE) or PROFILE_NONE
+        # A list-mode select has no clear button, so "None" is an explicit
+        # option; without it a chosen network tariff could never be removed.
+        selector_ = _profile_selector(
+            choices, none_option=(PROFILE_NONE, "None (no network tariff)")
+        )
         return self.async_show_form(
             last_step=False,
             step_id="network",
             data_schema=vol.Schema(
-                {
-                    vol.Optional(
-                        CONF_PROFILE, description={"suggested_value": current}
-                    ): _profile_selector(choices)
-                }
+                {vol.Optional(CONF_PROFILE, description={"suggested_value": current}): selector_}
             ),
             description_placeholders={
                 "docs": NETWORK_TARIFF_DOCS_URL,
@@ -3779,14 +3793,14 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
 
         if user_input is not None:
             key = user_input.get(CONF_PROFILE)
-            if not key:
+            if not key or key == PROFILE_NONE:
                 options[CONF_INVERTER] = {}
                 return self.async_create_entry(data=options)
             self._inverter_key = key
             self._inverter_profiles = profiles
             return await self.async_step_inverter_options()
 
-        current = (options.get(CONF_INVERTER) or {}).get(CONF_PROFILE)
+        current = (options.get(CONF_INVERTER) or {}).get(CONF_PROFILE) or PROFILE_NONE
         return self.async_show_form(
             last_step=False,
             step_id="inverter",

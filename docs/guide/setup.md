@@ -350,8 +350,9 @@ without a battery.
 
 ## 8. Inverter profile
 
-Optional — leave the profile blank and the integration only ever reads, and
-the plan is yours to act on however you like. Pick a profile and you're asked
+Optional — pick **None** and the integration only ever reads, and
+the plan is yours to act on however you like. You can switch back to **None**
+later under Configure to remove a profile. Pick a profile and you're asked
 for the entities it needs; nothing is written to your hardware until you also
 turn on the **Control enabled** switch afterwards.
 

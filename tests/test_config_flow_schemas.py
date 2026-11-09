@@ -809,7 +809,7 @@ def test_inverter_picker_sorts_hardware_alphabetically_with_scripts_last():
         Profile(key="inverter/deye", path="c", kind="inverter", name="Deye", document={}),
     ]
     values = [option["value"] for option in _inverter_profile_selector(profiles).config["options"]]
-    assert values == ["inverter/deye", "inverter/sungrow", "inverter/generic_script"]
+    assert values == ["none", "inverter/deye", "inverter/sungrow", "inverter/generic_script"]
 
 
 def test_inverter_picker_still_marks_untested_profiles():
@@ -819,7 +819,7 @@ def test_inverter_picker_still_marks_untested_profiles():
         ),
     ]
     labels = [option["label"] for option in _inverter_profile_selector(profiles).config["options"]]
-    assert labels == ["Deye — UNTESTED"]
+    assert labels[1:] == ["Deye — UNTESTED"]
 
 
 def test_profile_selector_with_no_order_keeps_the_given_order():
@@ -1090,3 +1090,12 @@ def test_room_offers_the_cop_curve_in_advanced_at_setup_and_flat_on_reconfigure(
 def test_the_cop_curve_field_can_be_left_blank():
     schema = vol.Schema(thermal_schema({}, initial=False))
     assert "cop_curve" not in schema({"name": "Heat pump", "sense": "heat"})
+
+
+def test_profile_selector_can_lead_with_a_none_option():
+    """A list-mode select has no clear button, so removal needs an explicit option."""
+    from custom_components.emhass_companion.config_flow import _profile_selector
+
+    sel = _profile_selector([], none_option=("none", "None"))
+    assert sel.config["options"][0]["value"] == "none"
+    assert _profile_selector([]).config["options"] == []

@@ -7,29 +7,14 @@ description: >-
   first 10 kW at one rate, only the part above at a second. Optionally also
   the reduced SNAP and WiNAP energy windows.
 notes: >-
-  Based on E-Control's press kit of 12 October 2026. The demand charge
-  follows the highest 15-minute average import of the month, with no daily
-  window. It starts between 1 January 2027 and 1 July 2028, depending on your
-  network area (Netzbereich) -- until your operator switches over, leave the
-  rates at 0. Rates are set per network area in the Systemnutzungsentgelte-
-  Tarifverordnung, so enter yours per kW per month from your operator's
-  sheet. A 15 kW peak costs 10 kW at rate 1 plus 5 kW at rate 2. It is sent
-  to EMHASS as two components over the same peak: rate 1, and (rate 2 - rate
-  1) on the peak raised to at least the tier limit. That differs from your
-  bill by a constant, so plans are the same; day-ahead runs carry no peak
-  memory, so they price the upper tier a little high below the limit. Set "Time resolution" (Setup) to 15 minutes while this profile is
-  active.
+  Enter the two per-kW-per-month rates from your operator's sheet. The charge
+  only starts when your operator switches over (between 1 January 2027 and
+  1 July 2028), so leave the rates at 0 until then, and set "Time resolution"
+  (Setup) to 15 minutes while this profile is active.
 
-  Reduced energy windows: SNAP, 10:00-16:00 from 1 April to 30 September
-  (a 20% cut of the network energy price so far), and WiNAP, 23:00-05:00 from
-  1 October to 31 March (from October 2027; the cut is not set yet). To use
-  them, enter your network energy price, which stacks on the price source --
-  leave it at 0 if your price source already includes network fees, or if
-  you only want the demand charge.
-
-  Not modelled: the flexible-draw discount (about 25% of the regular demand
-  price for the flexible part of your power), the 10 kW connection allowance,
-  and the transition from today's 90:10 to a 50:50 energy to demand split.
+  See the [Austria SNE-G-V documentation](https://smefa.github.io/emhass-ha-companion/guide/network_tariffs/#austria-sne-g-v-in-detail)
+  for how the two tiers are priced, the SNAP and WiNAP reduced energy windows,
+  and what is not modelled.
 
 detect:
   always: true

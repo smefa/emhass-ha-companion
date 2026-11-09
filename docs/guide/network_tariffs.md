@@ -87,10 +87,52 @@ tariff's own metering interval — 60 minutes for Göteborg and Dala, 30 minutes
 for Amber, 15 minutes for Austria. A coarser optimisation step under-protects the window; a finer one is
 just extra caution.
 
+## Austria SNE-G-V in detail
+
+This is the full text behind the short note on the profile's setup page.
+
+Based on E-Control's press kit of 12 October 2026. The demand charge follows
+the highest 15-minute average import of the month, with no daily window. It
+starts between 1 January 2027 and 1 July 2028, depending on your network area
+(Netzbereich) — until your operator switches over, leave the rates at 0.
+
+**Rates.** They are set per network area in the
+Systemnutzungsentgelte-Tarifverordnung, so enter yours per kW per month from
+your operator's sheet. A 15 kW peak costs 10 kW at rate 1 plus 5 kW at rate 2.
+
+**How it's sent to EMHASS.** As two components over the same peak: rate 1, and
+(rate 2 − rate 1) on the peak raised to at least the tier limit. That differs
+from your bill by a constant, so plans are the same. Day-ahead runs carry no
+peak memory, so they price the upper tier a little high below the limit. Set
+**Time resolution** (Setup) to 15 minutes while this profile is active.
+
+**Reduced energy windows.**
+
+- **SNAP** — 10:00–16:00 from 1 April to 30 September (a 20% cut of the
+  network energy price so far).
+- **WiNAP** — 23:00–05:00 from 1 October to 31 March, from October 2027; the
+  cut is not set yet.
+
+To use them, enter your network energy price, which stacks on the price
+source. Leave it at 0 if your price source already includes network fees, or
+if you only want the demand charge.
+
+**Not modelled:** the flexible-draw discount (about 25% of the regular demand
+price for the flexible part of your power), the 10 kW connection allowance,
+and the transition from today's 90:10 to a 50:50 energy to demand split.
+
+To stop using a network tariff, open Configure → Network tariff and pick
+**None**.
+
 ## What you'll see
 
 New sensors appear on the integration's hub device:
 
+- **Network tariff status** (diagnostic) — always present, even with no
+  tariff selected, so you can check that your tariff is on and working. It
+  reads *Not configured*, *Profile error* (see the log), *Peak tracking off*,
+  *Demand charge not priced* (usually an EMHASS add-on that is too old; the
+  reason is in its attributes) or *Active*.
 - **Network tariff band** — which price band is active right now (e.g.
   "höglast"/"låglast" for Göteborg), with the next change time in its
   attributes.
@@ -99,6 +141,10 @@ New sensors appear on the integration's hub device:
   Its attributes explain the arithmetic and, if it reads 0, why.
 - **Billing period peak** — the demand-charge aggregate incurred so far this
   billing period, with every contributing interval listed in its attributes.
+  It needs **Track cost and savings** on and a grid import energy sensor set
+  under Configure → *Cost and savings*. Without them this sensor and Peak
+  headroom don't exist, and a repair issue ("Demand charge peak isn't
+  tracked") tells you why.
 - **Peak headroom** — how much more you can draw right now before setting a
   new peak. This is the one worth wiring into your own automations — e.g. hold
   an EV charger back when it's tight.

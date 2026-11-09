@@ -1061,6 +1061,16 @@
       "network_tariff_band": {
         "name": "Network tariff band"
       },
+      "network_tariff_status": {
+        "name": "Network tariff status",
+        "state": {
+          "not_configured": "Not configured",
+          "profile_error": "Profile error",
+          "peak_tracking_off": "Peak tracking off",
+          "demand_charge_not_priced": "Demand charge not priced",
+          "active": "Active"
+        }
+      },
       "period_peak": {
         "name": "Billing period peak"
       },
@@ -1368,6 +1378,10 @@
     "standard_names_taken": {
       "title": "{count} EMHASS entity name(s) already taken",
       "description": "EMHASS Companion was asked to publish under EMHASS's own entity ids, but these are already in use:\n\n{details}\n\nAlmost always this is the EMHASS add-on publishing them itself. Those sensors keep their Companion names for now. To finish the switch, turn off publishing in EMHASS (unset `publish_prefix`, or stop calling its publish-data action), delete the leftover entities, then reload EMHASS Companion. To stop trying, turn the option off under Settings > Devices & services > EMHASS Companion > Configure > EMHASS entity names."
+    },
+    "peak_tracking_off": {
+      "title": "Demand charge peak isn't tracked",
+      "description": "Your network tariff has a demand charge, but no grid import energy sensor is set, so the billing period peak can't be measured. The Billing period peak and Peak headroom sensors are not created, and the plan doesn't know how high this period's peak already is, so it can't tell which peaks would actually raise the bill. Turn on cost tracking and set a grid import energy sensor under Settings > Devices & services > EMHASS Companion > Configure > Cost and savings."
     },
     "phase_clamp_off": {
       "title": "Phase guard can't cut battery charging",

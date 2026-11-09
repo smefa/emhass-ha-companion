@@ -284,6 +284,7 @@ warning names any timestep that had to be raised above its target.
 
 | Entity | Type | Notes |
 |---|---|---|
+| `sensor.*_network_tariff_status` | sensor, diagnostic | Always created. `not_configured` / `profile_error` / `peak_tracking_off` (demand charge but no grid-import meter, so no tracker; also raises the `peak_tracking_off` repair) / `demand_charge_not_priced` (from `demand_charge_pricing`) / `active` |
 | `sensor.*_network_tariff_band` | sensor | Current band name; `adder`, `multiplier`, `next_change`, `next_band` attributes |
 | `sensor.*_demand_charge_rate` | sensor, diagnostic | The effective `capacity_cost_per_kw`; `sheet_rate`, `rate_basis`, `aggregate`, `active`, `reason` attributes |
 | `sensor.*_period_peak` | sensor (kW) | The billed aggregate so far this period; `period`, `days_remaining`, `floor_kw`, `contributing_intervals` attributes |
