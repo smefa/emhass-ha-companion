@@ -25,6 +25,7 @@ from .const import (
     DEFAULT_COST_FUN,
 )
 from .effective_settings import resolve_effective_settings
+from .heat_pump_room import HeatPumpRoomConfig
 from .models import (
     ROW_ZERO_NEAREST,
     BatteryConfig,
@@ -35,7 +36,7 @@ from .models import (
     Series,
     row_zero_start,
 )
-from .thermal import build_def_load_config
+from .thermal import SENSE_HEAT, ThermalConfig, build_def_load_config
 from .water_tank import TankShortfall, WaterTankConfig, _resolve_endpoint
 
 _LOGGER = logging.getLogger(__name__)
@@ -545,6 +546,8 @@ class PayloadInputs:
     """Whether this backend accepts ``battery_soc_final_reward_factor``
     (EMHASS 0.18.5+). The factor still lives on :attr:`battery`; this only
     gates sending it. Unknown/older backends keep the two-sided soft target."""
+    solver_settings: dict[str, Any] | None = None
+    """The user's LP solver limits (Advanced settings); None keeps the defaults."""
     row_zero_mode: str = ROW_ZERO_NEAREST
     """Rounding asserted through ``method_ts_round`` and used by every array."""
     backend_version: str | None = None
@@ -1018,6 +1021,7 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
         send_derating=inputs.send_charge_power_derating,
         send_soc_final_reward=inputs.send_soc_final_reward,
         use_pv=bool(inputs.pv) if inputs.use_pv is None else inputs.use_pv,
+        solver_settings=inputs.solver_settings,
     )
     warnings = list(effective.warnings)
     payload = effective.runtime()
@@ -1315,6 +1319,17 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
         for load in inputs.loads
         if load.subentry_id in tank_shortfalls
     )
+    warnings.extend(
+        f"{load.name}: its comfort temperature cannot be reached in time, so the plan "
+        "aims for the warmest the heat pump can reach instead."
+        for load in inputs.loads
+        if isinstance(load.thermal, HeatPumpRoomConfig)
+        and load.wants_to_run
+        and _with_outdoor_forecast(load.thermal, load.name, inputs, step).first_unreachable_step(
+            inputs.row_zero(step), step, inputs.horizon_steps
+        )
+        is not None
+    )
 
     # After everything the check reads is in place: the import limit, the
     # blended house load, and def_load_config for which loads are thermal.
@@ -1363,7 +1378,7 @@ def _thermal_settings(inputs: PayloadInputs, step: timedelta, load_count: int) -
     operating hours it is being sent with.
     """
     thermal_by_index = {
-        index: load.thermal
+        index: _with_outdoor_forecast(load.thermal, load.name, inputs, step)
         for index, load in enumerate(inputs.loads)
         if load.thermal is not None and load.wants_to_run
     }
@@ -1372,6 +1387,73 @@ def _thermal_settings(inputs: PayloadInputs, step: timedelta, load_count: int) -
         thermal_by_index, load_count, inputs.row_zero(step), step, inputs.horizon_steps
     )
     return {"def_load_config": config if config is not None else [{} for _ in range(load_count)]}
+
+
+def _with_outdoor_forecast(
+    thermal: ThermalConfig | WaterTankConfig | HeatPumpRoomConfig,
+    name: str,
+    inputs: PayloadInputs,
+    step: timedelta,
+) -> ThermalConfig | WaterTankConfig | HeatPumpRoomConfig:
+    """Give a room the horizon's outdoor forecast its model depends on.
+
+    A COP curve scales the heating rate; a heat pump room gets the temperature
+    at every step, to replay what EMHASS will compute from the same forecast.
+    Failing is deliberate: without the forecast, silently sending the unscaled
+    rate (or floors no one has checked) is exactly the optimistic plan these
+    models exist to avoid. EMHASS's own weather source gives the Companion no
+    series to read.
+    """
+    if isinstance(thermal, HeatPumpRoomConfig):
+        start = inputs.row_zero(step)
+        series = inputs.outdoor_temperature
+        if not series:
+            raise PayloadError(
+                f"{name}: its heat pump model needs an outdoor temperature forecast the "
+                "Companion can read. Choose a weather entity as the temperature source."
+            )
+        return thermal.with_outdoor_forecast(
+            outdoor_per_step(series, start, step, inputs.horizon_steps)
+        )
+    if (
+        not isinstance(thermal, ThermalConfig)
+        or not thermal.cop_curve
+        or thermal.sense != SENSE_HEAT
+    ):
+        return thermal
+    start = inputs.row_zero(step)
+    outdoor = (
+        inputs.outdoor_temperature.window_covering(start, start + step * inputs.horizon_steps)
+        if inputs.outdoor_temperature
+        else None
+    )
+    if not outdoor:
+        raise PayloadError(
+            f"{name}: its heat pump COP curve needs an outdoor temperature forecast the "
+            "Companion can read. Choose a weather entity as the temperature source, "
+            "or clear the COP curve."
+        )
+    return thermal.with_outdoor_forecast(outdoor.values)
+
+
+def outdoor_per_step(series: Series, start: datetime, step: timedelta, steps: int) -> list[float]:
+    """The forecast at each step, aligned the way EMHASS aligns a timestamp map.
+
+    ``_align_runtime_forecast_mapping`` averages the points in each step-wide
+    bucket anchored on the first step, holds a bucket until the next one, and
+    lets the earliest bucket stand in for the steps before it.
+    """
+    buckets: dict[int, list[float]] = {}
+    for point in series:
+        buckets.setdefault((point.time - start) // step, []).append(point.value)
+    means = sorted((index, sum(values) / len(values)) for index, values in buckets.items())
+    result = []
+    position = -1
+    for index in range(steps):
+        while position + 1 < len(means) and means[position + 1][0] <= index:
+            position += 1
+        result.append(means[max(position, 0)][1])
+    return result
 
 
 def _tank_shortfalls(inputs: PayloadInputs, step: timedelta) -> dict[str, TankShortfall]:
@@ -1618,6 +1700,10 @@ def _deferrable_settings(
         _describe(load, inputs, step, warnings) if load.wants_to_run else _park(load)
         for load in loads
     ]
+    real = [
+        _spanning_daily_windows(row, load, inputs, step) if load.spans_daily_windows else row
+        for row, load in zip(real, loads, strict=True)
+    ]
     # Rows for later windows of daily loads go after every real load, so no real
     # load's P_deferrable{k} ever moves. Ordered by occurrence, then by load.
     extras = _extra_window_rows(loads, inputs, step)
@@ -1674,6 +1760,48 @@ def _deferrable_settings(
         ]
 
     return settings, [load.subentry_id for load in loads], warnings, extra_rows
+
+
+def _spanning_daily_windows(
+    row: _LoadSettings, load: DeferrableLoad, inputs: PayloadInputs, step: timedelta
+) -> _LoadSettings:
+    """Stretch a water tank's single row over every daily window in the horizon.
+
+    EMHASS gives a tank's row one contiguous heating mask and one cap on starts
+    for the whole horizon. The temperature arrays already carry each period's
+    deadline, so the mask only has to reach from the first window's opening to
+    the last one's closing (heating between windows stays allowed), and the
+    start cap grows with the number of windows so a later one is not starved.
+    """
+    if not load.wants_to_run:
+        return row
+    # Look a day past the horizon: a window that opens inside it but closes
+    # after it is dropped for a load that needs whole windows, yet the tank's
+    # temperature targets still reach into it, so its mask must too.
+    day_steps = round(timedelta(days=1) / step)
+    occurrences = [
+        (start, end)
+        for start, end in window_occurrences(
+            load.earliest_start,
+            load.latest_end,
+            inputs.row_zero(step),
+            step,
+            inputs.horizon_steps + day_steps,
+            timedelta(minutes=load.minimum_off_time_minutes),
+        )
+        if start < inputs.horizon_steps
+    ]
+    if len(occurrences) < 2:
+        return row
+    end_index = occurrences[-1][1]
+    if inputs.action == ACTION_MPC and end_index >= inputs.horizon_steps:
+        end_index = 0  # same convention as the first window: unconstrained
+    return replace(
+        row,
+        start_index=occurrences[0][0],
+        end_index=end_index,
+        max_startups=row.max_startups * len(occurrences),
+    )
 
 
 def _without_credit_for_later_day(

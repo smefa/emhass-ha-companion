@@ -473,3 +473,20 @@ async def test_the_conditional_sensors_carry_emhass_forecasts(hass: HomeAssistan
         attributes = hass.states.get(entity_id).attributes
         assert "forecasts" in attributes, entity_id
         assert set(attributes["forecasts"][0]) == {"date", value_key}, entity_id
+
+
+async def test_advanced_step_stores_the_solver_limits(hass: HomeAssistant) -> None:
+    entry = await _setup(hass)
+    flow = EmhassCompanionOptionsFlow()
+    flow.hass = hass
+    flow.handler = entry.entry_id
+
+    form = await flow.async_step_advanced()
+    assert form["type"] is FlowResultType.FORM
+    assert form["step_id"] == "advanced"
+
+    result = await flow.async_step_advanced(
+        {"lp_solver_timeout": 120, "lp_solver_mip_rel_gap": 0.02}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"]["solver"] == {"lp_solver_timeout": 120, "lp_solver_mip_rel_gap": 0.02}

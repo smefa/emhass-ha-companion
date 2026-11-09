@@ -93,7 +93,7 @@ Growatt alone spans three incompatible control schemes by inverter family: TOU
 slots (SPH GEN3), TOU periods gated on a grid-charge enable (MOD GEN4), and a
 signed ±100 % setpoint with a watchdog (WIT only). Deye, Sunsynk and Sol-Ark are
 the same silicon under three badges. `wills106/homeassistant-solax-modbus` is
-*one* HACS repo covering SolaX, Growatt, Sofar, Solis, Alpha ESS, Sunsynk/Deye
+*one* Marketplace repo covering SolaX, Growatt, Sofar, Solis, Alpha ESS, Sunsynk/Deye
 and more — with **per-plugin entity naming**, so one adapter for that repo is
 impossible.
 

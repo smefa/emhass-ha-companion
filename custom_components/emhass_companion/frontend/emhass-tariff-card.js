@@ -108,6 +108,7 @@ function tariffView(hass, hub, demo) {
       demand: {
         periodKw: SAMPLE.period.kw,
         daysRemaining: SAMPLE.period.daysRemaining,
+        peakIntervals: [],
         headroomKw: SAMPLE.headroomKw,
         periodEntity: null,
         headroomEntity: null,
@@ -122,6 +123,9 @@ function tariffView(hass, hub, demo) {
         unit: SAMPLE.rate.unit,
         sheetRate: SAMPLE.rate.sheetRate,
         rateBasis: SAMPLE.rate.rateBasis,
+        tierLimitKw: NaN,
+        rateAbove: NaN,
+        periodKw: SAMPLE.period.kw,
         entity: null,
       },
     };
@@ -148,6 +152,9 @@ function tariffView(hass, hub, demo) {
     demand: {
       periodKw: isUsable(periodState) ? num(periodState) : NaN,
       daysRemaining: Number(periodAttrs.days_remaining),
+      peakIntervals: Array.isArray(periodAttrs.contributing_intervals)
+        ? periodAttrs.contributing_intervals
+        : [],
       headroomKw: isUsable(headroomState) ? num(headroomState) : NaN,
       periodEntity: hub["sensor.period_peak"],
       headroomEntity: hub["sensor.peak_headroom"],
@@ -162,6 +169,9 @@ function tariffView(hass, hub, demo) {
       unit: rateState && rateState.attributes ? rateState.attributes.unit_of_measurement : null,
       sheetRate: Number(rateAttrs.sheet_rate),
       rateBasis: rateAttrs.rate_basis ? String(rateAttrs.rate_basis) : "",
+      tierLimitKw: Number(rateAttrs.tier_limit_kw),
+      rateAbove: Number(rateAttrs.rate_above),
+      periodKw: isUsable(periodState) ? num(periodState) : NaN,
       entity: hub["sensor.demand_charge_rate"],
     },
   };
@@ -185,6 +195,24 @@ function headroomPct(demand) {
   return (demand.headroomKw / demand.periodKw) * 100;
 }
 
+/** Hover text for the period peak: when each billed interval started, highest first. */
+function peakTimes(intervals) {
+  return intervals
+    .filter((i) => i && Number.isFinite(Date.parse(i.start)) && Number.isFinite(Number(i.kw)))
+    .sort((a, b) => Number(b.kw) - Number(a.kw))
+    .map((i) => {
+      const when = new Date(i.start).toLocaleString([], {
+        weekday: "short",
+        day: "numeric",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      return `${Number(i.kw).toFixed(1)} kW · ${when}`;
+    })
+    .join("\n");
+}
+
 function renderDemand(ui, demand, warnPct) {
   if (!ui.arc) return;
   const pct = headroomPct(demand);
@@ -199,6 +227,7 @@ function renderDemand(ui, demand, warnPct) {
   ui.periodLine.textContent = `${
     Number.isFinite(demand.periodKw) ? demand.periodKw.toFixed(1) : "–"
   } kW this period${Number.isFinite(demand.daysRemaining) ? ` · ${demand.daysRemaining} days left` : ""}`;
+  ui.periodLine.title = peakTimes(demand.peakIntervals);
   ui.periodEntity = demand.periodEntity;
 
   // The two pills are mutually exclusive readings of the same fact: whether
@@ -232,6 +261,34 @@ function renderRate(ui, rate) {
       : "–",
   );
   ui.rateEntity = rate.entity;
+
+  // A progressive tier (Austria's SNE-G-V): the sheet rate above is the rate
+  // up to the limit, so say so, and add the rate beyond it and the month's
+  // charge so far, which is the figure the two rates exist to produce.
+  const tiered = Number.isFinite(rate.tierLimitKw) && Number.isFinite(rate.rateAbove);
+  ui.aboveBox.style.display = tiered ? "" : "none";
+  ui.chargeBox.style.display = tiered ? "" : "none";
+  if (!tiered) return;
+  const unit = rate.unit ? ` ${rate.unit}${rate.rateBasis ? `/${rate.rateBasis}` : ""}` : "";
+  const limit = rate.tierLimitKw.toFixed(rate.tierLimitKw % 1 ? 1 : 0);
+  ui.sheetBox.set(
+    Number.isFinite(rate.sheetRate) ? `${rate.sheetRate.toFixed(2)}${unit}` : "–",
+    `up to ${limit} kW`,
+  );
+  ui.aboveBox.set(`${rate.rateAbove.toFixed(2)}${unit}`, `above ${limit} kW`);
+  ui.chargeBox.set(
+    Number.isFinite(rate.periodKw) && Number.isFinite(rate.sheetRate)
+      ? `${tieredCharge(rate).toFixed(2)}${rate.unit ? ` ${rate.unit}` : ""}`
+      : "–",
+    "this month so far",
+  );
+}
+
+/** The month's demand charge for the peak so far: rate 1 up to the limit, rate 2 only above it. */
+function tieredCharge(rate) {
+  const base = Math.min(rate.periodKw, rate.tierLimitKw);
+  const above = Math.max(rate.periodKw - rate.tierLimitKw, 0);
+  return base * rate.sheetRate + above * rate.rateAbove;
 }
 
 /**
@@ -320,10 +377,16 @@ class EmhassTariffCard extends LiveCard {
       const stats = tag("div", "stats rate-row", body);
       ui.rateBox = valueBox(stats, "Effective rate");
       ui.sheetBox = valueBox(stats, "Sheet rate");
+      ui.aboveBox = valueBox(stats, "Upper tier");
+      ui.chargeBox = valueBox(stats, "Peak charge");
       ui.rateBox.classList.add("tap");
       ui.sheetBox.classList.add("tap");
+      ui.aboveBox.classList.add("tap");
+      ui.chargeBox.classList.add("tap");
       ui.rateBox.addEventListener("click", () => moreInfo(this, ui.rateEntity));
       ui.sheetBox.addEventListener("click", () => moreInfo(this, ui.rateEntity));
+      ui.aboveBox.addEventListener("click", () => moreInfo(this, ui.rateEntity));
+      ui.chargeBox.addEventListener("click", () => moreInfo(this, ui.periodEntity));
     }
   }
 
