@@ -35,7 +35,13 @@ from .const import (
     BATTERY_ACTIONS,
     DEMAND_CHARGE_RATE_KEY,
     NET_HOUSE_LOAD_KEY,
+    NETWORK_STATUS_ACTIVE,
+    NETWORK_STATUS_NOT_CONFIGURED,
+    NETWORK_STATUS_NOT_PRICED,
+    NETWORK_STATUS_PEAK_TRACKING_OFF,
+    NETWORK_STATUS_PROFILE_ERROR,
     NETWORK_TARIFF_BAND_KEY,
+    NETWORK_TARIFF_STATUS_KEY,
     PEAK_HEADROOM_KEY,
     PERIOD_PEAK_KEY,
     PHASE_HEADROOM_KEY,
@@ -374,6 +380,10 @@ async def async_setup_entry(
             SolarSurplusEndSensor(coordinator),
         ]
     )
+
+    # Always created, unlike the entities below: its whole point is to answer
+    # "is my network tariff on and working?" including when it is not.
+    async_add_entities([NetworkTariffStatusSensor(coordinator)])
 
     # Only meaningful once a network profile with at least one band is
     # actually selected -- available() already reports unavailable without
@@ -779,7 +789,7 @@ class LoadPlannedTemperatureSensor(EmhassLoadEntity, SensorEntity):
                 if self.load.is_water_tank
                 else None
             )
-            config = self.load.thermal_config(current)
+            config = self.coordinator.effective_thermal_config(self.load, current)
             if config is None:
                 return None
             minimums, maximums = config.comfort_band(
@@ -1210,6 +1220,61 @@ class NetworkTariffBandSensor(EmhassEntity, SensorEntity):
         return attributes
 
 
+class NetworkTariffStatusSensor(EmhassEntity, SensorEntity):
+    """Whether the network tariff is set up and doing its job.
+
+    ``not_configured`` -- no profile selected; ``profile_error`` -- one is
+    selected but could not be resolved (see the log); ``peak_tracking_off`` --
+    it has a demand charge but no grid-import energy meter, so the peak is
+    not tracked; ``demand_charge_not_priced`` -- the demand charge cannot be
+    priced yet (usually an EMHASS release too old); ``active`` -- everything
+    it defines works.
+    """
+
+    _attr_translation_key = NETWORK_TARIFF_STATUS_KEY
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = [
+        NETWORK_STATUS_NOT_CONFIGURED,
+        NETWORK_STATUS_PROFILE_ERROR,
+        NETWORK_STATUS_PEAK_TRACKING_OFF,
+        NETWORK_STATUS_NOT_PRICED,
+        NETWORK_STATUS_ACTIVE,
+    ]
+
+    def __init__(self, coordinator: EmhassCoordinator) -> None:
+        super().__init__(coordinator, NETWORK_TARIFF_STATUS_KEY)
+
+    @property
+    def native_value(self) -> str:
+        coordinator = self.coordinator
+        if not coordinator.config.network.key:
+            return NETWORK_STATUS_NOT_CONFIGURED
+        calendar = coordinator.network_calendar
+        if calendar is None:
+            return NETWORK_STATUS_PROFILE_ERROR
+        if calendar.demand_charges and not coordinator.peak_trackers:
+            return NETWORK_STATUS_PEAK_TRACKING_OFF
+        pricing = coordinator.demand_charge_pricing(dt_util.utcnow())
+        if pricing is not None and pricing.effective_rate_per_kw is None:
+            return NETWORK_STATUS_NOT_PRICED
+        return NETWORK_STATUS_ACTIVE
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        coordinator = self.coordinator
+        calendar = coordinator.network_calendar
+        pricing = coordinator.demand_charge_pricing(dt_util.utcnow())
+        return {
+            "not_priced_reason": pricing.reason if pricing else None,
+            "profile": coordinator.config.network.key or None,
+            "bands": len(calendar.bands) if calendar else 0,
+            "demand_charges": len(calendar.demand_charges) if calendar else 0,
+            "peak_trackers": len(coordinator.peak_trackers),
+            "holiday_lookup_degraded": coordinator.holiday_cache.degraded,
+        }
+
+
 class DemandChargeRateSensor(EmhassEntity, SensorEntity):
     """The effective ``capacity_cost_per_kw`` a network profile's demand
     charge prices out to, or 0 with the reason it isn't priced right now.
@@ -1281,7 +1346,26 @@ class DemandChargeRateSensor(EmhassEntity, SensorEntity):
                 }
                 for component in pricing.components
             ]
+        tier = self._tier()
+        if tier is not None:
+            attributes["tier_limit_kw"], attributes["rate_above"] = tier
         return attributes
+
+    def _tier(self) -> tuple[float, float] | None:
+        """(limit kW, rate above it) when the profile prices a progressive tier.
+
+        Such a profile sends two components -- rate 1, then rate 2 - rate 1 on
+        a peak floored at the limit (``DemandCharge.min_peak_kw``) -- so the
+        operator's rate 2 is the two sheet rates added back together.
+        """
+        calendar = self.coordinator.network_calendar
+        pricing = self._pricing
+        if calendar is None or pricing is None or len(calendar.demand_charges) != 2:
+            return None
+        base, upper = calendar.demand_charges
+        if upper.min_peak_kw <= 0 or base.rate_per_kw is None or upper.rate_per_kw is None:
+            return None
+        return upper.min_peak_kw, base.rate_per_kw + upper.rate_per_kw
 
 
 class PhaseHeadroomSensor(EmhassEntity, SensorEntity):

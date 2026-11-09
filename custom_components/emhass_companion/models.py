@@ -67,6 +67,7 @@ from .const import (
     DEFAULT_WEIGHT_BATTERY_CHARGE,
     DEFAULT_WEIGHT_BATTERY_DISCHARGE,
 )
+from .heat_pump_room import HeatPumpRoomConfig
 from .thermal import ThermalConfig
 from .water_tank import WaterTankConfig
 
@@ -785,6 +786,16 @@ class DeferrableLoad:
     routine, not something to report every solve.
     """
 
+    spans_daily_windows: bool = False
+    """A water tank whose standing window recurs every day.
+
+    A tank is one thermal state, so it keeps a single EMHASS row (its
+    temperature arrays already cover the whole horizon). That row has only one
+    contiguous heating mask and one start cap, so the payload stretches the mask
+    from the first window's opening to the last window's closing and scales the
+    start cap by the number of windows, instead of adding rows.
+    """
+
     repeats_daily: bool = False
     """Whether the standing window recurs every day.
 
@@ -816,7 +827,7 @@ class DeferrableLoad:
     current_on_timesteps: int = 0
     current_off_timesteps: int = 0
 
-    thermal: ThermalConfig | WaterTankConfig | None = None
+    thermal: ThermalConfig | WaterTankConfig | HeatPumpRoomConfig | None = None
     """Set only for a thermal load, whose temperature is optimised instead of
     its run time."""
 

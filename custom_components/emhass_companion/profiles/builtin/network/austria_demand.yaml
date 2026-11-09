@@ -1,0 +1,95 @@
+name: Austria SNE-G-V (tiered demand charge)
+kind: network
+version: 1
+description: >-
+  Austria's new network tariff (SNE-G-V): the single highest 15-minute average
+  power of the month, at any time of day, sets a two-tier per-kW charge: the
+  first 10 kW at one rate, only the part above at a second. Optionally also
+  the reduced SNAP and WiNAP energy windows.
+notes: >-
+  Enter the two per-kW-per-month rates from your operator's sheet. The charge
+  only starts when your operator switches over (between 1 January 2027 and
+  1 July 2028), so leave the rates at 0 until then, and set "Time resolution"
+  (Setup) to 15 minutes while this profile is active.
+
+  See the [Austria SNE-G-V documentation](https://smefa.github.io/emhass-ha-companion/guide/network_tariffs/#austria-sne-g-v-in-detail)
+  for how the two tiers are priced, the SNAP and WiNAP reduced energy windows,
+  and what is not modelled.
+
+detect:
+  always: true
+
+options:
+  demand_rate:
+    name: Demand charge, first tier (rate 1)
+    description: >-
+      Euro per kW per month for the part of your highest 15-minute value up
+      to the tier limit, as on your operator's sheet. 0 turns it off.
+    default: 0
+    selector: {number: {min: 0, max: 500, step: any, mode: box}}
+  demand_rate_above:
+    name: Demand charge, above the limit (rate 2)
+    description: >-
+      Euro per kW per month for only the part of the peak above the tier
+      limit. Leave at 0 to charge everything at rate 1.
+    default: 0
+    selector: {number: {min: 0, max: 500, step: any, mode: box}}
+  tier_limit_kw:
+    advanced: true
+    name: Tier limit
+    description: kW of the monthly peak charged at rate 1; the rest at rate 2.
+    default: 10
+    selector: {number: {min: 0, max: 1000, step: any, mode: box}}
+  energy_price_ct:
+    advanced: true
+    name: Network energy price
+    description: >-
+      Cent per kWh network energy price, only needed for the SNAP and WiNAP
+      windows. 0 adds no energy band.
+    default: 0
+    selector: {number: {min: 0, max: 100, step: any, mode: box}}
+  snap_reduction_pct:
+    advanced: true
+    name: SNAP reduction
+    description: Percent off the network energy price, 10:00-16:00, April to September.
+    default: 20
+    selector: {number: {min: 0, max: 100, step: any, mode: box}}
+  winap_reduction_pct:
+    advanced: true
+    name: WiNAP reduction
+    description: >-
+      Percent off the network energy price, 23:00-05:00, October to March. Not
+      set yet; starts October 2027.
+    default: 0
+    selector: {number: {min: 0, max: 100, step: any, mode: box}}
+
+energy_bands:
+  - name: SNAP
+    months: [4, 5, 6, 7, 8, 9]
+    hours: "10:00-16:00"
+    buy: { adder: "{{ options.energy_price_ct * (1 - options.snap_reduction_pct / 100) / 100 }}" }
+  - name: WiNAP
+    months: [10, 11, 12, 1, 2, 3]
+    hours: "23:00-05:00"
+    buy: { adder: "{{ options.energy_price_ct * (1 - options.winap_reduction_pct / 100) / 100 }}" }
+  - name: standard
+    buy: { adder: "{{ options.energy_price_ct / 100 }}" }
+
+demand_charges:
+  - name: tier 1
+    rate_per_kw: "{{ options.demand_rate | float }}"
+    rate_basis: month
+    measure:
+      interval: 15min
+      aggregate: max
+    period: month
+  - name: tier 2
+    rate_per_kw: >-
+      {{ 0 if (options.demand_rate_above | default(0) | float) == 0
+         else (options.demand_rate_above | float) - (options.demand_rate | float) }}
+    min_peak_kw: "{{ options.tier_limit_kw | default(10) | float }}"
+    rate_basis: month
+    measure:
+      interval: 15min
+      aggregate: max
+    period: month

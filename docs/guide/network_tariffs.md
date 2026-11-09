@@ -10,15 +10,28 @@ Services → EMHASS Companion → Configure → Network tariff**.
 
 ## Network tariff step
 
-You're offered every `network`-kind profile available — two ship in-box:
+You're offered every `network`-kind profile available — five ship in-box:
 
 - **Göteborg Energi** — a Swedish high-load-season tariff: a winter weekday
   window with a higher per-kWh fee, plus a demand charge on your three highest
   hourly peaks.
+- **Dala Energi** — a Swedish dual-peak tariff: two independently billed
+  mean-of-top-3 peaks every month (höglast on weekday days, låglast at all
+  other times), plus a flat transmission fee. Needs EMHASS 0.18.3 or newer.
 - **Amber Electric** — an Australian demand tariff: a single daily window in
   which your highest 30-minute draw sets a charge for the whole month.
+- **Austria SNE-G-V** — the new Austrian network tariff: your highest
+  15-minute average power of the month, at any hour, sets a two-tier per-kW
+  charge. Optionally models the reduced SNAP and WiNAP energy windows. It
+  starts between January 2027 and July 2028 depending on your network area,
+  so leave the rates at 0 until your operator switches over.
+- **Flat demand charge (manual)** — a single kr/kW charge on your worst
+  import peak over the planning horizon. No time window and no memory of the
+  month's peak so far, so it suits a rough estimate or an operator that bills
+  your highest power at any hour. If your operator bills inside a time
+  window, pick a real tariff instead.
 
-Neither matches your operator? Leave this step unset — nothing changes — or
+None matches your operator? Leave this step unset — nothing changes — or
 write your own profile; see [Writing a profile](../profiles.md).
 
 ## Configuring the profile
@@ -48,15 +61,78 @@ For **Amber Electric**:
 - **Months the window applies** — leave every box unticked for a window that
   runs all year; tick specific months only if yours is seasonal.
 
+For **Dala Energi**:
+
+- **Transmission energy fee** — öre/kWh, flat.
+- **Höglast demand charge (winter)** / **(summer)** and **Låglast demand
+  charge** — kr/kW/month on each of the two peaks. Defaults are the household
+  sheet from 2026-01-01 including VAT; check them against your invoice.
+- **Workday sensor** — a Workday `binary_sensor` for Sweden, as above.
+
+For **Austria SNE-G-V**:
+
+- **Demand charge, first tier** and **above the limit** — per kW per month,
+  from your operator's sheet; **Tier limit** is 10 kW by default.
+- **Network energy price**, **SNAP reduction** and **WiNAP reduction** —
+  only needed if you want the reduced energy windows modelled. Leave the
+  energy price at 0 if your price source already includes network fees.
+
+For **Flat demand charge (manual)**:
+
+- **Capacity (demand) charge** — price per kW of the highest import power
+  over the planning horizon, charged once on the peak. 0 turns it off.
+
 Once saved, set **Time resolution** (under **Configure → Setup**) to match the
-tariff's own metering interval — 60 minutes for Göteborg, 30 minutes for
-Amber. A coarser optimisation step under-protects the window; a finer one is
+tariff's own metering interval — 60 minutes for Göteborg and Dala, 30 minutes
+for Amber, 15 minutes for Austria. A coarser optimisation step under-protects the window; a finer one is
 just extra caution.
+
+## Austria SNE-G-V in detail
+
+This is the full text behind the short note on the profile's setup page.
+
+Based on E-Control's press kit of 12 October 2026. The demand charge follows
+the highest 15-minute average import of the month, with no daily window. It
+starts between 1 January 2027 and 1 July 2028, depending on your network area
+(Netzbereich) — until your operator switches over, leave the rates at 0.
+
+**Rates.** They are set per network area in the
+Systemnutzungsentgelte-Tarifverordnung, so enter yours per kW per month from
+your operator's sheet. A 15 kW peak costs 10 kW at rate 1 plus 5 kW at rate 2.
+
+**How it's sent to EMHASS.** As two components over the same peak: rate 1, and
+(rate 2 − rate 1) on the peak raised to at least the tier limit. That differs
+from your bill by a constant, so plans are the same. Day-ahead runs carry no
+peak memory, so they price the upper tier a little high below the limit. Set
+**Time resolution** (Setup) to 15 minutes while this profile is active.
+
+**Reduced energy windows.**
+
+- **SNAP** — 10:00–16:00 from 1 April to 30 September (a 20% cut of the
+  network energy price so far).
+- **WiNAP** — 23:00–05:00 from 1 October to 31 March, from October 2027; the
+  cut is not set yet.
+
+To use them, enter your network energy price, which stacks on the price
+source. Leave it at 0 if your price source already includes network fees, or
+if you only want the demand charge.
+
+**Not modelled:** the flexible-draw discount (about 25% of the regular demand
+price for the flexible part of your power), the 10 kW connection allowance,
+and the transition from today's 90:10 to a 50:50 energy to demand split.
+
+To stop using a network tariff, open Configure → Network tariff and pick
+**None**.
 
 ## What you'll see
 
 New sensors appear on the integration's hub device:
 
+- **Network tariff status** (diagnostic) — always present, even with no
+  tariff selected, so you can check that your tariff is on and working. It
+  reads *Not configured*, *Profile error* (see the log), *Peak tracking off*,
+  *Demand charge not priced* (usually an EMHASS add-on that is too old; the
+  reason is in its attributes) or *Active*.
 - **Network tariff band** — which price band is active right now (e.g.
   "höglast"/"låglast" for Göteborg), with the next change time in its
   attributes.
@@ -65,6 +141,10 @@ New sensors appear on the integration's hub device:
   Its attributes explain the arithmetic and, if it reads 0, why.
 - **Billing period peak** — the demand-charge aggregate incurred so far this
   billing period, with every contributing interval listed in its attributes.
+  It needs **Track cost and savings** on and a grid import energy sensor set
+  under Configure → *Cost and savings*. Without them this sensor and Peak
+  headroom don't exist, and a repair issue ("Demand charge peak isn't
+  tracked") tells you why.
 - **Peak headroom** — how much more you can draw right now before setting a
   new peak. This is the one worth wiring into your own automations — e.g. hold
   an EV charger back when it's tight.
@@ -79,7 +159,7 @@ New sensors appear on the integration's hub device:
     Pricing a demand charge so the optimiser can trade it off against energy
     cost needs a feature (a "demand window mask") that reached a stable EMHASS
     release in **0.18.1**. On that version or newer, a tariff with a real time
-    window (both built-in profiles have one) prices cleanly. On an older
+    window (the Göteborg, Dala and Amber profiles have one) prices cleanly. On an older
     add-on it's enforced as a hard ceiling using the **Peak target** number
     instead of a price — it works, but it's a blunter tool than the priced
     version.

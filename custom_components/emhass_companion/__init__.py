@@ -41,6 +41,7 @@ from .const import (
     DOMAIN,
     ISSUE_BAD_PROFILE,
     ISSUE_EMHASS_VERSION,
+    ISSUE_PEAK_TRACKING_OFF,
     ISSUE_PHASE_CLAMP_OFF,
     ISSUE_SCRIPT_CONTROL_ENTITY,
     LOAD_SUBENTRY_TYPES,
@@ -250,6 +251,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
     peak_tracker = peak_trackers[0] if peak_trackers else None
     coordinator.peak_trackers = peak_trackers
     coordinator.peak_tracker = peak_tracker
+    _report_peak_tracking(hass, coordinator)
     for tracker_item in peak_trackers:
         await tracker_item.async_load()
 
@@ -447,6 +449,29 @@ def _check_version(hass: HomeAssistant, version: str | None) -> None:
         )
     else:
         ir.async_delete_issue(hass, DOMAIN, ISSUE_EMHASS_VERSION)
+
+
+@callback
+def _report_peak_tracking(hass: HomeAssistant, coordinator: EmhassCoordinator) -> None:
+    """Say so when a demand charge is configured but nothing tracks its peak.
+
+    Without a grid-import energy meter no tracker is built, so the Billing
+    period peak and Peak headroom sensors never appear and the peak is not
+    priced -- with nothing on screen to explain why. Checked once per setup:
+    the meter is a setting, and every settings change reloads the entry.
+    """
+    calendar = coordinator.network_calendar
+    if calendar is None or not calendar.demand_charges or coordinator.peak_trackers:
+        ir.async_delete_issue(hass, DOMAIN, ISSUE_PEAK_TRACKING_OFF)
+        return
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        ISSUE_PEAK_TRACKING_OFF,
+        is_fixable=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key=ISSUE_PEAK_TRACKING_OFF,
+    )
 
 
 @callback

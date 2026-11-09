@@ -32,8 +32,8 @@ creating a house load sensor and selecting an existing source.
       integration's `get_prices_for_date` action to fetch today's and
       tomorrow's day-ahead prices.
     - **Nord Pool (custom-components/nordpool)** — reads the `raw_today` /
-      `raw_tomorrow` attributes of a sensor from the HACS Nord Pool
-      integration.
+      `raw_tomorrow` attributes of a sensor from the Nord Pool
+      integration installed from the Marketplace.
     - **ENTSO-E** — reads the `prices` attribute of the ENTSO-E
       integration's average-price sensor.
     - **Tibber** — asks Tibber for the price series of one of your homes.
@@ -350,8 +350,9 @@ without a battery.
 
 ## 8. Inverter profile
 
-Optional — leave the profile blank and the integration only ever reads, and
-the plan is yours to act on however you like. Pick a profile and you're asked
+Optional — pick **None** and the integration only ever reads, and
+the plan is yours to act on however you like. You can switch back to **None**
+later under Configure to remove a profile. Pick a profile and you're asked
 for the entities it needs; nothing is written to your hardware until you also
 turn on the **Control enabled** switch afterwards.
 
@@ -403,7 +404,9 @@ is under **Advanced settings**.
   prices, 60 for most others). Pick from the list or type any number of
   minutes; a coarser step solves faster.
 - **Recalculate every** — how often the plan is re-optimised, in minutes.
-- **Planning horizon** — how many hours ahead it plans.
+- **Planning horizon** — how many hours ahead it plans (6 to 48). Longer
+  horizons see more of the price forecast but solve more slowly; End SOC
+  *Optimized* then plans a further day beyond it.
 - **Day-ahead fallback time** — backup time for the once-a-day full
   re-plan, in case new prices haven't shown up yet.
 
