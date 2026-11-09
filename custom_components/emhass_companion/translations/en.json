@@ -1762,7 +1762,9 @@
                 "source_temperature": "Source temperature",
                 "base_temperature": "Base temperature",
                 "annual_reference_hdd": "Annual heating degree days",
-                "thermal_inertia_time_constant": "Thermal inertia"
+                "thermal_inertia_time_constant": "Thermal inertia",
+                "window_area": "Window area",
+                "shgc": "Solar heat gain coefficient"
               },
               "data_description": {
                 "carnot_efficiency": "How close the heat pump gets to the ideal Carnot COP. 0.4 is typical; EMHASS clips the resulting COP to 1-8.",
@@ -1770,7 +1772,9 @@
                 "source_temperature": "Optional. Cold-side temperature in °C for the COP, such as a typical brine temperature for a ground-source heat pump. Replaces the outdoor temperature in the Carnot formula, which still drives the heat demand. Ignored when a constant COP is set.",
                 "base_temperature": "Outdoor temperature above which the house needs no heating.",
                 "annual_reference_hdd": "Heating degree days of the year the specific heating demand refers to.",
-                "thermal_inertia_time_constant": "Hours before delivered heat shows in the room temperature, such as for floor heating. 0 means immediately."
+                "thermal_inertia_time_constant": "Hours before delivered heat shows in the room temperature, such as for floor heating. 0 means immediately.",
+                "window_area": "Optional. Effective glazing area in m², mainly south-, east- and west-facing windows. With a window area set, EMHASS adds window area × solar heat gain coefficient × solar irradiance to the heat the room gets, so a sunny day needs less heating. Needs EMHASS's solar irradiance forecast (it fetches this itself, with solar forecasting on). Leave empty for no solar gain.",
+                "shgc": "Fraction of the sun's heat that gets through the glazing, 0 to 1. 0.6 suits modern double glazing. Only used with a window area."
               }
             }
           }
@@ -1807,7 +1811,9 @@
                 "source_temperature": "Source temperature",
                 "base_temperature": "Base temperature",
                 "annual_reference_hdd": "Annual heating degree days",
-                "thermal_inertia_time_constant": "Thermal inertia"
+                "thermal_inertia_time_constant": "Thermal inertia",
+                "window_area": "Window area",
+                "shgc": "Solar heat gain coefficient"
               },
               "data_description": {
                 "carnot_efficiency": "How close the heat pump gets to the ideal Carnot COP. 0.4 is typical; EMHASS clips the resulting COP to 1-8.",
@@ -1815,7 +1821,9 @@
                 "source_temperature": "Optional. Cold-side temperature in °C for the COP, such as a typical brine temperature for a ground-source heat pump. Replaces the outdoor temperature in the Carnot formula, which still drives the heat demand. Ignored when a constant COP is set.",
                 "base_temperature": "Outdoor temperature above which the house needs no heating.",
                 "annual_reference_hdd": "Heating degree days of the year the specific heating demand refers to.",
-                "thermal_inertia_time_constant": "Hours before delivered heat shows in the room temperature, such as for floor heating. 0 means immediately."
+                "thermal_inertia_time_constant": "Hours before delivered heat shows in the room temperature, such as for floor heating. 0 means immediately.",
+                "window_area": "Optional. Effective glazing area in m², mainly south-, east- and west-facing windows. With a window area set, EMHASS adds window area × solar heat gain coefficient × solar irradiance to the heat the room gets, so a sunny day needs less heating. Needs EMHASS's solar irradiance forecast (it fetches this itself, with solar forecasting on). Leave empty for no solar gain.",
+                "shgc": "Fraction of the sun's heat that gets through the glazing, 0 to 1. 0.6 suits modern double glazing. Only used with a window area."
               }
             }
           }

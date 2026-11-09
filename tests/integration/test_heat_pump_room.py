@@ -199,6 +199,34 @@ async def test_reconfigure_stores_and_clears_the_fixed_cop_settings(hass: HomeAs
     assert result["type"] is FlowResultType.ABORT
 
 
+async def test_reconfigure_stores_and_clears_the_solar_gain_settings(hass: HomeAssistant):
+    entry, result = await _start(hass, data=_stored())
+    form = {
+        "name": "House",
+        "temperature_sensor": SENSOR,
+        "thermal_mass_m3": 10,
+        "floor_area_m2": 150,
+        "specific_heating_demand": 100,
+        "supply_temperature": 35,
+    }
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {**form, "advanced": {"window_area": 18, "shgc": 0.5}}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    stored = next(iter(entry.subentries.values())).data
+    assert (stored["window_area"], stored["shgc"]) == (18, 0.5)
+
+    # A blank area clears it; the coefficient keeps its stored value, as the form's default.
+    _entry, result = await _start(hass, data=stored)
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {**form, "advanced": {}}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    cleared = next(iter(_entry.subentries.values())).data
+    assert "window_area" not in cleared
+    assert cleared["shgc"] == 0.5
+
+
 def _coordinator(hass: HomeAssistant, **overrides) -> EmhassCoordinator:
     entry = MockConfigEntry(
         domain=DOMAIN,

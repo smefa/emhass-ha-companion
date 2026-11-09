@@ -126,6 +126,7 @@ from .const import (
     CONF_SEMI_CONTINUOUS,
     CONF_SENSE,
     CONF_SETBACK_TEMPERATURE,
+    CONF_SHGC,
     CONF_SINGLE_CONSTANT,
     CONF_SOC_ENTITY,
     CONF_SOLVER,
@@ -149,6 +150,7 @@ from .const import (
     CONF_URL,
     CONF_WEIGHT_BATTERY_CHARGE,
     CONF_WEIGHT_BATTERY_DISCHARGE,
+    CONF_WINDOW_AREA,
     CONTROL_ENTITY_DOMAINS,
     DEFAULT_BATTERY_DYNAMIC_MAX,
     DEFAULT_BATTERY_DYNAMIC_MIN,
@@ -236,6 +238,7 @@ from .heat_pump_room import (
     DEFAULT_BASE_TEMPERATURE,
     DEFAULT_CARNOT_EFFICIENCY,
     DEFAULT_INERTIA_HOURS,
+    DEFAULT_SHGC,
     DEFAULT_SUPPLY_TEMPERATURE,
     MAX_INERTIA_HOURS,
     HeatPumpModel,
@@ -1930,6 +1933,8 @@ def heat_pump_room_schema(
                     max=MAX_INERTIA_HOURS,
                     unit_of_measurement="h",
                 ),
+                optional_number(CONF_WINDOW_AREA, min=0, max=1000, unit_of_measurement="m²"),
+                number(CONF_SHGC, DEFAULT_SHGC, min=0, max=1),
             )
         ),
     )
@@ -2217,6 +2222,7 @@ class ThermalLoadSubentryFlow(DeferrableLoadSubentryFlow):
                     CONF_CONTROL_ENTITY,
                     CONF_CONSTANT_COP,
                     CONF_SOURCE_TEMPERATURE,
+                    CONF_WINDOW_AREA,
                 ):
                     if key not in data:
                         merged.pop(key, None)

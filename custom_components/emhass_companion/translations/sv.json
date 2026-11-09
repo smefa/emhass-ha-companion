@@ -1762,7 +1762,9 @@
                 "source_temperature": "Källtemperatur",
                 "base_temperature": "Balanstemperatur",
                 "annual_reference_hdd": "Årliga graddagar",
-                "thermal_inertia_time_constant": "Termisk tröghet"
+                "thermal_inertia_time_constant": "Termisk tröghet",
+                "window_area": "Fönsteryta",
+                "shgc": "Solvärmefaktor (SHGC)"
               },
               "data_description": {
                 "carnot_efficiency": "Hur nära värmepumpen kommer den ideala Carnot-COP:n. 0,4 är typiskt; EMHASS begränsar COP:n till 1-8.",
@@ -1770,7 +1772,9 @@
                 "source_temperature": "Valfritt. Kallsidans temperatur i °C för COP:n, till exempel en typisk brinetemperatur för en bergvärmepump. Ersätter utetemperaturen i Carnot-formeln, som fortfarande styr värmebehovet. Ignoreras om en fast COP är angiven.",
                 "base_temperature": "Utetemperatur över vilken huset inte behöver värme.",
                 "annual_reference_hdd": "Graddagar för det år som det specifika värmebehovet avser.",
-                "thermal_inertia_time_constant": "Timmar innan levererad värme syns i rumstemperaturen, till exempel för golvvärme. 0 betyder direkt."
+                "thermal_inertia_time_constant": "Timmar innan levererad värme syns i rumstemperaturen, till exempel för golvvärme. 0 betyder direkt.",
+                "window_area": "Valfritt. Effektiv glasyta i m², främst fönster mot söder, öster och väster. Med en fönsteryta angiven lägger EMHASS till fönsteryta × solvärmefaktor × solinstrålning till värmen rummet får, så en solig dag behöver mindre uppvärmning. Kräver EMHASS solinstrålningsprognos (den hämtas av EMHASS själv, med solprognos aktiverad). Lämna tomt för ingen solvärme.",
+                "shgc": "Andel av solens värme som kommer in genom glaset, 0 till 1. 0,6 passar modern tvåglasruta. Används bara med en fönsteryta."
               }
             }
           }
@@ -1807,7 +1811,9 @@
                 "source_temperature": "Källtemperatur",
                 "base_temperature": "Balanstemperatur",
                 "annual_reference_hdd": "Årliga graddagar",
-                "thermal_inertia_time_constant": "Termisk tröghet"
+                "thermal_inertia_time_constant": "Termisk tröghet",
+                "window_area": "Fönsteryta",
+                "shgc": "Solvärmefaktor (SHGC)"
               },
               "data_description": {
                 "carnot_efficiency": "Hur nära värmepumpen kommer den ideala Carnot-COP:n. 0,4 är typiskt; EMHASS begränsar COP:n till 1-8.",
@@ -1815,7 +1821,9 @@
                 "source_temperature": "Valfritt. Kallsidans temperatur i °C för COP:n, till exempel en typisk brinetemperatur för en bergvärmepump. Ersätter utetemperaturen i Carnot-formeln, som fortfarande styr värmebehovet. Ignoreras om en fast COP är angiven.",
                 "base_temperature": "Utetemperatur över vilken huset inte behöver värme.",
                 "annual_reference_hdd": "Graddagar för det år som det specifika värmebehovet avser.",
-                "thermal_inertia_time_constant": "Timmar innan levererad värme syns i rumstemperaturen, till exempel för golvvärme. 0 betyder direkt."
+                "thermal_inertia_time_constant": "Timmar innan levererad värme syns i rumstemperaturen, till exempel för golvvärme. 0 betyder direkt.",
+                "window_area": "Valfritt. Effektiv glasyta i m², främst fönster mot söder, öster och väster. Med en fönsteryta angiven lägger EMHASS till fönsteryta × solvärmefaktor × solinstrålning till värmen rummet får, så en solig dag behöver mindre uppvärmning. Kräver EMHASS solinstrålningsprognos (den hämtas av EMHASS själv, med solprognos aktiverad). Lämna tomt för ingen solvärme.",
+                "shgc": "Andel av solens värme som kommer in genom glaset, 0 till 1. 0,6 passar modern tvåglasruta. Används bara med en fönsteryta."
               }
             }
           }

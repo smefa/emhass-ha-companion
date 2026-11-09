@@ -372,6 +372,9 @@ CONF_SOURCE_TEMPERATURE: Final = "source_temperature"
 CONF_BASE_TEMPERATURE: Final = "base_temperature"
 CONF_ANNUAL_HDD: Final = "annual_reference_hdd"
 CONF_INERTIA_TIME_CONSTANT: Final = "thermal_inertia_time_constant"
+# Optional passive solar gain: EMHASS adds window_area * shgc * GHI to the room's heat.
+CONF_WINDOW_AREA: Final = "window_area"
+CONF_SHGC: Final = "shgc"
 CONF_TANK_VOLUME: Final = "tank_volume_litres"
 # A common domestic hot-water cylinder; only the form's starting value.
 DEFAULT_TANK_VOLUME: Final = 200

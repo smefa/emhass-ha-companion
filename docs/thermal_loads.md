@@ -68,6 +68,16 @@ for step-by-step setup.
 | Base temperature (*Advanced*) | `base_temperature` | Default 18 °C. Degree-day demand is zero above it. |
 | Annual heating degree days (*Advanced*) | `annual_reference_hdd` | Default 3000. |
 | Thermal inertia (*Advanced*, h) | `thermal_inertia_time_constant` | Default 0, and then omitted. |
+| Window area (*Advanced*, m²) | `window_area` | Optional passive solar gain. Effective glazing area, mainly south, east and west windows. EMHASS subtracts `window_area × shgc × GHI` from the heat demand. Empty or 0 sends nothing. |
+| Solar heat gain coefficient (*Advanced*) | `shgc` | Default 0.6, 0–1. Sent only with a window area. |
+
+**Solar gain needs irradiance.** EMHASS gets the solar irradiance (GHI, on a
+horizontal surface) from its own Open-Meteo fetch, using the latitude and
+longitude in its configuration. If that fetch is unavailable the run plans
+without solar gain. The companion's own check that the comfort floors are
+reachable ignores solar gain, so it stays conservative. GHI is not the
+irradiance on the window, so treat the window area as an effective figure to
+tune, not a measured one.
 
 EMHASS's fixed `thermal_loss` of 0.045 kW is left at its default.
 

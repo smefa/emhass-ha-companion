@@ -99,6 +99,45 @@ def test_from_data_reads_the_optional_cop_keys_and_blank_means_unset():
     assert blank.fixed_cop() is None
 
 
+def test_no_window_area_sends_no_solar_keys():
+    for model in (_model(), _model(window_area_m2=0.0, shgc=0.5)):
+        entry = _room(model=model).with_outdoor_forecast([0.0] * 48).to_emhass(NOW, STEP, 48)
+        assert "window_area" not in entry
+        assert "shgc" not in entry
+
+
+def test_window_area_sends_solar_gain_keys():
+    model = _model(window_area_m2=18.5, shgc=0.45)
+    entry = _room(model=model).with_outdoor_forecast([0.0] * 48).to_emhass(NOW, STEP, 48)
+    assert (entry["window_area"], entry["shgc"]) == (18.5, 0.45)
+    # The physics demand keys EMHASS needs for solar gain are already there.
+    assert {"u_value", "envelope_area", "ventilation_rate", "heated_volume"} <= entry.keys()
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"window_area_m2": -1.0},
+        {"window_area_m2": float("nan")},
+        {"shgc": 1.5},
+        {"shgc": -0.1},
+        {"shgc": float("inf")},
+    ],
+)
+def test_invalid_solar_inputs_are_rejected(overrides):
+    with pytest.raises(ValueError):
+        _model(**overrides)
+
+
+def test_from_data_reads_solar_keys_and_blank_means_default():
+    base = {"thermal_mass_m3": 10, "floor_area_m2": 150, "specific_heating_demand": 100}
+    model = HeatPumpModel.from_data({**base, "window_area": 12, "shgc": 0})
+    assert (model.window_area_m2, model.shgc) == (12.0, 0.0)  # 0 is a real SHGC
+    blank = HeatPumpModel.from_data({**base, "window_area": "", "shgc": None})
+    assert (blank.window_area_m2, blank.shgc) == (None, 0.6)
+    assert HeatPumpModel.from_data(base).window_area_m2 is None
+
+
 def test_demand_is_degree_days_and_heating_only():
     model = _model()
     assert model.demand_kwh(8.0, 0.5) == pytest.approx(100 * 150 * 10 * (0.5 / 24) / 3000)

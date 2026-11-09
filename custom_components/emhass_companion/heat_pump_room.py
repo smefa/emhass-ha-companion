@@ -38,10 +38,12 @@ from .const import (
     CONF_CONSTANT_COP,
     CONF_FLOOR_AREA,
     CONF_INERTIA_TIME_CONSTANT,
+    CONF_SHGC,
     CONF_SOURCE_TEMPERATURE,
     CONF_SPECIFIC_HEATING_DEMAND,
     CONF_SUPPLY_TEMPERATURE,
     CONF_THERMAL_MASS,
+    CONF_WINDOW_AREA,
 )
 from .thermal import MAX_THERMAL_TEMPERATURE, MIN_THERMAL_TEMPERATURE, ThermalConfig
 from .water_tank import CLAMP_EPSILON_K, REACH_MARGIN_K, UNREACHABLE_TOLERANCE_K, TankShortfall
@@ -61,10 +63,16 @@ DEFAULT_BASE_TEMPERATURE = 18.0
 DEFAULT_ANNUAL_HDD = 3000.0
 DEFAULT_INERTIA_HOURS = 0.0
 MAX_INERTIA_HOURS = 24.0
+DEFAULT_SHGC = 0.6  # EMHASS's own default
 
 
 def _optional_float(value: Any) -> float | None:
     return None if value in (None, "") else float(value)
+
+
+def _float_or(value: Any, default: float) -> float:
+    """A stored number, or ``default`` when it is blank (0 is a real value)."""
+    return default if value in (None, "") else float(value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +92,10 @@ class HeatPumpModel:
     """A flat COP, for a heat pump whose COP barely follows the outdoor air."""
     source_temperature: float | None = None
     """Cold-side temperature in °C (brine, ground) used instead of the outdoor air for the COP."""
+    window_area_m2: float | None = None
+    """Effective glazing area. EMHASS adds ``area * shgc * GHI`` to the heat; unset or 0 means no solar gain."""
+    shgc: float = DEFAULT_SHGC
+    """Solar heat gain coefficient, 0-1. Only used with a window area."""
 
     def __post_init__(self) -> None:
         for name in (
@@ -95,21 +107,26 @@ class HeatPumpModel:
             "base_temperature",
             "annual_reference_hdd",
             "inertia_hours",
+            "shgc",
         ):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int | float) or not isfinite(value):
                 raise ValueError(f"{name} must be a finite number")
+        if not 0 <= self.shgc <= 1:
+            raise ValueError("shgc must be between 0 and 1")
         for name in ("thermal_mass_m3", "floor_area_m2", "annual_reference_hdd"):
             if getattr(self, name) <= 0:
                 raise ValueError(f"{name} must be positive")
         if self.specific_heating_demand < 0:
             raise ValueError("specific_heating_demand must be nonnegative")
-        for name in ("constant_cop", "source_temperature"):
+        for name in ("constant_cop", "source_temperature", "window_area_m2"):
             value = getattr(self, name)
             if value is not None and (
                 isinstance(value, bool) or not isinstance(value, int | float) or not isfinite(value)
             ):
                 raise ValueError(f"{name} must be a finite number")
+        if self.window_area_m2 is not None and self.window_area_m2 < 0:
+            raise ValueError("window_area_m2 must be nonnegative")
         if self.constant_cop is not None and not MIN_COP <= self.constant_cop <= MAX_COP:
             raise ValueError(f"constant_cop must be between {MIN_COP:g} and {MAX_COP:g}")
         if (
@@ -141,6 +158,8 @@ class HeatPumpModel:
                 inertia_hours=float(data.get(CONF_INERTIA_TIME_CONSTANT, DEFAULT_INERTIA_HOURS)),
                 constant_cop=_optional_float(data.get(CONF_CONSTANT_COP)),
                 source_temperature=_optional_float(data.get(CONF_SOURCE_TEMPERATURE)),
+                window_area_m2=_optional_float(data.get(CONF_WINDOW_AREA)),
+                shgc=_float_or(data.get(CONF_SHGC), DEFAULT_SHGC),
             )
         except (KeyError, TypeError) as err:
             raise ValueError("the heat pump model settings are incomplete") from err
@@ -391,6 +410,11 @@ class HeatPumpRoomConfig:
             "min_temperatures": minimums,
             "max_temperatures": maximums,
         }
+        if self.model.window_area_m2:
+            # EMHASS subtracts window_area * shgc * GHI from the heat demand. The
+            # replay above ignores it, so the lowered floors stay conservative.
+            entry["window_area"] = self.model.window_area_m2
+            entry["shgc"] = self.model.shgc
         if self.model.inertia_hours > 0:
             entry["thermal_inertia_time_constant"] = self.model.inertia_hours
         if (fixed_cop := self.model.fixed_cop()) is not None:
