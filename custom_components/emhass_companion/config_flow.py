@@ -9,6 +9,7 @@ substance of that answer.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from itertools import pairwise
 import logging
 import math
@@ -239,7 +240,7 @@ from .heat_pump_room import (
     MAX_INERTIA_HOURS,
     HeatPumpModel,
 )
-from .metering import async_energy_dashboard_defaults
+from .metering import async_energy_dashboard_defaults, has_grid_import_meter
 from .models import parse_charge_power_derating
 from .naming import async_taken_standard_ids
 from .price_forecast import PROVIDER_NONE, PROVIDERS
@@ -436,6 +437,26 @@ def _profile_notes(profile: Profile) -> str:
     """What the setup form shows above the entity fields."""
     notes = profile.notes or ""
     return f"{UNTESTED_NOTICE}{notes}" if profile.untested else notes
+
+
+PEAK_TRACKING_NOTICE = (
+    "**Peak tracking is off.** This tariff has a demand charge, but cost tracking "
+    "with a grid import energy sensor isn't set up (Configure → Cost and savings). "
+    "Without it the plan can't see the peak you've already reached this billing "
+    "period, so it can't tell which peaks would actually raise the bill. The tariff "
+    "still works.\n\n"
+)
+
+
+def _network_notes(profile: Profile, options: Mapping[str, Any]) -> str:
+    """The network options form's notes, warning when its demand charge can't be tracked."""
+    notes = _profile_notes(profile)
+    has_demand = bool(
+        profile.document.get("demand_charge") or profile.document.get("demand_charges")
+    )
+    if has_demand and not has_grid_import_meter(options):
+        return f"{PEAK_TRACKING_NOTICE}{notes}"
+    return notes
 
 
 def _numbered(label: str, key: str, numbering: tuple[str, ...]) -> str:
@@ -3773,7 +3794,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
             ),
             description_placeholders={
                 "profile": profile.name,
-                "notes": _profile_notes(profile),
+                "notes": _network_notes(profile, options),
             },
         )
 

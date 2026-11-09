@@ -68,3 +68,19 @@ async def test_repair_raised_only_for_an_untracked_demand_charge(hass: HomeAssis
     _report_peak_tracking(hass, _coordinator("network/x", _calendar(demand=1)))
     _report_peak_tracking(hass, _coordinator("network/x", _calendar()))
     assert registry.async_get_issue(DOMAIN, ISSUE_PEAK_TRACKING_OFF) is None
+
+
+def _profile(document):
+    from custom_components.emhass_companion.profiles.schema import Profile
+
+    return Profile(key="network/x", path="x.yaml", kind="network", name="X", document=document)
+
+
+def test_options_form_warns_when_a_demand_charge_cannot_be_tracked():
+    from custom_components.emhass_companion.config_flow import _network_notes
+
+    with_demand = _profile({"demand_charge": {"rate_per_kw": 1}})
+    assert "Peak tracking is off" in _network_notes(with_demand, {})
+    metered = {"metering": {"metering_enabled": True, "grid_import_energy_entity": "sensor.e"}}
+    assert "Peak tracking is off" not in _network_notes(with_demand, metered)
+    assert "Peak tracking is off" not in _network_notes(_profile({}), {})
