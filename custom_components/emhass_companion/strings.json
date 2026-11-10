@@ -1253,6 +1253,11 @@
         "name": "Comfort penalty"
       }
     },
+    "text": {
+      "nominal_power": {
+        "name": "03. Power when running"
+      }
+    },
     "time": {
       "earliest_start": {
         "name": "05. Earliest start"

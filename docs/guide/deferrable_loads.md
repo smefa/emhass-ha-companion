@@ -100,9 +100,9 @@ Every field the load's device page can show, in the order it appears:
   the optimiser skips over it entirely.
 - **02. Hours needed per day** — how many hours it should run each day.
   *Every day* loads only.
-- **03. Power when running** — how much it draws at full power, in W.
-  Unavailable on a sequence load: change the sequence with **Reconfigure**
-  on the load instead.
+- **03. Power when running** — how much it draws at full power, in W. A
+  text box: one value, or several separated by commas (one per step) for a
+  load whose power changes through its program.
 - **04. Lowest power while running** — the least it may draw while on, if
   it can modulate. Only used when *12. Runs at full power only* is off.
 - **05. Earliest start** — the window may not start before this time.

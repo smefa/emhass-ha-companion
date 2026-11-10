@@ -41,7 +41,8 @@ you might change day to day becomes a control on the load's own page:
 | `switch.<load>_enabled` | Include this load in the optimisation at all |
 | `switch.<load>_restrict_to_a_time_window` | Whether the window below applies |
 | `time.<load>_earliest_start` / `_latest_finish` | The window. May cross midnight |
-| `number.<load>_power_when_running` / `_hours_needed_per_day` | |
+| `text.<load>_power_when_running` | Power in W: one value, or a comma-separated [sequence](#sequence-loads) |
+| `number.<load>_hours_needed_per_day` | |
 | `number.<load>_minimum_on_time` / `_minimum_off_time` | Protects compressor-driven loads from short-cycling — see below |
 | `switch.<load>_battery_lockout` | Price the battery out of discharging into this load's window — see [battery_lockout.md](battery_lockout.md) |
 | `button.<load>_run_now` | Run this load immediately, regardless of recurrence. Unavailable on a surplus load — see [surplus_loads.md](surplus_loads.md) |
@@ -141,9 +142,10 @@ second one.
   that day.
 - **Stopping.** Turn **Enabled** off, turn **Requested** off, or change
   **Recurrence**. The next cycle starts again from the first step.
-- **Changing the sequence.** Use **Reconfigure** on the load. A change
-  applies to the next cycle, not the one already running. The Power number
-  on the device page is unavailable while the load has a sequence.
+- **Changing the sequence.** Edit the Power text entity
+  (`text.<load>_power_when_running`) or use **Reconfigure** on the load. A
+  change applies to the next cycle, not the one already running. Typing one
+  value turns the load back into a constant one.
 - **Ignored settings.** A sequence sets the power of every step, so
   *Lowest power while running*, *Runs at full power only*, *Must run in one
   unbroken block*, *Most starts per plan* and the minimum on/off times are

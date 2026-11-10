@@ -2132,6 +2132,12 @@ class DeferrableLoadSubentryFlow(ConfigSubentryFlow):
         defaults = dict(subentry.data)
         if load is not None:
             defaults[CONF_NOMINAL_POWER] = load.nominal_power_w
+            # The live Power, not the subentry's frozen seed: the Power text
+            # entity may have been edited since.
+            if load.is_sequence:
+                defaults[CONF_POWER_SEQUENCE] = list(load.power_sequence)
+            else:
+                defaults.pop(CONF_POWER_SEQUENCE, None)
             defaults[CONF_OPERATING_HOURS] = load.operating_hours
             defaults[CONF_RECURRENCE] = load.recurrence
 
@@ -2152,17 +2158,15 @@ class DeferrableLoadSubentryFlow(ConfigSubentryFlow):
                 )
             clean = _clean_deferrable(user_input)
             data = {**subentry.data, **clean}
-            if CONF_NOMINAL_POWER in user_input and CONF_POWER_SEQUENCE not in clean:
-                data.pop(CONF_POWER_SEQUENCE, None)
-                if (
-                    clean[CONF_NOMINAL_POWER] != defaults.get(CONF_NOMINAL_POWER)
-                    # Leaving a sequence: the number's restored value is
-                    # from before the sequence, not what was just typed.
-                    or CONF_POWER_SEQUENCE in subentry.data
+            if CONF_NOMINAL_POWER in user_input:
+                if CONF_POWER_SEQUENCE not in clean:
+                    data.pop(CONF_POWER_SEQUENCE, None)
+                if (clean.get(CONF_POWER_SEQUENCE) or [clean[CONF_NOMINAL_POWER]]) != (
+                    defaults.get(CONF_POWER_SEQUENCE) or [defaults.get(CONF_NOMINAL_POWER)]
                 ):
-                    # An explicit scalar edit. The reload seeds it from the
-                    # subentry; the stamp stops the number's restore from
-                    # putting the old value back, loaded entry or not.
+                    # An explicit Power edit. The reload seeds it from the
+                    # subentry; the stamp stops the Power entity's restore from
+                    # putting the old value back, and tells the entry to reload.
                     data[CONF_NOMINAL_POWER_EDITED_AT] = dt_util.utcnow().isoformat()
 
             for key in self._clearable_keys:

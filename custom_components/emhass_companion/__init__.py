@@ -11,7 +11,9 @@ the repository root for the full terms.
 
 from __future__ import annotations
 
+from contextlib import suppress
 import logging
+from typing import Any
 
 from homeassistant.config_entries import (
     SIGNAL_CONFIG_ENTRY_CHANGED,
@@ -20,11 +22,13 @@ from homeassistant.config_entries import (
 )
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP, Platform
 from homeassistant.core import Event, HomeAssistant, callback
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.exceptions import ConfigEntryNotReady, ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers import restore_state
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
+from homeassistant.util import dt as dt_util
 from homeassistant.util import slugify
 
 from .api import EmhassClient, EmhassError
@@ -34,7 +38,7 @@ from .const import (
     CONF_HOT_WATER_PERIODS,
     CONF_HOUSE_LOAD_TOTAL_ENTITY,
     CONF_NETWORK,
-    CONF_POWER_SEQUENCE,
+    CONF_NOMINAL_POWER_EDITED_AT,
     CONF_PROFILE,
     CONF_PROFILE_OPTIONS,
     CONF_TIME_STEP,
@@ -54,7 +58,7 @@ from .const import (
     NET_HOUSE_LOAD_KEY,
 )
 from .coordinator import EmhassCoordinator
-from .deferrable import DeferrableRegistry
+from .deferrable import DeferrableRegistry, parse_power
 from .executor import Executor
 from .frontend import async_setup_frontend
 from .log_ring import LogRingHandler
@@ -88,6 +92,7 @@ PLATFORMS: list[Platform] = [
     Platform.SELECT,
     Platform.SENSOR,
     Platform.SWITCH,
+    Platform.TEXT,
     Platform.TIME,
 ]
 
@@ -185,6 +190,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
 
     loads = DeferrableRegistry(hass, entry)
     loads.sync()
+    _async_restore_power(hass, entry, loads)
     await loads.async_load_sequences(int(entry.options.get(CONF_TIME_STEP, DEFAULT_TIME_STEP)))
     _async_remove_retired_buttons(hass, entry)
     _report_unusable_control_entities(hass, entry)
@@ -364,7 +370,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
         refresh_needed = False
         for load in entry.runtime_data.loads.all():
             subentry = entry.subentries[load.subentry_id]
-            if tuple(subentry.data.get(CONF_POWER_SEQUENCE, ())) != load.power_sequence:
+            if subentry.data.get(CONF_NOMINAL_POWER_EDITED_AT) != load.power_edited_at:
                 hass.config_entries.async_schedule_reload(entry.entry_id)
                 return
             if not load.is_water_tank or CONF_HOT_WATER_PERIODS not in subentry.data:
@@ -514,6 +520,53 @@ def _report_phase_clamp(
             ),
         },
     )
+
+
+def _stored_state(restore_data: Any, entity_id: str) -> Any:
+    """One entity's stored state; HA 2026.11 replaced ``last_states`` with a getter."""
+    if getter := getattr(restore_data, "async_get_stored_state", None):
+        return getter(entity_id)
+    return restore_data.last_states.get(entity_id)
+
+
+@callback
+def _async_restore_power(
+    hass: HomeAssistant, entry: EmhassConfigEntry, loads: DeferrableRegistry
+) -> None:
+    """Give each non-thermal load the Power it last had, and retire its number.
+
+    Runs before the sequence store loads, because whether a stored pending
+    start survives depends on the load already being a sequence. The Power
+    comes from the text entity's last state, or from the old Power number on
+    the first start after the upgrade. A reconfigure after that state wins,
+    and an unreadable state leaves the subentry's seed.
+    """
+    registry = er.async_get(hass)
+    restore_data = restore_state.async_get(hass)
+    for load in loads.all():
+        if load.is_thermal:
+            continue
+        unique_id = f"{entry.entry_id}_{load.subentry_id}_nominal_power"
+        number_id = registry.async_get_entity_id("number", DOMAIN, unique_id)
+        text_id = registry.async_get_entity_id("text", DOMAIN, unique_id)
+        last = next(
+            (
+                stored
+                for entity_id in (text_id, number_id)
+                if entity_id and (stored := _stored_state(restore_data, entity_id))
+            ),
+            None,
+        )
+        if last is not None:
+            edited_at = dt_util.parse_datetime(str(load.power_edited_at or ""))
+            if edited_at is None or last.state.last_updated >= edited_at:
+                with suppress(ServiceValidationError):
+                    values = parse_power(last.state.state)
+                    load.power_sequence = values if len(values) > 1 else ()
+                    load.nominal_power_w = max(values)
+        if number_id is not None:
+            _LOGGER.info("Replacing %s with the Power text entity", number_id)
+            registry.async_remove(number_id)
 
 
 @callback

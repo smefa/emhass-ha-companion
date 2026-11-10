@@ -68,6 +68,7 @@ from .const import (
     CONF_MINIMUM_ON_TIME,
     CONF_MINIMUM_POWER,
     CONF_NOMINAL_POWER,
+    CONF_NOMINAL_POWER_EDITED_AT,
     CONF_OPERATING_HOURS,
     CONF_POWER_SENSOR,
     CONF_POWER_SEQUENCE,
@@ -177,7 +178,14 @@ def parse_power(value: Any) -> tuple[float, ...]:
         raise ServiceValidationError(
             "First power must be at least 10 W; every value must be at most 100000 W"
         )
+    if len(format_power(values)) > 255:
+        raise ServiceValidationError("Power is too long; use fewer stages (the last value repeats)")
     return values
+
+
+def format_power(values: tuple[float, ...]) -> str:
+    """The Power field's text: ``1100`` or ``300, 1830, 118``."""
+    return ", ".join(f"{value:g}" for value in values)
 
 
 def expand_power(values: tuple[float, ...], hours: float, step_minutes: int) -> tuple[float, ...]:
@@ -251,6 +259,8 @@ class DeferrableRuntime:
     last_completed_day: date | None = None
     _sequence_restored: bool = False
     sequence_step_minutes: int = DEFAULT_TIME_STEP
+    power_edited_at: str | None = None
+    """The subentry's reconfigure stamp this runtime was seeded from."""
     _save_sequence: Callable[[], None] | None = field(default=None, repr=False)
 
     @property
@@ -2288,6 +2298,7 @@ def _apply_subentry_fields(
     subentry form stops offering it once the load exists.
     """
     load.power_sequence = tuple(data.get(CONF_POWER_SEQUENCE, ()))
+    load.power_edited_at = data.get(CONF_NOMINAL_POWER_EDITED_AT)
     load.name = title
     load.load_type = (
         LOAD_TYPE_THERMAL if subentry_type == SUBENTRY_TYPE_THERMAL else LOAD_TYPE_STANDARD

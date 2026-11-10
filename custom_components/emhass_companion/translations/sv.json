@@ -1253,6 +1253,11 @@
         "name": "Komfortstraff"
       }
     },
+    "text": {
+      "nominal_power": {
+        "name": "03. Effekt när den är igång"
+      }
+    },
     "time": {
       "earliest_start": {
         "name": "05. Tidigast start"
