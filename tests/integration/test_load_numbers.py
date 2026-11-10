@@ -144,21 +144,16 @@ async def test_a_standard_load_never_gets_a_reachability_issue(hass: HomeAssista
     )
 
 
-async def test_sequence_power_scales_the_shape_and_runtime_guard(hass: HomeAssistant) -> None:
+async def test_sequence_power_unavailable_and_runtime_guard(hass: HomeAssistant) -> None:
     from homeassistant.exceptions import ServiceValidationError
 
     numbers = _numbers(hass, 15)
     power = numbers["nominal_power"]
     power.load.power_sequence = (150, 2000, 0)
     power.load.operating_hours = 1
-    power.load.nominal_power_w = 2000
-    assert power.available
-    assert power.load.power_values == (150, 2000, 0)
-    # Power is the peak: an automation lowering it scales the whole shape.
-    await power.async_set_native_value(1000)
-    assert power.load.power_values == (75, 1000, 0)
-    await power.async_set_native_value(10)
-    assert power.load.power_values == (10, 10, 0)
+    assert not power.available
+    with pytest.raises(ServiceValidationError, match="Power is a sequence"):
+        await power.async_set_native_value(500)
     with pytest.raises(ServiceValidationError, match="needs at least"):
         await numbers["operating_hours"].async_set_native_value(0.25)
     assert power.load.operating_hours == 1

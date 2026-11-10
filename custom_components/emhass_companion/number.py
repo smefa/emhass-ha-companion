@@ -196,7 +196,7 @@ LOAD_NUMBERS: tuple[LoadNumberDescription, ...] = (
         entity_category=EntityCategory.CONFIG,
         get_fn=lambda load: load.nominal_power_w,
         set_fn=_set_nominal_power,
-        # On a sequence load this is the peak: the shape scales to it.
+        available_fn=lambda load: not load.is_sequence,
     ),
     LoadNumberDescription(
         key="minimum_power",
@@ -683,7 +683,7 @@ class LoadNumber(EmhassLoadEntity, RestoreNumber):
             and last.native_value is not None
             and not (
                 self.entity_description.key == "nominal_power"
-                and await self._power_edited_since_last_state()
+                and (self.load.is_sequence or await self._power_edited_since_last_state())
             )
         ):
             self.entity_description.set_fn(self.load, last.native_value)
@@ -708,6 +708,7 @@ class LoadNumber(EmhassLoadEntity, RestoreNumber):
     @property
     def available(self) -> bool:
         if self.load.is_sequence and self.entity_description.key in {
+            "nominal_power",
             "minimum_power",
             "max_startups",
             "minimum_on_time",
@@ -736,6 +737,8 @@ class LoadNumber(EmhassLoadEntity, RestoreNumber):
         return value
 
     async def async_set_native_value(self, value: float) -> None:
+        if self.load.is_sequence and self.entity_description.key == "nominal_power":
+            raise ServiceValidationError("Power is a sequence; change it in reconfigure")
         if self.load.is_sequence and self.entity_description.key == "operating_hours":
             from .deferrable import expand_power
 

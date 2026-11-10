@@ -255,24 +255,7 @@ class DeferrableRuntime:
 
     @property
     def power_values(self) -> tuple[float, ...]:
-        """The stages as sent to EMHASS.
-
-        The configured sequence is a shape; the Power number is its peak. At
-        the configured peak the shape is unchanged, and an automation that
-        lowers Power (a high base load in winter) scales every stage down
-        with it. The floor keeps the first stage above ``RUNNING_FLOOR_W``,
-        which is what a planned start is recognised by.
-        """
-        if not self.power_sequence:
-            return (self.nominal_power_w,)
-        peak = max(self.power_sequence)
-        if self.nominal_power_w <= 0 or self.nominal_power_w == peak:
-            return self.power_sequence
-        scale = self.nominal_power_w / peak
-        return tuple(
-            max(round(value * scale), RUNNING_FLOOR_W) if value else 0.0
-            for value in self.power_sequence
-        )
+        return self.power_sequence or (self.nominal_power_w,)
 
     @property
     def is_sequence(self) -> bool:
@@ -1427,7 +1410,7 @@ class DeferrableRuntime:
             subentry_id=self.subentry_id,
             name=self.name,
             nominal_power_w=max(self.power_values) if self.is_sequence else nominal_power_w,
-            power_sequence=self.power_values if self.power_sequence else (),
+            power_sequence=self.power_sequence,
             cycle_values=self.sequence_cycle.values if self.sequence_cycle else (),
             cycle_anchor=self.sequence_cycle.anchor if self.sequence_cycle else None,
             sequence_done=self.is_sequence and not self.sequence_owes(now),

@@ -57,9 +57,8 @@ described, with fields and examples, in [Actions](guide/actions.md).
 
 See [deferrable_loads.md](deferrable_loads.md) and
 [thermal_loads.md](thermal_loads.md) for the per-load entities. On a
-[sequence load](deferrable_loads.md#sequence-loads) the Power number is the
-sequence's peak: lowering it scales every step down; change the shape with
-**Reconfigure** on the load.
+[sequence load](deferrable_loads.md#sequence-loads) the Power number is
+unavailable; change the sequence with **Reconfigure** on the load.
 
 ## EMHASS entity names
 

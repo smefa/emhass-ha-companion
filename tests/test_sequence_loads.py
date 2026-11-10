@@ -649,11 +649,3 @@ def test_a_short_rest_of_today_does_not_drop_tomorrows_window():
     _, _, _, row = extras[0]
     assert row.hours == 2
     assert row.nominal_power_w == [500, 2000] + [2000] * 6
-
-
-def test_lowered_power_scales_the_sequence_sent_to_emhass():
-    """Power is the sequence's peak; the plan must see the scaled shape."""
-    runtime = load(nominal_power_w=1000)
-    assert row(runtime)["nominal_power_of_deferrable_loads"] == [[75, 1000, 0, 0]]
-    runtime.nominal_power_w = 2000
-    assert row(runtime)["nominal_power_of_deferrable_loads"] == [[150, 2000, 0, 0]]
