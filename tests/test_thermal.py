@@ -323,3 +323,48 @@ def test_a_mild_forecast_does_not_clamp_floors():
         mild.to_emhass(_midnight_utc(), HALF_HOUR, DAY_STEPS)["min_temperatures"]
         == config.comfort_band(_midnight_utc(), HALF_HOUR, DAY_STEPS)[0]
     )
+
+
+@pytest.mark.usefixtures("stockholm_timezone")
+@pytest.mark.parametrize(
+    ("day", "comfort_step"),
+    [
+        # Spring forward: 02:00 -> 03:00, so 06:00 is 5 h of real time after
+        # midnight. Stepping in wall time put comfort at 07:00 actual.
+        (datetime(2026, 3, 29), 10),
+        # Fall back: 03:00 -> 02:00, so 06:00 is 7 h after midnight.
+        (datetime(2026, 10, 25), 14),
+    ],
+)
+def test_comfort_follows_real_time_across_a_dst_change(day: datetime, comfort_step: int):
+    """Forecast rows advance by elapsed time, so the band has to as well."""
+    from homeassistant.util import dt as dt_util
+
+    midnight = day.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE).astimezone(UTC)
+    minimums, _ = _config().comfort_band(midnight, HALF_HOUR, DAY_STEPS)
+
+    assert minimums[comfort_step - 2] == 18.0  # an hour before: below the ramp
+    assert minimums[comfort_step - 1] == 19.5  # 05:30 local, halfway up the ramp
+    assert minimums[comfort_step] == 21.0  # 06:00 local
+    # 22:00 local, the same real-time shift in the evening.
+    assert minimums[comfort_step + 31] == 21.0
+    assert minimums[comfort_step + 32] == 18.0
+
+
+@pytest.mark.usefixtures("stockholm_timezone")
+def test_a_comfort_start_in_the_repeated_autumn_hour_ramps_to_its_second_time():
+    """On 2026-10-25, 02:00-03:00 happens twice; so does a 02:30 comfort start.
+
+    The window opens again at the second 02:30, so the second 02:00 has to
+    ramp towards it rather than towards tomorrow's 02:30.
+    """
+    from homeassistant.util import dt as dt_util
+
+    midnight = datetime(2026, 10, 25, tzinfo=dt_util.DEFAULT_TIME_ZONE).astimezone(UTC)
+    config = _config(comfort_start=time(2, 30), comfort_end=time(5, 0))
+    minimums, _ = config.comfort_band(midnight, timedelta(minutes=15), 24)
+
+    assert minimums[10] == 21.0  # the first 02:30 (00:30 UTC)
+    assert minimums[12] == 19.5  # the second 02:00, half an hour before 02:30
+    assert minimums[13] == 20.25
+    assert minimums[14] == 21.0  # the second 02:30

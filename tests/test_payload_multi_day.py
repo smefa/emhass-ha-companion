@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, time
 
+from homeassistant.util import dt as dt_util
 import pytest
 
 from custom_components.emhass_companion.const import ACTION_DAYAHEAD, ACTION_MPC
@@ -292,3 +293,125 @@ def test_water_tank_mask_reaches_a_window_that_the_horizon_clips():
 
     assert payload["end_timesteps_of_each_deferrable_load"] == [0]
     assert payload["set_deferrable_max_startups"] == [3]
+
+
+# --- daily loads with no window: one row per local day -------------------------
+
+
+def _windowless(**overrides) -> DeferrableLoad:
+    return _load(
+        earliest_start=None,
+        latest_end=None,
+        repeats_daily=False,
+        repeats_by_calendar_day=True,
+        **overrides,
+    )
+
+
+def test_windowless_daily_load_gets_a_row_per_whole_local_day():
+    # 12:00 local; midnight is 24 steps away, the next whole day ends at 72.
+    result = _build([_windowless()])
+    payload = result.payload
+    assert [(row.parent, row.name) for row in result.extra_rows] == [(0, "Washer (day 2)")]
+    assert payload["start_timesteps_of_each_deferrable_load"] == [0, 24]
+    assert payload["end_timesteps_of_each_deferrable_load"] == [24, 72]
+    assert payload["operating_hours_of_each_deferrable_load"] == [2.0, 2.0]
+
+
+def test_windowless_daily_load_cuts_today_to_what_fits_before_midnight():
+    # 23:00 local: two steps left today, and one has already run.
+    late = datetime(2026, 7, 28, 21, 0, tzinfo=UTC)
+    result = _build([_windowless(operating_hours=3, completed_timesteps=1)], now=late)
+    payload = result.payload
+    assert payload["end_timesteps_of_each_deferrable_load"][0] == 2
+    assert payload["operating_hours_of_each_deferrable_load"][0] == 1.5
+    assert payload["operating_hours_of_each_deferrable_load"][1] == 3.0
+    assert not any("infeasible" in warning for warning in result.warnings)
+
+
+def test_windowless_later_day_keeps_the_minimum_off_time_after_midnight():
+    result = _build([_windowless(minimum_off_time_minutes=60)])
+    assert result.payload["start_timesteps_of_each_deferrable_load"] == [0, 26]
+
+
+def test_windowless_daily_load_on_a_one_day_horizon_is_unchanged():
+    # Midnight is past a 12-step horizon: no cut, no extra row.
+    result = _build([_windowless()], horizon_steps=12)
+    assert result.extra_rows == []
+    assert result.payload["end_timesteps_of_each_deferrable_load"] == [0]
+    assert result.payload["operating_hours_of_each_deferrable_load"] == [2.0]
+
+
+def test_windowless_daily_load_across_the_autumn_dst_change():
+    # 12:00 CEST on Saturday 2026-10-24; Sunday has 25 hours (50 steps).
+    saturday = datetime(2026, 10, 24, 10, 0, tzinfo=UTC)
+    result = _build([_windowless()], horizon_steps=96, now=saturday)
+    assert result.payload["start_timesteps_of_each_deferrable_load"] == [0, 24]
+    assert result.payload["end_timesteps_of_each_deferrable_load"] == [24, 74]
+
+
+def test_windowless_row_zero_past_midnight_does_not_credit_yesterday():
+    # 23:50 local rounds to a 00:00 row zero: the first row is tomorrow's.
+    before_midnight = datetime(2026, 7, 28, 21, 50, tzinfo=UTC)
+    result = _build([_windowless(completed_timesteps=4)], now=before_midnight)
+    assert result.payload["def_current_operating_timesteps"][0] == 0
+    assert result.payload["operating_hours_of_each_deferrable_load"][0] == 2.0
+
+
+def test_windowless_less_than_a_step_before_an_off_grid_midnight_parks_today():
+    # Kathmandu is UTC+05:45, so its midnight falls mid-step on a 30-minute grid.
+    original = dt_util.DEFAULT_TIME_ZONE
+    dt_util.set_default_time_zone(dt_util.get_time_zone("Asia/Kathmandu"))
+    try:
+        # 18:00 UTC is 23:45 local: 15 minutes left today.
+        result = _build([_windowless()], now=datetime(2026, 7, 28, 18, 0, tzinfo=UTC))
+    finally:
+        dt_util.set_default_time_zone(original)
+    payload = result.payload
+    assert payload["operating_hours_of_each_deferrable_load"][0] == 0
+    assert payload["operating_hours_of_each_deferrable_load"][1] == 2.0
+    # Tomorrow's first step is the first wholly after midnight (00:15), not
+    # the one straddling it, whose runtime would count towards today.
+    assert payload["start_timesteps_of_each_deferrable_load"][1] == 1
+
+
+def test_window_closing_inside_the_current_step_parks_today_but_keeps_tomorrow():
+    """17:35 against a 14:00-17:50 window: row zero is 17:30, still inside it.
+
+    Less than a step of the window is left, so its end floors to index 0, which
+    EMHASS reads as "unconstrained" -- the load could be placed long after
+    17:50. Today parks; tomorrow still asks for its full run.
+    """
+    load = _load(latest_end=time(17, 50))
+    payload = _build([load], horizon_steps=72, now=datetime(2026, 7, 28, 15, 35, tzinfo=UTC))
+    payload = payload.payload
+    assert payload["operating_hours_of_each_deferrable_load"] == [0.0, 2.0]
+    # Tomorrow's 14:00 is 41 steps after 17:30; 17:50 floors to step 48.
+    assert payload["start_timesteps_of_each_deferrable_load"] == [0, 41]
+    assert payload["end_timesteps_of_each_deferrable_load"] == [0, 48]
+
+
+def test_a_later_day_too_narrow_for_a_sequence_block_gets_no_row():
+    """A 2 h block in a 1 h window cannot fit tomorrow either.
+
+    Sent anyway, the unsplittable block makes the whole problem infeasible.
+    """
+    load = _load(
+        earliest_start=time(14),
+        latest_end=time(15),
+        power_sequence=(2000.0,) * 4,
+    )
+    payload = _build([load]).payload
+    assert payload["number_of_deferrable_loads"] == 1
+
+
+@pytest.mark.parametrize(("running", "today_hours"), [(False, 0.0), (True, 1.0)])
+def test_windowless_today_shorter_than_the_minimum_on_time_parks_unless_running(
+    running, today_hours
+):
+    # 23:00 local: two 30-minute steps left today, but a start must last 2 h.
+    late = datetime(2026, 7, 28, 21, 0, tzinfo=UTC)
+    load = _windowless(minimum_on_time_minutes=120, current_state=running)
+    payload = _build([load], now=late).payload
+    assert payload["operating_hours_of_each_deferrable_load"][0] == today_hours
+    assert payload["operating_hours_of_each_deferrable_load"][1] == 2.0

@@ -19,6 +19,7 @@ from homeassistant.config_entries import (
     SIGNAL_CONFIG_ENTRY_CHANGED,
     ConfigEntry,
     ConfigEntryChange,
+    ConfigSubentry,
 )
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP, Platform
 from homeassistant.core import Event, HomeAssistant, callback
@@ -38,7 +39,6 @@ from .const import (
     CONF_HOT_WATER_PERIODS,
     CONF_HOUSE_LOAD_TOTAL_ENTITY,
     CONF_NETWORK,
-    CONF_NOMINAL_POWER_EDITED_AT,
     CONF_PROFILE,
     CONF_PROFILE_OPTIONS,
     CONF_TIME_STEP,
@@ -51,6 +51,7 @@ from .const import (
     ISSUE_PEAK_TRACKING_OFF,
     ISSUE_PHASE_CLAMP_OFF,
     ISSUE_SCRIPT_CONTROL_ENTITY,
+    LOAD_MODE_AUTO,
     LOAD_SUBENTRY_TYPES,
     MANUAL_DEMAND_PROFILE_KEY,
     MANUAL_DEMAND_RATE_OPTION,
@@ -58,7 +59,7 @@ from .const import (
     NET_HOUSE_LOAD_KEY,
 )
 from .coordinator import EmhassCoordinator
-from .deferrable import DeferrableRegistry, parse_power
+from .deferrable import DeferrableRegistry, parse_power, supported_control_entity
 from .executor import Executor
 from .frontend import async_setup_frontend
 from .log_ring import LogRingHandler
@@ -190,6 +191,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
 
     loads = DeferrableRegistry(hass, entry)
     loads.sync()
+    _restore_run_now(hass, entry, loads)
     _async_restore_power(hass, entry, loads)
     await loads.async_load_sequences(int(entry.options.get(CONF_TIME_STEP, DEFAULT_TIME_STEP)))
     _async_remove_retired_buttons(hass, entry)
@@ -322,9 +324,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
     # Assistant went away. Without these two, a restart during a forced charge
     # leaves the battery charging until somebody notices the bill.
     entry.async_on_unload(_async_restore_on_unload)
+    entry.async_on_unload(lambda: _stash_run_now(hass, entry, loads))
     entry.async_on_unload(
         hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, _async_restore_on_stop)
     )
+
+    loaded_settings = {
+        load.subentry_id: _load_settings(entry.subentries[load.subentry_id]) for load in loads.all()
+    }
+    # The entry's own state changes fire this signal again before the reload
+    # runs; acting twice would release a replaced actuator twice.
+    reload_scheduled = False
 
     @callback
     def _async_entry_changed(change_type: ConfigEntryChange, changed_entry: ConfigEntry) -> None:
@@ -352,7 +362,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
         """
         if changed_entry.entry_id != entry.entry_id:
             return
-        if change_type != ConfigEntryChange.UPDATED or entry.runtime_data is None:
+        nonlocal reload_scheduled
+        if (
+            change_type != ConfigEntryChange.UPDATED
+            or entry.runtime_data is None
+            or reload_scheduled
+        ):
             return
         # Editing a load in place does not reload the entry, so the repair
         # below would otherwise stay up until the next restart even after the
@@ -365,14 +380,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
         }
         already_loaded = {load.subentry_id for load in entry.runtime_data.loads.all()}
         if current != already_loaded:
+            reload_scheduled = True
+            hass.config_entries.async_schedule_reload(entry.entry_id)
+            return
+        if any(
+            _load_settings(entry.subentries[subentry_id]) != settings
+            for subentry_id, settings in loaded_settings.items()
+        ):
+            # A reconfigured load: its actuator, sensors, Power or model. The
+            # runtime and every entity were built from the old settings, and
+            # some (the control entity, the running-source subscription) are
+            # only read at setup, so a reload is the one complete refresh.
+            reload_scheduled = True
+            _release_replaced_actuators(hass, entry)
             hass.config_entries.async_schedule_reload(entry.entry_id)
             return
         refresh_needed = False
         for load in entry.runtime_data.loads.all():
             subentry = entry.subentries[load.subentry_id]
-            if subentry.data.get(CONF_NOMINAL_POWER_EDITED_AT) != load.power_edited_at:
-                hass.config_entries.async_schedule_reload(entry.entry_id)
-                return
             if not load.is_water_tank or CONF_HOT_WATER_PERIODS not in subentry.data:
                 continue
             periods = subentry.data[CONF_HOT_WATER_PERIODS] or []
@@ -414,6 +439,75 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
     entry.async_create_background_task(hass, scheduler.async_run_initial(), "emhass_initial_run")
 
     return True
+
+
+@callback
+def _release_replaced_actuators(hass: HomeAssistant, entry: EmhassConfigEntry) -> None:
+    """Switch off an actuator this integration left on before it was replaced.
+
+    After the reload nothing addresses the old entity again, so a load moved
+    to a new switch mid-run would otherwise leave the old one on for good.
+    Only one we commanded on: an appliance someone else switched on is theirs.
+    """
+    for load in entry.runtime_data.loads.all():
+        old = load.control_entity
+        subentry = entry.subentries.get(load.subentry_id)
+        if (
+            not old
+            or subentry is None
+            or supported_control_entity(subentry.data.get(CONF_CONTROL_ENTITY)) == old
+            or not load.is_commanded
+            or (state := hass.states.get(old)) is None
+            or state.state != "on"
+        ):
+            continue
+        _LOGGER.info("%s moved off %s; switching it off", load.name, old)
+        # Not an entry task: the reload scheduled next would cancel it.
+        hass.async_create_task(
+            hass.services.async_call(
+                old.partition(".")[0], "turn_off", {}, target={"entity_id": old}
+            ),
+            "emhass_release_replaced_actuator",
+        )
+
+
+# A scalar Run now lives only in memory (a restart drops it, as before), but a
+# reload -- reconfiguring a load, saving options -- must not switch off a load
+# that is being force-run. Unload stashes it here; the next setup takes it back.
+_RUN_NOW_CARRY = f"{DOMAIN}_run_now_carry"
+_RUN_NOW_FIELDS = ("mode", "forced_at", "seen_running", "idle_since")
+
+
+def _stash_run_now(hass: HomeAssistant, entry: ConfigEntry, loads: DeferrableRegistry) -> None:
+    carried = {
+        load.subentry_id: {name: getattr(load, name) for name in _RUN_NOW_FIELDS}
+        for load in loads.all()
+        if load.mode != LOAD_MODE_AUTO
+    }
+    if carried:
+        hass.data.setdefault(_RUN_NOW_CARRY, {})[entry.entry_id] = carried
+
+
+def _restore_run_now(hass: HomeAssistant, entry: ConfigEntry, loads: DeferrableRegistry) -> None:
+    carried = hass.data.get(_RUN_NOW_CARRY, {}).pop(entry.entry_id, {})
+    for subentry_id, fields in carried.items():
+        # A load that became a sequence or a thermal load has no scalar Run now.
+        if (load := loads.get(subentry_id)) is not None and not (
+            load.is_sequence or load.is_thermal
+        ):
+            for name, value in fields.items():
+                setattr(load, name, value)
+
+
+def _load_settings(subentry: ConfigSubentry) -> tuple[str, dict]:
+    """What a load was built from, less what is synced without a reload.
+
+    The hot-water period plan is written back to the subentry at runtime by
+    ``hot_water_plan.async_set_plan`` and applied in place, so it must not
+    count as a reconfiguration -- that would reload on every plan edit.
+    """
+    data = {k: v for k, v in subentry.data.items() if k != CONF_HOT_WATER_PERIODS}
+    return subentry.title, data
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bool:

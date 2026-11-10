@@ -123,6 +123,7 @@ from .profiles import (
 )
 from .smoothing import TimeWeightedAverage
 from .surplus import seam_carry
+from .tariff import native_tariff_series
 from .terminal import (
     LOAD_SOURCE_LAST_PLAN,
     LOAD_SOURCE_PROFILE,
@@ -1994,19 +1995,19 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
                 price_warnings.append(forecast_warning)
         if spot:
             buy, sell = config.tariff.compose(self.hass, spot)
-            if self.network_calendar is not None and buy:
-                # Bands add the network operator's own energy-fee structure on
-                # top of the supplier tariff `Tariff.compose` just produced --
-                # same Series in, same Series out, so nothing downstream has to
-                # know a network profile exists. Holiday dates are resolved
-                # for exactly the dates this horizon touches (two or three,
-                # normally), not the whole calendar year.
-                dates = self.network_calendar.dates_in(buy)
-                entity_id = next(iter(self.network_calendar.holiday_entities()), None)
-                network_warnings = await self.holiday_cache.async_ensure(
-                    self.hass, entity_id, dates
-                )
-                buy, sell = self.network_calendar.apply_bands(buy, sell, self.holiday_cache)
+        elif (native := self._native_prices(now, fill_until, step)) is not None:
+            buy, sell = native
+        if buy and self.network_calendar is not None:
+            # Bands add the network operator's own energy-fee structure on
+            # top of the supplier tariff `Tariff.compose` just produced --
+            # same Series in, same Series out, so nothing downstream has to
+            # know a network profile exists. Holiday dates are resolved
+            # for exactly the dates this horizon touches (two or three,
+            # normally), not the whole calendar year.
+            dates = self.network_calendar.dates_in(buy)
+            entity_id = next(iter(self.network_calendar.holiday_entities()), None)
+            network_warnings = await self.holiday_cache.async_ensure(self.hass, entity_id, dates)
+            buy, sell = self.network_calendar.apply_bands(buy, sell, self.holiday_cache)
 
         settings = self._forecast_profile_settings()
         if EMHASS_CONF_LOAD_FORECAST_METHOD in settings:
@@ -2342,6 +2343,31 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             fill.series,
             spot.end,
             f"Estimated prices from {dt_util.as_local(fill.forecast_from):%d %b %H:%M %Z}: {source}.",
+        )
+
+    def _native_prices(
+        self, now: datetime, until: datetime, step: timedelta
+    ) -> tuple[Series, Series] | None:
+        """Buy and sell series for a price profile that EMHASS prices itself.
+
+        The fixed tariff fetches nothing and hands EMHASS a peak / off-peak
+        split instead, so without this the tariff adjustments and the network
+        profile's energy fees were never applied to it. Only built when one
+        of them would change a price: otherwise EMHASS keeps pricing the run
+        from the same settings, exactly as before.
+        """
+        config = self.config
+        if config.tariff.is_identity and self.network_calendar is None:
+            return None
+        native = native_tariff_series(
+            self._settings(config.price, PROFILE_KIND_PRICE), now, until, step
+        )
+        if native is None:
+            return None
+        buy, sell = native
+        return (
+            config.tariff.buy.apply(self.hass, buy),
+            config.tariff.sell.apply(self.hass, sell) if sell else sell,
         )
 
     async def _series(self, selection: ProfileSelection, kind: str) -> Series:

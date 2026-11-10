@@ -142,6 +142,10 @@ class LoadWindow:
     end_index: int
     warnings: list[str] = field(default_factory=list)
     opens_beyond_horizon: bool = False
+    # The window's end falls inside the current step (or has passed), so no
+    # whole step of it is left. ``end_index`` is then 0, which EMHASS reads as
+    # "unconstrained" -- the caller must park the load instead of sending it.
+    closed: bool = False
 
 
 def resolve_load_window(
@@ -263,11 +267,20 @@ def resolve_load_window(
         start_index = 0
         opens_beyond_horizon = True
 
+    closed = False
     if ends_at is None:
         end_index = 0
     else:
         end_index = math.floor(elapsed_steps(ends_at))
-        if end_index >= horizon_steps:
+        if not end_is_deadline and end_index <= 0:
+            # Floored to the current step: what is left of the window is less
+            # than a step. Sent as-is, 0 would mean "run whenever", lifting the
+            # very end the window exists for; the window has simply closed for
+            # this cycle. (A deadline gets the earliest-opportunity relaxation
+            # below instead -- it was asked for explicitly.)
+            closed = True
+            end_index = 0
+        elif end_index >= horizon_steps:
             # Beyond the horizon is the same as unconstrained, and saying so
             # keeps EMHASS from clamping a nonsensical index. A deadline that
             # starts out here becomes binding on its own as later runs advance
@@ -318,7 +331,7 @@ def resolve_load_window(
             f"needs {operating_steps}; EMHASS may report the problem as infeasible."
         )
 
-    return LoadWindow(start_index, max(end_index, 0), warnings, opens_beyond_horizon)
+    return LoadWindow(start_index, max(end_index, 0), warnings, opens_beyond_horizon, closed)
 
 
 def window_to_timesteps(
@@ -435,6 +448,125 @@ def window_occurrences(
             continue
         result.append((start_index, end_index))
     return result
+
+
+def _next_local_midnight(grid_start: datetime) -> datetime:
+    """The first local midnight strictly after ``grid_start``, DST-safe, in UTC."""
+    local_start = dt_util.as_local(grid_start)
+    return _resolve_endpoint(
+        datetime.combine(local_start.date() + timedelta(days=1), time()), local_start.tzinfo
+    ).astimezone(UTC)
+
+
+def calendar_day_occurrences(
+    grid_start: datetime,
+    step: timedelta,
+    horizon_steps: int,
+    minimum_off: timedelta = timedelta(0),
+) -> list[tuple[int, int]]:
+    """Today's remainder and every whole later local day in the horizon.
+
+    The calendar-day counterpart of :func:`window_occurrences`, for a daily
+    load with no time window, whose runtime resets at local midnight. Same
+    shape: the first pair is today, ``(0, end)`` with ``end`` at the next
+    local midnight (0 when that is on or past the horizon edge). Later pairs
+    are whole local days with an exclusive end inside the horizon; a partly
+    covered day is left out for a later run.
+
+    Days touch, so a later day starts ``minimum_off`` (in whole steps) after
+    its midnight. Otherwise a run ending at 23:59 and the next day's starting
+    at 00:00 would be one unbroken run, or break the load's minimum off time.
+    """
+    origin = grid_start.astimezone(UTC)
+    timezone = dt_util.as_local(grid_start).tzinfo
+    step_seconds = step.total_seconds()
+
+    def elapsed_steps(moment: datetime) -> float:
+        return (moment.astimezone(UTC) - origin).total_seconds() / step_seconds
+
+    midnight = _next_local_midnight(grid_start)
+    first_end = math.floor(elapsed_steps(midnight))
+    result = [(0, 0 if first_end >= horizon_steps else first_end)]
+    off_steps = math.ceil(minimum_off / step)
+    day = dt_util.as_local(midnight).date()
+    # Each pass advances a whole day, so this bounds the loop on any horizon.
+    for _ in range(horizon_steps + 2):
+        opens = _resolve_endpoint(datetime.combine(day, time()), timezone)
+        day += timedelta(days=1)
+        closes = _resolve_endpoint(datetime.combine(day, time()), timezone)
+        # Ceiled, not rounded like a wall-clock window: a midnight between
+        # steps would otherwise let the day's first step begin before it,
+        # where its runtime belongs to the day before.
+        start_index = math.ceil(elapsed_steps(opens)) + off_steps
+        end_index = math.floor(elapsed_steps(closes))
+        if start_index >= horizon_steps or end_index > horizon_steps:
+            break
+        if end_index > start_index:
+            result.append((start_index, end_index))
+    return result
+
+
+def _daily_occurrences(
+    load: DeferrableLoad, inputs: PayloadInputs, step: timedelta
+) -> list[tuple[int, int]]:
+    """Every occurrence of a daily load in the horizon: its window, or its day."""
+    minimum_off = timedelta(minutes=load.minimum_off_time_minutes)
+    if load.repeats_by_calendar_day:
+        return calendar_day_occurrences(
+            inputs.row_zero(step), step, inputs.horizon_steps, minimum_off
+        )
+    return window_occurrences(
+        load.earliest_start,
+        load.latest_end,
+        inputs.row_zero(step),
+        step,
+        inputs.horizon_steps,
+        minimum_off,
+    )
+
+
+def _within_calendar_day(
+    load: DeferrableLoad, inputs: PayloadInputs, step: timedelta
+) -> DeferrableLoad:
+    """End today's row of a windowless daily load at local midnight.
+
+    Its runtime resets at midnight, so hours run after it count towards
+    tomorrow, which has its own row. Today's requirement is cut to what still
+    fits before midnight: asking for more would make EMHASS's problem
+    infeasible late in the day, and the shortfall cannot be made up later.
+    A sequence is not cut; it parks when it no longer fits, as in a window.
+
+    Row zero can round forward past midnight (a solve at 23:59 starts at
+    00:00). The first row is then tomorrow's, and today's progress is not its
+    own. With less than one step left before midnight (a time zone whose
+    midnight is off the step grid), today asks for nothing more; tomorrow's
+    row covers the rest. The same holds when what is left is shorter than the
+    load's minimum on time and it is not already running.
+    """
+    if not (load.repeats_by_calendar_day and load.wants_to_run):
+        return load
+    grid_start = inputs.row_zero(step)
+    if dt_util.as_local(grid_start).date() > dt_util.as_local(inputs.now).date():
+        load = replace(load, completed_timesteps=0, sequence_done=False)
+    midnight = _next_local_midnight(grid_start)
+    available = math.floor((midnight - grid_start.astimezone(UTC)) / step)
+    if available >= inputs.horizon_steps:
+        return load  # midnight is on or past the horizon edge: nothing to cut
+    if available <= 0:
+        return replace(load, wants_to_run=False)
+    # A start now would have to stay on past midnight: EMHASS cannot satisfy
+    # the minimum on time inside today's row, so the problem goes infeasible.
+    on_steps = operating_timesteps(load.minimum_on_time_minutes / 60, inputs.time_step_minutes)
+    if not load.current_state and available < on_steps:
+        return replace(load, wants_to_run=False)
+    load = replace(load, end_at=midnight if load.end_at is None else min(load.end_at, midnight))
+    steps = operating_timesteps(load.operating_hours, inputs.time_step_minutes)
+    if not load.power_sequence and steps - load.completed_timesteps > available:
+        load = replace(
+            load,
+            operating_hours=(load.completed_timesteps + available) * inputs.time_step_minutes / 60,
+        )
+    return load
 
 
 # --- payload -----------------------------------------------------------------
@@ -1662,7 +1794,7 @@ def _describe(
         )
         warnings.extend(window.warnings)
         available = (window.end_index or inputs.horizon_steps) - window.start_index
-        if window.opens_beyond_horizon or available < steps:
+        if window.opens_beyond_horizon or window.closed or available < steps:
             warnings.append(
                 f"{load.name}: window cannot fit {steps} sequence steps; sequence parked."
             )
@@ -1721,7 +1853,7 @@ def _describe(
     # single-constant branch below, which is the same trap reached from the
     # other direction, and _park's own docstring for why a zero-hour load
     # must never also claim to be running.
-    if window.opens_beyond_horizon:
+    if window.opens_beyond_horizon or window.closed:
         return _park(load)
 
     # A single-constant load that is already running gets *pinned* by EMHASS
@@ -1804,9 +1936,13 @@ def _deferrable_settings(
         if running is not None:
             real.append(running)
         else:
-            described = _without_credit_for_later_day(load, inputs, step)
+            described = _within_calendar_day(
+                _without_credit_for_later_day(load, inputs, step), inputs, step
+            )
             real.append(
-                _describe(described, inputs, step, warnings) if load.wants_to_run else _park(load)
+                _describe(described, inputs, step, warnings)
+                if described.wants_to_run
+                else _park(load)
             )
     real = [
         _spanning_daily_windows(row, load, inputs, step) if load.spans_daily_windows else row
@@ -1917,10 +2053,11 @@ def _without_credit_for_later_day(
 ) -> DeferrableLoad:
     """Drop today's progress from a daily load whose first window opens on a later date.
 
-    Progress is measured per local day. Once today's run is done, the first
-    window left in the horizon is tomorrow's, and crediting today's run against
-    it would give that day no hours while the day after gets them in full. Only
-    loads that get extra rows are touched, so a single-row load is unchanged.
+    Progress is measured per window day for overnight loads. Crediting the
+    previous window's run against the next one would suppress its hours.
+    Overnight loads need this even with one remaining window: row-zero
+    rounding can put the old window's close just behind the horizon while
+    runtime accounting still belongs to its opening date.
     """
     if not (
         load.repeats_daily
@@ -1936,14 +2073,23 @@ def _without_credit_for_later_day(
         inputs.horizon_steps,
         timedelta(minutes=load.minimum_off_time_minutes),
     )
+    overnight = (
+        load.earliest_start is not None
+        and load.latest_end is not None
+        and load.earliest_start > load.latest_end
+    )
     if (
         not occurrences
-        or (len(occurrences) < 2 and not load.power_sequence)
+        or (len(occurrences) < 2 and not load.power_sequence and not overnight)
         or occurrences[0][0] == 0
     ):
         return load  # one window, or the first is open now: its progress is its own
     opens = dt_util.as_local(inputs.row_zero(step) + step * occurrences[0][0])
-    if opens.date() > dt_util.as_local(inputs.now).date():
+    local_now = dt_util.as_local(inputs.now)
+    progress_day = local_now.date()
+    if overnight and local_now.time() < load.latest_end:
+        progress_day -= timedelta(days=1)
+    if opens.date() > progress_day:
         return replace(load, completed_timesteps=0, sequence_done=False)
     return load
 
@@ -1953,7 +2099,7 @@ def _extra_window_rows(
     inputs: PayloadInputs,
     step: timedelta,
 ) -> list[tuple[int, int, str, _LoadSettings]]:
-    """Rows for the later windows of daily loads, as ``(n, parent, name, row)``.
+    """Rows for the later windows (or days) of daily loads, as ``(n, parent, name, row)``.
 
     Only the first window carries runtime state: nothing has run in a future
     window, so an extra row has no pin, no running state and no progress, and
@@ -1966,22 +2112,16 @@ def _extra_window_rows(
     """
     extras: list[tuple[int, int, str, _LoadSettings]] = []
     for parent, load in enumerate(loads):
-        if not (load.repeats_daily and load.wants_to_run):
+        if not ((load.repeats_daily or load.repeats_by_calendar_day) and load.wants_to_run):
             continue
-        occurrences = window_occurrences(
-            load.earliest_start,
-            load.latest_end,
-            inputs.row_zero(step),
-            step,
-            inputs.horizon_steps,
-            timedelta(minutes=load.minimum_off_time_minutes),
-        )
+        occurrences = _daily_occurrences(load, inputs, step)
         if len(occurrences) < 2:
             continue
         # Nothing has run in a later window, so describe the load as if nothing
-        # had. Zero hours from this means the first window is beyond the horizon
-        # (nothing else parks a load that is not running), and so are the later
-        # ones.
+        # had -- and without today's window: the occurrences below carry each
+        # day's own indices. Today's window parks the load when it has closed
+        # or has too little room left for a sequence block, which says nothing
+        # about tomorrow's. Zero hours from this is a load with nothing to run.
         full = _describe(
             replace(
                 load,
@@ -1991,20 +2131,27 @@ def _extra_window_rows(
                 sequence_done=False,
                 cycle_anchor=None,
                 cycle_values=(),
+                earliest_start=None,
+                latest_end=None,
+                deadline_at=None,
+                start_at=None,
+                end_at=None,
             ),
             inputs,
             step,
             [],
         )
-        if full.hours <= 0 and load.power_sequence:
-            # A sequence also parks when today's window has too little room
-            # left for the block, which says nothing about tomorrow's.
-            values = _sequence_values(load, inputs, [])
-            if values is not None:
-                full = _sequence_row(load, values, inputs.time_step_minutes, start=0, end=0)
         if full.hours <= 0:
             continue
         for n, (start_index, end_index) in enumerate(occurrences[1:], start=2):
+            if (
+                load.power_sequence
+                and min(end_index, inputs.horizon_steps) - start_index < full.timesteps
+            ):
+                # A block cannot be split, and one that does not fit its window
+                # makes the whole problem infeasible; today's row parks for the
+                # same reason.
+                continue
             extras.append(
                 (
                     n,

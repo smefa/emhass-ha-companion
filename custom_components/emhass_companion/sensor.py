@@ -915,7 +915,8 @@ class LoadRuntimeTodaySensor(EmhassLoadEntity, RestoreSensor):
 
     Fed back to EMHASS as ``def_current_operating_timesteps`` so it does not
     re-schedule work already done. EMHASS has no concept of a day boundary for
-    that value, so the counter is reset locally at midnight.
+    that value, so the counter resets locally at midnight (at window close
+    for daily scalar overnight loads).
     """
 
     _attr_translation_key = "runtime_today"
@@ -933,8 +934,8 @@ class LoadRuntimeTodaySensor(EmhassLoadEntity, RestoreSensor):
         last = await self.async_get_last_sensor_data()
         if last is None or last.native_value is None:
             return
-        # Only restore within the same local day; a restart tomorrow morning
-        # must not carry yesterday's hours into today's schedule.
+        # Restore within the same accounting day, including the morning half
+        # of a daily scalar overnight window.
         #
         # The timestamp has to come from the *restored* state, not from
         # `hass.states.get(self.entity_id)`. At this point the state machine
@@ -946,14 +947,13 @@ class LoadRuntimeTodaySensor(EmhassLoadEntity, RestoreSensor):
         restored = await self.async_get_last_state()
         if restored is None:
             return
-        today = dt_util.as_local(dt_util.utcnow()).date()
-        if dt_util.as_local(restored.last_updated).date() != today:
-            return
         try:
-            self.load.runtime_today = timedelta(hours=float(last.native_value))
-            self.load.runtime_day = today
+            elapsed = timedelta(hours=float(last.native_value))
         except (TypeError, ValueError):
-            pass
+            return
+        # Judged in DeferrableRegistry.async_start, once the time entities
+        # have restored the window that decides which day this belongs to.
+        self.load.restored_runtime = (elapsed, restored.last_updated)
 
     @property
     def native_value(self) -> float:

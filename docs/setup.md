@@ -93,6 +93,12 @@ export:
   `datetime`) available, for tiered or time-of-day structures. The template
   itself is entered in the collapsed *Advanced settings* section.
 
+With the **Fixed tariff** price source there is no spot price. Its peak and
+off-peak prices take the place of `spot` on the import side, and its export
+price takes the place of `spot` on the export side. With *Linear* at multiplier
+1 and adder 0 and no network tariff, EMHASS prices the run from the fixed
+tariff directly, as before.
+
 ### Template examples
 
 Paste one of these into *Import template* or *Export template* under

@@ -810,6 +810,17 @@ class DeferrableLoad:
     further whole window in the horizon (see :func:`payload.window_occurrences`).
     """
 
+    repeats_by_calendar_day: bool = False
+    """A daily load with no time window: its hours are owed per local day.
+
+    Set by :meth:`deferrable.DeferrableRuntime.to_load` (daily recurrence, no
+    window time set, neither surplus nor thermal). Its runtime resets at local
+    midnight, so the payload ends today's row at midnight and adds one row per
+    further whole local day in the horizon (see
+    :func:`payload.calendar_day_occurrences`). Without this a 48-hour horizon
+    asked for a single day's hours.
+    """
+
     wants_to_run: bool = True
     """Whether this load is asking for its hours on this run.
 

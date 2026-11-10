@@ -135,7 +135,7 @@ from .thermal import (
     ThermalConfig,
     parse_cop_curve,
 )
-from .water_tank import WaterTankConfig, hot_water_periods_from_data
+from .water_tank import WaterTankConfig, _resolve_endpoint, hot_water_periods_from_data
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -432,6 +432,10 @@ class DeferrableRuntime:
     # the same conservative fallback runtime_today already uses.
     off_since: datetime | None = None
     runtime_day: date | None = None
+    # The runtime sensor's restored value and when it was written, held until
+    # every platform has restored its settings: whether it belongs to today
+    # depends on the window, which the time entities restore.
+    restored_runtime: tuple[timedelta, datetime] | None = None
 
     # The anchor a deadline counts from, and progress measured against *it*
     # rather than the calendar day. A request armed at 23:00 outlives the
@@ -749,10 +753,19 @@ class DeferrableRuntime:
 
     def elapsed_today(self, now: datetime) -> timedelta:
         """Runtime so far today, including any in-progress run."""
+        self._ensure_runtime_day(now)
         total = self.runtime_today
         if self.running_since is not None:
-            total += now - self.running_since
+            total += self._daily_span(now)
         return total
+
+    def _daily_span(self, now: datetime) -> timedelta:
+        """Clip delayed plan replay to the current overnight accounting day."""
+        start = self.running_since
+        if self.runtime_uses_window_day and self.runtime_day is not None:
+            start = max(start, self._window_close_at(self.runtime_day, now))
+            return max(now - start, timedelta())
+        return now - start
 
     def elapsed_since_request(self, now: datetime) -> timedelta:
         """Runtime since the pending request was armed.
@@ -911,6 +924,7 @@ class DeferrableRuntime:
 
     def observe_power(self, watts: float | None, now: datetime) -> None:
         """Fold a power reading into the runtime accumulator."""
+        self._ensure_runtime_day(now)
         if watts is None:
             # Treat an unavailable sensor as "stop counting" rather than
             # guessing; an unbounded open interval would inflate runtime. It is
@@ -971,7 +985,7 @@ class DeferrableRuntime:
     def _stop(self, now: datetime) -> None:
         if self.running_since is None:
             return
-        self.runtime_today += now - self.running_since
+        self.runtime_today += self._daily_span(now)
         if self.requested_at is not None:
             # Clamped for the same reason observe_command's clock is: a span
             # that closed before the request was armed owes it nothing. Without
@@ -985,6 +999,67 @@ class DeferrableRuntime:
         self.running_since = None
         self.off_since = now
 
+    @property
+    def runtime_uses_window_day(self) -> bool:
+        """Daily scalar overnight loads carry their credit across midnight."""
+        return (
+            self.recurrence == RECURRENCE_DAILY
+            and not self.is_thermal
+            and not self.is_sequence
+            and self.use_time_window
+            and self.earliest_start is not None
+            and self.latest_end is not None
+            and self.earliest_start > self.latest_end
+        )
+
+    def apply_restored_runtime(self, now: datetime) -> None:
+        """Take back the restored runtime if it is from this accounting day."""
+        if self.restored_runtime is None:
+            return
+        elapsed, written_at = self.restored_runtime
+        self.restored_runtime = None
+        today = self.runtime_date(now)
+        if self.runtime_date(written_at) == today:
+            self.runtime_today = elapsed
+            self.runtime_day = today
+
+    def runtime_date(self, at: datetime) -> date:
+        """Accounting date used by both live progress and restart restore.
+
+        For an overnight window, measured against the resolved close instant
+        rather than the wall clock: on the autumn DST night a 02:30 close is
+        the first 02:30, and 02:15 in the repeated hour already belongs to
+        the new day.
+        """
+        local = dt_util.as_local(at)
+        if self.runtime_uses_window_day and at < self._window_close_at(local.date(), at):
+            return local.date() - timedelta(days=1)
+        return local.date()
+
+    def _window_close_at(self, day: date, now: datetime) -> datetime:
+        """The UTC instant the window closes on ``day``, where accounting day ``day`` starts.
+
+        Resolved like a water-tank endpoint: a close inside a spring-forward
+        gap (02:30 on the last Sunday of March) is the first real instant
+        after it, the same moment ``sequence_day`` moves on to the new day.
+        UTC, so a DST night counts real time rather than wall-clock hours.
+        """
+        return _resolve_endpoint(
+            datetime.combine(day, self.latest_end),  # type: ignore[arg-type]
+            dt_util.as_local(now).tzinfo,  # type: ignore[arg-type]
+        )
+
+    def _ensure_runtime_day(self, now: datetime) -> None:
+        if not self.runtime_uses_window_day:
+            return
+        day = self.runtime_date(now)
+        if self.runtime_day is None:
+            self.runtime_day = day
+        elif day > self.runtime_day:
+            # Split an open span at the local window close, not at the first
+            # later sensor reading (or the midnight callback).
+            self._restart_counter(self._window_close_at(day, now), day)
+
     def reset_day(self, now: datetime) -> None:
         """Start a new day's runtime accounting.
 
@@ -993,12 +1068,22 @@ class DeferrableRuntime:
         otherwise yesterday's hours keep suppressing today's schedule.
 
         A pending request is deliberately untouched -- neither the flag, the
-        anchor, nor its progress. Only the calendar-day counter restarts.
+        anchor, nor its progress. Overnight daily scalar counters restart at
+        the window close; all other counters still restart at midnight.
         """
+        if self.runtime_uses_window_day:
+            # Midnight is not this load's day boundary. Catch up a counter
+            # that missed its window close, splitting at that close, and
+            # otherwise leave the running window day alone.
+            self._ensure_runtime_day(now)
+            return
+        self._restart_counter(now, dt_util.as_local(now).date())
+
+    def _restart_counter(self, now: datetime, day: date) -> None:
         was_running = self.is_running
         self._stop(now)
         self.runtime_today = timedelta()
-        self.runtime_day = dt_util.as_local(now).date()
+        self.runtime_day = day
         if was_running:
             # _stop closed the open span to bank it against yesterday; the load
             # itself is still on, so today's span starts now. Without this the
@@ -1450,6 +1535,12 @@ class DeferrableRuntime:
                 and self.earliest_start is not None
                 and self.latest_end is not None
             ),
+            repeats_by_calendar_day=(
+                self.recurrence == RECURRENCE_DAILY
+                and not surplus
+                and not self.is_thermal
+                and (not windowed or (self.earliest_start is None and self.latest_end is None))
+            ),
             spans_daily_windows=(
                 self.recurrence == RECURRENCE_DAILY
                 and windowed
@@ -1716,6 +1807,10 @@ class DeferrableRegistry:
     @callback
     def async_start(self) -> None:
         """Begin observing whatever tells each load it is running."""
+        # Before anything observes or disarms: both read today's runtime.
+        started = dt_util.utcnow()
+        for load in self._loads.values():
+            load.apply_restored_runtime(started)
         sources = {
             load.running_source: None for load in self._loads.values() if load.running_source
         }

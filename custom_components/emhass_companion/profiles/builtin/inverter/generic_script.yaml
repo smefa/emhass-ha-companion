@@ -25,7 +25,10 @@ options:
   # The other three are optional because the notes above say they are: an
   # inverter with no idle mode has no idle script to point at. An action whose
   # script is unset renders a step with an empty target, which the engine skips
-  # instead of calling.
+  # instead of calling. An action that makes no call at all is never reported
+  # as applied: the executor substitutes self_consume for it (idle, charge and
+  # discharge alike, so a forced mode left over from before does not keep
+  # running), and says so in the decision.
   force_charge_script:
     name: Charge script
     description: Receives power_w, the charge power in watts.

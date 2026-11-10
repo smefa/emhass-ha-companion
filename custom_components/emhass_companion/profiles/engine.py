@@ -517,6 +517,31 @@ def _is_blank(value: Any) -> bool:
     return value is None or (isinstance(value, str) and not value.strip())
 
 
+def step_is_skipped(step: dict[str, Any]) -> bool:
+    """Whether executing this rendered step would be skipped, not sent.
+
+    True for a step that aims somewhere, but whose aim renders to nothing. A
+    step with no aim at all is not skipped -- a service that takes no target is
+    a perfectly ordinary thing for a profile to call.
+    """
+    data = step.get("data") or {}
+    target = step.get("target") or {}
+    # Where the call is aimed: `target:`, or the older
+    # `data: {entity_id: ...}` form a hand-written profile may still use.
+    aim = target or ({"entity_id": data["entity_id"]} if "entity_id" in data else None)
+    return aim is not None and _is_blank(aim)
+
+
+def steps_are_noop(steps: list[dict[str, Any]]) -> bool:
+    """Whether a rendered action makes no service call at all.
+
+    Every step skipped (an unset optional target) means the action did nothing,
+    so nobody may report it as applied. An empty list is not "all skipped": it
+    is an action that was never rendered.
+    """
+    return bool(steps) and all(step_is_skipped(step) for step in steps)
+
+
 async def async_execute_steps(hass: HomeAssistant, steps: list[dict[str, Any]]) -> None:
     """Execute rendered service calls in order.
 
@@ -524,8 +549,7 @@ async def async_execute_steps(hass: HomeAssistant, steps: list[dict[str, Any]]) 
     rather than sent. Home Assistant validates ``entity_id: ""`` and rejects
     it, so sending one anyway turns an option the profile's own notes invite
     the user to leave unset into an error on every single apply. A step with
-    no aim at all is left alone -- a service that takes no target is a
-    perfectly ordinary thing for a profile to call.
+    no aim at all is left alone (see ``step_is_skipped``).
     """
     for step in steps:
         domain, _, service = str(step["service"]).partition(".")
@@ -533,10 +557,7 @@ async def async_execute_steps(hass: HomeAssistant, steps: list[dict[str, Any]]) 
             raise ProfileError(f"Invalid service name: {step['service']!r}")
         data = step.get("data") or {}
         target = step.get("target") or {}
-        # Where the call is aimed: `target:`, or the older
-        # `data: {entity_id: ...}` form a hand-written profile may still use.
-        aim = target or ({"entity_id": data["entity_id"]} if "entity_id" in data else None)
-        if aim is not None and _is_blank(aim):
+        if step_is_skipped(step):
             _LOGGER.debug("Skipping %s: nothing to aim it at (unset option?)", step["service"])
             continue
         await hass.services.async_call(

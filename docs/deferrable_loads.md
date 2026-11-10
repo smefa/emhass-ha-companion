@@ -71,6 +71,21 @@ start-up cost twice, and is not asked to repeat work it has already done
 today. Runtime is counted from that sensor and reset at local midnight,
 because EMHASS has no notion of a day boundary for it.
 
+An *Every day* load with no time window is planned per local day. When the
+plan reaches past midnight, today's hours have to fit before midnight, and each
+further whole day in the plan asks for the load's full hours again. Late in the
+day, today's hours are cut to what still fits. Any minimum off time is kept
+after each midnight, so two days' runs never join into one.
+If what is left of today is shorter than the load's minimum on time, and it
+is not already running, today asks for nothing more. A window that has less
+than one step left is treated as closed in the same way. Tomorrow still asks
+for the full run.
+
+Saving a change to a load with **Reconfigure** reloads the integration, so the
+new switch, sensors and power take effect at once. A Run now in progress
+carries over the reload. If you move a load to a new switch while Companion
+has the old one switched on, Companion switches the old one off.
+
 Automating against a load looks like:
 
 ```yaml

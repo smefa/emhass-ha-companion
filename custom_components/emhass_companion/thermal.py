@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
-from datetime import datetime, time, timedelta
+from datetime import UTC, datetime, time, timedelta, tzinfo
 from itertools import pairwise
 from math import isfinite
 from typing import TYPE_CHECKING, Any
@@ -177,9 +177,11 @@ class ThermalConfig:
     ) -> tuple[list[float], list[float]]:
         """Build the per-timestep ``(min_temperatures, max_temperatures)``.
 
-        Timestep *i* is the interval starting at ``grid_start + i * step``,
-        evaluated in local wall-clock time because that is what a comfort
-        schedule means to the person who set it.
+        Timestep *i* is the interval starting ``i * step`` of real time after
+        ``grid_start`` -- the same elapsed-time grid as every forecast row --
+        and is then read in local wall-clock time, because that is what a
+        comfort schedule means to the person who set it. Stepping in wall time
+        instead would shift the whole schedule by an hour after a DST change.
 
         Outside the comfort window the floor ramps linearly from
         ``setback_temperature`` up to ``comfort_temperature`` over the last
@@ -197,7 +199,8 @@ class ThermalConfig:
         that many; sending more would be silently truncated, and sending fewer
         is an error there rather than a clamp.
         """
-        local_start = dt_util.as_local(grid_start)
+        timezone = dt_util.as_local(grid_start).tzinfo
+        origin = grid_start.astimezone(UTC)
         ramp_duration = (
             timedelta(
                 hours=abs(self.comfort_temperature - self.setback_temperature) / self.heating_rate
@@ -208,19 +211,31 @@ class ThermalConfig:
         minimums: list[float] = []
 
         for index in range(horizon_steps):
-            moment_dt = local_start + step * index
-            moment = moment_dt.time()
-            inside = _in_comfort(moment, self.comfort_start, self.comfort_end)
+            instant = origin + step * index
+            moment_dt = instant.astimezone(timezone)
+            inside = _in_comfort(moment_dt.time(), self.comfort_start, self.comfort_end)
             if inside:
                 minimums.append(self.comfort_temperature)
                 continue
 
-            next_start_dt = datetime.combine(
-                moment_dt.date(), self.comfort_start, tzinfo=moment_dt.tzinfo
+            # Both in UTC, so the ramp measures real time to the comfort start
+            # (a start that does not exist on a spring-forward night resolves
+            # to the first valid instant after it, as for water tanks). A start
+            # in the repeated autumn hour happens twice; the comfort window
+            # opens again at the second, so the ramp aims at whichever is next.
+            day = moment_dt.date()
+            next_start = min(
+                (
+                    start
+                    for offset in (0, 1)
+                    for start in _comfort_starts(
+                        datetime.combine(day + timedelta(days=offset), self.comfort_start),
+                        timezone,
+                    )
+                    if start > instant
+                ),
             )
-            if next_start_dt <= moment_dt:
-                next_start_dt += timedelta(days=1)
-            time_until_start = next_start_dt - moment_dt
+            time_until_start = next_start - instant
 
             if ramp_duration > timedelta(0) and time_until_start <= ramp_duration:
                 fraction = 1 - (time_until_start / ramp_duration)
@@ -268,13 +283,17 @@ class ThermalConfig:
             return None
 
         minimums, _ = self.comfort_band(grid_start, step, horizon_steps)
-        local_start = dt_util.as_local(grid_start)
+        origin = grid_start.astimezone(UTC)
 
         for index in range(1, horizon_steps):
             elapsed_hours = (step * index) / timedelta(hours=1)
             achievable = current_temperature + self.heating_rate * elapsed_hours
             if achievable < minimums[index]:
-                return local_start + step * index, minimums[index], achievable
+                return (
+                    dt_util.as_local(origin + step * index),
+                    minimums[index],
+                    achievable,
+                )
         return None
 
     def to_emhass(
@@ -308,6 +327,18 @@ class ThermalConfig:
         if self.current_temperature is not None:
             config["start_temperature"] = self.current_temperature
         return config
+
+
+def _comfort_starts(wall_time: datetime, timezone: tzinfo) -> list[datetime]:
+    """Every real instant a comfort start happens on one day, in UTC.
+
+    Two in the repeated autumn hour; one otherwise, a start inside the
+    spring-forward gap resolving to the first valid instant after it.
+    """
+    # Imported here: water_tank imports this module.
+    from .water_tank import _resolve_endpoint, _valid_instants
+
+    return _valid_instants(wall_time, timezone) or [_resolve_endpoint(wall_time, timezone)]
 
 
 def _in_comfort(moment: time, start: time, end: time) -> bool:

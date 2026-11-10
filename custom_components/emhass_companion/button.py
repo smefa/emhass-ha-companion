@@ -115,3 +115,14 @@ class LoadRunNowButton(EmhassLoadEntity, ButtonEntity):
         self.load.force_run()
         self.load.invalidate_battery_lockout()
         self.load.notify()
+        # "Run now" means now, not at the next timestep tick: the executor
+        # only re-decides loads on a plan update or the step clock, so without
+        # this a directly controlled load sat off for up to a whole step after
+        # the press. The executor still applies its own control gate.
+        entry = self.coordinator.config_entry
+        entry.async_create_background_task(
+            self.hass,
+            entry.runtime_data.executor.async_apply(),
+            "emhass_run_now_apply",
+            eager_start=False,
+        )
