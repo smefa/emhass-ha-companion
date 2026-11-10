@@ -812,3 +812,50 @@ def test_a_zero_reward_factor_leaves_the_decision_alone():
     before = (decision.reason, dict(decision.details))
     annotate_final_reward(decision, 0.0, sent=True, min_version="0.18.5")
     assert (decision.reason, decision.details) == before
+
+
+# --- a 48 h horizon ----------------------------------------------------------
+
+
+def _long_horizon(prices: list[float], **overrides):
+    """A 48 h horizon with its 24 h lookahead: 72 h of window, pin at hour 48."""
+    kwargs = dict(
+        horizon_end=T0 + timedelta(hours=48),
+        buy_price=_series(prices),
+        load=_series([1000.0] * 48),
+    )
+    kwargs.update(overrides)
+    return _decide(**kwargs)
+
+
+def test_a_48_hour_horizon_plans_72_hours_and_pins_hour_48():
+    decision = _long_horizon([1.0] * 72)
+
+    assert decision.details["solver"] == "dynamic program"
+    assert decision.details["window_hours"] == pytest.approx(72.0)
+    assert decision.details["horizon_hours"] == pytest.approx(48.0)
+    assert 0.10 <= decision.soc <= 0.90
+    assert decision.details["plan_cost"] <= decision.details["cost_at_reserve"]
+    assert decision.details["plan_cost"] <= decision.details["cost_at_full"]
+
+
+def test_a_48_hour_horizon_without_a_published_tail_still_decides():
+    """Prices for the horizon only: the tail is proxied a day back, not dropped."""
+    decision = _long_horizon([1.0] * 48)
+
+    assert decision.details["mode"] == END_SOC_OPTIMIZED
+    assert decision.details["window_hours"] == pytest.approx(72.0)
+    assert decision.details.get("price_tail") == PRICE_TAIL_PROXY
+    assert 0.10 <= decision.soc <= 0.90
+
+
+def test_a_dear_day_after_a_48_hour_horizon_carries_more_than_a_cheap_one():
+    """Spot prices through a tariff the fit can recover, so the shape is believed."""
+
+    def pin(day_three: float) -> float:
+        spot = [0.5 + 0.1 * (i % 5) for i in range(48)] + [
+            day_three + 0.1 * (i % 5) for i in range(24)
+        ]
+        return _long_horizon([value * 1.25 + 0.80 for value in spot], sell_price=_series(spot)).soc
+
+    assert pin(4.0) > pin(0.1)

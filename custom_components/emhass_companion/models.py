@@ -67,6 +67,7 @@ from .const import (
     DEFAULT_WEIGHT_BATTERY_CHARGE,
     DEFAULT_WEIGHT_BATTERY_DISCHARGE,
 )
+from .heat_pump_room import HeatPumpRoomConfig
 from .thermal import ThermalConfig
 from .water_tank import WaterTankConfig
 
@@ -759,6 +760,10 @@ class DeferrableLoad:
     name: str
     nominal_power_w: float
     operating_hours: float
+    power_sequence: tuple[float, ...] = ()
+    cycle_values: tuple[float, ...] = ()
+    cycle_anchor: datetime | None = None
+    sequence_done: bool = False
     minimum_power_w: float = 0.0
     earliest_start: time | None = None
     latest_end: time | None = None
@@ -785,6 +790,16 @@ class DeferrableLoad:
     routine, not something to report every solve.
     """
 
+    spans_daily_windows: bool = False
+    """A water tank whose standing window recurs every day.
+
+    A tank is one thermal state, so it keeps a single EMHASS row (its
+    temperature arrays already cover the whole horizon). That row has only one
+    contiguous heating mask and one start cap, so the payload stretches the mask
+    from the first window's opening to the last window's closing and scales the
+    start cap by the number of windows, instead of adding rows.
+    """
+
     repeats_daily: bool = False
     """Whether the standing window recurs every day.
 
@@ -793,6 +808,17 @@ class DeferrableLoad:
     because ``earliest_start``/``latest_end`` alone cannot tell a daily load from
     an armed on-demand one. Only such a load gets one extra EMHASS row per
     further whole window in the horizon (see :func:`payload.window_occurrences`).
+    """
+
+    repeats_by_calendar_day: bool = False
+    """A daily load with no time window: its hours are owed per local day.
+
+    Set by :meth:`deferrable.DeferrableRuntime.to_load` (daily recurrence, no
+    window time set, neither surplus nor thermal). Its runtime resets at local
+    midnight, so the payload ends today's row at midnight and adds one row per
+    further whole local day in the horizon (see
+    :func:`payload.calendar_day_occurrences`). Without this a 48-hour horizon
+    asked for a single day's hours.
     """
 
     wants_to_run: bool = True
@@ -816,7 +842,16 @@ class DeferrableLoad:
     current_on_timesteps: int = 0
     current_off_timesteps: int = 0
 
-    thermal: ThermalConfig | WaterTankConfig | None = None
+    def cycle_elapsed(self, row_zero: datetime, step_minutes: int) -> int:
+        """Whole stages elapsed at EMHASS row zero, clamped to the snapshot."""
+        if self.cycle_anchor is None:
+            return 0
+        return min(
+            len(self.cycle_values),
+            max(0, int((row_zero - self.cycle_anchor).total_seconds() // (step_minutes * 60))),
+        )
+
+    thermal: ThermalConfig | WaterTankConfig | HeatPumpRoomConfig | None = None
     """Set only for a thermal load, whose temperature is optimised instead of
     its run time."""
 

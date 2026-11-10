@@ -31,7 +31,7 @@ underneath is always current.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import logging
@@ -459,6 +459,19 @@ class MeterSpec:
             for name, meter in named.items()
             if meter is not None
         }
+
+
+def has_grid_import_meter(options: Mapping[str, Any] | None) -> bool:
+    """Whether cost tracking is on with a grid-import energy sensor set.
+
+    The same condition ``build_meters`` needs for ``grid_import``; the peak
+    tracker (and so the Billing period peak sensor) depends on it.
+    """
+    metering = (options or {}).get(CONF_METERING) or {}
+    return bool(
+        metering.get(CONF_METERING_ENABLED, bool(metering))
+        and metering.get(CONF_GRID_IMPORT_ENERGY_ENTITY)
+    )
 
 
 def build_meters(config: EmhassConfig, options: dict[str, Any] | None) -> MeterSpec:

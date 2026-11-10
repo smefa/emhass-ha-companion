@@ -1685,3 +1685,21 @@ def test_repeats_daily_only_for_a_windowed_daily_load(overrides, expected):
     }
     load = _load(**{**defaults, **overrides})
     assert load.to_load(T0, 30).repeats_daily is expected
+
+
+@pytest.mark.parametrize(
+    ("overrides", "expected"),
+    [
+        ({}, True),
+        ({"use_time_window": True, "earliest_start": None, "latest_end": None}, True),
+        ({"use_time_window": True, "earliest_start": time(14), "latest_end": time(18)}, False),
+        # One end set is still a window, not a calendar day.
+        ({"use_time_window": True, "earliest_start": None, "latest_end": time(18)}, False),
+        ({"recurrence": RECURRENCE_ON_DEMAND}, False),
+        ({"recurrence": RECURRENCE_SURPLUS}, False),
+    ],
+)
+def test_repeats_by_calendar_day_only_for_a_windowless_daily_load(overrides, expected):
+    defaults = {"use_time_window": False, "recurrence": RECURRENCE_DAILY}
+    load = _load(**{**defaults, **overrides})
+    assert load.to_load(T0, 30).repeats_by_calendar_day is expected

@@ -22,6 +22,7 @@ from custom_components.emhass_companion.models import (
     Series,
 )
 from custom_components.emhass_companion.payload import (
+    PayloadError,
     PayloadInputs,
     build_capacity_charge_window_mask,
     build_payload,
@@ -2507,3 +2508,75 @@ def test_soc_final_reward_factor_is_static_without_a_battery():
     battery = BatteryConfig(enabled=False, soc_final_reward_factor=0.7)
     payload = build_payload(_inputs(battery=battery)).payload
     assert payload["battery_soc_final_reward_factor"] == 0.7
+
+
+# --- heat pump COP curve -------------------------------------------------------
+
+
+@pytest.mark.usefixtures("stockholm_timezone")
+def test_a_cop_curve_scales_the_heating_rate_by_the_forecasts_coldest_hour():
+    thermal = ThermalConfig(
+        heating_rate=2.0, current_temperature=19.5, cop_curve=((7.0, 5.2), (-10.0, 3.0))
+    )
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    payload = build_payload(
+        _inputs(
+            loads=[_thermal_load(thermal=thermal)],
+            outdoor_temperature=_series(now, 24, -10.0),
+        )
+    ).payload
+
+    assert payload["def_load_config"][0]["thermal_config"]["heating_rate"] == pytest.approx(
+        2.0 * 3.0 / 5.2
+    )
+
+
+@pytest.mark.usefixtures("stockholm_timezone")
+def test_a_cop_curve_without_an_outdoor_forecast_fails_instead_of_sending_the_unscaled_rate():
+    thermal = ThermalConfig(current_temperature=19.5, cop_curve=((7.0, 5.2), (-10.0, 3.0)))
+    with pytest.raises(PayloadError, match=r"Heat pump.*outdoor temperature forecast"):
+        build_payload(_inputs(loads=[_thermal_load(thermal=thermal)]))
+
+
+@pytest.mark.usefixtures("stockholm_timezone")
+def test_a_room_without_a_cop_curve_is_unchanged_by_the_forecast():
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    payload = build_payload(
+        _inputs(loads=[_thermal_load()], outdoor_temperature=_series(now, 24, -10.0))
+    ).payload
+    assert payload["def_load_config"][0]["thermal_config"]["heating_rate"] == 3.0
+
+
+@pytest.mark.usefixtures("stockholm_timezone")
+def test_window_ending_inside_the_current_step_is_closed():
+    """17:45 on a 15-minute grid, window ending 17:50: no whole step is left.
+
+    Index 0 would mean "unconstrained" to EMHASS, so the window is flagged
+    closed for the caller to park the load instead.
+    """
+    window = _window(
+        earliest=time(8),
+        latest=time(17, 50),
+        grid_start=_local(2026, 7, 28, 17, 45),
+        step=timedelta(minutes=15),
+        operating_steps=4,
+    )
+    assert window.closed
+    assert window.end_index == 0
+    open_window = _window(
+        earliest=time(8),
+        latest=time(18, 0),
+        grid_start=_local(2026, 7, 28, 17, 45),
+        step=timedelta(minutes=15),
+        operating_steps=1,
+    )
+    assert not open_window.closed
+    assert open_window.end_index == 1
+
+
+@pytest.mark.usefixtures("stockholm_timezone")
+def test_a_passed_deadline_is_not_a_closed_window():
+    """A deadline is relaxed to the earliest opportunity, not parked."""
+    window = _window(deadline=_local(2026, 7, 28, 20, 10))
+    assert not window.closed
+    assert window.end_index > 0

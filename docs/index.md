@@ -49,10 +49,10 @@ Nothing else is required. No battery, no solar, no dynamic tariff and no support
 ## Installation
 
 1. Install and start EMHASS (the add-on, or a container).
-2. Add this repository to HACS as a custom repository (category: Integration), then install **EMHASS Companion**.
+2. Add this repository to the Marketplace, then install **EMHASS Companion**. Either select the button below, or go to **Settings → Marketplace**, select **Add from link**, and enter `https://github.com/smefa/emhass-ha-companion`. (Home Assistant 2026.10 and older: add this repository to HACS as a custom repository, category Integration, and install from there.)
 
    <a href="https://my.home-assistant.io/redirect/hacs_repository/?owner=smefa&repository=emhass-ha-companion&category=integration" target="_blank">
-     <img src="https://my.home-assistant.io/badges/hacs_repository.svg" alt="Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.">
+     <img src="https://my.home-assistant.io/badges/hacs_repository.svg" alt="Open your Home Assistant instance and open a repository inside the Home Assistant Marketplace.">
    </a>
 
 3. Restart Home Assistant.

@@ -46,6 +46,7 @@ from .profiles import (
     ProfileError,
     async_execute_steps,
     render_action,
+    steps_are_noop,
 )
 from .strategy import decide_battery, decide_curtailment
 
@@ -233,25 +234,26 @@ class Executor:
         if profile is None:
             decision.curtail = None
         else:
-            resolved_action = self._resolve_action(profile, decision.action)
-            if resolved_action != decision.action:
-                decision.rules.append(
-                    f"{decision.action}→{resolved_action}: profile defines no "
-                    f"'{decision.action}' action"
-                )
             # A phase-guard cap is a ceiling on what is written, not just on
             # what was decided: the profile's boost and rounding come after
             # the clamp, and must not take the command back over it.
             ceiling_w = decision.power_w if decision.phase_cut_w else None
+            write_w = (
+                math.floor(decision.power_w) if ceiling_w is not None else round(decision.power_w)
+            )
+            resolved_action = self._resolve_action(profile, decision.action, write_w, ceiling_w)
+            if resolved_action != decision.action:
+                decision.rules.append(
+                    f"{decision.action}→{resolved_action}: profile has no usable "
+                    f"'{decision.action}' action"
+                )
             try:
                 battery_steps = render_action(
                     self.hass,
                     profile,
                     self.coordinator.config.inverter.options,
                     resolved_action,
-                    power_w=math.floor(decision.power_w)
-                    if ceiling_w is not None
-                    else round(decision.power_w),
+                    power_w=write_w,
                     ceiling_w=ceiling_w,
                     soc=self.coordinator.soc_percent,
                     soc_target=self.coordinator.config.battery.soc_target * 100,
@@ -281,6 +283,17 @@ class Executor:
                 # no curtail/uncurtail pair means curtailment is not
                 # applicable, not that it is off right now.
                 decision.curtail = None
+
+        if steps_are_noop(battery_steps):
+            # _resolve_action found nothing to fall back to either: say so,
+            # and send nothing, so nothing is recorded as applied.
+            msg = (
+                f"'{resolved_action}' has no target configured, so no command was sent; "
+                "the inverter keeps its previous mode"
+            )
+            decision.error = f"{decision.error}; {msg}" if decision.error else msg
+            _LOGGER.warning("Cannot apply inverter action: %s", msg)
+            battery_steps = []
 
         decision.steps = [*battery_steps, *curtail_steps]
 
@@ -371,6 +384,16 @@ class Executor:
                 soc=self.coordinator.soc_percent,
                 soc_target=self.coordinator.config.battery.soc_target * 100,
             )
+            if steps_are_noop(steps):
+                # Unset target: nothing was undone, and asking again every
+                # cycle would not change that.
+                _LOGGER.warning(
+                    "Cannot restore curtailment (%s): no target configured for '%s'",
+                    reason,
+                    ACTION_UNCURTAIL,
+                )
+                self._held.discard(AXIS_CURTAIL)
+                return
             await async_execute_steps(self.hass, steps)
         except Exception as err:  # noqa: BLE001 - never let a shutdown path raise
             _LOGGER.error("Could not restore curtailment (%s): %s", reason, err)
@@ -389,7 +412,7 @@ class Executor:
             # handover retried until it goes through, one that would repeat
             # every cycle a curtailment restore keeps failing.
             return
-        action = ACTION_RESTORE if profile.defines(ACTION_RESTORE) else MODE_SELF_CONSUME
+        action = self._resolve_restore_action(profile)
         if not profile.defines(action):
             _LOGGER.debug("Profile %s defines no way to restore control", profile.key)
             self._held.discard(AXIS_BATTERY)
@@ -405,6 +428,14 @@ class Executor:
                 soc=self.coordinator.soc_percent,
                 soc_target=self.coordinator.config.battery.soc_target * 100,
             )
+            if steps_are_noop(steps):
+                _LOGGER.warning(
+                    "Cannot restore inverter control (%s): no target configured for '%s'",
+                    reason,
+                    action,
+                )
+                self._held.discard(AXIS_BATTERY)
+                return
             await async_execute_steps(self.hass, steps)
         except Exception as err:  # noqa: BLE001 - never let a shutdown path raise
             _LOGGER.error("Could not restore inverter control (%s): %s", reason, err)
@@ -620,7 +651,9 @@ class Executor:
         if not self.control_enabled or last is None:
             return False
         profile = self._inverter_profile()
-        target = self._resolve_action(profile, action) if profile is not None else action
+        target = (
+            self._resolve_action(profile, action, round(power)) if profile is not None else action
+        )
         if last.action != target:
             return True
         if last.action == MODE_FORCE_CHARGE:
@@ -660,6 +693,16 @@ class Executor:
                 # being credited while the sensor said "off, disabled".
                 decisions[load.subentry_id] = resolve_should_run(load.mode, False)
                 continue
+            if (
+                load.sequence_cycle_active or load.sequence_start_pending
+            ) and load.check_auto_disarm(now, self.coordinator.config.time_step_minutes):
+                # Completion is time-based and must not wait for the next
+                # optimisation: a failing solve never reaches the coordinator's
+                # own disarm pass, and the hold below would keep the load on.
+                load.notify()
+            if load.sequence_cycle_active or load.sequence_start_pending:
+                decisions[load.subentry_id] = True
+                continue
             scheduled = self._scheduled(load) if use_plan else False
             if load.armable and not load.requested:
                 # The plan outlives the request that produced it: a run that
@@ -685,7 +728,9 @@ class Executor:
         row = data.plan.row_at(dt_util.utcnow())
         if row is None or index >= len(row.deferrables):
             return False
-        return row.deferrables[index] > load.running_threshold_w
+        if load.is_sequence and not load.sequence_owes(dt_util.utcnow()):
+            return False
+        return load.plan_runs_at(row.deferrables[index])
 
     # -- execution ------------------------------------------------------------
 
@@ -739,6 +784,11 @@ class Executor:
         self, decision: Decision, curtail_action: str, steps: list[dict[str, Any]]
     ) -> None:
         if not steps or decision.curtail is None:
+            return
+        if steps_are_noop(steps):
+            # Unset target: no call would be made, so there is nothing to record
+            # (it would suppress the next real command through _should_issue).
+            _LOGGER.debug("Skipping %s: no target configured", curtail_action)
             return
 
         profile = self._inverter_profile()
@@ -901,22 +951,78 @@ class Executor:
 
     # -- profile --------------------------------------------------------------
 
-    def _resolve_action(self, profile: Profile, action: str) -> str:
-        """The action to actually render, when the plan's own choice is undefined.
+    def _action_unusable(
+        self,
+        profile: Profile,
+        action: str,
+        power_w: float = 0,
+        ceiling_w: float | None = None,
+    ) -> bool:
+        """Whether the profile cannot do this action right now.
+
+        Either it does not define it, or every step it renders to aims at an
+        option the user left unset (an action that makes no call at all).
+        Rendered with the power about to be written, so a target templated on
+        it is judged on the real command.
+        """
+        if not profile.defines(action):
+            return True
+        try:
+            steps = render_action(
+                self.hass,
+                profile,
+                self.coordinator.config.inverter.options,
+                action,
+                power_w=power_w,
+                ceiling_w=ceiling_w,
+                soc=self.coordinator.soc_percent,
+                soc_target=self.coordinator.config.battery.soc_target * 100,
+            )
+        except ProfileError:
+            # Not our call: the real render reports it, as an error.
+            return False
+        return steps_are_noop(steps)
+
+    def _resolve_restore_action(self, profile: Profile) -> str:
+        if profile.defines(ACTION_RESTORE) and not self._action_unusable(profile, ACTION_RESTORE):
+            return ACTION_RESTORE
+        return MODE_SELF_CONSUME
+
+    def _resolve_action(
+        self,
+        profile: Profile,
+        action: str,
+        power_w: float = 0,
+        ceiling_w: float | None = None,
+    ) -> str:
+        """The action to actually render, when the plan's own choice is unusable.
 
         The set of actions a profile defines is its capability list
         (const.py): a profile with no ``idle`` is saying its hardware has no
         true standby, not that the executor should refuse a decision the plan
-        legitimately produced. ``idle`` falling back to ``self_consume`` is
-        the one substitution this makes -- every other battery action is
-        already guaranteed to exist by validation (``self_consume``/``restore``
-        for ``restore_required``), or has no sensible substitute at all
-        (forcing charge instead of discharge is not a fallback, it is the
-        opposite decision).
+        legitimately produced. The same goes for an action the profile defines
+        but whose target the user left unset (an optional script option): it
+        would render to no call at all, and "applied" would then be a lie
+        while the inverter kept whatever it was last told.
+
+        Falls back to ``self_consume`` in both cases. For ``idle`` that is the
+        long-standing substitution. For an unset ``force_charge`` or
+        ``force_discharge`` it is the safe one: leaving the previous forced
+        mode running (say a charge when the plan now wants a discharge) is the
+        wrong outcome, and self-consumption is the inverter's own sensible
+        behaviour in both directions. An action the profile does not define at
+        all, other than ``idle``, has no substitute (forcing charge instead of
+        discharge is the opposite decision) and is returned as is, to fail the
+        render. If ``self_consume`` is unusable too, the action is returned as
+        is, and the caller reports that nothing was sent.
         """
-        if profile.defines(action):
+        if not self._action_unusable(profile, action, power_w, ceiling_w):
             return action
-        if action == MODE_IDLE:
+        if not profile.defines(action) and action != MODE_IDLE:
+            return action
+        if action != MODE_SELF_CONSUME and not self._action_unusable(
+            profile, MODE_SELF_CONSUME, power_w, ceiling_w
+        ):
             return MODE_SELF_CONSUME
         return action
 

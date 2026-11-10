@@ -211,3 +211,160 @@ def test_from_dict_falls_back_to_safe_defaults():
     assert config.sense == SENSE_HEAT
     assert config.comfort_temperature < config.max_temperature
     assert config.setback_temperature < config.comfort_temperature
+
+
+# --- heat pump COP curve ------------------------------------------------------
+
+CURVE_TEXT = "7: 5.2, 0: 4.0, -10: 3.0"
+
+
+def test_a_cop_curve_parses_in_the_order_typed():
+    from custom_components.emhass_companion.thermal import parse_cop_curve
+
+    assert parse_cop_curve(CURVE_TEXT) == ((7.0, 5.2), (0.0, 4.0), (-10.0, 3.0))
+    assert parse_cop_curve("  ") == ()
+    assert parse_cop_curve(None) == ()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "7: 5.2",
+        "7: 5.2, 7: 4",
+        "7: 5.2, 0",
+        "7: 5.2, 0: 0",
+        "7: 5.2, 0: -1",
+        "7: inf, 0: 4",
+        "a: b, c: d",
+    ],
+)
+def test_a_bad_cop_curve_is_rejected(text):
+    from custom_components.emhass_companion.thermal import parse_cop_curve
+
+    with pytest.raises(ValueError):
+        parse_cop_curve(text)
+
+
+def test_cop_interpolates_and_holds_beyond_the_ends():
+    from custom_components.emhass_companion.thermal import cop_at, parse_cop_curve
+
+    curve = parse_cop_curve(CURVE_TEXT)
+    assert cop_at(curve, 7) == pytest.approx(5.2)
+    assert cop_at(curve, 3.5) == pytest.approx(4.6)
+    assert cop_at(curve, -5) == pytest.approx(3.5)
+    assert cop_at(curve, 20) == pytest.approx(5.2)
+    assert cop_at(curve, -30) == pytest.approx(3.0)
+
+
+def test_the_rate_follows_the_coldest_hour_and_never_exceeds_the_reference():
+    from custom_components.emhass_companion.thermal import cop_rate_factor, parse_cop_curve
+
+    curve = parse_cop_curve(CURVE_TEXT)
+    assert cop_rate_factor(curve, [5.0, -10.0, 2.0]) == pytest.approx(3.0 / 5.2)
+    assert cop_rate_factor(curve, [15.0, 20.0]) == 1.0
+    with pytest.raises(ValueError):
+        cop_rate_factor(curve, [])
+
+
+def test_a_non_monotonic_curve_uses_its_worst_point_in_the_forecast():
+    from custom_components.emhass_companion.thermal import cop_rate_factor, parse_cop_curve
+
+    curve = parse_cop_curve("7: 4, 0: 2, -10: 3")
+    assert cop_rate_factor(curve, [0.0, -10.0]) == pytest.approx(0.5)
+
+
+def test_scaling_lowers_the_rate_and_leaves_a_load_without_a_curve_alone():
+    from custom_components.emhass_companion.thermal import parse_cop_curve
+
+    plain = _config(heating_rate=2.0)
+    assert plain.with_outdoor_forecast([-10.0]) is plain
+    scaled = _config(heating_rate=2.0, cop_curve=parse_cop_curve(CURVE_TEXT)).with_outdoor_forecast(
+        [-10.0]
+    )
+    assert scaled.heating_rate == pytest.approx(2.0 * 3.0 / 5.2)
+    cooling = _config(sense=SENSE_COOL, cop_curve=parse_cop_curve(CURVE_TEXT))
+    assert cooling.with_outdoor_forecast([-10.0]) is cooling
+
+
+def test_the_ramp_and_the_emitted_rate_use_the_scaled_rate():
+    from custom_components.emhass_companion.thermal import parse_cop_curve
+
+    config = _config(heating_rate=3.0, cop_curve=parse_cop_curve("7: 4, -10: 2"))
+    scaled = config.with_outdoor_forecast([-10.0])
+    assert scaled.to_emhass(_midnight_utc(), HALF_HOUR, DAY_STEPS)["heating_rate"] == 1.5
+    # 3 K over 1.5 K/h is a two-hour ramp, against one hour at the full rate.
+    full = _config(heating_rate=3.0).comfort_band(_midnight_utc(), HALF_HOUR, DAY_STEPS)[0]
+    slow = scaled.comfort_band(_midnight_utc(), HALF_HOUR, DAY_STEPS)[0]
+    assert slow[10] > full[10]
+
+
+def test_floors_the_slower_load_cannot_reach_are_lowered_to_what_it_can():
+    from custom_components.emhass_companion.thermal import parse_cop_curve
+
+    config = _config(
+        heating_rate=3.0,
+        comfort_start=time(6, 0),
+        current_temperature=18.0,
+        cop_curve=parse_cop_curve("7: 4, -10: 2"),
+    ).with_outdoor_forecast([-10.0])
+    floors = config.to_emhass(_midnight_utc(), HALF_HOUR, DAY_STEPS)["min_temperatures"]
+    for index, floor in enumerate(floors):
+        assert floor <= 18.0 + 1.5 * 0.5 * index + 1e-9
+    assert floors[0] == 18.0
+
+
+def test_a_mild_forecast_does_not_clamp_floors():
+    from custom_components.emhass_companion.thermal import parse_cop_curve
+
+    config = _config(current_temperature=18.0, cop_curve=parse_cop_curve(CURVE_TEXT))
+    mild = config.with_outdoor_forecast([15.0])
+    assert mild.clamp_floors is False
+    assert (
+        mild.to_emhass(_midnight_utc(), HALF_HOUR, DAY_STEPS)["min_temperatures"]
+        == config.comfort_band(_midnight_utc(), HALF_HOUR, DAY_STEPS)[0]
+    )
+
+
+@pytest.mark.usefixtures("stockholm_timezone")
+@pytest.mark.parametrize(
+    ("day", "comfort_step"),
+    [
+        # Spring forward: 02:00 -> 03:00, so 06:00 is 5 h of real time after
+        # midnight. Stepping in wall time put comfort at 07:00 actual.
+        (datetime(2026, 3, 29), 10),
+        # Fall back: 03:00 -> 02:00, so 06:00 is 7 h after midnight.
+        (datetime(2026, 10, 25), 14),
+    ],
+)
+def test_comfort_follows_real_time_across_a_dst_change(day: datetime, comfort_step: int):
+    """Forecast rows advance by elapsed time, so the band has to as well."""
+    from homeassistant.util import dt as dt_util
+
+    midnight = day.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE).astimezone(UTC)
+    minimums, _ = _config().comfort_band(midnight, HALF_HOUR, DAY_STEPS)
+
+    assert minimums[comfort_step - 2] == 18.0  # an hour before: below the ramp
+    assert minimums[comfort_step - 1] == 19.5  # 05:30 local, halfway up the ramp
+    assert minimums[comfort_step] == 21.0  # 06:00 local
+    # 22:00 local, the same real-time shift in the evening.
+    assert minimums[comfort_step + 31] == 21.0
+    assert minimums[comfort_step + 32] == 18.0
+
+
+@pytest.mark.usefixtures("stockholm_timezone")
+def test_a_comfort_start_in_the_repeated_autumn_hour_ramps_to_its_second_time():
+    """On 2026-10-25, 02:00-03:00 happens twice; so does a 02:30 comfort start.
+
+    The window opens again at the second 02:30, so the second 02:00 has to
+    ramp towards it rather than towards tomorrow's 02:30.
+    """
+    from homeassistant.util import dt as dt_util
+
+    midnight = datetime(2026, 10, 25, tzinfo=dt_util.DEFAULT_TIME_ZONE).astimezone(UTC)
+    config = _config(comfort_start=time(2, 30), comfort_end=time(5, 0))
+    minimums, _ = config.comfort_band(midnight, timedelta(minutes=15), 24)
+
+    assert minimums[10] == 21.0  # the first 02:30 (00:30 UTC)
+    assert minimums[12] == 19.5  # the second 02:00, half an hour before 02:30
+    assert minimums[13] == 20.25
+    assert minimums[14] == 21.0  # the second 02:30

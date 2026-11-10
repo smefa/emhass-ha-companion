@@ -102,9 +102,27 @@ class LoadRunNowButton(EmhassLoadEntity, ButtonEntity):
         select: a load switched to spare solar this afternoon has to lose the
         button then, not only on the next restart.
         """
-        return super().available and not self.load.on_surplus
+        from .util import version_at_least
+
+        supported = not self.load.is_sequence or (
+            self.coordinator.backend_version is not None
+            and version_at_least(self.coordinator.backend_version, "0.18.8")
+        )
+        return super().available and not self.load.on_surplus and supported
 
     async def async_press(self) -> None:
+        self.load.sequence_step_minutes = self.coordinator.config.time_step_minutes
         self.load.force_run()
         self.load.invalidate_battery_lockout()
         self.load.notify()
+        # "Run now" means now, not at the next timestep tick: the executor
+        # only re-decides loads on a plan update or the step clock, so without
+        # this a directly controlled load sat off for up to a whole step after
+        # the press. The executor still applies its own control gate.
+        entry = self.coordinator.config_entry
+        entry.async_create_background_task(
+            self.hass,
+            entry.runtime_data.executor.async_apply(),
+            "emhass_run_now_apply",
+            eager_start=False,
+        )

@@ -66,7 +66,7 @@ async def test_a_load_can_be_added_with_every_optional_field_blank(
     result = await hass.config_entries.subentries.async_configure(
         result["flow_id"],
         {
-            CONF_NOMINAL_POWER: 2000,
+            CONF_NOMINAL_POWER: "2000",
             CONF_OPERATING_HOURS: 2,
             "advanced": {CONF_SEMI_CONTINUOUS: True, CONF_SINGLE_CONSTANT: False},
         },
@@ -93,7 +93,7 @@ async def test_a_binary_sensor_is_accepted_as_the_running_sensor(hass: HomeAssis
     result = await hass.config_entries.subentries.async_configure(
         result["flow_id"],
         {
-            CONF_NOMINAL_POWER: 2000,
+            CONF_NOMINAL_POWER: "2000",
             CONF_OPERATING_HOURS: 2,
             "advanced": {CONF_SEMI_CONTINUOUS: True, CONF_SINGLE_CONSTANT: False},
             CONF_POWER_SENSOR: "binary_sensor.dishwasher_running",
@@ -128,7 +128,7 @@ async def test_an_empty_name_is_a_field_error_not_a_crash(hass: HomeAssistant) -
             result["flow_id"],
             {
                 CONF_NAME: "",
-                CONF_NOMINAL_POWER: 2000,
+                CONF_NOMINAL_POWER: "2000",
                 CONF_OPERATING_HOURS: 2,
                 CONF_SEMI_CONTINUOUS: True,
                 CONF_SINGLE_CONSTANT: False,
@@ -141,9 +141,7 @@ async def test_an_empty_name_is_a_field_error_not_a_crash(hass: HomeAssistant) -
 async def test_reconfigure_offers_only_what_the_subentry_still_owns(
     hass: HomeAssistant,
 ) -> None:
-    """Powers, hours, the window and the load model became entities the moment
-    the load was created; offering them here would show an edit box whose
-    contents the restored entity immediately overrides."""
+    """Power supports sequences here; the remaining optimiser controls stay entity-owned."""
     entry = _entry(
         subentries=[
             ConfigSubentryData(
@@ -164,7 +162,7 @@ async def test_reconfigure_offers_only_what_the_subentry_still_owns(
 
     assert result["type"] is FlowResultType.FORM
     fields = {str(marker.schema) for marker in result["data_schema"].schema}
-    assert fields == {CONF_NAME, CONF_POWER_SENSOR, CONF_CONTROL_ENTITY}
+    assert fields == {CONF_NAME, CONF_NOMINAL_POWER, CONF_POWER_SENSOR, CONF_CONTROL_ENTITY}
 
 
 async def test_reconfigure_keeps_the_values_it_no_longer_shows(
@@ -245,3 +243,53 @@ async def test_reconfigure_can_clear_the_power_sensor(hass: HomeAssistant) -> No
 
     assert result["type"] is FlowResultType.ABORT
     assert CONF_POWER_SENSOR not in entry.subentries[subentry_id].data
+
+
+async def test_sequence_setup_reconfigure_and_invalid_runtime(hass: HomeAssistant) -> None:
+    from custom_components.emhass_companion.const import CONF_POWER_SEQUENCE
+
+    entry = _entry()
+    entry.add_to_hass(hass)
+    result = await _start_add(hass, entry)
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {CONF_NAME: "Washer"}
+    )
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"],
+        {
+            CONF_NOMINAL_POWER: "150, 2000, 0",
+            CONF_OPERATING_HOURS: 0.25,
+            "advanced": {CONF_SEMI_CONTINUOUS: True, CONF_SINGLE_CONSTANT: False},
+        },
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {CONF_NOMINAL_POWER: "invalid_power_sequence"}
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"],
+        {
+            CONF_NOMINAL_POWER: "150, 2000, 0",
+            CONF_OPERATING_HOURS: 1,
+            "advanced": {CONF_SEMI_CONTINUOUS: True, CONF_SINGLE_CONSTANT: False},
+        },
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_POWER_SEQUENCE] == [150, 2000, 0]
+    assert result["data"][CONF_NOMINAL_POWER] == 2000
+    subentry_id = next(iter(entry.subentries))
+    result = await hass.config_entries.subentries.async_init(
+        (entry.entry_id, SUBENTRY_TYPE_DEFERRABLE),
+        context={"source": "reconfigure", "subentry_id": subentry_id},
+    )
+    power_key = next(k for k in result["data_schema"].schema if str(k) == CONF_NOMINAL_POWER)
+    assert power_key.default() == "150, 2000, 0"
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {CONF_NAME: "Washer", CONF_NOMINAL_POWER: "500"}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert CONF_POWER_SEQUENCE not in entry.subentries[subentry_id].data
+    assert entry.subentries[subentry_id].data[CONF_NOMINAL_POWER] == 500
+    # Leaving a sequence stamps the edit, so the number's restore cannot put
+    # its pre-sequence value back on the next setup.
+    from custom_components.emhass_companion.const import CONF_NOMINAL_POWER_EDITED_AT
+
+    assert entry.subentries[subentry_id].data[CONF_NOMINAL_POWER_EDITED_AT]

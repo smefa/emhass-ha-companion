@@ -41,7 +41,11 @@ The next screen seeds the load. Which fields it shows depends on the **Runs**
 answer above, and every one of them becomes a control on the load's own
 device page afterwards — so nothing here is a permanent decision.
 
-- **Power when running** — roughly what it draws while on, in W.
+- **Power when running** — roughly what it draws while on, in W. For an
+  appliance whose draw changes through its program, such as a washing
+  machine, enter one value per optimisation step separated by commas, for
+  example `150, 2000, 2000, 300`. The last value repeats until *Hours needed*
+  is filled. See [Sequence loads](../deferrable_loads.md#sequence-loads).
 - **Advanced settings** — the collapsed section holds everything below
   except *Power when running*, *Hours needed per day*, *Earliest start* /
   *Latest finish* and the two entity pickers. The defaults suit most loads.
@@ -96,7 +100,9 @@ Every field the load's device page can show, in the order it appears:
   the optimiser skips over it entirely.
 - **02. Hours needed per day** — how many hours it should run each day.
   *Every day* loads only.
-- **03. Power when running** — how much it draws at full power, in W.
+- **03. Power when running** — how much it draws at full power, in W. A
+  text box: one value, or several separated by commas (one per step) for a
+  load whose power changes through its program.
 - **04. Lowest power while running** — the least it may draw while on, if
   it can modulate. Only used when *12. Runs at full power only* is off.
 - **05. Earliest start** — the window may not start before this time.
@@ -168,7 +174,12 @@ tomorrow, each with the full hours.
   far enough.
 - **Today's run counts for today only.** Once today's run is done, tomorrow's
   window still gets its full hours.
-- **Not for every load.** Loads on spare solar, thermal loads, on-demand
+- **Water tanks stay one load.** A tank has a single temperature, so it is
+  not duplicated. Its heating window is stretched from the first window to
+  the last one in the plan, and *Most starts per plan* is multiplied by the
+  number of windows. Heating between the windows is therefore allowed; the
+  temperature targets still decide when it has to happen.
+- **Not for every load.** Loads on spare solar, room thermal loads, on-demand
   loads and daily loads without a time window are planned as before. Windows
   that sit closer together than the load's *Minimum time off* are also
   planned as one.

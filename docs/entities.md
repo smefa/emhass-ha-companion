@@ -21,6 +21,7 @@
 | `sensor.*_forecast_cost_24h` / `*_forecast_savings_24h` | The same, priced off the current plan for the next 24 hours |
 | `sensor.*_battery_action` | What the executor did or would do, and why — see [Handing over control](handing_over_control.md) |
 | `sensor.*_last_request_to_emhass` | The exact payload of the last optimisation request. Diagnostic, disabled by default — see [Troubleshooting](troubleshooting.md) |
+| `sensor.*_network_tariff_status` | Diagnostic, always present: `not_configured`, `profile_error`, `peak_tracking_off`, `demand_charge_not_priced` or `active`. Attributes: `profile`, `bands`, `demand_charges`, `peak_trackers`, `holiday_lookup_degraded`, `not_priced_reason` |
 | `sensor.*_network_tariff_band` | The active energy band's name, with the adder and next change in its attributes. Only if you configured a network tariff — see [Network tariffs](network_tariffs.md) |
 | `sensor.*_demand_charge_rate` | The effective `capacity_cost_per_kw` a network tariff's demand charge prices out to right now, diagnostic. Only with a network tariff configured. With multi-component tariffs (EMHASS 0.18.3+), the native value is component 0; other components appear under a `components` attribute |
 | `sensor.*_period_peak` | The demand-charge aggregate incurred so far this billing period. Only if the network tariff defines a demand charge |
@@ -55,7 +56,10 @@ described, with fields and examples, in [Actions](guide/actions.md).
 ## Deferrable and thermal loads
 
 See [deferrable_loads.md](deferrable_loads.md) and
-[thermal_loads.md](thermal_loads.md) for the per-load entities.
+[thermal_loads.md](thermal_loads.md) for the per-load entities. Power
+is a text entity (`text.<load>_power_when_running`), not a number: one value
+is a constant load, several comma-separated values are a
+[sequence](deferrable_loads.md#sequence-loads). Thermal loads keep a number.
 
 ## EMHASS entity names
 

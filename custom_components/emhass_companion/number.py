@@ -32,7 +32,7 @@ from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, ISSUE_THERMAL_UNREACHABLE
+from .const import CONF_NOMINAL_POWER_EDITED_AT, DOMAIN, ISSUE_THERMAL_UNREACHABLE
 from .coordinator import EmhassCoordinator
 from .deferrable import DeferrableRuntime
 from .entity import EmhassEntity, EmhassLoadEntity
@@ -169,7 +169,7 @@ def _is_water_tank(load: DeferrableRuntime) -> bool:
 
 
 def _is_room(load: DeferrableRuntime) -> bool:
-    return load.is_thermal and not load.is_water_tank
+    return load.is_measured_room
 
 
 def _is_standard(load: DeferrableRuntime) -> bool:
@@ -196,6 +196,7 @@ LOAD_NUMBERS: tuple[LoadNumberDescription, ...] = (
         entity_category=EntityCategory.CONFIG,
         get_fn=lambda load: load.nominal_power_w,
         set_fn=_set_nominal_power,
+        applies_fn=_is_thermal,
     ),
     LoadNumberDescription(
         key="minimum_power",
@@ -677,13 +678,42 @@ class LoadNumber(EmhassLoadEntity, RestoreNumber):
         await super().async_added_to_hass()
         # RestoreNumber, not RestoreEntity: the latter restores the formatted
         # state string rather than the native value.
-        if (last := await self.async_get_last_number_data()) is not None and (
-            last.native_value is not None
+        if (
+            (last := await self.async_get_last_number_data()) is not None
+            and last.native_value is not None
+            and not (
+                self.entity_description.key == "nominal_power"
+                and await self._power_edited_since_last_state()
+            )
         ):
             self.entity_description.set_fn(self.load, last.native_value)
 
+    async def _power_edited_since_last_state(self) -> bool:
+        """Whether reconfigure changed Power after this entity's last state.
+
+        The subentry seeded the runtime with the edited value; restoring the
+        older state would silently undo it.
+        """
+        entry = self.coordinator.config_entry
+        subentry = entry.subentries.get(self.load.subentry_id) if entry else None
+        edited_at = subentry.data.get(CONF_NOMINAL_POWER_EDITED_AT) if subentry else None
+        if not edited_at:
+            return False
+        edited = dt_util.parse_datetime(str(edited_at))
+        last_state = await self.async_get_last_state()
+        if edited is None:
+            return False
+        return last_state is None or last_state.last_updated < edited
+
     @property
     def available(self) -> bool:
+        if self.load.is_sequence and self.entity_description.key in {
+            "minimum_power",
+            "max_startups",
+            "minimum_on_time",
+            "minimum_off_time",
+        }:
+            return False
         # Settles on the first coordinator update after a restart: the fields
         # this reads are restored by *other* entities, which may not have been
         # added yet when this one first reports.
@@ -706,8 +736,14 @@ class LoadNumber(EmhassLoadEntity, RestoreNumber):
         return value
 
     async def async_set_native_value(self, value: float) -> None:
+        if self.load.is_sequence and self.entity_description.key == "operating_hours":
+            from .deferrable import expand_power
+
+            expand_power(self.load.power_values, value, self.coordinator.config.time_step_minutes)
         band_fields = ("setback_temperature", "comfort_temperature", "max_temperature")
-        if self.load.is_water_tank and self.entity_description.key in band_fields:
+        if (
+            self.load.is_water_tank or self.load.is_heat_pump_room
+        ) and self.entity_description.key in band_fields:
             setback, comfort, maximum = (
                 value if key == self.entity_description.key else getattr(self.load, key)
                 for key in band_fields
@@ -715,13 +751,15 @@ class LoadNumber(EmhassLoadEntity, RestoreNumber):
             if not setback <= comfort <= maximum:
                 raise ServiceValidationError(
                     "Water tank temperatures must satisfy lowest standby <= required hot water <= maximum"
+                    if self.load.is_water_tank
+                    else "Temperatures must satisfy setback <= comfort <= maximum"
                 )
         self.entity_description.set_fn(self.load, value)
         self.load.invalidate_battery_lockout()
         self.load.notify()
         if self.load.enabled:
             await self.coordinator.async_request_settings_refresh()
-        if self.load.is_thermal and not self.load.is_water_tank:
+        if self.load.is_measured_room:
             self._check_thermal_reachability()
 
     def _check_thermal_reachability(self) -> None:
@@ -743,7 +781,7 @@ class LoadNumber(EmhassLoadEntity, RestoreNumber):
             ir.async_delete_issue(self.hass, DOMAIN, issue_id)
             return
 
-        thermal = self.load.thermal_config(current)
+        thermal = self.coordinator.effective_thermal_config(self.load, current)
         result = (
             thermal.first_unreachable_step(
                 current,

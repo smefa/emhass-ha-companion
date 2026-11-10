@@ -35,7 +35,13 @@ from .const import (
     BATTERY_ACTIONS,
     DEMAND_CHARGE_RATE_KEY,
     NET_HOUSE_LOAD_KEY,
+    NETWORK_STATUS_ACTIVE,
+    NETWORK_STATUS_NOT_CONFIGURED,
+    NETWORK_STATUS_NOT_PRICED,
+    NETWORK_STATUS_PEAK_TRACKING_OFF,
+    NETWORK_STATUS_PROFILE_ERROR,
     NETWORK_TARIFF_BAND_KEY,
+    NETWORK_TARIFF_STATUS_KEY,
     PEAK_HEADROOM_KEY,
     PERIOD_PEAK_KEY,
     PHASE_HEADROOM_KEY,
@@ -375,6 +381,10 @@ async def async_setup_entry(
         ]
     )
 
+    # Always created, unlike the entities below: its whole point is to answer
+    # "is my network tariff on and working?" including when it is not.
+    async_add_entities([NetworkTariffStatusSensor(coordinator)])
+
     # Only meaningful once a network profile with at least one band is
     # actually selected -- available() already reports unavailable without
     # one, but not creating the entity at all is better than a permanently
@@ -671,9 +681,41 @@ class LoadScheduledPowerSensor(EmhassLoadEntity, SensorEntity):
         # which payload.py already rounds away on the way out.
         return round(self._series().value_at(dt_util.utcnow()) or 0.0)
 
+    def _cycles(self) -> list[dict[str, str]]:
+        from .payload import operating_timesteps
+
+        step = timedelta(minutes=self.coordinator.config.time_step_minutes)
+        cycle = self.load.sequence_cycle
+        blocks: list[tuple[datetime, datetime]] = []
+        if cycle is not None:
+            blocks.append((cycle.anchor, cycle.ends_at(self.coordinator.config.time_step_minutes)))
+        count = operating_timesteps(
+            self.load.operating_hours, self.coordinator.config.time_step_minutes
+        )
+        data = self.coordinator.data
+        if data is not None and self.plan_index is not None:
+            powers = (data.payload or {}).get("nominal_power_of_deferrable_loads", [])
+            if self.plan_index < len(powers) and isinstance(powers[self.plan_index], list):
+                count = len(powers[self.plan_index])
+        points = list(self._series())
+        skip_until = blocks[0][1] if blocks else None
+        for point in points:
+            if skip_until is not None and point.time < skip_until:
+                continue
+            if count and self.load.plan_runs_at(point.value):
+                end = point.time + count * step
+                blocks.append((point.time, end))
+                skip_until = end
+        return [{"start": start.isoformat(), "end": end.isoformat()} for start, end in blocks]
+
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return {
+            **(
+                {"power_sequence": list(self.load.power_sequence), "cycles": self._cycles()}
+                if self.load.is_sequence or self.load.sequence_cycle
+                else {}
+            ),
             "schedule": self._series().to_attribute(),
             "emhass_deferrable": self.deferrable_number,
         }
@@ -779,7 +821,7 @@ class LoadPlannedTemperatureSensor(EmhassLoadEntity, SensorEntity):
                 if self.load.is_water_tank
                 else None
             )
-            config = self.load.thermal_config(current)
+            config = self.coordinator.effective_thermal_config(self.load, current)
             if config is None:
                 return None
             minimums, maximums = config.comfort_band(
@@ -873,7 +915,8 @@ class LoadRuntimeTodaySensor(EmhassLoadEntity, RestoreSensor):
 
     Fed back to EMHASS as ``def_current_operating_timesteps`` so it does not
     re-schedule work already done. EMHASS has no concept of a day boundary for
-    that value, so the counter is reset locally at midnight.
+    that value, so the counter resets locally at midnight (at window close
+    for daily scalar overnight loads).
     """
 
     _attr_translation_key = "runtime_today"
@@ -891,8 +934,8 @@ class LoadRuntimeTodaySensor(EmhassLoadEntity, RestoreSensor):
         last = await self.async_get_last_sensor_data()
         if last is None or last.native_value is None:
             return
-        # Only restore within the same local day; a restart tomorrow morning
-        # must not carry yesterday's hours into today's schedule.
+        # Restore within the same accounting day, including the morning half
+        # of a daily scalar overnight window.
         #
         # The timestamp has to come from the *restored* state, not from
         # `hass.states.get(self.entity_id)`. At this point the state machine
@@ -904,14 +947,13 @@ class LoadRuntimeTodaySensor(EmhassLoadEntity, RestoreSensor):
         restored = await self.async_get_last_state()
         if restored is None:
             return
-        today = dt_util.as_local(dt_util.utcnow()).date()
-        if dt_util.as_local(restored.last_updated).date() != today:
-            return
         try:
-            self.load.runtime_today = timedelta(hours=float(last.native_value))
-            self.load.runtime_day = today
+            elapsed = timedelta(hours=float(last.native_value))
         except (TypeError, ValueError):
-            pass
+            return
+        # Judged in DeferrableRegistry.async_start, once the time entities
+        # have restored the window that decides which day this belongs to.
+        self.load.restored_runtime = (elapsed, restored.last_updated)
 
     @property
     def native_value(self) -> float:
@@ -1210,6 +1252,61 @@ class NetworkTariffBandSensor(EmhassEntity, SensorEntity):
         return attributes
 
 
+class NetworkTariffStatusSensor(EmhassEntity, SensorEntity):
+    """Whether the network tariff is set up and doing its job.
+
+    ``not_configured`` -- no profile selected; ``profile_error`` -- one is
+    selected but could not be resolved (see the log); ``peak_tracking_off`` --
+    it has a demand charge but no grid-import energy meter, so the peak is
+    not tracked; ``demand_charge_not_priced`` -- the demand charge cannot be
+    priced yet (usually an EMHASS release too old); ``active`` -- everything
+    it defines works.
+    """
+
+    _attr_translation_key = NETWORK_TARIFF_STATUS_KEY
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = [
+        NETWORK_STATUS_NOT_CONFIGURED,
+        NETWORK_STATUS_PROFILE_ERROR,
+        NETWORK_STATUS_PEAK_TRACKING_OFF,
+        NETWORK_STATUS_NOT_PRICED,
+        NETWORK_STATUS_ACTIVE,
+    ]
+
+    def __init__(self, coordinator: EmhassCoordinator) -> None:
+        super().__init__(coordinator, NETWORK_TARIFF_STATUS_KEY)
+
+    @property
+    def native_value(self) -> str:
+        coordinator = self.coordinator
+        if not coordinator.config.network.key:
+            return NETWORK_STATUS_NOT_CONFIGURED
+        calendar = coordinator.network_calendar
+        if calendar is None:
+            return NETWORK_STATUS_PROFILE_ERROR
+        if calendar.demand_charges and not coordinator.peak_trackers:
+            return NETWORK_STATUS_PEAK_TRACKING_OFF
+        pricing = coordinator.demand_charge_pricing(dt_util.utcnow())
+        if pricing is not None and pricing.effective_rate_per_kw is None:
+            return NETWORK_STATUS_NOT_PRICED
+        return NETWORK_STATUS_ACTIVE
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        coordinator = self.coordinator
+        calendar = coordinator.network_calendar
+        pricing = coordinator.demand_charge_pricing(dt_util.utcnow())
+        return {
+            "not_priced_reason": pricing.reason if pricing else None,
+            "profile": coordinator.config.network.key or None,
+            "bands": len(calendar.bands) if calendar else 0,
+            "demand_charges": len(calendar.demand_charges) if calendar else 0,
+            "peak_trackers": len(coordinator.peak_trackers),
+            "holiday_lookup_degraded": coordinator.holiday_cache.degraded,
+        }
+
+
 class DemandChargeRateSensor(EmhassEntity, SensorEntity):
     """The effective ``capacity_cost_per_kw`` a network profile's demand
     charge prices out to, or 0 with the reason it isn't priced right now.
@@ -1281,7 +1378,26 @@ class DemandChargeRateSensor(EmhassEntity, SensorEntity):
                 }
                 for component in pricing.components
             ]
+        tier = self._tier()
+        if tier is not None:
+            attributes["tier_limit_kw"], attributes["rate_above"] = tier
         return attributes
+
+    def _tier(self) -> tuple[float, float] | None:
+        """(limit kW, rate above it) when the profile prices a progressive tier.
+
+        Such a profile sends two components -- rate 1, then rate 2 - rate 1 on
+        a peak floored at the limit (``DemandCharge.min_peak_kw``) -- so the
+        operator's rate 2 is the two sheet rates added back together.
+        """
+        calendar = self.coordinator.network_calendar
+        pricing = self._pricing
+        if calendar is None or pricing is None or len(calendar.demand_charges) != 2:
+            return None
+        base, upper = calendar.demand_charges
+        if upper.min_peak_kw <= 0 or base.rate_per_kw is None or upper.rate_per_kw is None:
+            return None
+        return upper.min_peak_kw, base.rate_per_kw + upper.rate_per_kw
 
 
 class PhaseHeadroomSensor(EmhassEntity, SensorEntity):

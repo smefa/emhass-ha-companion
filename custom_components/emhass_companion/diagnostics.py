@@ -446,6 +446,12 @@ def _loads_section(coordinator: EmhassCoordinator, entry: ConfigEntry) -> list[d
                     ),
                     # Runtime state, not a setting, but it is what decides
                     # whether the load is described to EMHASS as running at all.
+                    "power_sequence": list(load.power_sequence),
+                    "sequence_cycle": load.sequence_cycle.as_dict()
+                    if load.sequence_cycle
+                    else None,
+                    "sequence_start_pending": load.sequence_start_pending,
+                    "last_completed_day": _jsonable(load.last_completed_day),
                     "mode": load.mode,
                     "enabled": load.enabled,
                     "requested": load.requested,

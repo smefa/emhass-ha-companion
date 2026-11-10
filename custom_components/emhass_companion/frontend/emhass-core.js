@@ -839,6 +839,50 @@ function trackSvg(options) {
 /* ---------------------------------------------------------- load view model */
 
 /**
+ * A sequence load's power list and cycle progress, or null for a single value.
+ *
+ * `should_run` carries the progress and `scheduled_power` the planned cycle
+ * blocks; either one carries the list. The blocks come from the backend
+ * because a 0 W stage splits the plan's series, and guessing the cycle back
+ * out of the gaps would turn one wash into two runs.
+ */
+function sequenceOf(shouldRun, scheduled) {
+  const a = (shouldRun && shouldRun.attributes) || {};
+  const b = (scheduled && scheduled.attributes) || {};
+  const values = Array.isArray(a.power_sequence)
+    ? a.power_sequence
+    : Array.isArray(b.power_sequence)
+      ? b.power_sequence
+      : null;
+  const step = Number(a.sequence_step);
+  const steps = Number(a.sequence_steps);
+  const active = Number.isFinite(step) && step > 0 && Number.isFinite(steps) && steps > 0;
+  if (!values && !active) return null;
+  return {
+    values: values || [],
+    peak: values && values.length ? Math.max(...values.map(Number)) : NaN,
+    step: active ? step : null,
+    steps: active ? steps : values ? values.length : null,
+    doneToday: !active && a.sequence_done === true,
+    cycles: Array.isArray(b.cycles) ? b.cycles : null,
+  };
+}
+
+/** Cycle blocks as run windows, each with the plan's peak inside it. */
+function cycleRuns(cycles, points) {
+  const runs = [];
+  for (const cycle of cycles) {
+    const start = Date.parse(cycle.start);
+    const end = Date.parse(cycle.end);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
+    let watts = 0;
+    for (const point of points) if (point.t >= start && point.t < end) watts = Math.max(watts, point.v);
+    runs.push({ start, end, watts });
+  }
+  return runs.sort((x, y) => x.start - y.start);
+}
+
+/**
  * Everything the deferrable cards show, derived once per render.
  *
  * Kept in one place because two cards present the same load in two ways;
@@ -866,7 +910,8 @@ function loadView(hass, load) {
   const deadline = deadlineRaw ? Date.parse(deadlineRaw) : NaN;
 
   const points = series(scheduled, "schedule");
-  const runs = windows(points);
+  const sequence = sequenceOf(shouldRun, scheduled);
+  const runs = sequence && sequence.cycles ? cycleRuns(sequence.cycles, points) : windows(points);
   const ranToday = num(runtime);
   const needed = onSurplus ? num(find("surplus_budget")) : num(hours);
 
@@ -886,6 +931,9 @@ function loadView(hass, load) {
   // load that is two hours from starting.
   let status = "unknown";
   if (running && running.state === "on") status = "running";
+  // A cycle in a 0 W or low stage measures as off, but it is still running:
+  // the companion holds it on until its last step.
+  else if (sequence && sequence.step) status = "running";
   else if (shouldRun && shouldRun.state === "on") status = "should";
   else if (shouldRun && shouldRun.state === "off") status = nextRun ? "planned" : "idle";
 
@@ -929,6 +977,7 @@ function loadView(hass, load) {
     deadline: Number.isFinite(deadline) ? deadline : null,
     points,
     runs,
+    sequence,
     upcoming,
     nextRun,
     reason: shouldRun && shouldRun.attributes ? shouldRun.attributes.reason : null,
@@ -1214,6 +1263,8 @@ export {
   LiveCard,
   loadHaForm,
   loadView,
+  sequenceOf,
+  cycleRuns,
   measuredBy,
   mergeHistory,
   moreInfo,

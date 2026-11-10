@@ -82,6 +82,7 @@ from .const import (
 from .deferrable import DeferrableRegistry, DeferrableRuntime, state_to_watts
 from .effective_settings import ML_MODEL_SETTING_NAMES, ML_SETTING_NAMES, resolve_effective_settings
 from .health import SourceHealth
+from .heat_pump_room import HeatPumpRoomConfig
 from .infeasibility import Finding, Severity, diagnose, format_power, headline
 from .models import (
     ROW_ZERO_FIRST,
@@ -98,7 +99,13 @@ from .models import (
     row_zero_start,
 )
 from .network_calendar import HolidayCache, NetworkCalendar, NetworkCalendarError
-from .payload import PayloadInputs, PayloadResult, build_payload
+from .payload import (
+    PayloadError,
+    PayloadInputs,
+    PayloadResult,
+    build_payload,
+    outdoor_per_step,
+)
 from .peaks import PeakTracker, days_in_current_period, effective_rate_per_kw
 from .phase_guard import PhaseGuard
 from .price_forecast import (
@@ -116,6 +123,7 @@ from .profiles import (
 )
 from .smoothing import TimeWeightedAverage
 from .surplus import seam_carry
+from .tariff import native_tariff_series
 from .terminal import (
     LOAD_SOURCE_LAST_PLAN,
     LOAD_SOURCE_PROFILE,
@@ -126,8 +134,9 @@ from .terminal import (
 from .terminal import (
     LOOKAHEAD as END_SOC_LOOKAHEAD,
 )
+from .thermal import ThermalConfig
 from .util import schema_major, version_at_least
-from .water_tank import TankShortfall
+from .water_tank import TankShortfall, WaterTankConfig
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -493,6 +502,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         # conservative and treats it as unsupported.
         self.backend_version: str | None = None
         self._water_tank_plan_blocked: str | None = None
+        self._outdoor_forecast: Series = Series.empty()
         # Set once, right after __init__.async_setup_entry builds them (may be
         # empty -- see _build_peak_trackers). Held here, not just on
         # EmhassRuntimeData, because demand_charge_pricing / _build need each
@@ -1114,6 +1124,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             send_soc_final_reward=self.soc_final_reward_supported,
             # Configured enablement, not whether a series happens to be present.
             use_pv=bool(config.pv.key),
+            solver_settings=config.solver,
         )
         return effective.persistent(), effective.warnings
 
@@ -1269,6 +1280,8 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
                 temperature = self.loads.room_temperature(load)
                 projected.append(load.to_load(now, self.config.time_step_minutes, temperature))
             except ValueError as err:
+                if load.is_heat_pump_room:
+                    raise UpdateFailed(str(err)) from err
                 if not load.is_water_tank:
                     raise
                 message = f"Water tank {load.name}: {err}"
@@ -1297,6 +1310,29 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
                 f"the backend reports {self.backend_version or 'unknown'}. Upgrade EMHASS and reload."
             )
         return None
+
+    def effective_thermal_config(
+        self, load: DeferrableRuntime, current_temperature: float | None
+    ) -> ThermalConfig | WaterTankConfig | HeatPumpRoomConfig | None:
+        """A load's thermal model as the last request saw it.
+
+        For displays and checks, which must judge the same heating rate the
+        optimiser was sent. Unscaled until a forecast has been fetched.
+        """
+        config = load.thermal_config(current_temperature)
+        now = dt_util.utcnow()
+        if isinstance(config, HeatPumpRoomConfig):
+            if not self._outdoor_forecast:
+                return config
+            step = timedelta(minutes=self.config.time_step_minutes)
+            return config.with_outdoor_forecast(
+                outdoor_per_step(self._outdoor_forecast, now, step, self.config.horizon_steps)
+            )
+        if not isinstance(config, ThermalConfig) or not config.cop_curve:
+            return config
+        horizon = timedelta(minutes=self.config.time_step_minutes * self.config.horizon_steps)
+        window = self._outdoor_forecast.window_covering(now, now + horizon)
+        return config.with_outdoor_forecast(window.values) if window else config
 
     def water_tank_error(self, load: DeferrableRuntime) -> str | None:
         """Fail closed before tank dispatch, including between optimiser runs."""
@@ -1943,6 +1979,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         outdoor = Series.empty()
         if self.loads.needs_outdoor_temperature and config.temperature:
             outdoor = await self._series(config.temperature, PROFILE_KIND_TEMPERATURE)
+        self._outdoor_forecast = outdoor
 
         buy = sell = None
         network_warnings: list[str] = []
@@ -1958,19 +1995,19 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
                 price_warnings.append(forecast_warning)
         if spot:
             buy, sell = config.tariff.compose(self.hass, spot)
-            if self.network_calendar is not None and buy:
-                # Bands add the network operator's own energy-fee structure on
-                # top of the supplier tariff `Tariff.compose` just produced --
-                # same Series in, same Series out, so nothing downstream has to
-                # know a network profile exists. Holiday dates are resolved
-                # for exactly the dates this horizon touches (two or three,
-                # normally), not the whole calendar year.
-                dates = self.network_calendar.dates_in(buy)
-                entity_id = next(iter(self.network_calendar.holiday_entities()), None)
-                network_warnings = await self.holiday_cache.async_ensure(
-                    self.hass, entity_id, dates
-                )
-                buy, sell = self.network_calendar.apply_bands(buy, sell, self.holiday_cache)
+        elif (native := self._native_prices(now, fill_until, step)) is not None:
+            buy, sell = native
+        if buy and self.network_calendar is not None:
+            # Bands add the network operator's own energy-fee structure on
+            # top of the supplier tariff `Tariff.compose` just produced --
+            # same Series in, same Series out, so nothing downstream has to
+            # know a network profile exists. Holiday dates are resolved
+            # for exactly the dates this horizon touches (two or three,
+            # normally), not the whole calendar year.
+            dates = self.network_calendar.dates_in(buy)
+            entity_id = next(iter(self.network_calendar.holiday_entities()), None)
+            network_warnings = await self.holiday_cache.async_ensure(self.hass, entity_id, dates)
+            buy, sell = self.network_calendar.apply_bands(buy, sell, self.holiday_cache)
 
         settings = self._forecast_profile_settings()
         if EMHASS_CONF_LOAD_FORECAST_METHOD in settings:
@@ -2089,16 +2126,32 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         trackers = self.peak_trackers or (
             [self.peak_tracker] if self.peak_tracker is not None else []
         )
-        if demand_pricing is not None and rates is not None and action == ACTION_MPC and trackers:
+        tier_floors = bool(
+            self.network_calendar
+            and any(charge.min_peak_kw > 0 for charge in self.network_calendar.demand_charges)
+        )
+        if (
+            demand_pricing is not None
+            and rates is not None
+            and action == ACTION_MPC
+            and (trackers or tier_floors)
+        ):
             # Watts, matching every other power figure this integration sends
             # -- current_period_peak is MPC-only in EMHASS (see
             # docs/network_tariffs_plan.md, "Day-ahead versus MPC"), so a
             # day-ahead run gets no floor and no memory either way.
-            peaks_w = [tracker.floor_kw * 1000 for tracker in trackers[: len(rates)]]
-            # Pad / truncate to K if trackers and rates somehow diverge.
-            while len(peaks_w) < len(rates):
-                peaks_w.append(0.0)
-            peaks_w = peaks_w[: len(rates)]
+            charges = self.network_calendar.demand_charges if self.network_calendar else []
+            # A component's tier limit floors its peak even when no tracker
+            # backs it (no grid-import meter), or the upper tier would price
+            # the whole peak. Trackers and rates that diverge are padded.
+            peaks_w = [
+                max(
+                    trackers[i].floor_kw if i < len(trackers) else 0.0,
+                    charges[i].min_peak_kw if i < len(charges) else 0.0,
+                )
+                * 1000
+                for i in range(len(rates))
+            ]
             ns = demand_pricing.interval_timesteps_list
             histories = [
                 self._capacity_interval_history_w(
@@ -2236,8 +2289,12 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
                 and version_at_least(self.backend_version, MIN_EMHASS_VERSION_CHARGE_DERATING)
             ),
             send_soc_final_reward=self.soc_final_reward_supported,
+            solver_settings=config.solver,
         )
-        built = build_payload(inputs)
+        try:
+            built = build_payload(inputs)
+        except PayloadError as err:
+            raise UpdateFailed(str(err)) from err
         for series, method, label in (
             (buy, "load_cost_forecast_method", "buy price"),
             (sell, "production_price_forecast_method", "sell price"),
@@ -2286,6 +2343,31 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             fill.series,
             spot.end,
             f"Estimated prices from {dt_util.as_local(fill.forecast_from):%d %b %H:%M %Z}: {source}.",
+        )
+
+    def _native_prices(
+        self, now: datetime, until: datetime, step: timedelta
+    ) -> tuple[Series, Series] | None:
+        """Buy and sell series for a price profile that EMHASS prices itself.
+
+        The fixed tariff fetches nothing and hands EMHASS a peak / off-peak
+        split instead, so without this the tariff adjustments and the network
+        profile's energy fees were never applied to it. Only built when one
+        of them would change a price: otherwise EMHASS keeps pricing the run
+        from the same settings, exactly as before.
+        """
+        config = self.config
+        if config.tariff.is_identity and self.network_calendar is None:
+            return None
+        native = native_tariff_series(
+            self._settings(config.price, PROFILE_KIND_PRICE), now, until, step
+        )
+        if native is None:
+            return None
+        buy, sell = native
+        return (
+            config.tariff.buy.apply(self.hass, buy),
+            config.tariff.sell.apply(self.hass, sell) if sell else sell,
         )
 
     async def _series(self, selection: ProfileSelection, kind: str) -> Series:

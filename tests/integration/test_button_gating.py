@@ -7,7 +7,7 @@ configuration card carries just "Recalculate now" (plus a per-load "Run now").
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 from homeassistant.core import HomeAssistant
 import pytest
@@ -32,11 +32,13 @@ from custom_components.emhass_companion.profiles import async_load_profiles
 
 
 class _RuntimeData:
-    """Stand-in for EmhassRuntimeData; button.py only reads .coordinator and .loads."""
+    """Stand-in for EmhassRuntimeData; button.py reads .coordinator, .loads and .executor."""
 
     def __init__(self, coordinator: EmhassCoordinator, loads: DeferrableRegistry) -> None:
         self.coordinator = coordinator
         self.loads = loads
+        self.executor = MagicMock()
+        self.executor.async_apply = AsyncMock()
 
 
 async def _setup(hass: HomeAssistant, *, options: dict) -> set[str]:
@@ -130,6 +132,20 @@ async def test_run_now_follows_a_live_recurrence_change(hass: HomeAssistant) -> 
 
     load.recurrence = RECURRENCE_ON_DEMAND
     assert button.available is True
+
+
+async def test_run_now_applies_the_executor_immediately(hass: HomeAssistant) -> None:
+    """A directly controlled load must start on the press, not at the next tick."""
+    button, load = await _run_now_button(hass)
+    load.recurrence = RECURRENCE_ON_DEMAND
+    button.hass = hass
+    executor = button.coordinator.config_entry.runtime_data.executor
+
+    await button.async_press()
+    await hass.async_block_till_done()
+
+    assert load.forced_at is not None
+    executor.async_apply.assert_awaited_once()
 
 
 async def test_retired_buttons_are_removed_from_the_registry(hass: HomeAssistant) -> None:

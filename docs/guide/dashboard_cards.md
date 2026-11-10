@@ -29,6 +29,12 @@ One load at a time: whether it should run now, its scheduled power, next
 start, runtime today, a timeline of its schedule, and its enable/mode
 controls.
 
+On a [sequence load](../deferrable_loads.md#sequence-loads) the card shows a
+running cycle as "Running · step 3 of 6", even through a 0 W step. *Ran
+today* becomes the cycle step, then "Done" once the day's cycle has finished.
+*Nominal power* shows the sequence's peak, and the run list shows one run per
+cycle.
+
 ![A deferrable load card: scheduled power, next start, deadline and runtime today, over a timeline of the load's schedule](../assets/deferrable-card.png)
 
 ## Tank temperature card

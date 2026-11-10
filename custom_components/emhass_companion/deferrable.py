@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 import logging
 import math
+import re
 from typing import Any, Final
 
 from homeassistant.config_entries import ConfigEntry
@@ -33,8 +34,9 @@ from homeassistant.const import (
     UnitOfTemperature,
 )
 from homeassistant.core import Event, EventStateChangedData, HomeAssistant, State, callback
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.event import async_track_state_change_event, async_track_time_change
+from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 from homeassistant.util.unit_conversion import PowerConverter, TemperatureConverter
 
@@ -50,6 +52,7 @@ from .const import (
     CONF_COMFORT_TEMPERATURE,
     CONF_CONTROL_ENTITY,
     CONF_COOLING_CONSTANT,
+    CONF_COP_CURVE,
     CONF_DRAW_END,
     CONF_DRAW_ENERGY,
     CONF_DRAW_START,
@@ -65,8 +68,10 @@ from .const import (
     CONF_MINIMUM_ON_TIME,
     CONF_MINIMUM_POWER,
     CONF_NOMINAL_POWER,
+    CONF_NOMINAL_POWER_EDITED_AT,
     CONF_OPERATING_HOURS,
     CONF_POWER_SENSOR,
+    CONF_POWER_SEQUENCE,
     CONF_RECURRENCE,
     CONF_SEMI_CONTINUOUS,
     CONF_SENSE,
@@ -98,9 +103,11 @@ from .const import (
     RECURRENCE_SURPLUS,
     RECURRENCES,
     SUBENTRY_TYPE_THERMAL,
+    THERMAL_MODEL_HEAT_PUMP_ROOM,
     THERMAL_MODEL_ROOM,
     THERMAL_MODEL_WATER_TANK,
 )
+from .heat_pump_room import HeatPumpModel, HeatPumpRoomConfig
 from .models import BatteryConfig, DeferrableLoad, HybridInverterConfig, Plan, PlanRow, Series
 from .payload import operating_timesteps
 from .stored_time import parse_stored_time
@@ -124,9 +131,11 @@ from .thermal import (
     DEFAULT_SETBACK_TEMPERATURE,
     DEFAULT_THERMAL_INERTIA,
     SENSE_HEAT,
+    CopCurve,
     ThermalConfig,
+    parse_cop_curve,
 )
-from .water_tank import WaterTankConfig, hot_water_periods_from_data
+from .water_tank import WaterTankConfig, _resolve_endpoint, hot_water_periods_from_data
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -159,6 +168,70 @@ def state_to_watts(state: State) -> float | None:
     return value
 
 
+def parse_power(value: Any) -> tuple[float, ...]:
+    """Parse the single Power field without accepting signs, exponents or empty stages."""
+    text = str(value)
+    if len(text) > 255 or not re.fullmatch(r"\s*\d+(\.\d+)?(\s*,\s*\d+(\.\d+)?)*\s*", text):
+        raise ServiceValidationError("Power must contain watts separated by commas")
+    values = tuple(float(part) for part in text.split(","))
+    if values[0] < 10 or any(value > 100000 for value in values):
+        raise ServiceValidationError(
+            "First power must be at least 10 W; every value must be at most 100000 W"
+        )
+    if len(format_power(values)) > 255:
+        raise ServiceValidationError("Power is too long; use fewer stages (the last value repeats)")
+    return values
+
+
+def format_power(values: tuple[float, ...]) -> str:
+    """The Power field's text: ``1100`` or ``300, 1830, 118``."""
+    return ", ".join(f"{value:g}" for value in values)
+
+
+def expand_power(values: tuple[float, ...], hours: float, step_minutes: int) -> tuple[float, ...]:
+    """Validate the runtime and repeat the last stage to fill it."""
+    steps = operating_timesteps(hours, step_minutes)
+    if 0 < steps < len(values):
+        raise ServiceValidationError(
+            f"Power has {len(values)} values, one per {step_minutes}-minute step, so it needs "
+            f"at least {len(values) * step_minutes / 60:g} h of runtime; Operating hours is {hours:g} h."
+        )
+    return values + (values[-1],) * (steps - len(values)) if steps else ()
+
+
+@dataclass(slots=True)
+class SequenceCycle:
+    """The immutable program snapshot and observations for one commanded cycle."""
+
+    started_at: datetime
+    anchor: datetime
+    values: tuple[float, ...]
+    source: str
+    serves_request: bool = False
+    seen_running: bool = False
+    extension_granted: bool = False
+
+    def ends_at(self, step_minutes: int) -> datetime:
+        return self.started_at + timedelta(minutes=len(self.values) * step_minutes)
+
+    def elapsed(self, row_zero: datetime, step_minutes: int) -> int:
+        return min(
+            len(self.values),
+            max(0, int((row_zero - self.anchor).total_seconds() // (step_minutes * 60))),
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "started_at": self.started_at.isoformat(),
+            "anchor": self.anchor.isoformat(),
+            "values": list(self.values),
+            "source": self.source,
+            "serves_request": self.serves_request,
+            "seen_running": self.seen_running,
+            "extension_granted": self.extension_granted,
+        }
+
+
 @dataclass(frozen=True, slots=True)
 class BatteryLockout:
     """A load's held battery-lockout window -- the ``planned_held`` half only.
@@ -180,6 +253,68 @@ class DeferrableRuntime:
 
     subentry_id: str
     name: str
+    power_sequence: tuple[float, ...] = ()
+    sequence_cycle: SequenceCycle | None = None
+    sequence_start_pending: bool = False
+    last_completed_day: date | None = None
+    _sequence_restored: bool = False
+    sequence_step_minutes: int = DEFAULT_TIME_STEP
+    power_edited_at: str | None = None
+    """The subentry's reconfigure stamp this runtime was seeded from."""
+    _save_sequence: Callable[[], None] | None = field(default=None, repr=False)
+
+    @property
+    def power_values(self) -> tuple[float, ...]:
+        return self.power_sequence or (self.nominal_power_w,)
+
+    @property
+    def is_sequence(self) -> bool:
+        return len(self.power_sequence) > 1
+
+    @property
+    def sequence_cycle_active(self) -> bool:
+        return self.sequence_cycle is not None
+
+    def sequence_changed(self) -> None:
+        if self._save_sequence is not None:
+            self._save_sequence()
+
+    def sequence_owes(self, now: datetime) -> bool:
+        return (
+            self.enabled
+            and self.participates
+            and not (
+                self.recurrence == RECURRENCE_DAILY
+                and self.last_completed_day == self.sequence_day(now)
+            )
+        )
+
+    def sequence_day(self, at: datetime) -> date:
+        """The day whose daily run a moment belongs to.
+
+        The local date, except in the early-morning half of a window that
+        crosses midnight: a 22:00-06:00 cycle that started at 23:00 and ended
+        at 01:00 is yesterday's run, and crediting it to the calendar date
+        would leave the same window owing a second one.
+        """
+        local = dt_util.as_local(at)
+        start, end = self.earliest_start, self.latest_end
+        if (
+            self.use_time_window
+            and start is not None
+            and end is not None
+            and start > end
+            and local.time() < end
+        ):
+            return local.date() - timedelta(days=1)
+        return local.date()
+
+    def sequence_startable(self, step_minutes: int) -> bool:
+        """Whether the current Power and runtime give a cycle at all."""
+        try:
+            return bool(expand_power(self.power_values, self.operating_hours, step_minutes))
+        except ServiceValidationError:
+            return False
 
     # Owned by the subentry: what the load *is*, rather than what it is
     # currently being asked to do.
@@ -189,6 +324,10 @@ class DeferrableRuntime:
     temperature_sensor: str | None = None
     sense: str = SENSE_HEAT
     thermal_model: str = THERMAL_MODEL_ROOM
+    cop_curve: CopCurve = ()
+    """Room heat pump COP against outdoor temperature, owned by the subentry."""
+    heat_pump_model: HeatPumpModel | None = None
+    """The building and heat pump of a heat pump room; None if incomplete."""
     tank_volume_litres: float = 0.0
     standby_loss_w: float = 0.0
     heater_cop: float = DEFAULT_HEATER_COP
@@ -293,6 +432,10 @@ class DeferrableRuntime:
     # the same conservative fallback runtime_today already uses.
     off_since: datetime | None = None
     runtime_day: date | None = None
+    # The runtime sensor's restored value and when it was written, held until
+    # every platform has restored its settings: whether it belongs to today
+    # depends on the window, which the time entities restore.
+    restored_runtime: tuple[timedelta, datetime] | None = None
 
     # The anchor a deadline counts from, and progress measured against *it*
     # rather than the calendar day. A request armed at 23:00 outlives the
@@ -369,6 +512,16 @@ class DeferrableRuntime:
     def is_water_tank(self) -> bool:
         """Whether this is an explicitly configured immersion tank."""
         return self.is_thermal and self.thermal_model == THERMAL_MODEL_WATER_TANK
+
+    @property
+    def is_heat_pump_room(self) -> bool:
+        """Whether this room is described by its building and heat pump."""
+        return self.is_thermal and self.thermal_model == THERMAL_MODEL_HEAT_PUMP_ROOM
+
+    @property
+    def is_measured_room(self) -> bool:
+        """A room described by its measured heating rate and cooling constant."""
+        return self.is_thermal and not self.is_water_tank and not self.is_heat_pump_room
 
     @property
     def is_running(self) -> bool:
@@ -518,6 +671,17 @@ class DeferrableRuntime:
     def running_threshold_w(self) -> float:
         return max(self.nominal_power_w * RUNNING_FRACTION, RUNNING_FLOOR_W)
 
+    def plan_runs_at(self, watts: float) -> bool:
+        """Whether a plan row's power means "run now".
+
+        A sequence's first stage may be as low as RUNNING_FLOOR_W (the parser's
+        minimum), so it starts at that floor inclusive; 10 % of the peak would
+        never start ``150, 2000``. Scalar loads keep their relative threshold.
+        """
+        if self.is_sequence:
+            return watts >= RUNNING_FLOOR_W
+        return watts > self.running_threshold_w
+
     @property
     def running_source(self) -> str | None:
         """The entity whose state says whether this load is running.
@@ -589,10 +753,19 @@ class DeferrableRuntime:
 
     def elapsed_today(self, now: datetime) -> timedelta:
         """Runtime so far today, including any in-progress run."""
+        self._ensure_runtime_day(now)
         total = self.runtime_today
         if self.running_since is not None:
-            total += now - self.running_since
+            total += self._daily_span(now)
         return total
+
+    def _daily_span(self, now: datetime) -> timedelta:
+        """Clip delayed plan replay to the current overnight accounting day."""
+        start = self.running_since
+        if self.runtime_uses_window_day and self.runtime_day is not None:
+            start = max(start, self._window_close_at(self.runtime_day, now))
+            return max(now - start, timedelta())
+        return now - start
 
     def elapsed_since_request(self, now: datetime) -> timedelta:
         """Runtime since the pending request was armed.
@@ -657,6 +830,36 @@ class DeferrableRuntime:
         it was applied -- a decision computed while the control switch is off
         commands nothing, and must not be credited as run time.
         """
+        if (
+            commanded
+            and self.is_sequence
+            and self.sequence_cycle is None
+            and (self.sequence_start_pending or self.sequence_owes(now))
+        ):
+            values = expand_power(
+                self.power_values, self.operating_hours, self.sequence_step_minutes
+            )
+            if not values and self.sequence_start_pending:
+                # Runtime set to zero after Run now: nothing to start, and a
+                # pending start nothing can clear would hold the load on.
+                self.sequence_start_pending = False
+                self.sequence_changed()
+            if values:
+                seconds = self.sequence_step_minutes * 60
+                anchor = datetime.fromtimestamp(
+                    round(now.timestamp() / seconds) * seconds, tz=now.tzinfo
+                )
+                self.sequence_cycle = SequenceCycle(
+                    now,
+                    anchor,
+                    values,
+                    "run_now" if self.sequence_start_pending else "planned",
+                    self.requested,
+                    self.is_running if self.metered else False,
+                )
+                self.sequence_start_pending = False
+                self.sequence_changed()
+                self.notify()
         self.commands_seen = True
         if commanded:
             if self.commanded_since is None:
@@ -697,7 +900,8 @@ class DeferrableRuntime:
         from being called on.
         """
         return (
-            self.single_constant
+            not self.is_sequence
+            and self.single_constant
             and self.metered
             and self.is_commanded
             and self.off_since is not None
@@ -720,6 +924,7 @@ class DeferrableRuntime:
 
     def observe_power(self, watts: float | None, now: datetime) -> None:
         """Fold a power reading into the runtime accumulator."""
+        self._ensure_runtime_day(now)
         if watts is None:
             # Treat an unavailable sensor as "stop counting" rather than
             # guessing; an unbounded open interval would inflate runtime. It is
@@ -730,6 +935,9 @@ class DeferrableRuntime:
             return
 
         if watts >= self.running_threshold_w:
+            if self.sequence_cycle is not None and not self.sequence_cycle.seen_running:
+                self.sequence_cycle.seen_running = True
+                self.sequence_changed()
             self.seen_running = True
             if self.running_since is None:
                 self.running_since = now
@@ -777,7 +985,7 @@ class DeferrableRuntime:
     def _stop(self, now: datetime) -> None:
         if self.running_since is None:
             return
-        self.runtime_today += now - self.running_since
+        self.runtime_today += self._daily_span(now)
         if self.requested_at is not None:
             # Clamped for the same reason observe_command's clock is: a span
             # that closed before the request was armed owes it nothing. Without
@@ -791,6 +999,67 @@ class DeferrableRuntime:
         self.running_since = None
         self.off_since = now
 
+    @property
+    def runtime_uses_window_day(self) -> bool:
+        """Daily scalar overnight loads carry their credit across midnight."""
+        return (
+            self.recurrence == RECURRENCE_DAILY
+            and not self.is_thermal
+            and not self.is_sequence
+            and self.use_time_window
+            and self.earliest_start is not None
+            and self.latest_end is not None
+            and self.earliest_start > self.latest_end
+        )
+
+    def apply_restored_runtime(self, now: datetime) -> None:
+        """Take back the restored runtime if it is from this accounting day."""
+        if self.restored_runtime is None:
+            return
+        elapsed, written_at = self.restored_runtime
+        self.restored_runtime = None
+        today = self.runtime_date(now)
+        if self.runtime_date(written_at) == today:
+            self.runtime_today = elapsed
+            self.runtime_day = today
+
+    def runtime_date(self, at: datetime) -> date:
+        """Accounting date used by both live progress and restart restore.
+
+        For an overnight window, measured against the resolved close instant
+        rather than the wall clock: on the autumn DST night a 02:30 close is
+        the first 02:30, and 02:15 in the repeated hour already belongs to
+        the new day.
+        """
+        local = dt_util.as_local(at)
+        if self.runtime_uses_window_day and at < self._window_close_at(local.date(), at):
+            return local.date() - timedelta(days=1)
+        return local.date()
+
+    def _window_close_at(self, day: date, now: datetime) -> datetime:
+        """The UTC instant the window closes on ``day``, where accounting day ``day`` starts.
+
+        Resolved like a water-tank endpoint: a close inside a spring-forward
+        gap (02:30 on the last Sunday of March) is the first real instant
+        after it, the same moment ``sequence_day`` moves on to the new day.
+        UTC, so a DST night counts real time rather than wall-clock hours.
+        """
+        return _resolve_endpoint(
+            datetime.combine(day, self.latest_end),  # type: ignore[arg-type]
+            dt_util.as_local(now).tzinfo,  # type: ignore[arg-type]
+        )
+
+    def _ensure_runtime_day(self, now: datetime) -> None:
+        if not self.runtime_uses_window_day:
+            return
+        day = self.runtime_date(now)
+        if self.runtime_day is None:
+            self.runtime_day = day
+        elif day > self.runtime_day:
+            # Split an open span at the local window close, not at the first
+            # later sensor reading (or the midnight callback).
+            self._restart_counter(self._window_close_at(day, now), day)
+
     def reset_day(self, now: datetime) -> None:
         """Start a new day's runtime accounting.
 
@@ -799,12 +1068,22 @@ class DeferrableRuntime:
         otherwise yesterday's hours keep suppressing today's schedule.
 
         A pending request is deliberately untouched -- neither the flag, the
-        anchor, nor its progress. Only the calendar-day counter restarts.
+        anchor, nor its progress. Overnight daily scalar counters restart at
+        the window close; all other counters still restart at midnight.
         """
+        if self.runtime_uses_window_day:
+            # Midnight is not this load's day boundary. Catch up a counter
+            # that missed its window close, splitting at that close, and
+            # otherwise leave the running window day alone.
+            self._ensure_runtime_day(now)
+            return
+        self._restart_counter(now, dt_util.as_local(now).date())
+
+    def _restart_counter(self, now: datetime, day: date) -> None:
         was_running = self.is_running
         self._stop(now)
         self.runtime_today = timedelta()
-        self.runtime_day = dt_util.as_local(now).date()
+        self.runtime_day = day
         if was_running:
             # _stop closed the open span to bank it against yesterday; the load
             # itself is still on, so today's span starts now. Without this the
@@ -824,6 +1103,9 @@ class DeferrableRuntime:
         method rather than an attribute assignment: a bare ``requested = True``
         from the switch would leave a deadline with nothing to count from.
         """
+        if self.sequence_cycle is not None:
+            self.sequence_cycle.serves_request = True
+            self.sequence_changed()
         self.requested = True
         self.requested_at = now
         self.request_runtime = timedelta()
@@ -835,6 +1117,8 @@ class DeferrableRuntime:
         self.commanded_since = now if self.is_commanded else None
         self.seen_running = False
         self.idle_since = None
+        if self.is_sequence:
+            self.sequence_changed()
 
     def cancel(self, reason: str = COMPLETION_CANCELLED, now: datetime | None = None) -> None:
         """Clear a request, fulfilled or abandoned, along with its anchor.
@@ -844,6 +1128,10 @@ class DeferrableRuntime:
         the user's own doing: every caller that is *not* the user reaching for
         the switch has a more specific reason to pass.
         """
+        if reason == COMPLETION_CANCELLED:
+            self.sequence_cycle = None
+            self.sequence_start_pending = False
+            self.sequence_changed()
         self.requested = False
         self.requested_at = None
         self.request_runtime = timedelta()
@@ -853,6 +1141,8 @@ class DeferrableRuntime:
         self.idle_since = None
         self.last_completion_reason = reason
         self.last_completion_at = now or dt_util.utcnow()
+        if self.is_sequence:
+            self.sequence_changed()
 
     def force_run(self, now: datetime | None = None) -> None:
         """Arm a direct run right now, bypassing both the plan and any request.
@@ -865,6 +1155,15 @@ class DeferrableRuntime:
         ``forced_at`` is only a backstop for that rule -- see
         :meth:`check_auto_disarm` -- not a second target.
         """
+        if self.is_sequence:
+            if self.sequence_cycle is not None or self.sequence_start_pending:
+                _LOGGER.info("%s: Run now absorbed by the existing sequence cycle", self.name)
+                return
+            expand_power(self.power_values, self.operating_hours, self.sequence_step_minutes)
+            if self.operating_hours > 0:
+                self.sequence_start_pending = True
+                self.sequence_changed()
+            return
         self.mode = LOAD_MODE_FORCE_ON
         self.forced_at = now or dt_util.utcnow()
         if not self.requested:
@@ -888,7 +1187,8 @@ class DeferrableRuntime:
         own command read back, so every run would hold to the hard cut.
         """
         return (
-            self.on_demand
+            not self.is_sequence
+            and self.on_demand
             and self.requested
             and self.metered
             and (self.is_running or self.mid_program(now, step_minutes))
@@ -919,6 +1219,53 @@ class DeferrableRuntime:
         for the same reason its idle time proves nothing -- being idle under a
         cloud is what a surplus load *does*.
         """
+        self.sequence_step_minutes = step_minutes
+        if self.is_sequence or self.sequence_cycle is not None:
+            # A sequence never uses force mode (Run now arms start_pending), but
+            # a load reconfigured into a sequence may carry one over; nothing
+            # below would ever clear it.
+            changed = False
+            if self.mode == LOAD_MODE_FORCE_ON:
+                self.mode = LOAD_MODE_AUTO
+                self.forced_at = None
+                changed = True
+            cycle = self.sequence_cycle
+            if (
+                cycle is None
+                and self.sequence_start_pending
+                and not self.sequence_startable(step_minutes)
+            ):
+                # The executor holds a pending start on; one that can no longer
+                # become a cycle (runtime now zero or too short) would stay on.
+                self.sequence_start_pending = False
+                self.sequence_changed()
+                return True
+            if cycle is None or now < cycle.ends_at(step_minutes):
+                return changed
+            if self.metered and self.is_running and not cycle.extension_granted:
+                cycle.extension_granted = True
+                self.sequence_changed()
+            if cycle.extension_granted and now < cycle.ends_at(step_minutes) + timedelta(
+                minutes=step_minutes
+            ):
+                return changed
+            reason = (
+                COMPLETION_CUT_SHORT
+                if cycle.extension_granted
+                else COMPLETION_NEVER_STARTED
+                if self.metered and not cycle.seen_running
+                else COMPLETION_COMPLETED
+            )
+            if self.recurrence == RECURRENCE_DAILY:
+                self.last_completed_day = self.sequence_day(cycle.anchor)
+            self.sequence_cycle = None
+            if cycle.serves_request and self.requested:
+                self.cancel(reason, now)
+            else:
+                self.last_completion_reason = reason
+                self.last_completion_at = now
+            self.sequence_changed()
+            return True
         changed = False
         target = timedelta(hours=self.operating_hours)
         idle_done = (
@@ -1066,7 +1413,7 @@ class DeferrableRuntime:
 
     def thermal_config(
         self, current_temperature: float | None
-    ) -> ThermalConfig | WaterTankConfig | None:
+    ) -> ThermalConfig | WaterTankConfig | HeatPumpRoomConfig | None:
         """This load's thermal model, or None for an ordinary load.
 
         Built fresh on every request from the entity-owned live values, the
@@ -1100,6 +1447,25 @@ class DeferrableRuntime:
                     else None
                 ),
             )
+        if self.is_heat_pump_room:
+            # Like a disabled tank: a load that will not run blocks no plan.
+            if not self.enabled:
+                return None
+            if self.heat_pump_model is None:
+                raise ValueError(
+                    f"{self.name}: the heat pump model settings are incomplete; "
+                    "reconfigure the load"
+                )
+            return HeatPumpRoomConfig(
+                model=self.heat_pump_model,
+                nominal_power_w=self.nominal_power_w,
+                comfort_temperature=self.comfort_temperature,
+                setback_temperature=self.setback_temperature,
+                max_temperature=self.max_temperature,
+                comfort_start=self.comfort_start,
+                comfort_end=self.comfort_end,
+                current_temperature=current_temperature,
+            )
         return ThermalConfig(
             sense=self.sense,
             heating_rate=self.heating_rate,
@@ -1111,6 +1477,7 @@ class DeferrableRuntime:
             comfort_start=self.comfort_start,
             comfort_end=self.comfort_end,
             current_temperature=current_temperature,
+            cop_curve=self.cop_curve,
         )
 
     def to_load(
@@ -1120,6 +1487,7 @@ class DeferrableRuntime:
         current_temperature: float | None = None,
     ) -> DeferrableLoad:
         """Project the live state into what the payload builder consumes."""
+        self.sequence_step_minutes = step_minutes
         windowed = self.use_time_window
         surplus = self.on_surplus
         budget = self.surplus_budget
@@ -1136,7 +1504,11 @@ class DeferrableRuntime:
         return DeferrableLoad(
             subentry_id=self.subentry_id,
             name=self.name,
-            nominal_power_w=nominal_power_w,
+            nominal_power_w=max(self.power_values) if self.is_sequence else nominal_power_w,
+            power_sequence=self.power_sequence,
+            cycle_values=self.sequence_cycle.values if self.sequence_cycle else (),
+            cycle_anchor=self.sequence_cycle.anchor if self.sequence_cycle else None,
+            sequence_done=self.is_sequence and not self.sequence_owes(now),
             minimum_power_w=self.minimum_power_w,
             # A surplus load's run time is not a setting; it is however many
             # hours the exported power in the last plan can actually feed.
@@ -1160,6 +1532,20 @@ class DeferrableRuntime:
                 and windowed
                 and not surplus
                 and not self.is_thermal
+                and self.earliest_start is not None
+                and self.latest_end is not None
+            ),
+            repeats_by_calendar_day=(
+                self.recurrence == RECURRENCE_DAILY
+                and not surplus
+                and not self.is_thermal
+                and (not windowed or (self.earliest_start is None and self.latest_end is None))
+            ),
+            spans_daily_windows=(
+                self.recurrence == RECURRENCE_DAILY
+                and windowed
+                and not surplus
+                and self.is_water_tank
                 and self.earliest_start is not None
                 and self.latest_end is not None
             ),
@@ -1332,6 +1718,71 @@ class DeferrableRegistry:
         # listener -- which has no access to the config -- judges idle windows
         # against the same timestep the optimisation runs on.
         self._step_minutes = DEFAULT_TIME_STEP
+        self._sequence_store: Store | None = None
+
+    async def async_load_sequences(self, step_minutes: int) -> None:
+        self._step_minutes = step_minutes
+        self._sequence_store = Store(
+            self.hass, 1, f"emhass_companion.{self.entry.entry_id}.sequence_cycles"
+        )
+        stored = await self._sequence_store.async_load() or {}
+        for load in self.all():
+            load.sequence_step_minutes = step_minutes
+            data = stored.get(load.subentry_id, {})
+            load._sequence_restored = bool(data)
+            if data:
+                load.requested = bool(data.get("requested"))
+                load.requested_at = (
+                    datetime.fromisoformat(data["requested_at"])
+                    if data.get("requested_at")
+                    else None
+                )
+            try:
+                if cycle := data.get("cycle"):
+                    load.sequence_cycle = SequenceCycle(
+                        datetime.fromisoformat(cycle["started_at"]),
+                        datetime.fromisoformat(cycle["anchor"]),
+                        tuple(cycle["values"]),
+                        cycle["source"],
+                        cycle["serves_request"],
+                        cycle["seen_running"],
+                        cycle.get("extension_granted", False),
+                    )
+                load.last_completed_day = (
+                    date.fromisoformat(data["last_completed_day"])
+                    if data.get("last_completed_day")
+                    else None
+                )
+                # A load reconfigured to a single value has no cycle to start;
+                # a pending start carried over would hold it on for good.
+                load.sequence_start_pending = load.is_sequence and bool(data.get("start_pending"))
+            except (KeyError, ValueError, TypeError):
+                _LOGGER.warning("%s: invalid stored sequence cycle", load.name)
+            load._save_sequence = self._save_sequences
+
+    async def async_save_sequences(self) -> None:
+        if self._sequence_store is not None:
+            await self._sequence_store.async_save(self._sequence_data())
+
+    def _sequence_data(self) -> dict[str, Any]:
+        return {
+            load.subentry_id: {
+                "cycle": load.sequence_cycle.as_dict() if load.sequence_cycle else None,
+                "start_pending": load.sequence_start_pending,
+                "requested": load.requested,
+                "requested_at": load.requested_at.isoformat() if load.requested_at else None,
+                "last_completed_day": load.last_completed_day.isoformat()
+                if load.last_completed_day
+                else None,
+            }
+            for load in self.all()
+            if load.is_sequence or load.sequence_cycle or load.last_completed_day
+        }
+
+    def _save_sequences(self) -> None:
+        if self._sequence_store is None:
+            return
+        self._sequence_store.async_delay_save(self._sequence_data, 0)
 
     # -- lifecycle ------------------------------------------------------------
 
@@ -1356,6 +1807,10 @@ class DeferrableRegistry:
     @callback
     def async_start(self) -> None:
         """Begin observing whatever tells each load it is running."""
+        # Before anything observes or disarms: both read today's runtime.
+        started = dt_util.utcnow()
+        for load in self._loads.values():
+            load.apply_restored_runtime(started)
         sources = {
             load.running_source: None for load in self._loads.values() if load.running_source
         }
@@ -1376,6 +1831,7 @@ class DeferrableRegistry:
                 if (source := load.running_source) is not None:
                     load.observe(self.hass.states.get(source), now)
 
+        self.check_auto_disarm(dt_util.utcnow(), self._step_minutes)
         self._unsubscribes.append(
             async_track_time_change(self.hass, self._async_midnight, hour=0, minute=0, second=0)
         )
@@ -1734,7 +2190,7 @@ class DeferrableRegistry:
             except ValueError:
                 continue
             if index < len(row.deferrables):
-                load.plan_scheduled_now = row.deferrables[index] > load.running_threshold_w
+                load.plan_scheduled_now = load.plan_runs_at(row.deferrables[index])
                 if load.plan_scheduled_now:
                     load.plan_power_now_w = row.deferrables[index]
 
@@ -1843,6 +2299,12 @@ def live_settings(load: DeferrableRuntime) -> dict[str, Any]:
     The counterpart to a subentry's ``data`` -- same keys, current values.
     """
     fields = SEEDED_FIELDS + (SEEDED_THERMAL_FIELDS if load.is_thermal else ())
+    if load.is_heat_pump_room:
+        fields = tuple(
+            (key, attr)
+            for key, attr in fields
+            if attr not in {"heating_rate", "cooling_constant", "thermal_inertia"}
+        )
     if load.is_water_tank:
         fields = (
             *(
@@ -1930,6 +2392,8 @@ def _apply_subentry_fields(
     The subentry's copy is the value a newly created load starts from, and the
     subentry form stops offering it once the load exists.
     """
+    load.power_sequence = tuple(data.get(CONF_POWER_SEQUENCE, ()))
+    load.power_edited_at = data.get(CONF_NOMINAL_POWER_EDITED_AT)
     load.name = title
     load.load_type = (
         LOAD_TYPE_THERMAL if subentry_type == SUBENTRY_TYPE_THERMAL else LOAD_TYPE_STANDARD
@@ -1939,6 +2403,20 @@ def _apply_subentry_fields(
     load.temperature_sensor = data.get(CONF_TEMPERATURE_SENSOR) or None
     load.sense = data.get(CONF_SENSE) or SENSE_HEAT
     load.thermal_model = data.get(CONF_THERMAL_MODEL, THERMAL_MODEL_ROOM)
+    try:
+        load.cop_curve = parse_cop_curve(data.get(CONF_COP_CURVE))
+    except ValueError:
+        # The form rejects a bad curve; a hand-edited one runs without it.
+        load.cop_curve = ()
+    try:
+        load.heat_pump_model = (
+            HeatPumpModel.from_data(data)
+            if load.thermal_model == THERMAL_MODEL_HEAT_PUMP_ROOM
+            else None
+        )
+    except ValueError:
+        # The form rejects these; a hand-edited one is reported at request time.
+        load.heat_pump_model = None
     load.tank_volume_litres = float(data.get(CONF_TANK_VOLUME, 0))
     load.draw_energy_kwh = float(data.get(CONF_DRAW_ENERGY, 0))
     load.hot_water_periods = (

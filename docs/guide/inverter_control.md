@@ -25,7 +25,7 @@ Configure → Inverter profile**.
       picker entry for it, you can write your own profile — a YAML file that
       maps roles to your entities and actions to service calls, with no
       Python involved. It lives outside the integration directory, so a
-      HACS update never touches it. See [Writing a profile](../profiles.md)
+      Marketplace update never touches it. See [Writing a profile](../profiles.md)
       for the format and a starter template.
 
 ## Configuring the profile

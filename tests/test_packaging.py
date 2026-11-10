@@ -167,6 +167,7 @@ def test_imported_home_assistant_components_are_declared():
         "select",
         "button",
         "number",
+        "text",
         "time",
     }
     missing = used - declared - platforms

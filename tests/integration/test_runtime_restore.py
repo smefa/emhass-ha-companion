@@ -73,6 +73,9 @@ async def _sensor(hass: HomeAssistant, *, hours: float, when) -> LoadRuntimeToda
     sensor.hass = hass
     sensor.entity_id = ENTITY_ID
     await sensor.async_added_to_hass()
+    # Setup applies it once every platform has restored the load's settings.
+    loads.async_start()
+    loads.async_stop()
     return sensor
 
 
