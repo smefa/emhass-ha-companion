@@ -23,7 +23,7 @@ separate button from *Add deferrable load*, with its own questions:
 | --- | --- |
 | Temperature sensor | The room (or tank) the comfort band applies to. Read live on every optimisation as the plan's start temperature. |
 | Heats or cools | Whether running the load raises the temperature (heat pump) or lowers it (air conditioning). |
-| Power when running | Electrical draw at full power — this is the power EMHASS schedules. |
+| Power when running | Electrical draw at full power — this is the power EMHASS schedules. A single value: power sequences are not supported for thermal loads. |
 | Comfort / setback / maximum temperature | The band. Comfort holds inside the comfort window, setback outside it, and the maximum is a hard ceiling at all times. |
 | Comfort from / until | The daily comfort window, which may cross midnight. |
 | Heating rate | Degrees per hour at full power. In the collapsed *Advanced settings* section, along with the next two rows. |

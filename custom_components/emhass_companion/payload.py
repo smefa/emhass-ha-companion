@@ -910,7 +910,12 @@ def _fit_pins_to_import_limit(
             continue  # thermal: governed by its temperature, neither pinned nor forced
         nominal = _numeric(_flag("nominal_power_of_deferrable_loads", k))
         if nominal is None:
-            continue  # a sequence load's list-valued power: not pinned either
+            sequence = _flag("nominal_power_of_deferrable_loads", k)
+            if isinstance(sequence, list) and bool(states[k]):
+                elapsed = int(_flag("def_current_operating_timesteps", k) or 0)
+                if 0 <= elapsed < len(sequence):
+                    fixed.append((k, float(sequence[elapsed])))
+            continue
         state = bool(states[k])
         forced = _forced_on_w(payload, k, state=state)
         sent = _numeric(powers[k]) if k < len(powers) else None
@@ -1498,7 +1503,7 @@ def operating_timesteps(operating_hours: float, step_minutes: int) -> int:
 class _LoadSettings:
     """One load's row across every per-load array EMHASS expects."""
 
-    nominal_power_w: float
+    nominal_power_w: float | list[float]
     minimum_power_w: float
     hours: float
     timesteps: int
@@ -1559,6 +1564,76 @@ def _park(load: DeferrableLoad) -> _LoadSettings:
     )
 
 
+def _sequence_version_supported(version: str) -> bool:
+    from .util import version_at_least
+
+    return version_at_least(version, "0.18.8")
+
+
+def _sequence_row(
+    load: DeferrableLoad,
+    values: tuple[float, ...],
+    step_minutes: int,
+    elapsed: int = 0,
+    running: bool = False,
+    start: int = 0,
+    end: int = 0,
+) -> _LoadSettings:
+    row = _park(load)
+    row.nominal_power_w = list(values)
+    row.hours = len(values) * step_minutes / 60
+    row.timesteps = len(values)
+    row.current_state = running
+    row.completed_timesteps = elapsed
+    row.start_index = start
+    row.end_index = end
+    return row
+
+
+def _running_sequence_row(
+    load: DeferrableLoad, inputs: PayloadInputs, step: timedelta, action: str
+) -> _LoadSettings | None:
+    if load.cycle_anchor is None:
+        return None
+    elapsed = load.cycle_elapsed(inputs.row_zero(step), inputs.time_step_minutes)
+    if action != ACTION_MPC or elapsed >= len(load.cycle_values) or not load.cycle_values:
+        return _park(load)
+    return _sequence_row(load, load.cycle_values, inputs.time_step_minutes, elapsed, True)
+
+
+def _sequence_values(
+    load: DeferrableLoad, inputs: PayloadInputs, warnings: list[str]
+) -> tuple[float, ...] | None:
+    """The expanded sequence for one cycle, or None if no cycle can be sent.
+
+    Only what holds for every window: the runtime, the backend, and a standing
+    window too short for the block. Whether today's window still has room is
+    the caller's question; a later day's window may.
+    """
+    steps = operating_timesteps(load.operating_hours, inputs.time_step_minutes)
+    if steps == 0:
+        return None
+    if steps < len(load.power_sequence):
+        warnings.append(f"{load.name}: Power has more values than runtime steps; sequence parked.")
+        return None
+    if inputs.backend_version is None or not _sequence_version_supported(inputs.backend_version):
+        warnings.append(
+            f"{load.name}: sequence loads require EMHASS 0.18.8 or newer; sequence parked."
+        )
+        return None
+    if load.earliest_start is not None and load.latest_end is not None:
+        a, b = load.earliest_start, load.latest_end
+        standing = ((b.hour * 60 + b.minute - a.hour * 60 - a.minute) % 1440 or 1440) / (
+            inputs.time_step_minutes
+        )
+        if standing < steps:
+            warnings.append(
+                f"{load.name}: window cannot fit {steps} sequence steps; sequence parked."
+            )
+            return None
+    return load.power_sequence + (load.power_sequence[-1],) * (steps - len(load.power_sequence))
+
+
 def _describe(
     load: DeferrableLoad, inputs: PayloadInputs, step: timedelta, warnings: list[str]
 ) -> _LoadSettings:
@@ -1567,6 +1642,34 @@ def _describe(
     # theirs to see, and the timestep it has to fit is only known when a
     # request is built.
     steps = operating_timesteps(load.operating_hours, inputs.time_step_minutes)
+    if load.power_sequence:
+        if load.sequence_done:
+            return _park(load)
+        values = _sequence_values(load, inputs, warnings)
+        if values is None:
+            return _park(load)
+        window = resolve_load_window(
+            name=load.name,
+            earliest=load.earliest_start,
+            latest=load.latest_end,
+            deadline=load.deadline_at,
+            grid_start=inputs.row_zero(step),
+            step=step,
+            horizon_steps=inputs.horizon_steps,
+            operating_steps=steps,
+            start_at=load.start_at,
+            end_at=load.end_at,
+        )
+        warnings.extend(window.warnings)
+        available = (window.end_index or inputs.horizon_steps) - window.start_index
+        if window.opens_beyond_horizon or available < steps:
+            warnings.append(
+                f"{load.name}: window cannot fit {steps} sequence steps; sequence parked."
+            )
+            return _park(load)
+        return _sequence_row(
+            load, values, inputs.time_step_minutes, start=window.start_index, end=window.end_index
+        )
     quantised = steps * inputs.time_step_minutes / 60
     off_grid = not math.isclose(quantised, load.operating_hours, rel_tol=1e-9, abs_tol=1e-9)
     if off_grid and not load.hours_from_surplus_budget:
@@ -1695,11 +1798,16 @@ def _deferrable_settings(
         return {"number_of_deferrable_loads": 0}, [], [], []
 
     warnings: list[str] = []
-    loads = [_without_credit_for_later_day(load, inputs, step) for load in loads]
-    real = [
-        _describe(load, inputs, step, warnings) if load.wants_to_run else _park(load)
-        for load in loads
-    ]
+    real = []
+    for load in loads:
+        running = _running_sequence_row(load, inputs, step, inputs.action)
+        if running is not None:
+            real.append(running)
+        else:
+            described = _without_credit_for_later_day(load, inputs, step)
+            real.append(
+                _describe(described, inputs, step, warnings) if load.wants_to_run else _park(load)
+            )
     real = [
         _spanning_daily_windows(row, load, inputs, step) if load.spans_daily_windows else row
         for row, load in zip(real, loads, strict=True)
@@ -1814,7 +1922,11 @@ def _without_credit_for_later_day(
     it would give that day no hours while the day after gets them in full. Only
     loads that get extra rows are touched, so a single-row load is unchanged.
     """
-    if not (load.repeats_daily and load.wants_to_run and load.completed_timesteps > 0):
+    if not (
+        load.repeats_daily
+        and load.wants_to_run
+        and (load.completed_timesteps > 0 or load.sequence_done)
+    ):
         return load
     occurrences = window_occurrences(
         load.earliest_start,
@@ -1824,11 +1936,15 @@ def _without_credit_for_later_day(
         inputs.horizon_steps,
         timedelta(minutes=load.minimum_off_time_minutes),
     )
-    if len(occurrences) < 2 or occurrences[0][0] == 0:
+    if (
+        not occurrences
+        or (len(occurrences) < 2 and not load.power_sequence)
+        or occurrences[0][0] == 0
+    ):
         return load  # one window, or the first is open now: its progress is its own
     opens = dt_util.as_local(inputs.row_zero(step) + step * occurrences[0][0])
     if opens.date() > dt_util.as_local(inputs.now).date():
-        return replace(load, completed_timesteps=0)
+        return replace(load, completed_timesteps=0, sequence_done=False)
     return load
 
 
@@ -1867,11 +1983,25 @@ def _extra_window_rows(
         # (nothing else parks a load that is not running), and so are the later
         # ones.
         full = _describe(
-            replace(load, current_state=False, current_power_w=0.0, completed_timesteps=0),
+            replace(
+                load,
+                current_state=False,
+                current_power_w=0.0,
+                completed_timesteps=0,
+                sequence_done=False,
+                cycle_anchor=None,
+                cycle_values=(),
+            ),
             inputs,
             step,
             [],
         )
+        if full.hours <= 0 and load.power_sequence:
+            # A sequence also parks when today's window has too little room
+            # left for the block, which says nothing about tomorrow's.
+            values = _sequence_values(load, inputs, [])
+            if values is not None:
+                full = _sequence_row(load, values, inputs.time_step_minutes, start=0, end=0)
         if full.hours <= 0:
             continue
         for n, (start_index, end_index) in enumerate(occurrences[1:], start=2):

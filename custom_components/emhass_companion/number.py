@@ -32,7 +32,7 @@ from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, ISSUE_THERMAL_UNREACHABLE
+from .const import CONF_NOMINAL_POWER_EDITED_AT, DOMAIN, ISSUE_THERMAL_UNREACHABLE
 from .coordinator import EmhassCoordinator
 from .deferrable import DeferrableRuntime
 from .entity import EmhassEntity, EmhassLoadEntity
@@ -196,6 +196,7 @@ LOAD_NUMBERS: tuple[LoadNumberDescription, ...] = (
         entity_category=EntityCategory.CONFIG,
         get_fn=lambda load: load.nominal_power_w,
         set_fn=_set_nominal_power,
+        available_fn=lambda load: not load.is_sequence,
     ),
     LoadNumberDescription(
         key="minimum_power",
@@ -677,13 +678,43 @@ class LoadNumber(EmhassLoadEntity, RestoreNumber):
         await super().async_added_to_hass()
         # RestoreNumber, not RestoreEntity: the latter restores the formatted
         # state string rather than the native value.
-        if (last := await self.async_get_last_number_data()) is not None and (
-            last.native_value is not None
+        if (
+            (last := await self.async_get_last_number_data()) is not None
+            and last.native_value is not None
+            and not (
+                self.entity_description.key == "nominal_power"
+                and (self.load.is_sequence or await self._power_edited_since_last_state())
+            )
         ):
             self.entity_description.set_fn(self.load, last.native_value)
 
+    async def _power_edited_since_last_state(self) -> bool:
+        """Whether reconfigure changed Power after this entity's last state.
+
+        The subentry seeded the runtime with the edited value; restoring the
+        older state would silently undo it.
+        """
+        entry = self.coordinator.config_entry
+        subentry = entry.subentries.get(self.load.subentry_id) if entry else None
+        edited_at = subentry.data.get(CONF_NOMINAL_POWER_EDITED_AT) if subentry else None
+        if not edited_at:
+            return False
+        edited = dt_util.parse_datetime(str(edited_at))
+        last_state = await self.async_get_last_state()
+        if edited is None:
+            return False
+        return last_state is None or last_state.last_updated < edited
+
     @property
     def available(self) -> bool:
+        if self.load.is_sequence and self.entity_description.key in {
+            "nominal_power",
+            "minimum_power",
+            "max_startups",
+            "minimum_on_time",
+            "minimum_off_time",
+        }:
+            return False
         # Settles on the first coordinator update after a restart: the fields
         # this reads are restored by *other* entities, which may not have been
         # added yet when this one first reports.
@@ -706,6 +737,12 @@ class LoadNumber(EmhassLoadEntity, RestoreNumber):
         return value
 
     async def async_set_native_value(self, value: float) -> None:
+        if self.load.is_sequence and self.entity_description.key == "nominal_power":
+            raise ServiceValidationError("Power is a sequence; change it in reconfigure")
+        if self.load.is_sequence and self.entity_description.key == "operating_hours":
+            from .deferrable import expand_power
+
+            expand_power(self.load.power_values, value, self.coordinator.config.time_step_minutes)
         band_fields = ("setback_temperature", "comfort_temperature", "max_temperature")
         if (
             self.load.is_water_tank or self.load.is_heat_pump_room

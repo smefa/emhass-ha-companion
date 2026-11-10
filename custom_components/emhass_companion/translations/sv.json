@@ -1494,13 +1494,15 @@
           "data": {
             "name": "Namn",
             "power_sensor": "Körsensor",
-            "control_entity": "Styrenhet"
+            "control_entity": "Styrenhet",
+            "nominal_power_w": "Effekt när den är igång"
           },
           "data_description": {
             "power_sensor": "Valfritt. Det säkraste sättet att låta optimeringen veta om lasten faktiskt kör -- fångar ett pass som avslutades tidigt, ett som aldrig blev av trots att det var planerat, eller ett som startades vid en annan tidpunkt än schemalagt. En effektsensor ger mest detalj (valfri enhet -- W, kW, MW, ... -- räknas automatiskt om till watt); en enkel av/på-binary_sensor fungerar också, och läses på samma sätt som en styrenhets tillstånd. Utan någon av dem och utan styrenhet antar optimeringen i stället att lasten följde sin egen senaste plan, vilket inte kan se något av detta.",
-            "control_entity": "Valfritt. Om den anges slår integrationen på och av denna för att följa planen, när du aktiverat styrning -- och dess tillstånd används dessutom som körsignal när det inte finns någon effektsensor. Lämna tom för att behålla styrningen i dina egna automationer. Utan vare sig denna eller en effektsensor litar optimeringen i stället på sin egen tidigare plan -- och antar att lasten körde när den var schemalagd. Det är bara så tillförlitligt som din egen efterlevnad, så en riktig sensor eller styrenhet är värd att lägga till när det går."
+            "control_entity": "Valfritt. Om den anges slår integrationen på och av denna för att följa planen, när du aktiverat styrning -- och dess tillstånd används dessutom som körsignal när det inte finns någon effektsensor. Lämna tom för att behålla styrningen i dina egna automationer. Utan vare sig denna eller en effektsensor litar optimeringen i stället på sin egen tidigare plan -- och antar att lasten körde när den var schemalagd. Det är bara så tillförlitligt som din egen efterlevnad, så en riktig sensor eller styrenhet är värd att lägga till när det går.",
+            "nominal_power_w": "Ungefär vad lasten drar när den är igång. En effekt per optimeringssteg ({time_step} min), separerade med kommatecken. Det sista värdet upprepas för att fylla drifttiden. Ett värde ger konstant effekt."
           },
-          "description": "Effekt, körtid, tidsfönster och lastmodell är reglage på lastens egen sida, inte inställningar här -- ändra dem där eller från en automation."
+          "description": "Effekt kan ändras här. Drifttid, tidsfönster och lastmodell är kontroller på lastens egen sida."
         },
         "settings": {
           "title": "Inställningar för lasten",
@@ -1514,7 +1516,7 @@
             "control_entity": "Styrenhet"
           },
           "data_description": {
-            "nominal_power_w": "Ungefär vad lasten drar när den är igång.",
+            "nominal_power_w": "Ungefär vad lasten drar när den är igång. En effekt per optimeringssteg ({time_step} min), separerade med kommatecken. Det sista värdet upprepas för att fylla drifttiden. Ett värde ger konstant effekt.",
             "operating_hours": "Hur länge den behöver köra totalt. Optimeraren väljer när. EMHASS planerar i steg om {time_step} minuter, så detta avrundas till närmaste hela steg ({time_step_hours} h).",
             "earliest_start": "Används bara om du slår på lastens tidsfönster efteråt.",
             "latest_end": "Får vara tidigare än starttiden, för ett fönster över natten.",
@@ -1557,6 +1559,10 @@
       "initiate_flow": {
         "user": "Lägg till flyttbar last",
         "reconfigure": "Redigera flyttbar last"
+      },
+      "error": {
+        "invalid_power_sequence": "Ogiltig effektsekvens eller för kort drifttid.",
+        "sequence_not_supported": "Effektsekvenser stöds inte för överskottslaster eller termiska laster."
       }
     },
     "thermal_load": {
@@ -1834,7 +1840,9 @@
         "invalid_tank_band": "Lägsta vilotemperatur måste vara högst önskad varmvattentemperatur, som måste vara högst maxtemperaturen.",
         "invalid_cop_curve": "Ange minst två par av \"utomhustemperatur: COP\", åtskilda med kommatecken, med COP över 0 och varje temperatur högst en gång, till exempel \"7: 5.2, 0: 4.0, -10: 3.0\".",
         "invalid_heat_pump_value": "Ange ett giltigt värde; tal måste vara ändliga och inom tillåtet intervall.",
-        "invalid_heat_pump_band": "Sänkt temperatur får inte överstiga komforttemperaturen, som inte får överstiga högsta temperaturen."
+        "invalid_heat_pump_band": "Sänkt temperatur får inte överstiga komforttemperaturen, som inte får överstiga högsta temperaturen.",
+        "invalid_power_sequence": "Ogiltig effektsekvens eller för kort drifttid.",
+        "sequence_not_supported": "Effektsekvenser stöds inte för överskottslaster eller termiska laster."
       }
     },
     "load_group": {

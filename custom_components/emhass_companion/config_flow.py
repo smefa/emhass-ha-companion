@@ -27,6 +27,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import section
 from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.util import dt as dt_util
 import voluptuous as vol
 
 from .api import EmhassClient, EmhassError
@@ -107,6 +108,7 @@ from .const import (
     CONF_NAME,
     CONF_NETWORK,
     CONF_NOMINAL_POWER,
+    CONF_NOMINAL_POWER_EDITED_AT,
     CONF_OPERATING_HOURS,
     CONF_PHASE_ENTITIES,
     CONF_PHASE_LIMIT_WINDOW_MIN,
@@ -114,6 +116,7 @@ from .const import (
     CONF_PHASE_VOLTAGE_ENTITY,
     CONF_PHASE_VOLTAGE_V,
     CONF_POWER_SENSOR,
+    CONF_POWER_SEQUENCE,
     CONF_PRICE,
     CONF_PRICE_FORECAST,
     CONF_PROFILE,
@@ -1439,16 +1442,24 @@ def deferrable_schema(
             selector.TextSelector(), vol.Length(min=1)
         )
 
+    power_default = defaults.get(CONF_POWER_SEQUENCE) or defaults.get(CONF_NOMINAL_POWER, 2000)
+    if isinstance(power_default, (list, tuple)):
+        power_default = ", ".join(f"{value:g}" for value in power_default)
+    elif not isinstance(power_default, str):
+        power_default = f"{float(power_default):g}"
+    schema[vol.Required(CONF_NOMINAL_POWER, default=power_default)] = (
+        selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=10, max=100000, step=10, unit_of_measurement="W", mode="box"
+            )
+        )
+        if recurrence == RECURRENCE_SURPLUS
+        else selector.TextSelector()
+    )
+
     if initial:
         schema.update(
             {
-                vol.Required(
-                    CONF_NOMINAL_POWER, default=defaults.get(CONF_NOMINAL_POWER, 2000)
-                ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(
-                        min=10, max=100000, step=10, unit_of_measurement="W", mode="box"
-                    )
-                ),
                 # Shown unconditionally even though it only bites when the load
                 # is not semi-continuous: a config flow form cannot show or hide
                 # a field in reaction to another field in the same form, and the
@@ -1983,7 +1994,15 @@ def water_tank_period_schema(defaults: dict[str, Any]) -> dict[Any, Any]:
 
 def _clean_deferrable(user_input: dict[str, Any]) -> dict[str, Any]:
     """Drop empty optional fields so absent means "unset", not "midnight"."""
-    return {key: value for key, value in user_input.items() if value not in (None, "")}
+    data = {key: value for key, value in user_input.items() if value not in (None, "")}
+    if CONF_NOMINAL_POWER in data:
+        from .deferrable import parse_power
+
+        values = parse_power(data[CONF_NOMINAL_POWER])
+        data[CONF_NOMINAL_POWER] = max(values)
+        if len(values) > 1:
+            data[CONF_POWER_SEQUENCE] = list(values)
+    return data
 
 
 class DeferrableLoadSubentryFlow(ConfigSubentryFlow):
@@ -2007,6 +2026,20 @@ class DeferrableLoadSubentryFlow(ConfigSubentryFlow):
 
     def _form_errors(self, data: dict[str, Any]) -> dict[str, str]:
         """Problems with a submitted form that its selectors cannot catch."""
+        from homeassistant.exceptions import ServiceValidationError
+
+        from .deferrable import expand_power, parse_power
+
+        if CONF_NOMINAL_POWER not in data:
+            return {}
+        try:
+            values = parse_power(data[CONF_NOMINAL_POWER])
+            if len(values) > 1:
+                if data.get(CONF_RECURRENCE, RECURRENCE_DAILY) == RECURRENCE_SURPLUS:
+                    return {CONF_NOMINAL_POWER: "sequence_not_supported"}
+                expand_power(values, float(data.get(CONF_OPERATING_HOURS, 0)), self._step_minutes)
+        except ServiceValidationError:
+            return {CONF_NOMINAL_POWER: "invalid_power_sequence"}
         return {}
 
     def _placeholders(self) -> dict[str, str]:
@@ -2046,7 +2079,21 @@ class DeferrableLoadSubentryFlow(ConfigSubentryFlow):
     ) -> SubentryFlowResult:
         """The fields the recurrence chosen in the first step actually uses."""
         if user_input is not None:
-            return self._create({**self._kind, **_clean_deferrable(_flatten_sections(user_input))})
+            flat = {**self._kind, **_flatten_sections(user_input)}
+            if errors := self._form_errors(flat):
+                return self.async_show_form(
+                    step_id="settings",
+                    data_schema=vol.Schema(
+                        self._schema(
+                            flat,
+                            self._step_minutes,
+                            recurrence=self._kind.get(CONF_RECURRENCE, RECURRENCE_DAILY),
+                        )
+                    ),
+                    errors=errors,
+                    description_placeholders=self._placeholders(),
+                )
+            return self._create(_clean_deferrable(flat))
 
         return self.async_show_form(
             step_id="settings",
@@ -2075,12 +2122,24 @@ class DeferrableLoadSubentryFlow(ConfigSubentryFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> SubentryFlowResult:
         subentry = self._get_reconfigure_subentry()
+        entry = self._get_entry()
+        runtime = getattr(entry, "runtime_data", None)
+        load = (
+            runtime.loads.get(subentry.subentry_id)
+            if runtime and hasattr(runtime, "loads")
+            else None
+        )
+        defaults = dict(subentry.data)
+        if load is not None:
+            defaults[CONF_NOMINAL_POWER] = load.nominal_power_w
+            defaults[CONF_OPERATING_HOURS] = load.operating_hours
+            defaults[CONF_RECURRENCE] = load.recurrence
 
         if user_input is not None:
             # The fields this step no longer offers are still part of the
             # subentry -- they are what a load starts from, and dropping them
             # here would reset a load to the defaults on its next reload.
-            if errors := self._form_errors(user_input):
+            if errors := self._form_errors({**defaults, **user_input}):
                 return self.async_show_form(
                     step_id="reconfigure",
                     data_schema=vol.Schema(
@@ -2091,7 +2150,21 @@ class DeferrableLoadSubentryFlow(ConfigSubentryFlow):
                     errors=errors,
                     description_placeholders=self._placeholders(),
                 )
-            data = {**subentry.data, **_clean_deferrable(user_input)}
+            clean = _clean_deferrable(user_input)
+            data = {**subentry.data, **clean}
+            if CONF_NOMINAL_POWER in user_input and CONF_POWER_SEQUENCE not in clean:
+                data.pop(CONF_POWER_SEQUENCE, None)
+                if (
+                    clean[CONF_NOMINAL_POWER] != defaults.get(CONF_NOMINAL_POWER)
+                    # Leaving a sequence: the number's restored value is
+                    # from before the sequence, not what was just typed.
+                    or CONF_POWER_SEQUENCE in subentry.data
+                ):
+                    # An explicit scalar edit. The reload seeds it from the
+                    # subentry; the stamp stops the number's restore from
+                    # putting the old value back, loaded entry or not.
+                    data[CONF_NOMINAL_POWER_EDITED_AT] = dt_util.utcnow().isoformat()
+
             for key in self._clearable_keys:
                 if key not in user_input:
                     data.pop(key, None)
@@ -2102,7 +2175,16 @@ class DeferrableLoadSubentryFlow(ConfigSubentryFlow):
         return self.async_show_form(
             step_id="reconfigure",
             data_schema=vol.Schema(
-                self._schema(dict(subentry.data), self._step_minutes, initial=False)
+                self._schema(
+                    defaults,
+                    self._step_minutes,
+                    initial=False,
+                    **(
+                        {"recurrence": defaults.get(CONF_RECURRENCE, RECURRENCE_DAILY)}
+                        if self._schema is deferrable_schema
+                        else {}
+                    ),
+                )
             ),
             description_placeholders=self._placeholders(),
         )
@@ -2121,6 +2203,16 @@ class ThermalLoadSubentryFlow(DeferrableLoadSubentryFlow):
     )
 
     def _form_errors(self, data: dict[str, Any]) -> dict[str, str]:
+        from homeassistant.exceptions import ServiceValidationError
+
+        from .deferrable import parse_power
+
+        if CONF_NOMINAL_POWER in data:
+            try:
+                if len(parse_power(data[CONF_NOMINAL_POWER])) > 1:
+                    return {CONF_NOMINAL_POWER: "sequence_not_supported"}
+            except ServiceValidationError:
+                return {CONF_NOMINAL_POWER: "invalid_power_sequence"}
         try:
             parse_cop_curve(data.get(CONF_COP_CURVE))
         except ValueError:

@@ -65,6 +65,10 @@ class LoadSwitchDescription(SwitchEntityDescription):
 
 
 def _set_enabled(load: DeferrableRuntime, value: bool) -> None:
+    if not value and (
+        load.is_sequence or load.sequence_cycle_active or load.sequence_start_pending
+    ):
+        load.cancel()
     load.enabled = value
 
 
@@ -401,7 +405,13 @@ class LoadSwitch(EmhassLoadEntity, SwitchEntity, RestoreEntity):
             STATE_ON,
             STATE_OFF,
         ):
-            self.entity_description.set_fn(self.load, last.state == STATE_ON)
+            if self.entity_description.key == "requested" and (
+                self.load.is_sequence or self.load.sequence_cycle_active
+            ):
+                if not self.load._sequence_restored:
+                    self.load.requested = last.state == STATE_ON
+            else:
+                self.entity_description.set_fn(self.load, last.state == STATE_ON)
             # After set_fn, which for a request installs a fresh anchor that
             # the restored one must overwrite.
             if (restore_fn := self.entity_description.restore_fn) is not None:
@@ -409,6 +419,11 @@ class LoadSwitch(EmhassLoadEntity, SwitchEntity, RestoreEntity):
 
     @property
     def available(self) -> bool:
+        if self.load.is_sequence and self.entity_description.key in {
+            "semi_continuous",
+            "single_constant",
+        }:
+            return False
         if (available_fn := self.entity_description.available_fn) is None:
             return super().available
         return super().available and available_fn(self.load)

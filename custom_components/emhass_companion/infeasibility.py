@@ -640,6 +640,8 @@ def check_window_energy(payload: dict, report: Report, load_names: list[str] | N
     owed: list[tuple[int, int, float]] = []
     for k in range(n):
         power = _item(powers, k, None)
+        if isinstance(power, list):
+            power = max(power, default=0)
         if not isinstance(power, (int, float)) or power <= 0:
             continue
         steps = _item(timesteps, k, None)

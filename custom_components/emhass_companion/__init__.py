@@ -34,10 +34,13 @@ from .const import (
     CONF_HOT_WATER_PERIODS,
     CONF_HOUSE_LOAD_TOTAL_ENTITY,
     CONF_NETWORK,
+    CONF_POWER_SEQUENCE,
     CONF_PROFILE,
     CONF_PROFILE_OPTIONS,
+    CONF_TIME_STEP,
     CONF_URL,
     CONTROL_ENTITY_DOMAINS,
+    DEFAULT_TIME_STEP,
     DOMAIN,
     ISSUE_BAD_PROFILE,
     ISSUE_EMHASS_VERSION,
@@ -182,6 +185,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
 
     loads = DeferrableRegistry(hass, entry)
     loads.sync()
+    await loads.async_load_sequences(int(entry.options.get(CONF_TIME_STEP, DEFAULT_TIME_STEP)))
     _async_remove_retired_buttons(hass, entry)
     _report_unusable_control_entities(hass, entry)
 
@@ -280,6 +284,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
 
     entry.async_on_unload(scheduler.async_stop)
     entry.async_on_unload(loads.async_stop)
+    entry.async_on_unload(loads.async_save_sequences)
     entry.async_on_unload(coordinator.async_stop_clock)
     entry.async_on_unload(coordinator.async_stop_pv_live_tracking)
     entry.async_on_unload(coordinator.async_stop_source_health)
@@ -359,6 +364,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
         refresh_needed = False
         for load in entry.runtime_data.loads.all():
             subentry = entry.subentries[load.subentry_id]
+            if tuple(subentry.data.get(CONF_POWER_SEQUENCE, ())) != load.power_sequence:
+                hass.config_entries.async_schedule_reload(entry.entry_id)
+                return
             if not load.is_water_tank or CONF_HOT_WATER_PERIODS not in subentry.data:
                 continue
             periods = subentry.data[CONF_HOT_WATER_PERIODS] or []

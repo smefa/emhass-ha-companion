@@ -41,7 +41,11 @@ The next screen seeds the load. Which fields it shows depends on the **Runs**
 answer above, and every one of them becomes a control on the load's own
 device page afterwards — so nothing here is a permanent decision.
 
-- **Power when running** — roughly what it draws while on, in W.
+- **Power when running** — roughly what it draws while on, in W. For an
+  appliance whose draw changes through its program, such as a washing
+  machine, enter one value per optimisation step separated by commas, for
+  example `150, 2000, 2000, 300`. The last value repeats until *Hours needed*
+  is filled. See [Sequence loads](../deferrable_loads.md#sequence-loads).
 - **Advanced settings** — the collapsed section holds everything below
   except *Power when running*, *Hours needed per day*, *Earliest start* /
   *Latest finish* and the two entity pickers. The defaults suit most loads.
@@ -97,6 +101,8 @@ Every field the load's device page can show, in the order it appears:
 - **02. Hours needed per day** — how many hours it should run each day.
   *Every day* loads only.
 - **03. Power when running** — how much it draws at full power, in W.
+  Unavailable on a sequence load: change the sequence with **Reconfigure**
+  on the load instead.
 - **04. Lowest power while running** — the least it may draw while on, if
   it can modulate. Only used when *12. Runs at full power only* is off.
 - **05. Earliest start** — the window may not start before this time.

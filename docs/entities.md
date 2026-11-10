@@ -56,7 +56,9 @@ described, with fields and examples, in [Actions](guide/actions.md).
 ## Deferrable and thermal loads
 
 See [deferrable_loads.md](deferrable_loads.md) and
-[thermal_loads.md](thermal_loads.md) for the per-load entities.
+[thermal_loads.md](thermal_loads.md) for the per-load entities. On a
+[sequence load](deferrable_loads.md#sequence-loads) the Power number is
+unavailable; change the sequence with **Reconfigure** on the load.
 
 ## EMHASS entity names
 

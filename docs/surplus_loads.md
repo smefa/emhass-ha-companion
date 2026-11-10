@@ -357,7 +357,7 @@ table below for exactly which.
 
 | Setting | Surplus load |
 | --- | --- |
-| Power when running | **configured** — the load's rating, and its run floor when on/off |
+| Power when running | **configured** — the load's rating, and its run floor when on/off. A single value: power sequences are not supported here |
 | Runs at full power only | **configured** |
 | Lowest power while running | **configured**, when the above is off |
 | Cost of starting | **configured** |

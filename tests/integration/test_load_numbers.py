@@ -142,3 +142,52 @@ async def test_a_standard_load_never_gets_a_reachability_issue(hass: HomeAssista
     assert (
         registry.async_get_issue(DOMAIN, f"{ISSUE_THERMAL_UNREACHABLE}_{load.subentry_id}") is None
     )
+
+
+async def test_sequence_power_unavailable_and_runtime_guard(hass: HomeAssistant) -> None:
+    from homeassistant.exceptions import ServiceValidationError
+
+    numbers = _numbers(hass, 15)
+    power = numbers["nominal_power"]
+    power.load.power_sequence = (150, 2000, 0)
+    power.load.operating_hours = 1
+    assert not power.available
+    with pytest.raises(ServiceValidationError, match="Power is a sequence"):
+        await power.async_set_native_value(500)
+    with pytest.raises(ServiceValidationError, match="needs at least"):
+        await numbers["operating_hours"].async_set_native_value(0.25)
+    assert power.load.operating_hours == 1
+    for key in ("minimum_power", "minimum_on_time", "minimum_off_time", "max_startups"):
+        assert not numbers[key].available
+
+
+@pytest.mark.parametrize(
+    ("edited_at", "last_updated", "expected"),
+    [
+        (None, datetime(2026, 11, 10, 10, 0, tzinfo=UTC), False),
+        ("2026-11-10T11:00:00+00:00", datetime(2026, 11, 10, 10, 0, tzinfo=UTC), True),
+        ("2026-11-10T09:00:00+00:00", datetime(2026, 11, 10, 10, 0, tzinfo=UTC), False),
+    ],
+)
+async def test_power_restore_yields_to_a_newer_reconfigure_edit(
+    hass: HomeAssistant, edited_at, last_updated, expected
+) -> None:
+    """A Power edited in reconfigure (even with the entry unloaded) must not be
+    overwritten by the number's older restored state on the next setup."""
+    from unittest.mock import patch
+
+    from homeassistant.core import State
+
+    from custom_components.emhass_companion.const import CONF_NOMINAL_POWER_EDITED_AT
+
+    numbers = _numbers(hass, 15)
+    power = numbers["nominal_power"]
+    entry = power.coordinator.config_entry
+    subentry = entry.subentries[power.load.subentry_id]
+    data = {**subentry.data}
+    if edited_at:
+        data[CONF_NOMINAL_POWER_EDITED_AT] = edited_at
+    hass.config_entries.async_update_subentry(entry, subentry, data=data)
+    last = State("number.car_power", "11000", last_updated=last_updated)
+    with patch.object(power, "async_get_last_state", AsyncMock(return_value=last)):
+        assert await power._power_edited_since_last_state() is expected

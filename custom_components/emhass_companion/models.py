@@ -760,6 +760,10 @@ class DeferrableLoad:
     name: str
     nominal_power_w: float
     operating_hours: float
+    power_sequence: tuple[float, ...] = ()
+    cycle_values: tuple[float, ...] = ()
+    cycle_anchor: datetime | None = None
+    sequence_done: bool = False
     minimum_power_w: float = 0.0
     earliest_start: time | None = None
     latest_end: time | None = None
@@ -826,6 +830,15 @@ class DeferrableLoad:
     # dwell time correctly across restarts (def_current_on/off_timesteps).
     current_on_timesteps: int = 0
     current_off_timesteps: int = 0
+
+    def cycle_elapsed(self, row_zero: datetime, step_minutes: int) -> int:
+        """Whole stages elapsed at EMHASS row zero, clamped to the snapshot."""
+        if self.cycle_anchor is None:
+            return 0
+        return min(
+            len(self.cycle_values),
+            max(0, int((row_zero - self.cycle_anchor).total_seconds() // (step_minutes * 60))),
+        )
 
     thermal: ThermalConfig | WaterTankConfig | HeatPumpRoomConfig | None = None
     """Set only for a thermal load, whose temperature is optimised instead of

@@ -212,11 +212,20 @@ class LoadShouldRunBinarySensor(EmhassLoadEntity, BinarySensorEntity):
             return None
         if self.load.mode != LOAD_MODE_AUTO:
             return resolve_should_run(self.load.mode, False)
+        if self.load.enabled and (
+            self.load.sequence_cycle_active or self.load.sequence_start_pending
+        ):
+            return True
+        if self.load.is_sequence and not self.load.sequence_owes(dt_util.utcnow()):
+            return False
         if not self.load.enabled or not self.load.participates:
             return False
         if (scheduled := self._scheduled_power()) is None:
             return None
-        return resolve_should_run(self.load.mode, scheduled > self.load.running_threshold_w)
+        return resolve_should_run(
+            self.load.mode,
+            self.load.plan_runs_at(scheduled),
+        )
 
     @property
     def _reason(self) -> str:
@@ -264,6 +273,33 @@ class LoadShouldRunBinarySensor(EmhassLoadEntity, BinarySensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return {
+            **(
+                {
+                    "power_sequence": list(self.load.power_sequence),
+                    "sequence_step": min(
+                        len(self.load.sequence_cycle.values),
+                        self.load.sequence_cycle.elapsed(
+                            dt_util.utcnow(), self.coordinator.config.time_step_minutes
+                        )
+                        + 1,
+                    )
+                    if self.load.sequence_cycle
+                    else None,
+                    "sequence_steps": len(self.load.sequence_cycle.values)
+                    if self.load.sequence_cycle
+                    else None,
+                    "last_completed_day": self.load.last_completed_day.isoformat()
+                    if self.load.last_completed_day
+                    else None,
+                    # Whether today's daily cycle is done, by the load's own
+                    # window day: an overnight cycle counts for the evening it
+                    # started, which the card cannot work out from a date.
+                    "sequence_done": self.load.last_completed_day is not None
+                    and self.load.last_completed_day == self.load.sequence_day(dt_util.utcnow()),
+                }
+                if self.load.is_sequence or self.load.sequence_cycle_active
+                else {}
+            ),
             "mode": self.load.mode,
             "scheduled_power": self._scheduled_power(),
             "currently_running": self.load.is_running,

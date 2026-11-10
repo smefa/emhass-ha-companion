@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 import logging
 import math
+import re
 from typing import Any, Final
 
 from homeassistant.config_entries import ConfigEntry
@@ -33,8 +34,9 @@ from homeassistant.const import (
     UnitOfTemperature,
 )
 from homeassistant.core import Event, EventStateChangedData, HomeAssistant, State, callback
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.event import async_track_state_change_event, async_track_time_change
+from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 from homeassistant.util.unit_conversion import PowerConverter, TemperatureConverter
 
@@ -68,6 +70,7 @@ from .const import (
     CONF_NOMINAL_POWER,
     CONF_OPERATING_HOURS,
     CONF_POWER_SENSOR,
+    CONF_POWER_SEQUENCE,
     CONF_RECURRENCE,
     CONF_SEMI_CONTINUOUS,
     CONF_SENSE,
@@ -164,6 +167,63 @@ def state_to_watts(state: State) -> float | None:
     return value
 
 
+def parse_power(value: Any) -> tuple[float, ...]:
+    """Parse the single Power field without accepting signs, exponents or empty stages."""
+    text = str(value)
+    if len(text) > 255 or not re.fullmatch(r"\s*\d+(\.\d+)?(\s*,\s*\d+(\.\d+)?)*\s*", text):
+        raise ServiceValidationError("Power must contain watts separated by commas")
+    values = tuple(float(part) for part in text.split(","))
+    if values[0] < 10 or any(value > 100000 for value in values):
+        raise ServiceValidationError(
+            "First power must be at least 10 W; every value must be at most 100000 W"
+        )
+    return values
+
+
+def expand_power(values: tuple[float, ...], hours: float, step_minutes: int) -> tuple[float, ...]:
+    """Validate the runtime and repeat the last stage to fill it."""
+    steps = operating_timesteps(hours, step_minutes)
+    if 0 < steps < len(values):
+        raise ServiceValidationError(
+            f"Power has {len(values)} values, one per {step_minutes}-minute step, so it needs "
+            f"at least {len(values) * step_minutes / 60:g} h of runtime; Operating hours is {hours:g} h."
+        )
+    return values + (values[-1],) * (steps - len(values)) if steps else ()
+
+
+@dataclass(slots=True)
+class SequenceCycle:
+    """The immutable program snapshot and observations for one commanded cycle."""
+
+    started_at: datetime
+    anchor: datetime
+    values: tuple[float, ...]
+    source: str
+    serves_request: bool = False
+    seen_running: bool = False
+    extension_granted: bool = False
+
+    def ends_at(self, step_minutes: int) -> datetime:
+        return self.started_at + timedelta(minutes=len(self.values) * step_minutes)
+
+    def elapsed(self, row_zero: datetime, step_minutes: int) -> int:
+        return min(
+            len(self.values),
+            max(0, int((row_zero - self.anchor).total_seconds() // (step_minutes * 60))),
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "started_at": self.started_at.isoformat(),
+            "anchor": self.anchor.isoformat(),
+            "values": list(self.values),
+            "source": self.source,
+            "serves_request": self.serves_request,
+            "seen_running": self.seen_running,
+            "extension_granted": self.extension_granted,
+        }
+
+
 @dataclass(frozen=True, slots=True)
 class BatteryLockout:
     """A load's held battery-lockout window -- the ``planned_held`` half only.
@@ -185,6 +245,66 @@ class DeferrableRuntime:
 
     subentry_id: str
     name: str
+    power_sequence: tuple[float, ...] = ()
+    sequence_cycle: SequenceCycle | None = None
+    sequence_start_pending: bool = False
+    last_completed_day: date | None = None
+    _sequence_restored: bool = False
+    sequence_step_minutes: int = DEFAULT_TIME_STEP
+    _save_sequence: Callable[[], None] | None = field(default=None, repr=False)
+
+    @property
+    def power_values(self) -> tuple[float, ...]:
+        return self.power_sequence or (self.nominal_power_w,)
+
+    @property
+    def is_sequence(self) -> bool:
+        return len(self.power_sequence) > 1
+
+    @property
+    def sequence_cycle_active(self) -> bool:
+        return self.sequence_cycle is not None
+
+    def sequence_changed(self) -> None:
+        if self._save_sequence is not None:
+            self._save_sequence()
+
+    def sequence_owes(self, now: datetime) -> bool:
+        return (
+            self.enabled
+            and self.participates
+            and not (
+                self.recurrence == RECURRENCE_DAILY
+                and self.last_completed_day == self.sequence_day(now)
+            )
+        )
+
+    def sequence_day(self, at: datetime) -> date:
+        """The day whose daily run a moment belongs to.
+
+        The local date, except in the early-morning half of a window that
+        crosses midnight: a 22:00-06:00 cycle that started at 23:00 and ended
+        at 01:00 is yesterday's run, and crediting it to the calendar date
+        would leave the same window owing a second one.
+        """
+        local = dt_util.as_local(at)
+        start, end = self.earliest_start, self.latest_end
+        if (
+            self.use_time_window
+            and start is not None
+            and end is not None
+            and start > end
+            and local.time() < end
+        ):
+            return local.date() - timedelta(days=1)
+        return local.date()
+
+    def sequence_startable(self, step_minutes: int) -> bool:
+        """Whether the current Power and runtime give a cycle at all."""
+        try:
+            return bool(expand_power(self.power_values, self.operating_hours, step_minutes))
+        except ServiceValidationError:
+            return False
 
     # Owned by the subentry: what the load *is*, rather than what it is
     # currently being asked to do.
@@ -537,6 +657,17 @@ class DeferrableRuntime:
     def running_threshold_w(self) -> float:
         return max(self.nominal_power_w * RUNNING_FRACTION, RUNNING_FLOOR_W)
 
+    def plan_runs_at(self, watts: float) -> bool:
+        """Whether a plan row's power means "run now".
+
+        A sequence's first stage may be as low as RUNNING_FLOOR_W (the parser's
+        minimum), so it starts at that floor inclusive; 10 % of the peak would
+        never start ``150, 2000``. Scalar loads keep their relative threshold.
+        """
+        if self.is_sequence:
+            return watts >= RUNNING_FLOOR_W
+        return watts > self.running_threshold_w
+
     @property
     def running_source(self) -> str | None:
         """The entity whose state says whether this load is running.
@@ -676,6 +807,36 @@ class DeferrableRuntime:
         it was applied -- a decision computed while the control switch is off
         commands nothing, and must not be credited as run time.
         """
+        if (
+            commanded
+            and self.is_sequence
+            and self.sequence_cycle is None
+            and (self.sequence_start_pending or self.sequence_owes(now))
+        ):
+            values = expand_power(
+                self.power_values, self.operating_hours, self.sequence_step_minutes
+            )
+            if not values and self.sequence_start_pending:
+                # Runtime set to zero after Run now: nothing to start, and a
+                # pending start nothing can clear would hold the load on.
+                self.sequence_start_pending = False
+                self.sequence_changed()
+            if values:
+                seconds = self.sequence_step_minutes * 60
+                anchor = datetime.fromtimestamp(
+                    round(now.timestamp() / seconds) * seconds, tz=now.tzinfo
+                )
+                self.sequence_cycle = SequenceCycle(
+                    now,
+                    anchor,
+                    values,
+                    "run_now" if self.sequence_start_pending else "planned",
+                    self.requested,
+                    self.is_running if self.metered else False,
+                )
+                self.sequence_start_pending = False
+                self.sequence_changed()
+                self.notify()
         self.commands_seen = True
         if commanded:
             if self.commanded_since is None:
@@ -716,7 +877,8 @@ class DeferrableRuntime:
         from being called on.
         """
         return (
-            self.single_constant
+            not self.is_sequence
+            and self.single_constant
             and self.metered
             and self.is_commanded
             and self.off_since is not None
@@ -749,6 +911,9 @@ class DeferrableRuntime:
             return
 
         if watts >= self.running_threshold_w:
+            if self.sequence_cycle is not None and not self.sequence_cycle.seen_running:
+                self.sequence_cycle.seen_running = True
+                self.sequence_changed()
             self.seen_running = True
             if self.running_since is None:
                 self.running_since = now
@@ -843,6 +1008,9 @@ class DeferrableRuntime:
         method rather than an attribute assignment: a bare ``requested = True``
         from the switch would leave a deadline with nothing to count from.
         """
+        if self.sequence_cycle is not None:
+            self.sequence_cycle.serves_request = True
+            self.sequence_changed()
         self.requested = True
         self.requested_at = now
         self.request_runtime = timedelta()
@@ -854,6 +1022,8 @@ class DeferrableRuntime:
         self.commanded_since = now if self.is_commanded else None
         self.seen_running = False
         self.idle_since = None
+        if self.is_sequence:
+            self.sequence_changed()
 
     def cancel(self, reason: str = COMPLETION_CANCELLED, now: datetime | None = None) -> None:
         """Clear a request, fulfilled or abandoned, along with its anchor.
@@ -863,6 +1033,10 @@ class DeferrableRuntime:
         the user's own doing: every caller that is *not* the user reaching for
         the switch has a more specific reason to pass.
         """
+        if reason == COMPLETION_CANCELLED:
+            self.sequence_cycle = None
+            self.sequence_start_pending = False
+            self.sequence_changed()
         self.requested = False
         self.requested_at = None
         self.request_runtime = timedelta()
@@ -872,6 +1046,8 @@ class DeferrableRuntime:
         self.idle_since = None
         self.last_completion_reason = reason
         self.last_completion_at = now or dt_util.utcnow()
+        if self.is_sequence:
+            self.sequence_changed()
 
     def force_run(self, now: datetime | None = None) -> None:
         """Arm a direct run right now, bypassing both the plan and any request.
@@ -884,6 +1060,15 @@ class DeferrableRuntime:
         ``forced_at`` is only a backstop for that rule -- see
         :meth:`check_auto_disarm` -- not a second target.
         """
+        if self.is_sequence:
+            if self.sequence_cycle is not None or self.sequence_start_pending:
+                _LOGGER.info("%s: Run now absorbed by the existing sequence cycle", self.name)
+                return
+            expand_power(self.power_values, self.operating_hours, self.sequence_step_minutes)
+            if self.operating_hours > 0:
+                self.sequence_start_pending = True
+                self.sequence_changed()
+            return
         self.mode = LOAD_MODE_FORCE_ON
         self.forced_at = now or dt_util.utcnow()
         if not self.requested:
@@ -907,7 +1092,8 @@ class DeferrableRuntime:
         own command read back, so every run would hold to the hard cut.
         """
         return (
-            self.on_demand
+            not self.is_sequence
+            and self.on_demand
             and self.requested
             and self.metered
             and (self.is_running or self.mid_program(now, step_minutes))
@@ -938,6 +1124,53 @@ class DeferrableRuntime:
         for the same reason its idle time proves nothing -- being idle under a
         cloud is what a surplus load *does*.
         """
+        self.sequence_step_minutes = step_minutes
+        if self.is_sequence or self.sequence_cycle is not None:
+            # A sequence never uses force mode (Run now arms start_pending), but
+            # a load reconfigured into a sequence may carry one over; nothing
+            # below would ever clear it.
+            changed = False
+            if self.mode == LOAD_MODE_FORCE_ON:
+                self.mode = LOAD_MODE_AUTO
+                self.forced_at = None
+                changed = True
+            cycle = self.sequence_cycle
+            if (
+                cycle is None
+                and self.sequence_start_pending
+                and not self.sequence_startable(step_minutes)
+            ):
+                # The executor holds a pending start on; one that can no longer
+                # become a cycle (runtime now zero or too short) would stay on.
+                self.sequence_start_pending = False
+                self.sequence_changed()
+                return True
+            if cycle is None or now < cycle.ends_at(step_minutes):
+                return changed
+            if self.metered and self.is_running and not cycle.extension_granted:
+                cycle.extension_granted = True
+                self.sequence_changed()
+            if cycle.extension_granted and now < cycle.ends_at(step_minutes) + timedelta(
+                minutes=step_minutes
+            ):
+                return changed
+            reason = (
+                COMPLETION_CUT_SHORT
+                if cycle.extension_granted
+                else COMPLETION_NEVER_STARTED
+                if self.metered and not cycle.seen_running
+                else COMPLETION_COMPLETED
+            )
+            if self.recurrence == RECURRENCE_DAILY:
+                self.last_completed_day = self.sequence_day(cycle.anchor)
+            self.sequence_cycle = None
+            if cycle.serves_request and self.requested:
+                self.cancel(reason, now)
+            else:
+                self.last_completion_reason = reason
+                self.last_completion_at = now
+            self.sequence_changed()
+            return True
         changed = False
         target = timedelta(hours=self.operating_hours)
         idle_done = (
@@ -1159,6 +1392,7 @@ class DeferrableRuntime:
         current_temperature: float | None = None,
     ) -> DeferrableLoad:
         """Project the live state into what the payload builder consumes."""
+        self.sequence_step_minutes = step_minutes
         windowed = self.use_time_window
         surplus = self.on_surplus
         budget = self.surplus_budget
@@ -1175,7 +1409,11 @@ class DeferrableRuntime:
         return DeferrableLoad(
             subentry_id=self.subentry_id,
             name=self.name,
-            nominal_power_w=nominal_power_w,
+            nominal_power_w=max(self.power_values) if self.is_sequence else nominal_power_w,
+            power_sequence=self.power_sequence,
+            cycle_values=self.sequence_cycle.values if self.sequence_cycle else (),
+            cycle_anchor=self.sequence_cycle.anchor if self.sequence_cycle else None,
+            sequence_done=self.is_sequence and not self.sequence_owes(now),
             minimum_power_w=self.minimum_power_w,
             # A surplus load's run time is not a setting; it is however many
             # hours the exported power in the last plan can actually feed.
@@ -1379,6 +1617,71 @@ class DeferrableRegistry:
         # listener -- which has no access to the config -- judges idle windows
         # against the same timestep the optimisation runs on.
         self._step_minutes = DEFAULT_TIME_STEP
+        self._sequence_store: Store | None = None
+
+    async def async_load_sequences(self, step_minutes: int) -> None:
+        self._step_minutes = step_minutes
+        self._sequence_store = Store(
+            self.hass, 1, f"emhass_companion.{self.entry.entry_id}.sequence_cycles"
+        )
+        stored = await self._sequence_store.async_load() or {}
+        for load in self.all():
+            load.sequence_step_minutes = step_minutes
+            data = stored.get(load.subentry_id, {})
+            load._sequence_restored = bool(data)
+            if data:
+                load.requested = bool(data.get("requested"))
+                load.requested_at = (
+                    datetime.fromisoformat(data["requested_at"])
+                    if data.get("requested_at")
+                    else None
+                )
+            try:
+                if cycle := data.get("cycle"):
+                    load.sequence_cycle = SequenceCycle(
+                        datetime.fromisoformat(cycle["started_at"]),
+                        datetime.fromisoformat(cycle["anchor"]),
+                        tuple(cycle["values"]),
+                        cycle["source"],
+                        cycle["serves_request"],
+                        cycle["seen_running"],
+                        cycle.get("extension_granted", False),
+                    )
+                load.last_completed_day = (
+                    date.fromisoformat(data["last_completed_day"])
+                    if data.get("last_completed_day")
+                    else None
+                )
+                # A load reconfigured to a single value has no cycle to start;
+                # a pending start carried over would hold it on for good.
+                load.sequence_start_pending = load.is_sequence and bool(data.get("start_pending"))
+            except (KeyError, ValueError, TypeError):
+                _LOGGER.warning("%s: invalid stored sequence cycle", load.name)
+            load._save_sequence = self._save_sequences
+
+    async def async_save_sequences(self) -> None:
+        if self._sequence_store is not None:
+            await self._sequence_store.async_save(self._sequence_data())
+
+    def _sequence_data(self) -> dict[str, Any]:
+        return {
+            load.subentry_id: {
+                "cycle": load.sequence_cycle.as_dict() if load.sequence_cycle else None,
+                "start_pending": load.sequence_start_pending,
+                "requested": load.requested,
+                "requested_at": load.requested_at.isoformat() if load.requested_at else None,
+                "last_completed_day": load.last_completed_day.isoformat()
+                if load.last_completed_day
+                else None,
+            }
+            for load in self.all()
+            if load.is_sequence or load.sequence_cycle or load.last_completed_day
+        }
+
+    def _save_sequences(self) -> None:
+        if self._sequence_store is None:
+            return
+        self._sequence_store.async_delay_save(self._sequence_data, 0)
 
     # -- lifecycle ------------------------------------------------------------
 
@@ -1423,6 +1726,7 @@ class DeferrableRegistry:
                 if (source := load.running_source) is not None:
                     load.observe(self.hass.states.get(source), now)
 
+        self.check_auto_disarm(dt_util.utcnow(), self._step_minutes)
         self._unsubscribes.append(
             async_track_time_change(self.hass, self._async_midnight, hour=0, minute=0, second=0)
         )
@@ -1781,7 +2085,7 @@ class DeferrableRegistry:
             except ValueError:
                 continue
             if index < len(row.deferrables):
-                load.plan_scheduled_now = row.deferrables[index] > load.running_threshold_w
+                load.plan_scheduled_now = load.plan_runs_at(row.deferrables[index])
                 if load.plan_scheduled_now:
                     load.plan_power_now_w = row.deferrables[index]
 
@@ -1983,6 +2287,7 @@ def _apply_subentry_fields(
     The subentry's copy is the value a newly created load starts from, and the
     subentry form stops offering it once the load exists.
     """
+    load.power_sequence = tuple(data.get(CONF_POWER_SEQUENCE, ()))
     load.name = title
     load.load_type = (
         LOAD_TYPE_THERMAL if subentry_type == SUBENTRY_TYPE_THERMAL else LOAD_TYPE_STANDARD

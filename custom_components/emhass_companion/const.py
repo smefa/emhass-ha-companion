@@ -286,6 +286,11 @@ CONF_BATTERY_DISCHARGE_ENERGY_ENTITY: Final = "battery_discharge_energy_entity"
 
 # Deferrable load subentry keys
 CONF_NAME: Final = "name"
+CONF_POWER_SEQUENCE: Final = "power_sequence"
+# When reconfigure last changed a scalar Power. The number restores its own
+# value only if that state is newer, so an edit made while the entry was not
+# loaded is not overwritten by restore on the next setup.
+CONF_NOMINAL_POWER_EDITED_AT: Final = "nominal_power_edited_at"
 CONF_NOMINAL_POWER: Final = "nominal_power_w"
 # Floor on the power a load may draw while it is on, sent as EMHASS's
 # `minimum_power_of_deferrable_loads`. Only bites when the load is *not*

@@ -37,6 +37,24 @@ import {
 
 
 /**
+ * How far today's run has got, as `{v, s}` for a box or a figure.
+ *
+ * A sequence load reads its progress from the cycle, not from measured
+ * runtime: a 0 W or low stage measures as not running, so the measured hours
+ * of a finished wash still fall short of what it needed.
+ */
+function progressOf(view) {
+  const cycle = view.sequence;
+  if (cycle && cycle.step) return { v: `Step ${cycle.step}`, s: `of ${cycle.steps}` };
+  if (cycle && cycle.doneToday) return { v: "Done", s: "cycle finished today" };
+  if (!Number.isFinite(view.ranToday)) return { v: "–" };
+  return {
+    v: formatHours(view.ranToday),
+    s: Number.isFinite(view.needed) ? `of ${formatHours(view.needed)}` : "",
+  };
+}
+
+/**
  * The same duration read as a deadline: "in 4 h 20 m".
  *
  * A bare duration is what a label like "limit 30 m" wants; a figure standing
@@ -175,7 +193,12 @@ const STATUS_META = {
  */
 function subtitleFor(view, hass) {
   if (!view.isEnabled) return "Disabled — left out of the plan";
-  if ((view.onDemand || view.onSurplus) && !view.isRequested) return "Waiting to be asked";
+  const cycle = view.sequence;
+  // Before "waiting to be asked": Run now starts a cycle with nothing requested.
+  if (cycle && cycle.step) return `Running · step ${cycle.step} of ${cycle.steps}`;
+  if ((view.onDemand || view.onSurplus) && !view.isRequested) {
+    return cycle && cycle.doneToday ? "Cycle done today" : "Waiting to be asked";
+  }
   if (view.status === "running") {
     return Number.isFinite(view.ranToday) ? `Running · ${formatHours(view.ranToday)} today` : "Running";
   }
@@ -386,10 +409,14 @@ class EmhassDeferrableCard extends HTMLElement {
       if (budget && Number.isFinite(num(budget))) {
         figures.push(["Spare solar", `${num(budget).toFixed(1)} h`]);
       }
-      figures.push([
-        "Ran today",
-        Number.isFinite(view.ranToday) ? `${view.ranToday.toFixed(1)} h` : "–",
-      ]);
+      const cycle = view.sequence;
+      figures.push(
+        cycle && cycle.step
+          ? ["Cycle", `step ${cycle.step} of ${cycle.steps}`]
+          : cycle && cycle.doneToday
+            ? ["Cycle", "done today"]
+            : ["Ran today", Number.isFinite(view.ranToday) ? `${view.ranToday.toFixed(1)} h` : "–"],
+      );
       for (const [label, text] of figures) {
         const cell = document.createElement("div");
         cell.appendChild(document.createTextNode(label));
@@ -537,13 +564,7 @@ const LOAD_METRICS = {
   ran_today: {
     label: "Ran today",
     entity: "runtime_today",
-    read: (v) => {
-      if (!Number.isFinite(v.ranToday)) return { v: "–" };
-      return {
-        v: formatHours(v.ranToday),
-        s: Number.isFinite(v.needed) ? `of ${formatHours(v.needed)}` : "",
-      };
-    },
+    read: (v) => progressOf(v),
   },
   // What box four has always shown: the deadline while a request is pending,
   // and the load's mode the rest of the time. Kept as one metric rather than
@@ -604,7 +625,13 @@ const LOAD_METRICS = {
     entity: "operating_hours",
     read: (v) => {
       if (!Number.isFinite(v.needed)) return { v: "–" };
-      const left = v.needed - (Number.isFinite(v.ranToday) ? v.ranToday : 0);
+      const cycle = v.sequence;
+      if (cycle && cycle.doneToday) return { v: formatHours(0), s: "cycle finished today" };
+      // The current step counts as still to run, to the step.
+      const left =
+        cycle && cycle.step
+          ? (v.needed * (cycle.steps - cycle.step + 1)) / cycle.steps
+          : v.needed - (Number.isFinite(v.ranToday) ? v.ranToday : 0);
       return { v: formatHours(Math.max(left, 0)), s: `of ${formatHours(v.needed)} needed` };
     },
   },
@@ -640,7 +667,11 @@ const LOAD_METRICS = {
   power: {
     label: "Nominal power",
     entity: "nominal_power",
-    read: (v) => ({ v: formatPower(num(v.find("nominal_power"))), s: "" }),
+    // A sequence leaves the number unavailable; its peak is what the box shows.
+    read: (v) =>
+      v.sequence && v.sequence.values.length
+        ? { v: formatPower(v.sequence.peak), s: `sequence, ${v.sequence.values.length} steps` }
+        : { v: formatPower(num(v.find("nominal_power"))), s: "" },
   },
   needed: {
     label: "Hours needed",

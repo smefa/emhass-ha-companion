@@ -681,9 +681,41 @@ class LoadScheduledPowerSensor(EmhassLoadEntity, SensorEntity):
         # which payload.py already rounds away on the way out.
         return round(self._series().value_at(dt_util.utcnow()) or 0.0)
 
+    def _cycles(self) -> list[dict[str, str]]:
+        from .payload import operating_timesteps
+
+        step = timedelta(minutes=self.coordinator.config.time_step_minutes)
+        cycle = self.load.sequence_cycle
+        blocks: list[tuple[datetime, datetime]] = []
+        if cycle is not None:
+            blocks.append((cycle.anchor, cycle.ends_at(self.coordinator.config.time_step_minutes)))
+        count = operating_timesteps(
+            self.load.operating_hours, self.coordinator.config.time_step_minutes
+        )
+        data = self.coordinator.data
+        if data is not None and self.plan_index is not None:
+            powers = (data.payload or {}).get("nominal_power_of_deferrable_loads", [])
+            if self.plan_index < len(powers) and isinstance(powers[self.plan_index], list):
+                count = len(powers[self.plan_index])
+        points = list(self._series())
+        skip_until = blocks[0][1] if blocks else None
+        for point in points:
+            if skip_until is not None and point.time < skip_until:
+                continue
+            if count and self.load.plan_runs_at(point.value):
+                end = point.time + count * step
+                blocks.append((point.time, end))
+                skip_until = end
+        return [{"start": start.isoformat(), "end": end.isoformat()} for start, end in blocks]
+
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return {
+            **(
+                {"power_sequence": list(self.load.power_sequence), "cycles": self._cycles()}
+                if self.load.is_sequence or self.load.sequence_cycle
+                else {}
+            ),
             "schedule": self._series().to_attribute(),
             "emhass_deferrable": self.deferrable_number,
         }

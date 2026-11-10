@@ -1494,13 +1494,15 @@
           "data": {
             "name": "Name",
             "power_sensor": "Running sensor",
-            "control_entity": "Control entity"
+            "control_entity": "Control entity",
+            "nominal_power_w": "Power when running"
           },
           "data_description": {
             "power_sensor": "Optional. The most reliable way to tell the optimiser whether this load is actually running -- catching a run that finished early, one that never happened despite being planned, or one started at a different time than scheduled. A power sensor gives the most detail (any unit -- W, kW, MW, ... -- is converted to watts automatically); a plain on/off binary_sensor works too, read the same way a control entity's state is. Without either and no control entity, the optimiser instead assumes the load followed its own last plan, which cannot see any of that.",
-            "control_entity": "Optional. If set, the integration switches this on and off to follow the plan, once you enable control -- and its state doubles as the running signal when there is no power sensor. Leave empty to keep control in your own automations. With neither this nor a power sensor set, the optimiser instead trusts its own previous plan -- assuming the load ran whenever it was scheduled to. That is only as accurate as your own follow-through, so a real sensor or control entity is worth adding when you can."
+            "control_entity": "Optional. If set, the integration switches this on and off to follow the plan, once you enable control -- and its state doubles as the running signal when there is no power sensor. Leave empty to keep control in your own automations. With neither this nor a power sensor set, the optimiser instead trusts its own previous plan -- assuming the load ran whenever it was scheduled to. That is only as accurate as your own follow-through, so a real sensor or control entity is worth adding when you can.",
+            "nominal_power_w": "Roughly what this load draws while it is on. One value per optimisation step ({time_step} min), separated by commas. The last value repeats to fill Operating hours. A single value gives constant power."
           },
-          "description": "Power, run time, the time window and the load model are controls on the load's own page, not settings here -- change them there or from an automation."
+          "description": "Change Power here. Runtime, the time window and the load model are controls on the load’s own page."
         },
         "settings": {
           "title": "Load settings",
@@ -1514,7 +1516,7 @@
             "control_entity": "Control entity"
           },
           "data_description": {
-            "nominal_power_w": "Roughly what this load draws while it is on.",
+            "nominal_power_w": "Roughly what this load draws while it is on. One value per optimisation step ({time_step} min), separated by commas. The last value repeats to fill Operating hours. A single value gives constant power.",
             "operating_hours": "How long it needs to run in total. The optimiser chooses when. EMHASS plans in {time_step}-minute steps, so this is rounded to the nearest whole step ({time_step_hours} h).",
             "earliest_start": "Only used if you turn on the load's time window switch afterwards.",
             "latest_end": "May be earlier than the start time, for an overnight window.",
@@ -1557,6 +1559,10 @@
       "initiate_flow": {
         "user": "Add deferrable load",
         "reconfigure": "Edit deferrable load"
+      },
+      "error": {
+        "invalid_power_sequence": "Invalid power sequence or runtime too short for the number of values.",
+        "sequence_not_supported": "Power sequences are not supported for surplus or thermal loads."
       }
     },
     "thermal_load": {
@@ -1834,7 +1840,9 @@
         "invalid_tank_band": "Lowest standby temperature must not exceed required hot-water temperature, which must not exceed maximum temperature.",
         "invalid_cop_curve": "Enter at least two pairs of \"outdoor temperature: COP\", separated by commas, with a COP above 0 and each temperature listed once, such as \"7: 5.2, 0: 4.0, -10: 3.0\".",
         "invalid_heat_pump_value": "Enter a valid value; numbers must be finite and within the allowed range.",
-        "invalid_heat_pump_band": "Setback temperature must not exceed comfort temperature, which must not exceed maximum temperature."
+        "invalid_heat_pump_band": "Setback temperature must not exceed comfort temperature, which must not exceed maximum temperature.",
+        "invalid_power_sequence": "Invalid power sequence or runtime too short for the number of values.",
+        "sequence_not_supported": "Power sequences are not supported for surplus or thermal loads."
       }
     },
     "load_group": {

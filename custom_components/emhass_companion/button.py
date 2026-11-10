@@ -102,9 +102,16 @@ class LoadRunNowButton(EmhassLoadEntity, ButtonEntity):
         select: a load switched to spare solar this afternoon has to lose the
         button then, not only on the next restart.
         """
-        return super().available and not self.load.on_surplus
+        from .util import version_at_least
+
+        supported = not self.load.is_sequence or (
+            self.coordinator.backend_version is not None
+            and version_at_least(self.coordinator.backend_version, "0.18.8")
+        )
+        return super().available and not self.load.on_surplus and supported
 
     async def async_press(self) -> None:
+        self.load.sequence_step_minutes = self.coordinator.config.time_step_minutes
         self.load.force_run()
         self.load.invalidate_battery_lockout()
         self.load.notify()

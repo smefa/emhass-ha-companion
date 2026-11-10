@@ -26,6 +26,12 @@ one, and a switch that far-reaching does not belong under a thumb on a card
 that gets tapped every day. The header still reads "Disabled" while it is off,
 and the switch is on the load's own device page.
 
+On a [sequence load](deferrable_loads.md#sequence-loads) the card shows a
+running cycle as "Running · step 3 of 6", even through a 0 W step. *Ran
+today* becomes the cycle step, then "Done" once the day's cycle has finished.
+*Nominal power* shows the sequence's peak, and the run list shows one run per
+cycle.
+
 ![A deferrable load card: scheduled power, next start, deadline and runtime today, over a timeline of the load's schedule](assets/deferrable-card.png)
 
 ```yaml

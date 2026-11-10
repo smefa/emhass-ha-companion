@@ -660,6 +660,16 @@ class Executor:
                 # being credited while the sensor said "off, disabled".
                 decisions[load.subentry_id] = resolve_should_run(load.mode, False)
                 continue
+            if (
+                load.sequence_cycle_active or load.sequence_start_pending
+            ) and load.check_auto_disarm(now, self.coordinator.config.time_step_minutes):
+                # Completion is time-based and must not wait for the next
+                # optimisation: a failing solve never reaches the coordinator's
+                # own disarm pass, and the hold below would keep the load on.
+                load.notify()
+            if load.sequence_cycle_active or load.sequence_start_pending:
+                decisions[load.subentry_id] = True
+                continue
             scheduled = self._scheduled(load) if use_plan else False
             if load.armable and not load.requested:
                 # The plan outlives the request that produced it: a run that
@@ -685,7 +695,9 @@ class Executor:
         row = data.plan.row_at(dt_util.utcnow())
         if row is None or index >= len(row.deferrables):
             return False
-        return row.deferrables[index] > load.running_threshold_w
+        if load.is_sequence and not load.sequence_owes(dt_util.utcnow()):
+            return False
+        return load.plan_runs_at(row.deferrables[index])
 
     # -- execution ------------------------------------------------------------
 
