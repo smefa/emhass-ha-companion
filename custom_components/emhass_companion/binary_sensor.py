@@ -275,7 +275,9 @@ class LoadShouldRunBinarySensor(EmhassLoadEntity, BinarySensorEntity):
         return {
             **(
                 {
-                    "power_sequence": list(self.load.power_sequence),
+                    "power_sequence": list(
+                        self.load.power_values if self.load.power_sequence else ()
+                    ),
                     "sequence_step": min(
                         len(self.load.sequence_cycle.values),
                         self.load.sequence_cycle.elapsed(

@@ -712,7 +712,12 @@ class LoadScheduledPowerSensor(EmhassLoadEntity, SensorEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         return {
             **(
-                {"power_sequence": list(self.load.power_sequence), "cycles": self._cycles()}
+                {
+                    "power_sequence": list(
+                        self.load.power_values if self.load.power_sequence else ()
+                    ),
+                    "cycles": self._cycles(),
+                }
                 if self.load.is_sequence or self.load.sequence_cycle
                 else {}
             ),

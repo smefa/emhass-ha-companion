@@ -2165,6 +2165,13 @@ class DeferrableLoadSubentryFlow(ConfigSubentryFlow):
                     # putting the old value back, loaded entry or not.
                     data[CONF_NOMINAL_POWER_EDITED_AT] = dt_util.utcnow().isoformat()
 
+            if CONF_POWER_SEQUENCE in clean and clean[CONF_POWER_SEQUENCE] != list(
+                subentry.data.get(CONF_POWER_SEQUENCE, ())
+            ):
+                # A new shape: its peak is the new Power. Without the stamp
+                # the number would restore a value scaled to the old shape.
+                data[CONF_NOMINAL_POWER_EDITED_AT] = dt_util.utcnow().isoformat()
+
             for key in self._clearable_keys:
                 if key not in user_input:
                     data.pop(key, None)

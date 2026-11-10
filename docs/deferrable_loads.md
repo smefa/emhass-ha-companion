@@ -143,7 +143,10 @@ second one.
   **Recurrence**. The next cycle starts again from the first step.
 - **Changing the sequence.** Use **Reconfigure** on the load. A change
   applies to the next cycle, not the one already running. The Power number
-  on the device page is unavailable while the load has a sequence.
+  on the device page is the sequence's peak. It starts at the highest value
+  you entered; lowering it (for example from an automation that follows the
+  base load) scales every step down in proportion, and a new sequence resets
+  it to the new peak. A cycle already running keeps its values.
 - **Ignored settings.** A sequence sets the power of every step, so
   *Lowest power while running*, *Runs at full power only*, *Must run in one
   unbroken block*, *Most starts per plan* and the minimum on/off times are
