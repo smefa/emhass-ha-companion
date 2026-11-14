@@ -453,6 +453,71 @@ function integrate(points, endT) {
   return { up, down, net: up - down, peak };
 }
 
+/**
+ * The value a stepped series holds at one instant, or NaN before its first point.
+ *
+ * `hold` is how long the last point stays in force; left out, it never ends.
+ */
+function valueAt(points, t, hold) {
+  let found = NaN;
+  for (let i = 0; i < points.length; i++) {
+    if (points[i].t > t) break;
+    found = points[i].v;
+    if (i === points.length - 1 && Number.isFinite(hold) && t >= points[i].t + hold) found = NaN;
+  }
+  return found;
+}
+
+/**
+ * Axis ticks on whole clock hours, at most `maxCount` of them.
+ *
+ * Dividing the window into equal parts labels a plan "13:47, 19:22, 00:57":
+ * correct, and unreadable. A tick belongs on an hour a person would name.
+ */
+function hourTicks(t0, t1, maxCount) {
+  const hour = 3600000;
+  const span = (t1 - t0) / hour;
+  let every = 24;
+  for (const candidate of [1, 2, 3, 6, 12, 24]) {
+    if (span / candidate <= Math.max(maxCount, 2)) {
+      every = candidate;
+      break;
+    }
+  }
+  const ticks = [];
+  const start = new Date(t0);
+  start.setMinutes(0, 0, 0);
+  let t = start.getTime();
+  for (let guard = 0; t <= t1 && guard < 1000; guard++) {
+    const local = new Date(t).getHours();
+    if (t >= t0 && local % every === 0) ticks.push({ t, midnight: local === 0 });
+    t += hour;
+  }
+  return ticks;
+}
+
+/**
+ * A y-axis that ends on round numbers: `{lo, hi, step, ticks}`.
+ *
+ * The data's own extent makes an axis reading "0.37 .. 2.83"; the eye wants
+ * 0, 1, 2, 3 and reads everything else against them.
+ */
+function niceScale(low, high, count) {
+  const lo = Number.isFinite(low) ? low : 0;
+  const hi = Number.isFinite(high) && high > lo ? high : lo + 1;
+  const raw = (hi - lo) / Math.max(count, 1);
+  const magnitude = Math.pow(10, Math.floor(Math.log10(raw)));
+  const norm = raw / magnitude;
+  const step = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 2.5 ? 2.5 : norm <= 5 ? 5 : 10) * magnitude;
+  const first = Math.floor(lo / step + 1e-9) * step;
+  const last = Math.ceil(hi / step - 1e-9) * step;
+  const ticks = [];
+  for (let v = first; v <= last + step / 2; v += step) {
+    ticks.push(Math.abs(v) < step / 1e6 ? 0 : v);
+  }
+  return { lo: first, hi: last, step, ticks };
+}
+
 /* --------------------------------------------------------------- discovery */
 
 /**
@@ -728,6 +793,37 @@ const TOKENS = `
   .empty { color: var(--emh-dim); font-size: .88rem; padding: 8px 0; }
   .hint { color: var(--emh-dim); font-size: .74rem; margin-top: 8px; }
   svg { display: block; width: 100%; }
+`;
+
+/*
+ * The second token block, for the horizon and briefing cards.
+ *
+ * Their three series colours are fixed rather than taken from the energy
+ * dashboard's theme variables: the dashboard's defaults fail a colour-vision
+ * check against each other (its battery teal and grid blue sit too close), and
+ * these three were checked as a set on both a light and a dark surface. A theme
+ * can still override each one.
+ */
+const STUDIO_TOKENS = `
+  :host {
+    --emh-s-solar: var(--emh-studio-solar, #c97a00);
+    --emh-s-battery: var(--emh-studio-battery, #0a9a82);
+    --emh-s-grid: var(--emh-studio-grid, #4f6bdc);
+    --emh-s-price: var(--emh-studio-price, #c2468f);
+    --emh-s-ink: var(--primary-text-color, #212121);
+    --emh-s-card: var(--ha-card-background, var(--card-background-color, #fff));
+  }
+  .eyebrow { font-size: .66rem; font-weight: 600; letter-spacing: .09em;
+             text-transform: uppercase; color: var(--emh-dim); }
+  .swatch { display: inline-block; width: 8px; height: 8px; border-radius: 2px;
+            flex: 0 0 auto; }
+  .swatch.line { height: 2px; width: 10px; border-radius: 1px; }
+  .swatch.solar { background: var(--emh-s-solar); }
+  .swatch.battery { background: var(--emh-s-battery); }
+  .swatch.grid { background: var(--emh-s-grid); }
+  .swatch.house { background: var(--emh-s-ink); }
+  .swatch.price { background: var(--emh-s-price); }
+  .swatch.load { background: var(--emh-accent); }
 `;
 
 /* ------------------------------------------------------------ timeline svg */
@@ -1257,6 +1353,7 @@ export {
   formatSpan,
   formatTime,
   haptic,
+  hourTicks,
   integrate,
   isUsable,
   labelFor,
@@ -1268,6 +1365,7 @@ export {
   measuredBy,
   mergeHistory,
   moreInfo,
+  niceScale,
   num,
   pastBand,
   pressButton,
@@ -1277,8 +1375,10 @@ export {
   showsSection,
   stateOf,
   statTile,
+  STUDIO_TOKENS,
   svg,
   tag,
   trackSvg,
+  valueAt,
   valueBox,
 };

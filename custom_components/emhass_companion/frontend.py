@@ -54,6 +54,8 @@ BUNDLES: tuple[tuple[str, str], ...] = (
     ("emhass-health-card.js", f"/{DOMAIN}/emhass-health-card.js"),
     ("emhass-status-card.js", f"/{DOMAIN}/emhass-status-card.js"),
     ("emhass-overview-card.js", f"/{DOMAIN}/emhass-overview-card.js"),
+    ("emhass-briefing-card.js", f"/{DOMAIN}/emhass-briefing-card.js"),
+    ("emhass-horizon-card.js", f"/{DOMAIN}/emhass-horizon-card.js"),
     ("emhass-tariff-card.js", f"/{DOMAIN}/emhass-tariff-card.js"),
     ("emhass-economy-card.js", f"/{DOMAIN}/emhass-economy-card.js"),
     ("emhass-tank-card.js", f"/{DOMAIN}/emhass-tank-card.js"),

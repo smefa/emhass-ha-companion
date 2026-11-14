@@ -18,6 +18,23 @@ deferrable load showing when it's scheduled to run. A vertical line marks
 
 ![The plan card: solar and consumption as a filled area and lines above, charge level and both prices below, and a row per deferrable load](../assets/plan-card.png)
 
+## Horizon and briefing cards
+
+```yaml
+type: custom:emhass-horizon-card
+```
+
+```yaml
+type: custom:emhass-briefing-card
+```
+
+Two alternative looks at the same plan. The horizon card stacks power, price,
+charge level and loads as panels on one time axis, with a readout that follows
+the pointer. The briefing card says in words what the house is doing and until
+when, then lists what happens next. Both have a visual editor where each part
+can be switched off; the options are listed in
+[the card reference](../dashboard_cards.md#alternative-plan-and-overview-cards).
+
 ## Deferrable load card
 
 ```yaml
