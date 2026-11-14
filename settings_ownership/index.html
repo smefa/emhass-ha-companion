@@ -1,0 +1,2023 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A Home Assistant integration that makes EMHASS usable without writing YAML.">
+      
+      
+      
+        <link rel="canonical" href="https://smefa.github.io/emhass-ha-companion/settings_ownership/">
+      
+      
+        <link rel="prev" href="../profiles/">
+      
+      
+        <link rel="next" href="../inverter_profile_roadmap/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/icon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+    
+    
+      
+        <title>Settings ownership - EMHASS Companion</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#effective-emhass-settings" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="EMHASS Companion" class="md-header__button md-logo" aria-label="EMHASS Companion" data-md-component="logo">
+      
+  <img src="../assets/logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            EMHASS Companion
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Settings ownership
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="teal" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/smefa/emhass-ha-companion" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    smefa/emhass-ha-companion
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="EMHASS Companion" class="md-nav__button md-logo" aria-label="EMHASS Companion" data-md-component="logo">
+      
+  <img src="../assets/logo.png" alt="logo">
+
+    </a>
+    EMHASS Companion
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/smefa/emhass-ha-companion" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    smefa/emhass-ha-companion
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    User Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/deferrable_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deferrable loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/thermal_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Thermal loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/surplus_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Surplus loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/inverter_control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inverter control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/hub_controls/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hub controls
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Actions (advanced)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/network_tariffs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Network tariffs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/dashboard_cards/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dashboard cards
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Technical reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Technical reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_2" id="__nav_3_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Loads
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Loads
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deferrable_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deferrable loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../thermal_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Thermal loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../surplus_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Surplus loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../on_demand_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    On-demand loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../load_groups/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Load groups
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../battery_lockout/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Battery lockout
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../request_run_service/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Request-run service (planned)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dashboard_cards/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dashboard cards
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../lab_cards/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Lab cards (experimental)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../entities/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Entities
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../savings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cost and savings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../end_soc/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    End SOC
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../handing_over_control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Handing over control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../inverter_control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inverter control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fronius_gen24_scripts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fronius GEN24 scripts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data_sources/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data sources
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../grid_limits/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dynamic grid limits
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../network_tariffs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Network tariffs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../template_additions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Template additions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../profiles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Writing a profile
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Settings ownership
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Settings ownership
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#ownership-and-destinations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ownership and destinations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ml-settings-and-saved-model-compatibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ML settings and saved-model compatibility
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#manual-export" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manual export
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#setup-and-reload" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setup and reload
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#compatibility-and-explicit-clearing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compatibility and explicit clearing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#profiles-and-rounding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Profiles and rounding
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../inverter_profile_roadmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inverter profile roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#ownership-and-destinations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ownership and destinations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ml-settings-and-saved-model-compatibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ML settings and saved-model compatibility
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#manual-export" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manual export
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#setup-and-reload" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setup and reload
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#compatibility-and-explicit-clearing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compatibility and explicit clearing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#profiles-and-rounding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Profiles and rounding
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/smefa/emhass-ha-companion/edit/main/docs/settings_ownership.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="effective-emhass-settings">Effective EMHASS settings<a class="headerlink" href="#effective-emhass-settings" title="Permanent link">&para;</a></h1>
+<p>Optimisation requests use <code>effective_settings.resolve_effective_settings</code> for
+static settings, followed by action-specific inputs in <code>payload.build_payload</code>.
+The persistent projection is an <strong>allowlisted static baseline</strong>, not a copy of
+an optimisation request. It is exported only by the manual action described
+below; setup and reload never write it. ML fitting and prediction invoked by
+day-ahead/MPC share the resolver and do not depend on EMHASS's saved settings.
+Explicit supported profile values retain their existing precedence.</p>
+<p>In short:</p>
+<ul>
+<li><strong>API only.</strong> Companion talks to EMHASS through its HTTP API (<code>/action/*</code>,
+  <code>/get-config</code>, <code>/set-config</code>). It never reads or writes backend files, and
+  profile YAML is Companion input, not a backend configuration source.</li>
+<li><strong>Requests carry the static settings.</strong> A run needs no earlier export or
+  sync. EMHASS still needs the saved baseline it requires before any action,
+  its credentials and storage paths, and compatible trained model files.</li>
+<li><strong>Export is manual and limited.</strong> <strong>Write settings to EMHASS</strong> writes the
+  allowlisted static baseline and nothing live.</li>
+<li><strong>Limits of reproduction.</strong> The exported baseline and Companion's settings
+  cannot recreate a past run. That needs its original runtime payload and
+  compatible backend and model state.</li>
+</ul>
+<h2 id="ownership-and-destinations">Ownership and destinations<a class="headerlink" href="#ownership-and-destinations" title="Permanent link">&para;</a></h2>
+<p>The executable field inventory is <code>effective_settings.SETTINGS</code>: each entry
+records its public runtime name, persistent-config destination (or no
+destination), minimum version, default/clearing value and profile policy.
+Public runtime and persistent names currently coincide; internal legacy names
+such as <code>freq</code>, <code>var_load</code>, <code>num_batteries</code> and <code>Pc_max</code> are not API payload keys.
+The resolver never derives the persistent baseline from live action data.</p>
+<table>
+<thead>
+<tr>
+<th>Owner / family</th>
+<th>Fields</th>
+<th>Destination and consuming path</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Companion static: timing / objective</td>
+<td><code>optimization_time_step</code>, <code>method_ts_round</code>, <code>costfun</code></td>
+<td>Both projections; runtime merge precedes forecast-date construction, retrieval and optimisation.</td>
+</tr>
+<tr>
+<td>Companion static: battery</td>
+<td><code>set_use_battery</code>, <code>number_of_batteries</code>, capacity, charge/discharge powers and efficiencies, SOC min/max/target, charge/discharge restrictions, first priority, dynamic limits, throughput weights, SOC deficit/surplus costs and thresholds, stress cost/segments, charge derating, final reward</td>
+<td>Both; <code>plant_conf</code> and <code>optim_conf</code> consumed by <code>Optimization</code>. Disabled battery still sends the static baseline.</td>
+</tr>
+<tr>
+<td>Companion static: inverter / PV</td>
+<td>Hybrid flag, AC input/output powers and efficiencies, both inverter power curves, inverter stress cost/segments, <code>compute_curtailment</code>, <code>set_use_pv</code>, PV module/inverter models, tilt/azimuth, modules/string, strings/inverter</td>
+<td>Both; <code>Forecast</code> and <code>Optimization</code>. A supplied PV series enables PV unless the profile explicitly disables it. Native PV profile supplies its own model/geometry. Unselected geometry is not fabricated.</td>
+</tr>
+<tr>
+<td>Companion static: physical grid</td>
+<td><code>maximum_power_from_grid</code>, <code>maximum_power_to_grid</code></td>
+<td>Persistent projection uses configured scalars only; runtime request replaces them with sensor/phase/window-constrained limits.</td>
+</tr>
+<tr>
+<td>Companion static: solver</td>
+<td><code>lp_solver_timeout=45</code>, <code>lp_solver_mip_rel_gap=0.01</code> (both user-adjustable under Advanced settings; the choice outranks a profile), <code>num_threads=0</code></td>
+<td>Both; optimisation solver invocation. Solver <strong>selection</strong> (<code>lp_solver</code>, not in associations) and installed solver packages remain backend-owned.</td>
+</tr>
+<tr>
+<td>Companion static: native history</td>
+<td><code>historic_days_to_retrieve=2</code> (at least 9 for ML), <code>load_negative=false</code>, <code>set_zero_min=true</code>, <code>sensor_replace_zero=[]</code>, <code>sensor_linear_interp=[]</code>, profile-selected load/PV sensor</td>
+<td>Both; <code>RetrieveHass</code> preprocessing. A profile may supply sensor-specific preprocessing; credentials and transport remain backend-owned.</td>
+</tr>
+<tr>
+<td>Companion static: native forecasts / ML</td>
+<td>Load/weather methods, PV quantile bias, Open-Meteo cache age, adjusted-PV flag and model settings, battery-identification flag/trust/model age, <code>var_model</code>, <code>num_lags</code>; explicit profile model/training options</td>
+<td>Both; <code>Forecast</code>/ML configuration. The load sensor is the single source of <code>var_model</code> (a differing profile value is ignored with a warning, because prediction indexes the retrieved history by it). Default lags cover the whole-day-rounded day-ahead horizon. ML defaults are <code>model_type=long_train_data</code>, <code>sklearn_model=KNeighborsRegressor</code>, <code>split_date_delta=48h</code>, <code>perform_backtest=false</code>, <code>mlforecaster_weather_features=[]</code>.</td>
+</tr>
+<tr>
+<td>Companion static: native tariffs</td>
+<td>Load/production forecast methods, HP periods/costs, constant sale price, tariff timezone, <code>set_total_pv_sell</code></td>
+<td>Both; native tariff forecasting and optimisation. Timestamped price inputs take precedence in the backend.</td>
+</tr>
+<tr>
+<td>Companion static: thermal defaults</td>
+<td><code>heat_topology={}</code>, <code>cop_solver=static</code>, <code>cop_solver_tolerance=0.5</code>, <code>cop_hx_approach=5</code></td>
+<td>Both where supported. Empty topology prevents post-merge compilation from replacing Companion's registry. COP settings affect native thermal forecasting.</td>
+</tr>
+<tr>
+<td>Runtime only: topology</td>
+<td><code>shared_thermal_tanks=[]</code>, <code>is_electric_load=[true, ...]</code>, <code>def_load_config=[{}, ...]</code>, <code>deferrable_load_groups</code>, <code>cost_forecast_per_deferrable_load=[null, ...]</code></td>
+<td>Action only. Independent inherited thermal/tank/group/cost models are cleared. Thermal configurations are rebuilt at each load's registry index; null <strong>entries</strong> disable optional costs, not null field-level overrides.</td>
+</tr>
+<tr>
+<td>Runtime only: load schedule and progress</td>
+<td>Number of loads, nominal/minimum powers, operating hours/timesteps, start/end timesteps, semi-continuous/single-constant flags, startup penalties/limits, minimum on/off times, current state/power/completed/on/off timesteps</td>
+<td>Action only. Even nominal arrays can contain parked or pinned live values, so none are exported as static load definitions.</td>
+</tr>
+<tr>
+<td>Runtime only: current inputs</td>
+<td><code>soc_init</code>, <code>soc_final</code>, five timestamped forecast mappings, MPC <code>alpha</code>/<code>beta</code>, <code>prediction_horizon</code>, day-ahead <code>delta_forecast_daily</code></td>
+<td>Action only. Forecast mappings retain explicit timestamps; backend resampling uses the same requested rounding.</td>
+</tr>
+<tr>
+<td>Runtime only: grid / demand / lockout</td>
+<td>Dynamic import/export limits, <code>capacity_cost_per_kw</code>, <code>current_period_peak</code>, charge windows, charge interval/history, time-varying discharge weights</td>
+<td>Action only. Built by the existing safety, tariff and lockout code; baseline export must never capture these temporary values.</td>
+</tr>
+<tr>
+<td>Backend only</td>
+<td>HA URL/token, location/timezone, provider/database credentials, transport/database connection options, data/model/storage paths, logger/process settings, installed solvers, publication lifecycle/identifiers, valid bootstrap config and saved trained models</td>
+<td>Neither resolver projection. These remain prerequisites and may still affect retrieval, publication or native forecasting. The resolver is not a claim of complete backend statelessness.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="ml-settings-and-saved-model-compatibility">ML settings and saved-model compatibility<a class="headerlink" href="#ml-settings-and-saved-model-compatibility" title="Permanent link">&para;</a></h2>
+<p>The existing training action sends only the shared ML/history/preprocessing
+projection, including timestep and rounding, plus the selected load sensor,
+<code>var_model</code>, lag count, model identity, estimator and training options. Native
+ML optimisation prediction receives the same values. No standalone prediction
+or tuning workflow exists in Companion. Training is automatic and also
+available as the <code>emhass_companion.train_load_forecaster</code> action; there is no
+button.
+History retrieval is explicitly at least nine days for ML, matching the
+backend's training minimum, and longer profile-selected history is preserved.</p>
+<p>Companion persists the complete effective fit-settings snapshot only after a
+successful fit. Compatibility excludes request rounding, weather-provider
+selection and cache age: rounding affects the request grid, and ML covariates
+come from Open-Meteo independently of the PV weather-provider choice. These
+values are still sent on requests. A changed sensor, timestep, lags, model/estimator, weather
+features, history or preprocessing invalidates that snapshot. Legacy
+sensor-only records also require a new fit. Until retraining succeeds, runs
+use the existing real-sensor bootstrap fallback and ML-not-ready repair;
+automatic training retains its history check and retry cooldown. A model that
+matches the settings is also refitted weekly, because a trained model does not
+learn from new data; if the history check fails at that point the working model
+is kept and the check is retried later. The action and automatic fits share a
+lock. An attempted fit invalidates the previous
+snapshot before contacting EMHASS, so a failed retrain is not certified.</p>
+<p>This checks Companion's last successful fit settings, not the contents of
+backend pickle files. Deletion, replacement or external retraining of those
+files is not detectable through this local snapshot; existing failed-run
+fallback still applies. Compatible trained model files and valid backend
+initialisation remain required. Runtime overrides cannot replace trained models.</p>
+<h2 id="manual-export">Manual export<a class="headerlink" href="#manual-export" title="Permanent link">&para;</a></h2>
+<p><strong>Write settings to EMHASS</strong> (the admin-only
+<code>emhass_companion.export_settings</code> action; there is no button) is the only way the persistent
+projection reaches EMHASS. It uses
+<code>coordinator._persistent_baseline</code>, which feeds the resolver the same
+configuration, cost function, rounding mode, profile precedence, configured PV
+enablement and version gates as an optimisation request, then keeps only
+<code>EffectiveSettings.persistent()</code>.</p>
+<ol>
+<li>Resolve the baseline; a profile that no longer resolves stops the export
+   before EMHASS is contacted.</li>
+<li><code>GET /get-config</code> for the active configuration. An empty or non-object
+   answer aborts: <code>/set-config</code> rebuilds from EMHASS defaults, so posting only
+   Companion's keys would reset everything else.</li>
+<li>Overlay the baseline onto the fetched configuration and <code>POST /set-config</code>
+   with the whole result. Unrelated keys, including credentials, storage paths,
+   solver selection and settings from newer EMHASS releases, round-trip
+   unchanged.</li>
+</ol>
+<p>Only the allowlist is written, with the same explicit clearing values as
+requests (empty topology, <code>[]</code> curves/derating, <code>false</code> flags). Fields the
+detected backend version does not support are left as the backend has them.</p>
+<p>Because clearing values are part of the baseline, the export deliberately
+overwrites some backend values a user may have set by hand: a saved
+<code>heat_topology</code>, thermal tanks, battery charge taper, inverter power curves,
+derating and the one-battery setting are reset to their empty values, and the
+native forecast and tariff settings take Companion's defaults (placeholders,
+not real prices) unless a profile supplies them. An empty <code>load_peak_hour_periods</code>, which clears peak pricing in a request, is
+saved as EMHASS's own placeholder period instead, because EMHASS's configuration
+page cannot render an empty value there and stops building the sections after
+Tariff. The user-facing list is under
+<a href="../guide/hub_controls/#write-settings-to-emhass">Hub controls</a>.
+Live and temporary inputs are not in the allowlist, and the grid limits written
+are the configured scalars, not the sensor/phase/window-constrained values.</p>
+<p>A failed read, refused save or unreachable backend raises an error naming the
+step and the HTTP status; success is logged only after <code>/set-config</code> accepts
+the request. The fetched configuration, and any response body, is never logged
+or quoted in an error. Exports are serialised. No backend file is read or
+written and no YAML is produced.</p>
+<p>This makes EMHASS's own UI and manual runs more representative of Companion's
+settings. It is not a reproduction of a Companion run: that needs the original
+runtime payload (live inputs, loads, forecasts) and compatible backend and
+trained-model state. Normal runs never require it.</p>
+<h2 id="setup-and-reload">Setup and reload<a class="headerlink" href="#setup-and-reload" title="Permanent link">&para;</a></h2>
+<p>Setup no longer persists the timestep, load sensor, <code>var_model</code>, lag count or
+any other Companion setting. It makes one API-only initialisation call:
+fetch the active configuration and save it back unchanged. EMHASS rejects every
+<code>/action/*</code> request until it has a saved configuration, and <code>/set-config</code>
+creates it; for a backend that already has one the call is a no-op, so a value
+chosen in EMHASS (timestep, load sensor, ML model) is never overwritten by a
+reload. Nothing is read from or written to backend files.</p>
+<ul>
+<li><strong>Backend unavailable at setup:</strong> the failure is logged and setup continues.
+  Reloading retries it. Runs, fits and the manual export report their own
+  errors.</li>
+<li><strong>Missing baseline:</strong> an empty answer from <code>/get-config</code> is saved back as the
+  EMHASS defaults, which creates the baseline.</li>
+<li><strong>Not required for normal runs:</strong> every request carries the effective static
+  settings, so a run needs neither a successful initialisation call nor a
+  manual export, only the baseline EMHASS itself requires.</li>
+<li><strong>Still backend-owned:</strong> that baseline, credentials and connection options,
+  and trained model files. A changed timestep, sensor or lag count invalidates
+  Companion's record of the last fit (see above) rather than being pushed to
+  EMHASS; retrain, or export, as needed.</li>
+</ul>
+<h2 id="compatibility-and-explicit-clearing">Compatibility and explicit clearing<a class="headerlink" href="#compatibility-and-explicit-clearing" title="Permanent link">&para;</a></h2>
+<p>The minimum supported baseline is EMHASS <strong>0.17.9</strong>. Unknown, missing or invalid
+versions receive only this known capability set. Below-baseline versions are
+already rejected at integration setup. New optional fields are omitted on older
+or unknown versions, including custom-profile contributions to those fields.</p>
+<table>
+<thead>
+<tr>
+<th>First supported release</th>
+<th>Runtime field</th>
+<th>Default / clearing policy</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0.17.9</td>
+<td>Base static inventory, <code>heat_topology</code>, electric flags and direct <code>def_load_config</code> runtime handler</td>
+<td>Empty object disables topology; empty/per-load-empty arrays clear flat load models. False/zero disable owned flags and penalties.</td>
+</tr>
+<tr>
+<td>0.18.0</td>
+<td><code>number_of_batteries</code></td>
+<td><code>1</code>; Companion represents one aggregate battery.</td>
+</tr>
+<tr>
+<td>0.18.2</td>
+<td><code>capacity_charge_interval_timesteps</code></td>
+<td><code>1</code> unless a live demand-charge interval overrides it; action only. Prevents an inherited rolling interval changing instantaneous tariffs.</td>
+</tr>
+<tr>
+<td>0.18.3</td>
+<td><code>battery_charge_power_derating</code></td>
+<td><code>[]</code> means flat charge-power ceiling, not inherited derating.</td>
+</tr>
+<tr>
+<td>0.18.5</td>
+<td><code>battery_soc_final_reward_factor</code>, both inverter curves, tariff timezone</td>
+<td><code>0</code>, <code>[]</code>, <code>[]</code>, <code>""</code> respectively.</td>
+</tr>
+<tr>
+<td>0.18.6</td>
+<td>Direct <code>shared_thermal_tanks</code> runtime handler, COP solver fields</td>
+<td><code>[]</code> clears shared tanks; pinned COP defaults prevent inheritance.</td>
+</tr>
+</tbody>
+</table>
+<p>These gates were checked against upstream tagged <code>associations.csv</code> and the
+special handlers in <code>utils.treat_runtimeparams</code>, not just association presence.
+In particular, <code>def_load_config</code> had a direct handler before it was listed in
+associations. Shared tanks cannot be reliably cleared per-request on an older
+backend without its direct handler; upgrading is required for that isolation.
+No field uses JSON null to clear a saved setting. Unset Companion curtailment
+now explicitly resolves to false rather than inheriting the backend value.</p>
+<p>Pinned native tariff defaults are fallback values, not evidence of a working
+price source. Runs without price series or explicit profile tariff methods
+produce warnings, and support diagnostics flag default-only forecast sources.
+Do not rely on those plans until a price source has been configured. History
+defaults deliberately replace saved preprocessing/history choices; custom
+profiles can supply supported alternatives.</p>
+<h2 id="profiles-and-rounding">Profiles and rounding<a class="headerlink" href="#profiles-and-rounding" title="Permanent link">&para;</a></h2>
+<p>Existing selection order remains price, PV, load, then temperature; later
+profiles win. Supported static fields in the inventory may override defaults
+and Companion values, including solver, native forecast/model, PV, tariff and
+optional inverter settings. Unknown keys, backend-owned fields, live-input
+keys and null values are ignored with a warning naming the key only, never its
+value. Version gates apply <strong>after</strong> profiles, so a profile cannot bypass them.</p>
+<p>Timestep, rounding, one-battery representation, empty topology/tanks, dynamic
+grid safety limits and <code>var_model</code> (always the load sensor) are Companion
+invariants, not profile overrides. A profile value that cannot be used, such as
+a non-numeric <code>historic_days_to_retrieve</code> for ML, fails the run, fit or export
+with a message naming the setting rather than an unhandled error. Registry
+load topology/progress cannot be replaced by a profile. This intentionally
+narrows the previous unrestricted dictionary merge to an explicit contract.
+Lockout penalties are applied after profile baseline weights and cannot be
+replaced by them. Nonempty inverter curves are ignored with a warning when
+the effective hybrid flag is off, preventing invalid runtime requests.</p>
+<p>Production PV enablement comes from the selected PV profile, not the current
+availability of its forecast series. The No solar profile still explicitly
+disables PV. Static exports must pass configured enablement to the resolver;
+the standalone payload builder's series inference is not an export input.</p>
+<p>Rounding policy retains the coordinator's selected mode (<code>nearest</code> initially,
+with its existing plan-based learning) and sends it as <code>method_ts_round</code> on
+every request. All positional arrays and coverage endpoints use
+<code>PayloadInputs.row_zero</code>; custom profiles cannot change rounding behind them.
+Timestamped forecasts are aligned by EMHASS. A request crossing a time-grid
+boundary between preparation and backend execution still has clock-race risk;
+this change does not introduce a server-side request timestamp.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "navigation.tracking", "search.suggest", "search.highlight", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.a5f9d56c.min.js"></script>
+      
+    
+  </body>
+</html>
