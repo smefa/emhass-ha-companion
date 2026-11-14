@@ -928,6 +928,59 @@ EmhassDeferrableSwipeCard.css = `
  * readable at 6 px per bucket. Controls are behind a chevron, so a dashboard
  * of eight loads stays a list rather than eight control panels.
  */
+const STRIP_CONTROLS = [
+  ["show_requested", "Requested", "Show the request toggle for on-demand and surplus loads."],
+  ["show_run_now", "Run now", "Show the manual start button."],
+  ["show_run_within", "Run within", "Show the deadline control for on-demand loads."],
+  ["show_hours_needed", "Hours needed", "Show the operating-hours control. Off by default."],
+];
+const STRIP_OFF_BY_DEFAULT = new Set(["show_hours_needed"]);
+
+function showsStripControl(config, key) {
+  return config[key] === undefined ? !STRIP_OFF_BY_DEFAULT.has(key) : config[key] !== false;
+}
+
+/** A compact number button; its slider lives in the top layer, outside the drawer clip. */
+function stripNumberControl(parent, label, onCommit) {
+  const button = tag("button", "control", parent, label);
+  const value = tag("span", "control-value", button);
+  const dialog = tag("dialog", "number-dialog", parent);
+  const heading = tag("div", "number-heading", dialog, label);
+  dialog.setAttribute("aria-label", label);
+  const close = tag("button", "mini", heading, "\u00d7");
+  close.setAttribute("aria-label", "Close");
+  close.addEventListener("click", () => dialog.close());
+  const input = tag("input", null, dialog);
+  input.type = "range";
+  input.setAttribute("aria-label", label);
+  const output = tag("output", null, dialog);
+  button.setAttribute("aria-haspopup", "dialog");
+  button.addEventListener("click", () => dialog.showModal());
+  input.addEventListener("input", () => {
+    output.textContent = value.textContent = formatHours(Number(input.value));
+    input.setAttribute("aria-valuetext", output.textContent);
+  });
+  input.addEventListener("change", () => onCommit(Number(input.value)));
+  button.setState = (state, floor) => {
+    button.disabled = !state || !Number.isFinite(num(state));
+    button.classList.toggle("enabled", !button.disabled);
+    if (button.disabled && dialog.open) dialog.close();
+    // A live HA update must not reset a slider while the user edits it.
+    if (dialog.open) return;
+    const attrs = (state && state.attributes) || {};
+    const step = Number(attrs.step) || 0.5;
+    const min = Math.max(Number(attrs.min) || 0, Number.isFinite(floor) ? floor : 0);
+    input.min = Math.ceil(min / step) * step;
+    input.max = Math.max(Number(input.min), Number(attrs.max) || 24);
+    input.step = step;
+    input.value = button.disabled ? input.min : num(state);
+    output.textContent = value.textContent = button.disabled ? "\u2013" : formatHours(Number(input.value));
+    input.setAttribute("aria-valuetext", output.textContent);
+  };
+  button.close = () => { if (dialog.open) dialog.close(); };
+  return button;
+}
+
 class EmhassDeferrableStripCard extends LiveCard {
   static getStubConfig(hass) {
     const loads = findLoads(hass);
@@ -963,24 +1016,15 @@ class EmhassDeferrableStripCard extends LiveCard {
     const line = tag("div", "line", middle);
     ui.name = tag("span", "nm", line, "");
     ui.state = tag("span", "st", line, "");
-    ui.buckets = tag("div", "buckets", middle);
+    const timeline = tag("div", "timeline", middle);
+    ui.buckets = tag("div", "buckets", timeline);
+    ui.horizon = tag("span", "horizon", timeline);
     ui.sub = tag("div", "sub", middle, "");
 
-    // Bubble-card's sub-buttons: the two actions worth taking without opening
-    // anything, pinned to the trailing edge.
     const side = tag("div", "side", row);
-    ui.runButton = tag("button", "mini", side);
-    const runIcon = document.createElement("ha-icon");
-    runIcon.setAttribute("icon", "mdi:flash");
-    ui.runButton.appendChild(runIcon);
-    ui.runButton.addEventListener("click", () => {
-      const entityId = this._entity("run_now");
-      if (entityId) {
-        haptic("medium");
-        pressButton(this._hass, entityId);
-      }
-    });
     ui.chevron = tag("button", "mini", side);
+    ui.chevron.setAttribute("aria-label", "Expand controls");
+    ui.chevron.setAttribute("aria-expanded", "false");
     ui.chevronIcon = document.createElement("ha-icon");
     ui.chevronIcon.setAttribute("icon", "mdi:chevron-down");
     ui.chevron.appendChild(ui.chevronIcon);
@@ -991,20 +1035,32 @@ class EmhassDeferrableStripCard extends LiveCard {
     });
 
     ui.drawer = tag("div", "drawer", pad);
+    ui.drawer.id = "strip-controls";
+    ui.chevron.setAttribute("aria-controls", ui.drawer.id);
     ui.drawerBody = tag("div", "drawer-body", ui.drawer);
-    ui.requestRow = toggleRow(ui.drawerBody, "Requested", "Ask for a run");
-    ui.requestRow.button.addEventListener("click", () => this._toggle("load_requested"));
-    ui.withinRow = sliderRow(ui.drawerBody, "Run within", (value) => `${value} h`, 0.5);
-    ui.withinRow.onCommit = (value) => {
-      const entityId = this._entity("run_within");
+    ui.requestButton = tag("button", "control", ui.drawerBody, "Requested");
+    ui.requestButton.addEventListener("click", () => this._toggle("load_requested"));
+    ui.runButton = tag("button", "control", ui.drawerBody, "Run now");
+    ui.runButton.addEventListener("click", () => {
+      const entityId = this._entity("run_now");
+      if (entityId) { haptic("medium"); pressButton(this._hass, entityId); }
+    });
+    const set = (key, value) => {
+      const entityId = this._entity(key);
       if (entityId) setNumber(this._hass, entityId, value);
     };
+    ui.withinButton = stripNumberControl(ui.drawerBody, "Run within", (value) => set("run_within", value));
+    ui.hoursButton = stripNumberControl(ui.drawerBody, "Hours needed", (value) => set("operating_hours", value));
   }
 
   _syncDrawer() {
     const ui = this._ui;
     ui.drawer.style.height = this._expanded ? `${ui.drawerBody.offsetHeight}px` : "0px";
     ui.chevronIcon.setAttribute("icon", this._expanded ? "mdi:chevron-up" : "mdi:chevron-down");
+    ui.chevron.setAttribute("aria-expanded", String(this._expanded));
+    ui.chevron.setAttribute("aria-label", this._expanded ? "Collapse controls" : "Expand controls");
+    ui.drawer.inert = !this._expanded;
+    if (!this._expanded) { ui.withinButton.close(); ui.hoursButton.close(); }
   }
 
   _entity(key) {
@@ -1036,13 +1092,31 @@ class EmhassDeferrableStripCard extends LiveCard {
 
     this._buckets(view);
 
-    ui.runButton.style.display = this._entity("run_now") ? "" : "none";
     const asks = view.onDemand || view.onSurplus;
-    ui.requestRow.style.display = asks ? "" : "none";
-    ui.requestRow.setState(view.isRequested);
-    ui.withinRow.style.display = view.onDemand ? "" : "none";
-    ui.withinRow.setState(view.find("run_within"), num(view.find("operating_hours")));
-    if (this._expanded) this._syncDrawer();
+    const controls = [
+      [ui.requestButton, "show_requested", "load_requested", asks],
+      [ui.runButton, "show_run_now", "run_now", true],
+      [ui.withinButton, "show_run_within", "run_within", view.onDemand],
+      [ui.hoursButton, "show_hours_needed", "operating_hours", true],
+    ];
+    let visible = 0;
+    for (const [button, option, entity, applicable] of controls) {
+      button.hidden = !showsStripControl(this._config, option) || !applicable || !this._entity(entity);
+      if (!button.hidden) visible++;
+      else if (button.close) button.close();
+      const state = view.find(entity);
+      // A HA button is "unknown" until its first press; it is still usable.
+      button.disabled = !state || state.state === "unavailable" ||
+        (entity !== "run_now" && state.state === "unknown");
+      button.classList.toggle("enabled", !button.disabled);
+    }
+    ui.requestButton.setAttribute("aria-pressed", String(view.isRequested));
+    ui.requestButton.classList.toggle("enabled", view.isRequested && !ui.requestButton.disabled);
+    ui.withinButton.setState(view.find("run_within"), num(view.find("operating_hours")));
+    ui.hoursButton.setState(view.find("operating_hours"));
+    ui.chevron.hidden = visible === 0;
+    if (!visible) this._expanded = false;
+    this._syncDrawer();
   }
 
   /** 48 half-hour buckets across the plan's own horizon. */
@@ -1050,10 +1124,15 @@ class EmhassDeferrableStripCard extends LiveCard {
     const ui = this._ui;
     const count = 48;
     ui.buckets.textContent = "";
+    ui.horizon.textContent = "";
     if (view.points.length < 2) return;
     const t0 = view.points[0].t;
-    const t1 = view.points[view.points.length - 1].t;
+    // Schedule timestamps are step starts, including the final point.
+    const last = view.points[view.points.length - 1];
+    const t1 = last.t + (view.points[1].t - t0);
     const span = (t1 - t0) / count;
+    ui.horizon.textContent = formatHours((t1 - t0) / 3600000);
+    ui.horizon.title = "Schedule time span";
     const now = Date.now();
 
     for (let i = 0; i < count; i++) {
@@ -1061,7 +1140,8 @@ class EmhassDeferrableStripCard extends LiveCard {
       const to = from + span;
       let on = false;
       for (const run of view.runs) {
-        if (run.start < to && run.end > from) on = true;
+        const end = !view.sequence && last.v > 0 && run.end === last.t ? t1 : run.end;
+        if (run.start < to && end > from) on = true;
       }
       const cell = tag("i", "b", ui.buckets);
       if (on) cell.setAttribute("data-on", "");
@@ -1084,7 +1164,9 @@ EmhassDeferrableStripCard.css = `
   .st { font-size: .74rem; color: var(--emh-dim); flex: 0 0 auto; }
   .st.on { color: var(--emh-ok); }
   .st.warn { color: var(--emh-warn); }
-  .buckets { display: flex; gap: 1px; margin: 6px 0 4px 0; height: 14px; }
+  .timeline { display: flex; align-items: center; gap: 6px; margin: 6px 0 4px; }
+  .horizon { font-size: .65rem; color: var(--emh-dim); white-space: nowrap; }
+  .buckets { display: flex; flex: 1; min-width: 0; gap: 1px; height: 14px; }
   .buckets .b { flex: 1; border-radius: 1px; background: var(--emh-surface-2);
                 transition: background 300ms; }
   .buckets .b[data-on] { background: var(--emh-solar); }
@@ -1099,7 +1181,25 @@ EmhassDeferrableStripCard.css = `
   .mini:active { transform: scale(.9); }
   .mini ha-icon { --mdc-icon-size: 17px; }
   .drawer { height: 0; overflow: hidden; transition: height 300ms var(--emh-ease); }
-  .drawer-body { padding-top: 6px; }
+  [hidden] { display: none !important; }
+  .drawer-body { display: flex; align-items: stretch; gap: 6px; padding-top: 12px; }
+  .control { flex: 1; min-width: 0; border: 1px solid var(--divider-color);
+             border-radius: 10px; padding: 8px 4px; font: inherit; font-size: .72rem;
+             background: var(--emh-surface); color: var(--emh-dim); cursor: pointer;
+             overflow-wrap: anywhere; }
+  .control.enabled { color: var(--emh-ok);
+    background: color-mix(in srgb, var(--emh-ok) 14%, var(--card-background-color));
+    border-color: color-mix(in srgb, var(--emh-ok) 40%, var(--divider-color)); }
+  .control:disabled { opacity: .5; cursor: default; }
+  .control-value { display: block; font-variant-numeric: tabular-nums; }
+  .number-dialog { width: min(280px, calc(100vw - 48px)); padding: 16px;
+    border: 1px solid var(--divider-color); border-radius: 14px;
+    background: var(--card-background-color); color: var(--primary-text-color); }
+  .number-dialog::backdrop { background: rgb(0 0 0 / .25); }
+  .number-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .number-dialog input { width: 100%; accent-color: var(--emh-ok); }
+  .number-dialog output { display: block; text-align: right; margin-top: 8px; }
+  @media (pointer: coarse) { .control, .mini { min-height: 44px; } }
 `;
 
 /**
@@ -1223,25 +1323,35 @@ class EmhassDeferrableSwipeCardEditor extends CardEditor {
 
 /* ------------------------------------------------------- strip card editor */
 
-/** Which load the strip is about. It has nothing else to configure. */
+const STRIP_LABELS = { ...DEFERRABLE_LABELS };
+const STRIP_HELPERS = { ...DEFERRABLE_HELPERS };
+for (const [key, label, helper] of STRIP_CONTROLS) {
+  STRIP_LABELS[key] = label;
+  STRIP_HELPERS[key] = helper;
+}
+
+/** Which load, and which compact controls appear in its expanded row. */
 class EmhassDeferrableStripCardEditor extends CardEditor {
   get labels() {
-    return DEFERRABLE_LABELS;
+    return STRIP_LABELS;
   }
 
   get helpers() {
-    return DEFERRABLE_HELPERS;
+    return STRIP_HELPERS;
   }
 
   schema(hass) {
-    return [loadField(hass)];
+    return [loadField(hass), sectionGrid(STRIP_CONTROLS)];
   }
 
   data() {
-    return { load: this._config.load || "" };
+    const data = { load: this._config.load || "" };
+    for (const [key] of STRIP_CONTROLS) data[key] = showsStripControl(this._config, key);
+    return data;
   }
 
   clean(config) {
+    cleanSections(config, STRIP_CONTROLS, STRIP_OFF_BY_DEFAULT);
     if (!config.load) delete config.load;
     return config;
   }

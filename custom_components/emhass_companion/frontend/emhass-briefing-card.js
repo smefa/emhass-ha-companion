@@ -581,15 +581,14 @@ class EmhassBriefingCard extends LiveCard {
         );
         if (end <= points[i].t) continue;
         const share = (points[i].v - lo) / spread;
-        // Height as well as tone: the tone alone is hard to rank at a glance.
+        // Keep the graph heights, with the overview ribbon's cheap-to-dear colours.
         const tall = 4 + share * 14;
         const cell = svg("rect", {
-          class: "bar",
+          fill: `color-mix(in srgb, var(--emh-bad) ${Math.round(share * 100)}%, var(--emh-ok))`,
           x: fixed(x(points[i].t)),
           y: fixed(18 - tall),
           width: fixed(Math.max(x(end) - x(points[i].t) - 1, 0.5)),
           height: fixed(tall),
-          "fill-opacity": (0.35 + 0.65 * share).toFixed(2),
         }, root);
         const tip = svg("title", null, cell);
         tip.textContent = `${formatTime(points[i].t, data.hass)} · ${points[i].v.toFixed(2)} ${data.context.unit}`;
@@ -871,7 +870,6 @@ EmhassBriefingCard.css = STUDIO_TOKENS + `
   .track svg { width: 100%; display: block; border-radius: 3px; }
   .past { fill: var(--emh-surface); }
   .now { stroke: var(--emh-s-ink); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
-  .bar { fill: var(--emh-s-price); }
   .sun { fill: var(--emh-s-solar); fill-opacity: .88; }
   .wash { fill: var(--emh-s-battery); fill-opacity: .14; }
   .level { fill: none; stroke: var(--emh-s-battery); stroke-width: 2;
