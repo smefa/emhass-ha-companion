@@ -1211,12 +1211,12 @@ EmhassDeferrableStripCard.css = `
   .mini ha-icon { --mdc-icon-size: 17px; }
   .drawer { height: 0; overflow: hidden; transition: height 300ms var(--emh-ease); }
   [hidden] { display: none !important; }
-  .drawer-body { position: relative; display: flex; align-items: center; gap: 8px; padding-top: 28px; }
-  .drawer-body::before { content: ""; position: absolute; top: 12px; left: 0; right: 0;
+  .drawer-body { position: relative; display: flex; align-items: center; gap: 8px; padding-top: 20px; }
+  .drawer-body::before { content: ""; position: absolute; top: 8px; left: 0; right: 0;
                          border-top: 1px solid var(--divider-color); }
   .control { display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-             flex: 0 1 auto; min-width: 0; min-height: 38px; border: 1px solid var(--divider-color);
-             border-radius: 12px; padding: 8px 12px; font: inherit; font-size: .78rem;
+             flex: 0 1 auto; min-width: 0; min-height: 32px; border: 1px solid var(--divider-color);
+             border-radius: 10px; padding: 5px 10px; font: inherit; font-size: .78rem;
              background: var(--emh-surface); color: var(--emh-dim); cursor: pointer;
              white-space: nowrap; }
   .control-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -1235,7 +1235,7 @@ EmhassDeferrableStripCard.css = `
   .number-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
   .number-dialog input { width: 100%; accent-color: var(--emh-ok); }
   .number-dialog output { display: block; text-align: right; margin-top: 8px; }
-  @media (pointer: coarse) { .control, .mini { min-height: 44px; } }
+  @media (pointer: coarse) { .control { min-height: 38px; } .mini { min-height: 44px; } }
   @container strip-card (max-width: 440px) {
     .drawer-body { gap: 5px; }
     .control { padding-inline: 7px; gap: 4px; font-size: .72rem; }
