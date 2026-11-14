@@ -19,7 +19,10 @@ const fs = require('node:fs');
 const source = fs.readFileSync(process.argv[1], 'utf8');
 class Element {
   constructor() {
-    this.style = {}; this.children = []; this.attrs = {}; this.events = {};
+    this.style = {
+      setProperty: (key, value) => { this.style[key] = value; },
+      removeProperty: key => { delete this.style[key]; },
+    }; this.children = []; this.attrs = {}; this.events = {};
     this.offsetHeight = 48;
     this.classList = { toggle: (k, on) => { this[k] = on; } };
   }
@@ -51,7 +54,8 @@ const load = {entities: Object.fromEntries(Object.keys(states).map(k=>[k, `test.
 const resolveLoad = () => load;
 const view = {
   name:'Dishwasher', status:'idle', onDemand:true, onSurplus:false,
-  isRequested:false, points:Array.from({length:48}, (_,i)=>({t:i*1800000, v:i===47?1000:0})),
+  isRequested:false, deadline:null, shouldRun:{attributes:{mode:'auto', run_now_active:false}},
+  points:Array.from({length:48}, (_,i)=>({t:i*1800000, v:i===47?1000:0})),
   runs:[{start:47*1800000, end:47*1800000}],
   find:k=>states[k],
 };
@@ -79,10 +83,31 @@ assert.equal(ui.withinButton.hidden, false);
 assert.equal(ui.horizon.textContent, '24 h');
 assert.equal(ui.buckets.children.at(-1).attrs['data-on'], '', 'final schedule step is included');
 assert.equal(ui.requestButton.enabled, false);
-assert.equal(ui.runButton.enabled, true, 'a never-pressed HA button is available');
+assert.equal(ui.runButton.disabled, false, 'a never-pressed HA button is available');
+assert.equal(ui.runButton.enabled, false, 'availability does not mean active');
+assert.equal(ui.withinButton.enabled, undefined, 'deadline control stays neutral');
 view.isRequested = true; states.run_now.state = '2026-11-14'; card.update({});
 assert.equal(ui.requestButton.enabled, true);
+assert.equal(ui.runButton.enabled, false, 'a past press is not an active run');
+view.shouldRun.attributes.run_now_active = true; card.update({});
+assert.equal(ui.requestButton.enabled, false, 'Run now takes precedence over a pending request');
 assert.equal(ui.runButton.enabled, true);
+view.shouldRun.attributes = {mode:'force_on'}; card.update({});
+assert.equal(ui.runButton.enabled, true, 'older backends expose forced mode');
+view.shouldRun.attributes = {mode:'auto', run_now_active:false}; card.update({});
+assert.equal(ui.runButton.enabled, false);
+assert.equal(ui.requestButton.enabled, true);
+for (const deadline of [0, 900000, 24*3600000]) {
+  view.deadline = deadline; card.update({});
+  assert.equal(ui.buckets['has-deadline'], true);
+  assert.equal(ui.buckets.style['--deadline-position'], (100*deadline/(24*3600000)) + '%');
+  assert.ok(ui.buckets.children.every(cell=>!('data-deadline' in cell.attrs)));
+}
+view.deadline = 25*3600000; card.update({});
+assert.equal(ui.buckets['has-deadline'], false);
+assert.equal(ui.buckets.style['--deadline-position'], undefined);
+view.deadline = null; card.update({});
+assert.equal(ui.buckets['has-deadline'], false);
 ui.requestButton.events.click(); ui.runButton.events.click();
 assert.deepEqual(calls, [['toggle','test.load_requested'], ['press','test.run_now']]);
 ui.chevron.events.click();
@@ -96,6 +121,7 @@ assert.deepEqual(calls.at(-1), ['number','test.run_within',12.5]);
 deadlineDialog.close();
 card._config.show_hours_needed = true; card.update({});
 assert.equal(ui.hoursButton.hidden, false);
+assert.equal(ui.hoursButton.enabled, undefined, 'hours control stays neutral');
 ui.hoursButton.events.click();
 const dialog = ui.drawerBody.children.find(el=>el.tag==='dialog' && el.attrs['aria-label']==='Hours needed');
 const input = dialog.children.find(el=>el.tag==='input');

@@ -441,6 +441,38 @@ def test_running_sequence_counts_as_fixed_import_draw():
     assert "def_current_power" not in payload
 
 
+@pytest.mark.parametrize(
+    ("kind", "enabled", "expected"),
+    [
+        ("idle", True, False),
+        ("planned", True, False),
+        ("pending", True, True),
+        ("run_now", True, True),
+        ("forced", True, True),
+        ("run_now", False, False),
+        ("forced", False, False),
+    ],
+)
+def test_run_now_attribute_tracks_the_active_command(kind, enabled, expected):
+    from custom_components.emhass_companion.binary_sensor import LoadShouldRunBinarySensor
+
+    runtime = load(power_sequence=() if kind == "forced" else (150, 2000, 0))
+    if kind in {"pending", "run_now", "forced"}:
+        runtime.force_run(NOW)
+    if kind in {"planned", "run_now"}:
+        runtime.observe_command(True, NOW)
+    runtime.enabled = enabled
+    fake = SimpleNamespace(
+        load=runtime,
+        coordinator=SimpleNamespace(config=SimpleNamespace(time_step_minutes=15)),
+        _scheduled_power=lambda: 0,
+        _reason="test",
+        deferrable_number=0,
+    )
+    attrs = LoadShouldRunBinarySensor.extra_state_attributes.fget(fake)
+    assert attrs["run_now_active"] is expected
+
+
 def test_attributes_keep_zero_stage_inside_one_cycle(monkeypatch):
     from custom_components.emhass_companion.binary_sensor import LoadShouldRunBinarySensor
     from custom_components.emhass_companion.models import Point, Series

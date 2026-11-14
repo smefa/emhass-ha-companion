@@ -971,7 +971,6 @@ function stripNumberControl(parent, label, onCommit) {
   input.addEventListener("change", () => onCommit(Number(input.value)));
   button.setState = (state, floor) => {
     button.disabled = !state || !Number.isFinite(num(state));
-    button.classList.toggle("enabled", !button.disabled);
     if (button.disabled && dialog.open) dialog.close();
     // A live HA update must not reset a slider while the user edits it.
     if (dialog.open) return;
@@ -1126,10 +1125,14 @@ class EmhassDeferrableStripCard extends LiveCard {
       // A HA button is "unknown" until its first press; it is still usable.
       button.disabled = !state || state.state === "unavailable" ||
         (entity !== "run_now" && state.state === "unknown");
-      button.classList.toggle("enabled", !button.disabled);
     }
+    const attrs = view.shouldRun && view.shouldRun.attributes || {};
+    const runNowActive = attrs.run_now_active === true ||
+      (attrs.run_now_active === undefined && attrs.mode === "force_on");
     ui.requestButton.setAttribute("aria-pressed", String(view.isRequested));
-    ui.requestButton.classList.toggle("enabled", view.isRequested && !ui.requestButton.disabled);
+    ui.requestButton.classList.toggle("enabled", view.isRequested && !runNowActive && !ui.requestButton.disabled);
+    ui.runButton.classList.toggle("enabled", runNowActive && !ui.runButton.disabled);
+    ui.runButton.title = runNowActive ? "Run now is active" : "Run now";
     ui.withinButton.setState(view.find("run_within"), num(view.find("operating_hours")));
     ui.hoursButton.setState(view.find("operating_hours"));
     ui.withinButton.style.marginLeft = "auto";
@@ -1145,6 +1148,8 @@ class EmhassDeferrableStripCard extends LiveCard {
     const ui = this._ui;
     const count = 48;
     ui.buckets.textContent = "";
+    ui.buckets.style.removeProperty("--deadline-position");
+    ui.buckets.classList.toggle("has-deadline", false);
     ui.horizon.textContent = "";
     if (view.points.length < 2) return;
     const t0 = view.points[0].t;
@@ -1155,6 +1160,10 @@ class EmhassDeferrableStripCard extends LiveCard {
     ui.horizon.textContent = formatHours((t1 - t0) / 3600000);
     ui.horizon.title = "Schedule time span";
     const now = Date.now();
+    if (view.deadline !== null && view.deadline >= t0 && view.deadline <= t1) {
+      ui.buckets.style.setProperty("--deadline-position", `${100 * (view.deadline - t0) / (t1 - t0)}%`);
+      ui.buckets.classList.toggle("has-deadline", true);
+    }
 
     for (let i = 0; i < count; i++) {
       const from = t0 + i * span;
@@ -1167,9 +1176,6 @@ class EmhassDeferrableStripCard extends LiveCard {
       const cell = tag("i", "b", ui.buckets);
       if (on) cell.setAttribute("data-on", "");
       if (now >= from && now < to) cell.setAttribute("data-now", "");
-      if (view.deadline && view.deadline >= from && view.deadline < to) {
-        cell.setAttribute("data-deadline", "");
-      }
     }
   }
 }
@@ -1187,12 +1193,14 @@ EmhassDeferrableStripCard.css = `
   .st.warn { color: var(--emh-warn); }
   .timeline { display: flex; align-items: center; gap: 6px; margin: 6px 0 4px; }
   .horizon { font-size: .65rem; color: var(--emh-dim); white-space: nowrap; }
-  .buckets { display: flex; flex: 1; min-width: 0; gap: 1px; height: 14px; }
+  .buckets { position: relative; display: flex; flex: 1; min-width: 0; gap: 1px; height: 14px; }
   .buckets .b { flex: 1; border-radius: 1px; background: var(--emh-surface-2);
                 transition: background 300ms; }
   .buckets .b[data-on] { background: var(--emh-solar); }
   .buckets .b[data-now] { background: var(--primary-text-color); }
-  .buckets .b[data-deadline] { background: var(--emh-warn); }
+  .buckets.has-deadline::after { content: ""; position: absolute; top: -2px; bottom: -2px;
+    left: var(--deadline-position); border-left: 1px dotted var(--emh-warn);
+    transform: translateX(-.5px); pointer-events: none; }
   .sub { font-size: .72rem; }
   .side { display: flex; flex-direction: column; gap: 4px; flex: 0 0 auto; }
   .mini { width: 30px; height: 30px; border-radius: 50%; border: 0; padding: 0;

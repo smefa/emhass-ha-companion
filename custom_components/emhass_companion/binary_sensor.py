@@ -17,6 +17,7 @@ from homeassistant.util import dt as dt_util
 from . import snow_cover
 from .const import (
     LOAD_MODE_AUTO,
+    LOAD_MODE_FORCE_ON,
     MODE_FORCE_CHARGE,
     MODE_FORCE_DISCHARGE,
     PHASE_GUARD_ACTIVE_KEY,
@@ -338,6 +339,15 @@ class LoadShouldRunBinarySensor(EmhassLoadEntity, BinarySensorEntity):
                 else {}
             ),
             "mode": self.load.mode,
+            "run_now_active": self.load.enabled
+            and (
+                self.load.mode == LOAD_MODE_FORCE_ON
+                or self.load.sequence_start_pending
+                or (
+                    self.load.sequence_cycle is not None
+                    and self.load.sequence_cycle.source == "run_now"
+                )
+            ),
             "scheduled_power": self._scheduled_power(),
             "currently_running": self.load.is_running,
             "reason": self._reason,
