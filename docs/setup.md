@@ -93,6 +93,65 @@ export:
   `datetime`) available, for tiered or time-of-day structures. The template
   itself is entered in the collapsed *Advanced settings* section.
 
+With the **Fixed tariff** price source there is no spot price. Its peak and
+off-peak prices take the place of `spot` on the import side, and its export
+price takes the place of `spot` on the export side. With *Linear* at multiplier
+1 and adder 0 and no network tariff, EMHASS prices the run from the fixed
+tariff directly, as before.
+
+### Template examples
+
+Paste one of these into *Import template* or *Export template* under
+*Advanced settings* and set the matching method to **Template**. `spot` is the
+raw price from your price source, in the same unit and currency as that source
+(so the result is too). `time` is the local time of the price being worked out,
+so `time.hour` is your own clock, not UTC. The template must return a single
+number.
+
+Spot plus VAT, a supplier markup and a grid fee (same as Linear, written out):
+
+```jinja
+{{ (spot + 0.05) * 1.25 + 0.30 }}
+```
+
+A cheaper night rate and a dearer peak rate on top of spot (here the grid fee is
+0.20 from 22:00 to 06:00, 0.60 from 06:00 to 22:00 on weekdays, otherwise 0.20):
+
+```jinja
+{% set peak = time.weekday() < 5 and 6 <= time.hour < 22 %}
+{{ spot * 1.25 + (0.60 if peak else 0.20) }}
+```
+
+A different grid fee in winter (November to March) than in summer:
+
+```jinja
+{% set winter = time.month in [11, 12, 1, 2, 3] %}
+{{ spot * 1.25 + (0.45 if winter else 0.25) }}
+```
+
+Export: spot minus a fixed fee, never below zero:
+
+```jinja
+{{ [spot - 0.05, 0] | max }}
+```
+
+Export: a fixed feed-in price whatever the spot price does:
+
+```jinja
+{{ 0.60 }}
+```
+
+A template can also read other entities, for example a price your supplier
+publishes as a sensor:
+
+```jinja
+{{ spot + states('sensor.my_supplier_surcharge') | float(0) }}
+```
+
+If a template returns something that is not a number, the run fails with a
+message saying so. Test a template in *Developer tools → Template* first,
+adding `{% set spot = 0.80 %}{% set time = now() %}` at the top.
+
 > Tax and subsidy schemes change. Nothing here is kept current for you — check
 > your own numbers each year.
 
@@ -243,6 +302,28 @@ from 0 to 1): 0 uses the forecast untouched, 1 replaces the first step
 entirely with the live reading, and 0.5 — the default — splits it evenly.
 Day-ahead runs are never blended; a day-ahead forecast starts at midnight, not
 now.
+
+### Snow on the panels
+
+Snow on the panels leaves the solar forecast high and the output near zero.
+There is nothing to configure: when measured output (the **Live PV power
+sensor** above) stays below about 20 % of the raw forecast over an hour of
+real sun, and the outdoor temperature has been at or below about +2 °C at some
+point in the last 48 hours, the whole forecast is scaled by that ratio until
+output recovers above about 60 %. The temperature comes from your outdoor
+temperature source if you set one, otherwise from a weather entity in Home
+Assistant; with neither, and without the live sensor, nothing is detected.
+When a weather entity is available, a shortfall only counts as snow if that
+entity has reported snowfall in the cold since the panels last produced
+normally, so fog the forecast missed is not mistaken for snow. If the weather
+source misses a snowfall, use the action below. Reported snowfall also makes
+the plan discount the next sunny hours before any measurement exists. A thaw or rain
+drops the call back to a
+suspicion until daylight settles it. The thresholds are first guesses and have
+not been tuned. The diagnostic **Panels snow covered** binary sensor shows when
+this is active, and the Briefing and Status cards add a line. The
+`emhass_companion.set_snow_cover` action overrides it: see
+[Actions](guide/actions.md#set_snow_cover).
 
 ## Time resolution
 

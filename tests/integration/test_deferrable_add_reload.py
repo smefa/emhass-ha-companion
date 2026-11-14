@@ -84,7 +84,7 @@ async def test_a_newly_added_load_gets_entities_without_a_manual_reload(
         result = await hass.config_entries.subentries.async_configure(
             result["flow_id"],
             {
-                CONF_NOMINAL_POWER: 2000,
+                CONF_NOMINAL_POWER: "2000",
                 CONF_OPERATING_HOURS: 2,
                 "advanced": {CONF_SEMI_CONTINUOUS: True, CONF_SINGLE_CONSTANT: False},
             },

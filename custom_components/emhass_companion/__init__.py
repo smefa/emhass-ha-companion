@@ -11,20 +11,25 @@ the repository root for the full terms.
 
 from __future__ import annotations
 
+from contextlib import suppress
 import logging
+from typing import Any
 
 from homeassistant.config_entries import (
     SIGNAL_CONFIG_ENTRY_CHANGED,
     ConfigEntry,
     ConfigEntryChange,
+    ConfigSubentry,
 )
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP, Platform
 from homeassistant.core import Event, HomeAssistant, callback
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.exceptions import ConfigEntryNotReady, ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers import restore_state
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
+from homeassistant.util import dt as dt_util
 from homeassistant.util import slugify
 
 from .api import EmhassClient, EmhassError
@@ -36,13 +41,17 @@ from .const import (
     CONF_NETWORK,
     CONF_PROFILE,
     CONF_PROFILE_OPTIONS,
+    CONF_TIME_STEP,
     CONF_URL,
     CONTROL_ENTITY_DOMAINS,
+    DEFAULT_TIME_STEP,
     DOMAIN,
     ISSUE_BAD_PROFILE,
     ISSUE_EMHASS_VERSION,
+    ISSUE_PEAK_TRACKING_OFF,
     ISSUE_PHASE_CLAMP_OFF,
     ISSUE_SCRIPT_CONTROL_ENTITY,
+    LOAD_MODE_AUTO,
     LOAD_SUBENTRY_TYPES,
     MANUAL_DEMAND_PROFILE_KEY,
     MANUAL_DEMAND_RATE_OPTION,
@@ -50,7 +59,7 @@ from .const import (
     NET_HOUSE_LOAD_KEY,
 )
 from .coordinator import EmhassCoordinator
-from .deferrable import DeferrableRegistry
+from .deferrable import DeferrableRegistry, parse_power, supported_control_entity
 from .executor import Executor
 from .frontend import async_setup_frontend
 from .log_ring import LogRingHandler
@@ -84,6 +93,7 @@ PLATFORMS: list[Platform] = [
     Platform.SELECT,
     Platform.SENSOR,
     Platform.SWITCH,
+    Platform.TEXT,
     Platform.TIME,
 ]
 
@@ -181,6 +191,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
 
     loads = DeferrableRegistry(hass, entry)
     loads.sync()
+    _restore_run_now(hass, entry, loads)
+    _async_restore_power(hass, entry, loads)
+    await loads.async_load_sequences(int(entry.options.get(CONF_TIME_STEP, DEFAULT_TIME_STEP)))
     _async_remove_retired_buttons(hass, entry)
     _report_unusable_control_entities(hass, entry)
 
@@ -204,6 +217,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
     coordinator.backend_version = version
     await coordinator.async_load_profiles()
     await coordinator.async_load_ml_state()
+    await coordinator.async_load_snow_cover()
     _report_profile_errors(hass, coordinator)
     await coordinator.async_ensure_emhass_baseline()
     await coordinator.async_check_heat_topology()
@@ -250,6 +264,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
     peak_tracker = peak_trackers[0] if peak_trackers else None
     coordinator.peak_trackers = peak_trackers
     coordinator.peak_tracker = peak_tracker
+    _report_peak_tracking(hass, coordinator)
     for tracker_item in peak_trackers:
         await tracker_item.async_load()
 
@@ -278,6 +293,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
 
     entry.async_on_unload(scheduler.async_stop)
     entry.async_on_unload(loads.async_stop)
+    entry.async_on_unload(loads.async_save_sequences)
     entry.async_on_unload(coordinator.async_stop_clock)
     entry.async_on_unload(coordinator.async_stop_pv_live_tracking)
     entry.async_on_unload(coordinator.async_stop_source_health)
@@ -309,9 +325,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
     # Assistant went away. Without these two, a restart during a forced charge
     # leaves the battery charging until somebody notices the bill.
     entry.async_on_unload(_async_restore_on_unload)
+    entry.async_on_unload(lambda: _stash_run_now(hass, entry, loads))
     entry.async_on_unload(
         hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, _async_restore_on_stop)
     )
+
+    loaded_settings = {
+        load.subentry_id: _load_settings(entry.subentries[load.subentry_id]) for load in loads.all()
+    }
+    # The entry's own state changes fire this signal again before the reload
+    # runs; acting twice would release a replaced actuator twice.
+    reload_scheduled = False
 
     @callback
     def _async_entry_changed(change_type: ConfigEntryChange, changed_entry: ConfigEntry) -> None:
@@ -339,7 +363,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
         """
         if changed_entry.entry_id != entry.entry_id:
             return
-        if change_type != ConfigEntryChange.UPDATED or entry.runtime_data is None:
+        nonlocal reload_scheduled
+        if (
+            change_type != ConfigEntryChange.UPDATED
+            or entry.runtime_data is None
+            or reload_scheduled
+        ):
             return
         # Editing a load in place does not reload the entry, so the repair
         # below would otherwise stay up until the next restart even after the
@@ -352,6 +381,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
         }
         already_loaded = {load.subentry_id for load in entry.runtime_data.loads.all()}
         if current != already_loaded:
+            reload_scheduled = True
+            hass.config_entries.async_schedule_reload(entry.entry_id)
+            return
+        if any(
+            _load_settings(entry.subentries[subentry_id]) != settings
+            for subentry_id, settings in loaded_settings.items()
+        ):
+            # A reconfigured load: its actuator, sensors, Power or model. The
+            # runtime and every entity were built from the old settings, and
+            # some (the control entity, the running-source subscription) are
+            # only read at setup, so a reload is the one complete refresh.
+            reload_scheduled = True
+            _release_replaced_actuators(hass, entry)
             hass.config_entries.async_schedule_reload(entry.entry_id)
             return
         refresh_needed = False
@@ -398,6 +440,75 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
     entry.async_create_background_task(hass, scheduler.async_run_initial(), "emhass_initial_run")
 
     return True
+
+
+@callback
+def _release_replaced_actuators(hass: HomeAssistant, entry: EmhassConfigEntry) -> None:
+    """Switch off an actuator this integration left on before it was replaced.
+
+    After the reload nothing addresses the old entity again, so a load moved
+    to a new switch mid-run would otherwise leave the old one on for good.
+    Only one we commanded on: an appliance someone else switched on is theirs.
+    """
+    for load in entry.runtime_data.loads.all():
+        old = load.control_entity
+        subentry = entry.subentries.get(load.subentry_id)
+        if (
+            not old
+            or subentry is None
+            or supported_control_entity(subentry.data.get(CONF_CONTROL_ENTITY)) == old
+            or not load.is_commanded
+            or (state := hass.states.get(old)) is None
+            or state.state != "on"
+        ):
+            continue
+        _LOGGER.info("%s moved off %s; switching it off", load.name, old)
+        # Not an entry task: the reload scheduled next would cancel it.
+        hass.async_create_task(
+            hass.services.async_call(
+                old.partition(".")[0], "turn_off", {}, target={"entity_id": old}
+            ),
+            "emhass_release_replaced_actuator",
+        )
+
+
+# A scalar Run now lives only in memory (a restart drops it, as before), but a
+# reload -- reconfiguring a load, saving options -- must not switch off a load
+# that is being force-run. Unload stashes it here; the next setup takes it back.
+_RUN_NOW_CARRY = f"{DOMAIN}_run_now_carry"
+_RUN_NOW_FIELDS = ("mode", "forced_at", "seen_running", "idle_since")
+
+
+def _stash_run_now(hass: HomeAssistant, entry: ConfigEntry, loads: DeferrableRegistry) -> None:
+    carried = {
+        load.subentry_id: {name: getattr(load, name) for name in _RUN_NOW_FIELDS}
+        for load in loads.all()
+        if load.mode != LOAD_MODE_AUTO
+    }
+    if carried:
+        hass.data.setdefault(_RUN_NOW_CARRY, {})[entry.entry_id] = carried
+
+
+def _restore_run_now(hass: HomeAssistant, entry: ConfigEntry, loads: DeferrableRegistry) -> None:
+    carried = hass.data.get(_RUN_NOW_CARRY, {}).pop(entry.entry_id, {})
+    for subentry_id, fields in carried.items():
+        # A load that became a sequence or a thermal load has no scalar Run now.
+        if (load := loads.get(subentry_id)) is not None and not (
+            load.is_sequence or load.is_thermal
+        ):
+            for name, value in fields.items():
+                setattr(load, name, value)
+
+
+def _load_settings(subentry: ConfigSubentry) -> tuple[str, dict]:
+    """What a load was built from, less what is synced without a reload.
+
+    The hot-water period plan is written back to the subentry at runtime by
+    ``hot_water_plan.async_set_plan`` and applied in place, so it must not
+    count as a reconfiguration -- that would reload on every plan edit.
+    """
+    data = {k: v for k, v in subentry.data.items() if k != CONF_HOT_WATER_PERIODS}
+    return subentry.title, data
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bool:
@@ -450,6 +561,29 @@ def _check_version(hass: HomeAssistant, version: str | None) -> None:
 
 
 @callback
+def _report_peak_tracking(hass: HomeAssistant, coordinator: EmhassCoordinator) -> None:
+    """Say so when a demand charge is configured but nothing tracks its peak.
+
+    Without a grid-import energy meter no tracker is built, so the Billing
+    period peak and Peak headroom sensors never appear and the peak is not
+    priced -- with nothing on screen to explain why. Checked once per setup:
+    the meter is a setting, and every settings change reloads the entry.
+    """
+    calendar = coordinator.network_calendar
+    if calendar is None or not calendar.demand_charges or coordinator.peak_trackers:
+        ir.async_delete_issue(hass, DOMAIN, ISSUE_PEAK_TRACKING_OFF)
+        return
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        ISSUE_PEAK_TRACKING_OFF,
+        is_fixable=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key=ISSUE_PEAK_TRACKING_OFF,
+    )
+
+
+@callback
 def _report_phase_clamp(
     hass: HomeAssistant, coordinator: EmhassCoordinator, executor: Executor
 ) -> None:
@@ -481,6 +615,53 @@ def _report_phase_clamp(
             ),
         },
     )
+
+
+def _stored_state(restore_data: Any, entity_id: str) -> Any:
+    """One entity's stored state; HA 2026.11 replaced ``last_states`` with a getter."""
+    if getter := getattr(restore_data, "async_get_stored_state", None):
+        return getter(entity_id)
+    return restore_data.last_states.get(entity_id)
+
+
+@callback
+def _async_restore_power(
+    hass: HomeAssistant, entry: EmhassConfigEntry, loads: DeferrableRegistry
+) -> None:
+    """Give each non-thermal load the Power it last had, and retire its number.
+
+    Runs before the sequence store loads, because whether a stored pending
+    start survives depends on the load already being a sequence. The Power
+    comes from the text entity's last state, or from the old Power number on
+    the first start after the upgrade. A reconfigure after that state wins,
+    and an unreadable state leaves the subentry's seed.
+    """
+    registry = er.async_get(hass)
+    restore_data = restore_state.async_get(hass)
+    for load in loads.all():
+        if load.is_thermal:
+            continue
+        unique_id = f"{entry.entry_id}_{load.subentry_id}_nominal_power"
+        number_id = registry.async_get_entity_id("number", DOMAIN, unique_id)
+        text_id = registry.async_get_entity_id("text", DOMAIN, unique_id)
+        last = next(
+            (
+                stored
+                for entity_id in (text_id, number_id)
+                if entity_id and (stored := _stored_state(restore_data, entity_id))
+            ),
+            None,
+        )
+        if last is not None:
+            edited_at = dt_util.parse_datetime(str(load.power_edited_at or ""))
+            if edited_at is None or last.state.last_updated >= edited_at:
+                with suppress(ServiceValidationError):
+                    values = parse_power(last.state.state)
+                    load.power_sequence = values if len(values) > 1 else ()
+                    load.nominal_power_w = max(values)
+        if number_id is not None:
+            _LOGGER.info("Replacing %s with the Power text entity", number_id)
+            registry.async_remove(number_id)
 
 
 @callback

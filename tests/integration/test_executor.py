@@ -622,6 +622,128 @@ async def test_idle_resolved_to_self_consume_is_not_reissued_by_a_later_self_con
     assert len(calls) == first
 
 
+def _aim_at_unset_option(coordinator: EmhassCoordinator, action: str, option: str) -> None:
+    """Point an action's every step at an option the user never filled in."""
+    for step in coordinator.profiles[TEST_INVERTER_KEY].document["actions"][action]:
+        step["target"] = {"entity_id": "{{ options." + option + " }}"}
+
+
+async def test_idle_with_an_unset_target_falls_back_to_self_consume(
+    hass: HomeAssistant, calls: list[ServiceCall]
+) -> None:
+    """The profile defines `idle`, but its script option is blank, so it would
+    render to no call. It must behave as if undefined: self_consume is written
+    and recorded, not a phantom idle."""
+    executor, coordinator = await _build(hass)
+    coordinator.control_enabled = True
+    _aim_at_unset_option(coordinator, "idle", "idle_script")
+    coordinator.data = EmhassData(plan=_plan(0), last_success=dt_util.utcnow())
+
+    decision = await executor.async_apply()
+    await hass.async_block_till_done()
+
+    assert decision.action == MODE_IDLE
+    assert decision.error is None
+    assert decision.applied
+    assert any("self_consume" in rule for rule in decision.rules)
+    assert calls[-1].data["option"] == "Self Consumption"
+    assert executor._last_applied[AXIS_BATTERY].action == MODE_SELF_CONSUME
+
+
+async def test_dry_run_reports_the_resolved_action_for_an_unset_target(
+    hass: HomeAssistant, calls: list[ServiceCall]
+) -> None:
+    executor, coordinator = await _build(hass)
+    coordinator.control_enabled = False
+    _aim_at_unset_option(coordinator, "idle", "idle_script")
+    coordinator.data = EmhassData(plan=_plan(0), last_success=dt_util.utcnow())
+
+    decision = await executor.async_apply()
+
+    assert calls == []
+    assert [step["data"]["option"] for step in decision.steps] == ["Self Consumption"]
+
+
+async def test_force_charge_with_an_unset_target_falls_back_to_self_consume(
+    hass: HomeAssistant, calls: list[ServiceCall]
+) -> None:
+    """A forced mode left running from before is the wrong outcome, so an
+    unset charge script hands the battery back to self-consumption."""
+    executor, coordinator = await _build(hass)
+    coordinator.control_enabled = True
+    _aim_at_unset_option(coordinator, "force_charge", "force_charge_script")
+    coordinator.data = EmhassData(plan=_plan(-3000), last_success=dt_util.utcnow())
+
+    decision = await executor.async_apply()
+    await hass.async_block_till_done()
+
+    assert decision.action == MODE_FORCE_CHARGE
+    assert any("self_consume" in rule for rule in decision.rules)
+    assert [call.data["option"] for call in calls] == ["Self Consumption"]
+    assert executor._last_applied[AXIS_BATTERY].action == MODE_SELF_CONSUME
+
+
+async def test_an_action_with_no_usable_fallback_is_neither_sent_nor_recorded(
+    hass: HomeAssistant, calls: list[ServiceCall]
+) -> None:
+    """Charge and self_consume both unset: nothing can be called. The decision
+    must say so and must not claim it applied, nor record a command that would
+    later suppress a real one."""
+    executor, coordinator = await _build(hass)
+    coordinator.control_enabled = True
+    _aim_at_unset_option(coordinator, "force_charge", "force_charge_script")
+    _aim_at_unset_option(coordinator, "self_consume", "self_consume_script")
+    coordinator.data = EmhassData(plan=_plan(-3000), last_success=dt_util.utcnow())
+
+    decision = await executor.async_apply()
+    await hass.async_block_till_done()
+
+    assert calls == []
+    assert not decision.applied
+    assert decision.error is not None
+    assert "force_charge" in decision.error
+    assert decision.steps == []
+    assert AXIS_BATTERY not in executor._last_applied
+    assert AXIS_BATTERY not in executor._held
+
+
+async def test_a_target_templated_on_power_is_judged_on_the_real_command(
+    hass: HomeAssistant, calls: list[ServiceCall]
+) -> None:
+    """Usability is rendered with the power about to be written: a target that
+    is blank only at 0 W must not turn a 3 kW charge into self-consumption."""
+    executor, coordinator = await _build(hass)
+    coordinator.control_enabled = True
+    for step in coordinator.profiles[TEST_INVERTER_KEY].document["actions"]["force_charge"]:
+        expression = step["target"]["entity_id"].strip("{} ")
+        step["target"] = {"entity_id": "{{ " + expression + " if magnitude_w > 0 else '' }}"}
+    coordinator.data = EmhassData(plan=_plan(-3000), last_success=dt_util.utcnow())
+
+    decision = await executor.async_apply()
+    await hass.async_block_till_done()
+
+    assert not any("self_consume" in rule for rule in decision.rules)
+    assert executor._last_applied[AXIS_BATTERY].action == MODE_FORCE_CHARGE
+
+
+async def test_a_step_without_any_target_is_not_blank(
+    hass: HomeAssistant, calls: list[ServiceCall]
+) -> None:
+    """A service that takes no target is ordinary; it must still be applied."""
+    executor, coordinator = await _build(hass)
+    coordinator.control_enabled = True
+    for step in coordinator.profiles[TEST_INVERTER_KEY].document["actions"]["idle"]:
+        step.pop("target")
+    coordinator.data = EmhassData(plan=_plan(0), last_success=dt_util.utcnow())
+
+    decision = await executor.async_apply()
+    await hass.async_block_till_done()
+
+    assert decision.applied
+    assert decision.error is None
+    assert executor._last_applied[AXIS_BATTERY].action == MODE_IDLE
+
+
 async def test_a_missing_action_with_no_fallback_is_reported_not_raised(
     hass: HomeAssistant,
 ) -> None:

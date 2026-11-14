@@ -29,6 +29,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 import logging
+import math
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -309,6 +310,11 @@ class DemandCharge:
     rate_per_kw: float | None
     rate_basis: str
     name: str | None = None
+    min_peak_kw: float = 0.0
+    """Lowest level the peak is treated as already having reached. Lets a
+    second component price only the part of the peak above a threshold: it
+    is sent as ``max(tracked peak, min_peak_kw)``, so its cost differs from
+    the true tier charge by a constant and plans are unchanged."""
 
     @classmethod
     def from_dict(
@@ -343,8 +349,24 @@ class DemandCharge:
             rate = float(rate_raw) if rate_raw not in (None, "") else None
         except (TypeError, ValueError) as err:
             raise NetworkCalendarError(f"Invalid demand_charge.rate_per_kw {rate_raw!r}") from err
+        if rate is not None and (not math.isfinite(rate) or rate < 0):
+            raise NetworkCalendarError(
+                f"demand_charge.rate_per_kw must be a finite number >= 0, got {rate!r}; "
+                "a tier priced below the one before it is not supported"
+            )
         name_raw = data.get("name")
         name = str(name_raw).strip() if name_raw not in (None, "") else None
+        min_peak_raw = data.get("min_peak_kw")
+        try:
+            min_peak = float(min_peak_raw) if min_peak_raw not in (None, "") else 0.0
+        except (TypeError, ValueError) as err:
+            raise NetworkCalendarError(
+                f"Invalid demand_charge.min_peak_kw {min_peak_raw!r}"
+            ) from err
+        if not math.isfinite(min_peak) or min_peak < 0:
+            raise NetworkCalendarError(
+                f"demand_charge.min_peak_kw must be a finite number >= 0, got {min_peak!r}"
+            )
         return cls(
             window=window,
             measure=DemandMeasure.from_dict(data.get("measure") or {}),
@@ -352,6 +374,7 @@ class DemandCharge:
             rate_per_kw=rate,
             rate_basis=str(data.get("rate_basis") or "month"),
             name=name or None,
+            min_peak_kw=min_peak,
         )
 
 
@@ -436,6 +459,7 @@ def _parse_demand_charges(
             rate_per_kw=charges[index].rate_per_kw,
             rate_basis=charges[index].rate_basis,
             name=charges[index].name,
+            min_peak_kw=charges[index].min_peak_kw,
         )
         charges[index] = resolved
         if resolved.name:

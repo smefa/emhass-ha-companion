@@ -17,7 +17,7 @@ household with a time-differentiated network fee runs both, and the buy price
 EMHASS sees is `tariff(spot) + band_adder`.
 
 Pick one under **Configure → Network tariff**, the same config-flow step every
-other profile kind uses. Two ship built in:
+other profile kind uses. Several ship built in:
 
 - **Göteborg Energi** (`network/goteborg_energi`) — a high-load season and
   window (Nov–Mar, weekdays 07:00–20:00, red days excluded via the
@@ -37,10 +37,110 @@ other profile kind uses. Two ship built in:
   source to read, the same way `price/amber_express.yaml` already reads its
   price sensor's `forecast` attribute — but nothing wires that up today, so
   the window and rate above are entered by hand.
+- **Austria** (`network/austria_demand`) — the SNE-G-V tariff from E-Control: the
+  single highest 15-minute average power of the month, at any hour, sets a
+  two-tier per-kW-per-month charge (first 10 kW at rate 1, only the part above
+  at rate 2). It starts between January 2027 and July 2028
+  depending on your network area, and the rate is entered by hand from your
+  operator's sheet. It can also model the reduced SNAP (10:00–16:00,
+  April–September) and WiNAP (23:00–05:00, October–March) energy windows if you
+  enter your network energy price. Set the time resolution to 15 minutes while
+  it is active. The flexible-draw discount is not modelled.
+- **Dala Energi** (`network/dala_energi`) — two independent mean-of-top-3
+  hourly peaks every month (höglast on weekday days, låglast otherwise; summer
+  only equalises the rates) as a two-component demand charge, plus a flat
+  transmission energy fee. Needs EMHASS 0.18.3+ and a Workday sensor. Set the
+  time resolution to 60 minutes.
+- **Flat demand charge** (`network/manual_demand_charge`) — one kr/kW charge on
+  the worst import peak over the horizon. No window and no peak memory; a rough
+  estimate for operators that bill the highest power at any hour.
 
-Nothing on this page is specific to those two utilities; see
+Nothing on this page is specific to those utilities; see
 [Writing a profile](profiles.md) to describe your own operator's tariff sheet
 the same way.
+
+## Writing your own
+
+Your operator is not listed? Save a YAML file as
+`/config/emhass_companion/profiles/network/<name>.yaml`, reload the
+integration, and it shows up in the **Network tariff** list next to the built-in
+ones. Updates never touch that folder. The file copies the shape of the
+built-in profiles above, so
+[`goteborg_energi.yaml`](https://github.com/smefa/emhass-ha-companion/blob/main/custom_components/emhass_companion/profiles/builtin/network/goteborg_energi.yaml)
+and `dala_energi.yaml` are the best starting points. The values you want to
+change from the form go under `options:`, and the rest refers to them as
+`{{ options.name }}`. Share a working one on the
+[Discord](https://discord.gg/ugDwJwynC5) so others can reuse it.
+
+**A day and night energy fee** (no demand charge). The first matching band
+wins, so the exception comes first and the fallback last:
+
+```yaml
+name: My operator (day/night)
+kind: network
+version: 1
+description: A higher energy fee on weekday daytime, a lower one otherwise.
+
+detect:
+  always: true
+
+options:
+  day_ore:
+    name: Day fee
+    description: öre/kWh, weekdays 06:00-22:00.
+    default: 30.0
+    selector: { number: { min: 0, max: 500, step: any, mode: box } }
+  night_ore:
+    name: Night fee
+    description: öre/kWh at all other times.
+    default: 12.0
+    selector: { number: { min: 0, max: 500, step: any, mode: box } }
+
+calendar:
+  weekday:
+    weekdays: [mon, tue, wed, thu, fri]
+
+energy_bands:
+  - name: day
+    days: weekday
+    hours: "06:00-22:00"
+    buy: { adder: "{{ options.day_ore / 100 }}" }
+  - name: night
+    buy: { adder: "{{ options.night_ore / 100 }}" }
+```
+
+**A demand charge on the single highest hour** each month, at any time of day (leave out `window:`):
+
+```yaml
+name: My operator (monthly peak)
+kind: network
+version: 1
+description: A per-kW charge on the highest hourly import of the month.
+
+detect:
+  always: true
+
+options:
+  kr_per_kw:
+    name: Demand charge
+    description: kr/kW/month, as on your invoice.
+    default: 60.0
+    selector: { number: { min: 0, max: 2000, step: any, mode: box } }
+
+demand_charge:
+  rate_per_kw: "{{ options.kr_per_kw }}"
+  rate_basis: month
+  measure:
+    interval: 60min
+    aggregate: max
+  period: month
+```
+
+Check the sheet rate against your invoice, and use `aggregate: mean_top_n` with
+`n:` if your operator averages several peaks, as Göteborg Energi does. A file
+that does not load is reported as a repair issue naming the file and the key
+at fault, and the other profiles keep working. The general rules for profile
+files are in [Writing a profile](profiles.md).
 
 ## Energy bands
 
@@ -184,6 +284,7 @@ warning names any timestep that had to be raised above its target.
 
 | Entity | Type | Notes |
 |---|---|---|
+| `sensor.*_network_tariff_status` | sensor, diagnostic | Always created. `not_configured` / `profile_error` / `peak_tracking_off` (demand charge but no grid-import meter, so no tracker; also raises the `peak_tracking_off` repair) / `demand_charge_not_priced` (from `demand_charge_pricing`) / `active` |
 | `sensor.*_network_tariff_band` | sensor | Current band name; `adder`, `multiplier`, `next_change`, `next_band` attributes |
 | `sensor.*_demand_charge_rate` | sensor, diagnostic | The effective `capacity_cost_per_kw`; `sheet_rate`, `rate_basis`, `aggregate`, `active`, `reason` attributes |
 | `sensor.*_period_peak` | sensor (kW) | The billed aggregate so far this period; `period`, `days_remaining`, `floor_kw`, `contributing_intervals` attributes |

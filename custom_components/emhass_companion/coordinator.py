@@ -11,6 +11,7 @@ from typing import Any
 
 from homeassistant.components.recorder import get_instance, history
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import SUN_EVENT_SUNRISE, UnitOfTemperature
 from homeassistant.core import Event, EventStateChangedData, HomeAssistant, State, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
@@ -22,10 +23,13 @@ from homeassistant.helpers.event import (
     async_track_time_interval,
 )
 from homeassistant.helpers.storage import Store
+from homeassistant.helpers.sun import get_astral_event_date
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
+from homeassistant.util.unit_conversion import TemperatureConverter
 from packaging.version import InvalidVersion, Version
 
+from . import snow_cover
 from .api import EmhassClient, EmhassConnectionError, EmhassError
 from .configuration import EmhassConfig, ProfileSelection
 from .const import (
@@ -82,6 +86,7 @@ from .const import (
 from .deferrable import DeferrableRegistry, DeferrableRuntime, state_to_watts
 from .effective_settings import ML_MODEL_SETTING_NAMES, ML_SETTING_NAMES, resolve_effective_settings
 from .health import SourceHealth
+from .heat_pump_room import HeatPumpRoomConfig
 from .infeasibility import Finding, Severity, diagnose, format_power, headline
 from .models import (
     ROW_ZERO_FIRST,
@@ -98,7 +103,13 @@ from .models import (
     row_zero_start,
 )
 from .network_calendar import HolidayCache, NetworkCalendar, NetworkCalendarError
-from .payload import PayloadInputs, PayloadResult, build_payload
+from .payload import (
+    PayloadError,
+    PayloadInputs,
+    PayloadResult,
+    build_payload,
+    outdoor_per_step,
+)
 from .peaks import PeakTracker, days_in_current_period, effective_rate_per_kw
 from .phase_guard import PhaseGuard
 from .price_forecast import (
@@ -116,6 +127,7 @@ from .profiles import (
 )
 from .smoothing import TimeWeightedAverage
 from .surplus import seam_carry
+from .tariff import native_tariff_series
 from .terminal import (
     LOAD_SOURCE_LAST_PLAN,
     LOAD_SOURCE_PROFILE,
@@ -126,8 +138,9 @@ from .terminal import (
 from .terminal import (
     LOOKAHEAD as END_SOC_LOOKAHEAD,
 )
+from .thermal import ThermalConfig
 from .util import schema_major, version_at_least
-from .water_tank import TankShortfall
+from .water_tank import TankShortfall, WaterTankConfig
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -143,6 +156,8 @@ _ML_FIT_RETRY_COOLDOWN = timedelta(hours=1)
 _ML_REFIT_INTERVAL = timedelta(days=7)
 _ML_STORE_VERSION = 1
 _SOC_DAY_STORE_VERSION = 1
+_SNOW_STORE_VERSION = 1
+_SNOW_SAVE_DELAY = 30
 _SETTINGS_REFRESH_DELAY = 3
 
 # How long the coordinator keeps building the load forecast itself after a run
@@ -493,6 +508,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         # conservative and treats it as unsupported.
         self.backend_version: str | None = None
         self._water_tank_plan_blocked: str | None = None
+        self._outdoor_forecast: Series = Series.empty()
         # Set once, right after __init__.async_setup_entry builds them (may be
         # empty -- see _build_peak_trackers). Held here, not just on
         # EmhassRuntimeData, because demand_charge_pricing / _build need each
@@ -598,6 +614,13 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         self._run_lock = asyncio.Lock()
         self._ml_store: Store[dict[str, Any]] = Store(
             hass, _ML_STORE_VERSION, f"{DOMAIN}_{entry.entry_id}_ml_fit"
+        )
+        # Whether snow looks to be covering the panels, and the samples behind
+        # that call (see snow_cover.py). Persisted: the state has to survive
+        # midnight and restarts, and the samples hold the evidence for it.
+        self.snow_cover = snow_cover.SnowCoverState()
+        self._snow_store: Store[dict[str, Any]] = Store(
+            hass, _SNOW_STORE_VERSION, f"{DOMAIN}_{entry.entry_id}_snow_cover"
         )
 
     # -- surplus --------------------------------------------------------------
@@ -1030,6 +1053,124 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             if raw := stored.get("trained_at"):
                 self._ml_trained_at = dt_util.parse_datetime(raw)
 
+    async def async_load_snow_cover(self) -> None:
+        """Restore the snow cover state saved before the last shutdown."""
+        try:
+            stored = await self._snow_store.async_load()
+        except Exception:  # a damaged store must not block setup
+            _LOGGER.debug("Could not load the snow cover state", exc_info=True)
+            return
+        self.snow_cover = snow_cover.from_json(stored)
+
+    def _save_snow_cover(self) -> None:
+        self._snow_store.async_delay_save(
+            lambda: snow_cover.to_json(self.snow_cover), _SNOW_SAVE_DELAY
+        )
+
+    async def async_set_snow_cover_mode(self, mode: str) -> None:
+        """Apply the ``set_snow_cover`` action and republish at once."""
+        self.snow_cover = snow_cover.set_mode(self.snow_cover, mode, dt_util.utcnow())
+        self._save_snow_cover()
+        self.async_update_listeners()
+
+    def _weather_entity(self) -> str | None:
+        """The weather entity already in the configuration, if there is one.
+
+        The outdoor temperature source's own, when it names one. Otherwise the
+        first weather entity Home Assistant has, by entity id: no setting
+        exists to pick a source for snow cover, and a weather entity is
+        almost always for the home's own location.
+        """
+        entity_id = self._temperature_entity()
+        if entity_id and entity_id.startswith("weather."):
+            return entity_id
+        return min(self.hass.states.async_entity_ids("weather"), default=None)
+
+    def _temperature_entity(self) -> str | None:
+        selection = self.config.temperature
+        entity_id = selection.options.get("entity") if selection else None
+        return entity_id if isinstance(entity_id, str) and entity_id else None
+
+    def _read_outdoor_temperature(self) -> float | None:
+        """Current outdoor temperature in degrees Celsius, from the existing source.
+
+        The temperature source's own entity, then the weather entity: a
+        ``temperature`` attribute, or a numeric state. Fahrenheit is converted.
+        """
+        for entity_id in (self._temperature_entity(), self._weather_entity()):
+            state = self.hass.states.get(entity_id) if entity_id else None
+            if state is None:
+                continue
+            unit = state.attributes.get("temperature_unit") or state.attributes.get(
+                "unit_of_measurement"
+            )
+            for raw in (state.attributes.get("temperature"), state.state):
+                try:
+                    value = float(raw)
+                except (TypeError, ValueError):
+                    continue
+                if unit == UnitOfTemperature.FAHRENHEIT:
+                    value = TemperatureConverter.convert(
+                        value, UnitOfTemperature.FAHRENHEIT, UnitOfTemperature.CELSIUS
+                    )
+                return value
+        return None
+
+    def _read_weather_condition(self) -> str | None:
+        entity_id = self._weather_entity()
+        state = self.hass.states.get(entity_id) if entity_id else None
+        if state is None or state.state in ("unknown", "unavailable", ""):
+            return None
+        return state.state
+
+    def _update_snow_cover(self, now: datetime, pv: Series, pv_live_w: float | None) -> float:
+        """Advance the snow cover state from this run and return the PV factor.
+
+        ``pv`` is the *raw* forecast, which is what the measured output is held
+        against. Sensors are read here and the decision is the pure module's.
+        """
+        if not pv or not self.config.pv.key:
+            return 1.0
+        if not self.config.pv_live_entity:
+            # Nothing to measure against: weather alone could set a suspicion
+            # that nothing would ever lift. Only a manual override applies.
+            return snow_cover.factor(self.snow_cover)
+        local_day = dt_util.as_local(now).date()
+        peak_w = max(
+            (p.value for p in pv if dt_util.as_local(p.time).date() == local_day), default=0.0
+        )
+        # One sample arrives per run, so it stands for the longer of the step
+        # and the recalculation interval; otherwise an hourly recalculation on
+        # a 15-minute step would never gather an hour of evidence.
+        slot = max(
+            timedelta(minutes=self.config.time_step_minutes),
+            self.config.mpc_interval,
+            snow_cover.SAMPLE_SLOT,
+        )
+        # The live value is an average over the step that just ended, so it is
+        # held against the forecast for that same stretch, not the step ahead:
+        # on a steep morning ramp the two differ enough to look like snow.
+        averaged = timedelta(minutes=self.config.time_step_minutes)
+        planned_w = pv.value_at(now - averaged / 2)
+        if planned_w is None:
+            planned_w = pv.value_at(now)
+        sunrise = get_astral_event_date(self.hass, SUN_EVENT_SUNRISE, local_day)
+        before = self.snow_cover
+        self.snow_cover = snow_cover.advance(
+            before,
+            now=now,
+            planned_w=planned_w,
+            actual_w=pv_live_w,
+            peak_w=peak_w,
+            temperature_c=self._read_outdoor_temperature(),
+            condition=self._read_weather_condition(),
+            sunrise=sunrise,
+            slot=slot,
+        )
+        if self.snow_cover != before:
+            self._save_snow_cover()
+        return snow_cover.factor(self.snow_cover)
+
     async def _async_save_ml_state(self) -> None:
         await self._ml_store.async_save(
             {
@@ -1114,6 +1255,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             send_soc_final_reward=self.soc_final_reward_supported,
             # Configured enablement, not whether a series happens to be present.
             use_pv=bool(config.pv.key),
+            solver_settings=config.solver,
         )
         return effective.persistent(), effective.warnings
 
@@ -1269,6 +1411,8 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
                 temperature = self.loads.room_temperature(load)
                 projected.append(load.to_load(now, self.config.time_step_minutes, temperature))
             except ValueError as err:
+                if load.is_heat_pump_room:
+                    raise UpdateFailed(str(err)) from err
                 if not load.is_water_tank:
                     raise
                 message = f"Water tank {load.name}: {err}"
@@ -1297,6 +1441,29 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
                 f"the backend reports {self.backend_version or 'unknown'}. Upgrade EMHASS and reload."
             )
         return None
+
+    def effective_thermal_config(
+        self, load: DeferrableRuntime, current_temperature: float | None
+    ) -> ThermalConfig | WaterTankConfig | HeatPumpRoomConfig | None:
+        """A load's thermal model as the last request saw it.
+
+        For displays and checks, which must judge the same heating rate the
+        optimiser was sent. Unscaled until a forecast has been fetched.
+        """
+        config = load.thermal_config(current_temperature)
+        now = dt_util.utcnow()
+        if isinstance(config, HeatPumpRoomConfig):
+            if not self._outdoor_forecast:
+                return config
+            step = timedelta(minutes=self.config.time_step_minutes)
+            return config.with_outdoor_forecast(
+                outdoor_per_step(self._outdoor_forecast, now, step, self.config.horizon_steps)
+            )
+        if not isinstance(config, ThermalConfig) or not config.cop_curve:
+            return config
+        horizon = timedelta(minutes=self.config.time_step_minutes * self.config.horizon_steps)
+        window = self._outdoor_forecast.window_covering(now, now + horizon)
+        return config.with_outdoor_forecast(window.values) if window else config
 
     def water_tank_error(self, load: DeferrableRuntime) -> str | None:
         """Fail closed before tank dispatch, including between optimiser runs."""
@@ -1943,6 +2110,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         outdoor = Series.empty()
         if self.loads.needs_outdoor_temperature and config.temperature:
             outdoor = await self._series(config.temperature, PROFILE_KIND_TEMPERATURE)
+        self._outdoor_forecast = outdoor
 
         buy = sell = None
         network_warnings: list[str] = []
@@ -1958,19 +2126,22 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
                 price_warnings.append(forecast_warning)
         if spot:
             buy, sell = config.tariff.compose(self.hass, spot)
-            if self.network_calendar is not None and buy:
-                # Bands add the network operator's own energy-fee structure on
-                # top of the supplier tariff `Tariff.compose` just produced --
-                # same Series in, same Series out, so nothing downstream has to
-                # know a network profile exists. Holiday dates are resolved
-                # for exactly the dates this horizon touches (two or three,
-                # normally), not the whole calendar year.
-                dates = self.network_calendar.dates_in(buy)
-                entity_id = next(iter(self.network_calendar.holiday_entities()), None)
-                network_warnings = await self.holiday_cache.async_ensure(
-                    self.hass, entity_id, dates
-                )
-                buy, sell = self.network_calendar.apply_bands(buy, sell, self.holiday_cache)
+        elif (native := self._native_prices(now, fill_until, step)) is not None:
+            buy, sell = native
+        if buy and self.network_calendar is not None:
+            # Bands add the network operator's own energy-fee structure on
+            # top of the supplier tariff `Tariff.compose` just produced --
+            # same Series in, same Series out, so nothing downstream has to
+            # know a network profile exists. Holiday dates are resolved
+            # for exactly the dates this horizon touches (two or three,
+            # normally), not the whole calendar year.
+            dates = self.network_calendar.dates_in(buy)
+            entity_id = next(iter(self.network_calendar.holiday_entities()), None)
+            network_warnings = await self.holiday_cache.async_ensure(self.hass, entity_id, dates)
+            buy, sell = self.network_calendar.apply_bands(buy, sell, self.holiday_cache)
+
+        pv_live_w = self._read_pv_live()
+        pv_snow_factor = self._update_snow_cover(now, pv, pv_live_w)
 
         settings = self._forecast_profile_settings()
         if EMHASS_CONF_LOAD_FORECAST_METHOD in settings:
@@ -2051,6 +2222,10 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         end_soc: EndSocDecision | None = None
         if config.battery.enabled and soc_init is not None:
             load_for_terminal, load_source = self._load_for_terminal(load)
+            # The end-of-horizon target must count on the same sun the plan
+            # does, or a snowed-in house ends the horizon empty, waiting for
+            # a replenishment the scaled forecast never promised.
+            pv_expected = pv.scaled(pv_snow_factor) if pv and pv_snow_factor != 1.0 else pv
             end_soc = decide_end_soc(
                 mode=config.battery.end_soc_mode,
                 soc_init=soc_init,
@@ -2058,7 +2233,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
                 now=now,
                 horizon_end=horizon_end,
                 step=step,
-                pv=pv or None,
+                pv=pv_expected or None,
                 load=load_for_terminal,
                 load_source=load_source,
                 buy_price=buy,
@@ -2089,16 +2264,32 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         trackers = self.peak_trackers or (
             [self.peak_tracker] if self.peak_tracker is not None else []
         )
-        if demand_pricing is not None and rates is not None and action == ACTION_MPC and trackers:
+        tier_floors = bool(
+            self.network_calendar
+            and any(charge.min_peak_kw > 0 for charge in self.network_calendar.demand_charges)
+        )
+        if (
+            demand_pricing is not None
+            and rates is not None
+            and action == ACTION_MPC
+            and (trackers or tier_floors)
+        ):
             # Watts, matching every other power figure this integration sends
             # -- current_period_peak is MPC-only in EMHASS (see
             # docs/network_tariffs_plan.md, "Day-ahead versus MPC"), so a
             # day-ahead run gets no floor and no memory either way.
-            peaks_w = [tracker.floor_kw * 1000 for tracker in trackers[: len(rates)]]
-            # Pad / truncate to K if trackers and rates somehow diverge.
-            while len(peaks_w) < len(rates):
-                peaks_w.append(0.0)
-            peaks_w = peaks_w[: len(rates)]
+            charges = self.network_calendar.demand_charges if self.network_calendar else []
+            # A component's tier limit floors its peak even when no tracker
+            # backs it (no grid-import meter), or the upper tier would price
+            # the whole peak. Trackers and rates that diverge are padded.
+            peaks_w = [
+                max(
+                    trackers[i].floor_kw if i < len(trackers) else 0.0,
+                    charges[i].min_peak_kw if i < len(charges) else 0.0,
+                )
+                * 1000
+                for i in range(len(rates))
+            ]
             ns = demand_pricing.interval_timesteps_list
             histories = [
                 self._capacity_interval_history_w(
@@ -2211,7 +2402,8 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             outdoor_temperature=outdoor or None,
             soc_init=soc_init,
             soc_final=end_soc.soc if end_soc else None,
-            pv_live_w=self._read_pv_live(),
+            pv_live_w=pv_live_w,
+            pv_snow_factor=pv_snow_factor,
             load_live_w=self._read_load_live(),
             grid_import_limit_w=self._grid_import_limit_w(config),
             grid_export_limit_w=self._read_grid_limit(config.grid.export_limit_entity, "export"),
@@ -2236,8 +2428,12 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
                 and version_at_least(self.backend_version, MIN_EMHASS_VERSION_CHARGE_DERATING)
             ),
             send_soc_final_reward=self.soc_final_reward_supported,
+            solver_settings=config.solver,
         )
-        built = build_payload(inputs)
+        try:
+            built = build_payload(inputs)
+        except PayloadError as err:
+            raise UpdateFailed(str(err)) from err
         for series, method, label in (
             (buy, "load_cost_forecast_method", "buy price"),
             (sell, "production_price_forecast_method", "sell price"),
@@ -2286,6 +2482,31 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             fill.series,
             spot.end,
             f"Estimated prices from {dt_util.as_local(fill.forecast_from):%d %b %H:%M %Z}: {source}.",
+        )
+
+    def _native_prices(
+        self, now: datetime, until: datetime, step: timedelta
+    ) -> tuple[Series, Series] | None:
+        """Buy and sell series for a price profile that EMHASS prices itself.
+
+        The fixed tariff fetches nothing and hands EMHASS a peak / off-peak
+        split instead, so without this the tariff adjustments and the network
+        profile's energy fees were never applied to it. Only built when one
+        of them would change a price: otherwise EMHASS keeps pricing the run
+        from the same settings, exactly as before.
+        """
+        config = self.config
+        if config.tariff.is_identity and self.network_calendar is None:
+            return None
+        native = native_tariff_series(
+            self._settings(config.price, PROFILE_KIND_PRICE), now, until, step
+        )
+        if native is None:
+            return None
+        buy, sell = native
+        return (
+            config.tariff.buy.apply(self.hass, buy),
+            config.tariff.sell.apply(self.hass, sell) if sell else sell,
         )
 
     async def _series(self, selection: ProfileSelection, kind: str) -> Series:

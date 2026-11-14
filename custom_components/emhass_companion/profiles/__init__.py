@@ -36,6 +36,8 @@ from .engine import (
     resolve_network,
     resolve_sensors,
     resolve_settings,
+    step_is_skipped,
+    steps_are_noop,
 )
 from .schema import Profile, ProfileError, ProfileLoadResult, validate_document
 
@@ -56,6 +58,8 @@ __all__ = [
     "resolve_network",
     "resolve_sensors",
     "resolve_settings",
+    "step_is_skipped",
+    "steps_are_noop",
 ]
 
 _LOGGER = logging.getLogger(__name__)

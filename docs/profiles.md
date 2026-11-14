@@ -2,7 +2,7 @@
 
 A profile teaches EMHASS Companion how to read one data source, or how to drive one inverter. It is **data, not code** — a YAML file with no Python in it.
 
-That choice is deliberate. A Python plugin folder inside the integration would be wiped by every HACS update, is an arbitrary-code-execution surface, and breaks whenever Home Assistant changes an API. Profiles survive updates, are reviewable, are testable as fixtures, and need no Python to contribute.
+That choice is deliberate. A Python plugin folder inside the integration would be wiped by every update, is an arbitrary-code-execution surface, and breaks whenever Home Assistant changes an API. Profiles survive updates, are reviewable, are testable as fixtures, and need no Python to contribute.
 
 ## Where profiles live
 
@@ -13,7 +13,7 @@ custom_components/emhass_companion/profiles/builtin/<kind>/   shipped
 
 `<kind>` is `price`, `pv`, `load`, `temperature`, `inverter` or `network`.
 
-Your directory is outside the integration, so **HACS updates never delete your files**. A file whose name matches a built-in *replaces* it — which means you can patch a broken built-in locally instead of waiting for a release.
+Your directory is outside the integration, so **Marketplace (or HACS) updates never delete your files**. A file whose name matches a built-in *replaces* it — which means you can patch a broken built-in locally instead of waiting for a release.
 
 Reload the integration after adding or editing a profile.
 
@@ -254,6 +254,13 @@ tariffs use `demand_charges:` (a list); do **not** model mean-of-top-3 as
 K=3 — that is still one component priced as `rate / n`. Needs EMHASS
 0.18.3+. Complementary windows can use `window: {invert: <other name>}`.
 Defining both `demand_charge` and `demand_charges` is rejected.
+
+A progressive (tiered) charge on one peak is two components over the same
+window: rate 1, and `rate 2 - rate 1` with `min_peak_kw: <tier limit>`. The
+second component's peak is sent as `max(tracked peak, min_peak_kw)`, so it
+prices only the part above the limit; its cost differs from the real bill by a
+constant, which does not change the plan. Day-ahead runs send no peak memory,
+so they lack that floor.
 
 ```yaml
 name: Example network operator

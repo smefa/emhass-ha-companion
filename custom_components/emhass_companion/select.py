@@ -6,6 +6,7 @@ from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
@@ -128,6 +129,8 @@ class LoadRecurrenceSelect(EmhassLoadEntity, SelectEntity, RestoreEntity):
         return self.load.recurrence
 
     async def async_select_option(self, option: str) -> None:
+        if self.load.is_sequence and option == "surplus":
+            raise ServiceValidationError("Sequence loads do not support surplus recurrence")
         if option != self.load.recurrence:
             self.load.cancel()
         self.load.recurrence = option

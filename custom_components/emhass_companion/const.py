@@ -7,6 +7,13 @@ from typing import Final
 
 DOMAIN: Final = "emhass_companion"
 
+# Community invite shown in the inverter step. Strings may not hold URLs (hassfest),
+# so the link reaches the text through a description placeholder.
+DISCORD_INVITE_URL: Final = "https://discord.gg/ugDwJwynC5"
+NETWORK_TARIFF_DOCS_URL: Final = (
+    "https://smefa.github.io/emhass-ha-companion/guide/network_tariffs/"
+)
+
 # --- EMHASS backend contract -------------------------------------------------
 
 # Minimum EMHASS version. 0.17.9 introduced GET /api/v1/plan, /api/v1/last-run and
@@ -279,6 +286,11 @@ CONF_BATTERY_DISCHARGE_ENERGY_ENTITY: Final = "battery_discharge_energy_entity"
 
 # Deferrable load subentry keys
 CONF_NAME: Final = "name"
+CONF_POWER_SEQUENCE: Final = "power_sequence"
+# When reconfigure last changed a scalar Power. The number restores its own
+# value only if that state is newer, so an edit made while the entry was not
+# loaded is not overwritten by restore on the next setup.
+CONF_NOMINAL_POWER_EDITED_AT: Final = "nominal_power_edited_at"
 CONF_NOMINAL_POWER: Final = "nominal_power_w"
 # Floor on the power a load may draw while it is on, sent as EMHASS's
 # `minimum_power_of_deferrable_loads`. Only bites when the load is *not*
@@ -351,6 +363,23 @@ CONF_TEMPERATURE_SENSOR: Final = "temperature_sensor"
 CONF_THERMAL_MODEL: Final = "thermal_model"
 THERMAL_MODEL_ROOM: Final = "room"
 THERMAL_MODEL_WATER_TANK: Final = "water_tank"
+# A room described by its building and heat pump (EMHASS thermal_battery);
+# these settings are owned by the subentry. See heat_pump_room.py.
+THERMAL_MODEL_HEAT_PUMP_ROOM: Final = "heat_pump_room"
+CONF_THERMAL_MASS: Final = "thermal_mass_m3"
+CONF_FLOOR_AREA: Final = "floor_area_m2"
+CONF_SPECIFIC_HEATING_DEMAND: Final = "specific_heating_demand"
+CONF_SUPPLY_TEMPERATURE: Final = "supply_temperature"
+CONF_CARNOT_EFFICIENCY: Final = "carnot_efficiency"
+# Optional, for a heat pump whose cold side is not the outdoor air (ground source).
+CONF_CONSTANT_COP: Final = "constant_cop"
+CONF_SOURCE_TEMPERATURE: Final = "source_temperature"
+CONF_BASE_TEMPERATURE: Final = "base_temperature"
+CONF_ANNUAL_HDD: Final = "annual_reference_hdd"
+CONF_INERTIA_TIME_CONSTANT: Final = "thermal_inertia_time_constant"
+# Optional passive solar gain: EMHASS adds window_area * shgc * GHI to the room's heat.
+CONF_WINDOW_AREA: Final = "window_area"
+CONF_SHGC: Final = "shgc"
 CONF_TANK_VOLUME: Final = "tank_volume_litres"
 # A common domestic hot-water cylinder; only the form's starting value.
 DEFAULT_TANK_VOLUME: Final = 200
@@ -370,6 +399,7 @@ CONF_SENSE: Final = "sense"
 CONF_HEATING_RATE: Final = "heating_rate"
 CONF_COOLING_CONSTANT: Final = "cooling_constant"
 CONF_THERMAL_INERTIA: Final = "thermal_inertia"
+CONF_COP_CURVE: Final = "cop_curve"
 CONF_COMFORT_TEMPERATURE: Final = "comfort_temperature"
 CONF_SETBACK_TEMPERATURE: Final = "setback_temperature"
 CONF_MAX_TEMPERATURE: Final = "max_temperature"
@@ -857,7 +887,17 @@ PEAK_HEADROOM_KEY: Final = "peak_headroom"
 # currently holding the battery's charge below the plan to stay inside it.
 PHASE_HEADROOM_KEY: Final = "phase_headroom"
 PHASE_GUARD_ACTIVE_KEY: Final = "phase_guard_active"
+# Diagnostic: the PV forecast is being scaled down for snow on the panels.
+SNOW_COVER_KEY: Final = "snow_cover"
 DEMAND_CHARGE_RATE_KEY: Final = "demand_charge_rate"
+# Always-present diagnostic: is a network tariff selected, resolved and, if it
+# has a demand charge, actually being tracked.
+NETWORK_TARIFF_STATUS_KEY: Final = "network_tariff_status"
+NETWORK_STATUS_NOT_CONFIGURED: Final = "not_configured"
+NETWORK_STATUS_PROFILE_ERROR: Final = "profile_error"
+NETWORK_STATUS_PEAK_TRACKING_OFF: Final = "peak_tracking_off"
+NETWORK_STATUS_NOT_PRICED: Final = "demand_charge_not_priced"
+NETWORK_STATUS_ACTIVE: Final = "active"
 
 # The EMHASS release ``current_period_peak`` shipped in -- see
 # docs/network_tariffs_plan.md's version-gating table. Below this, a network
@@ -930,6 +970,13 @@ SAVINGS_FORECAST_HOURS: Final = 24
 # nothing to warn the user. A wrong number on a silent sensor is worse than no
 # sensor, so those are left out.
 CONF_EMHASS_STANDARD_NAMES: Final = "emhass_standard_names"
+# Advanced options: the LP solver limits sent with every run. Stored as a dict
+# under CONF_SOLVER; an entry that never opened the page keeps the defaults.
+CONF_SOLVER: Final = "solver"
+CONF_SOLVER_TIMEOUT: Final = "lp_solver_timeout"
+CONF_SOLVER_MIP_REL_GAP: Final = "lp_solver_mip_rel_gap"
+DEFAULT_SOLVER_TIMEOUT: Final = 45
+DEFAULT_SOLVER_MIP_REL_GAP: Final = 0.01
 # The entity ids these sensors had before the option was first switched on.
 # Kept so that switching it off restores exactly what the user had, rather than
 # whatever Home Assistant would generate today -- a friendly name or a
@@ -1124,6 +1171,7 @@ INFEASIBLE_CAUSE_CODES: Final = frozenset(
         "window_too_short",
         "window_energy",
         "thermal_unreachable",
+        "thermal_window",
         "power_deficit",
         "pv_surplus",
         "array_length",
@@ -1188,6 +1236,7 @@ ISSUE_STANDARD_NAMES_TAKEN: Final = "standard_names_taken"
 # The phase guard's real-time clamp cannot run on this install. One issue id,
 # one translation per reason (see phase_guard.clamp_blocker).
 ISSUE_PHASE_CLAMP_OFF: Final = "phase_clamp_off"
+ISSUE_PEAK_TRACKING_OFF: Final = "peak_tracking_off"
 # A heat_topology saved in the EMHASS add-on's own configuration, in EMHASS's
 # default replace mode, overwrites every deferrable load the Companion sends.
 # One issue id, a second translation for a backend too old for the fix.

@@ -21,6 +21,7 @@
 | `sensor.*_forecast_cost_24h` / `*_forecast_savings_24h` | The same, priced off the current plan for the next 24 hours |
 | `sensor.*_battery_action` | What the executor did or would do, and why — see [Handing over control](handing_over_control.md) |
 | `sensor.*_last_request_to_emhass` | The exact payload of the last optimisation request. Diagnostic, disabled by default — see [Troubleshooting](troubleshooting.md) |
+| `sensor.*_network_tariff_status` | Diagnostic, always present: `not_configured`, `profile_error`, `peak_tracking_off`, `demand_charge_not_priced` or `active`. Attributes: `profile`, `bands`, `demand_charges`, `peak_trackers`, `holiday_lookup_degraded`, `not_priced_reason` |
 | `sensor.*_network_tariff_band` | The active energy band's name, with the adder and next change in its attributes. Only if you configured a network tariff — see [Network tariffs](network_tariffs.md) |
 | `sensor.*_demand_charge_rate` | The effective `capacity_cost_per_kw` a network tariff's demand charge prices out to right now, diagnostic. Only with a network tariff configured. With multi-component tariffs (EMHASS 0.18.3+), the native value is component 0; other components appear under a `components` attribute |
 | `sensor.*_period_peak` | The demand-charge aggregate incurred so far this billing period. Only if the network tariff defines a demand charge |
@@ -28,6 +29,7 @@
 | `number.*_peak_target` | The manual fallback ceiling used while a windowed demand charge can't yet be priced directly. Same condition as above |
 | `sensor.*_phase_headroom` | Symmetric charging the main fuse's worst phase has room for right now, in W. Only if you configured a main fuse — see [Dynamic grid limits](grid_limits.md#three-phase-imbalance-the-phase-guard) |
 | `binary_sensor.*_phase_guard_active` | On while a forced charge is being held below the plan to protect the main fuse. Same condition as above |
+| `binary_sensor.*_panels_snow_covered` | Diagnostic. On while the solar forecast is being scaled down because the panels look snow covered — see [Snow on the panels](setup.md#snow-on-the-panels). Attributes: `state` (`covered` or `suspected`), `ratio`, `factor`, `since`, `source` |
 | `binary_sensor.*_plan_out_of_date` | The plan is too old to act on |
 | `binary_sensor.*_source_readings_unavailable` | One of the entities this integration reads has stopped reporting — see [Troubleshooting](troubleshooting.md#when-a-source-stops-reporting) |
 | `switch.*_control_enabled` | Master gate on acting. Ships **off** |
@@ -47,6 +49,7 @@ you've selected a network profile under **Configure → Network tariff** — see
 Actions for scripts and automations: `emhass_companion.run_mpc` (the
 recalculate button), `emhass_companion.run_dayahead` and
 `emhass_companion.train_load_forecaster`, which have no button.
+`emhass_companion.set_snow_cover` overrides the snow detection, with no entity.
 `emhass_companion.export_settings` (**Write settings to EMHASS**) is an action
 only, with no button or entity; administrators only. See
 [Hub controls](guide/hub_controls.md#write-settings-to-emhass). Every action is
@@ -55,7 +58,10 @@ described, with fields and examples, in [Actions](guide/actions.md).
 ## Deferrable and thermal loads
 
 See [deferrable_loads.md](deferrable_loads.md) and
-[thermal_loads.md](thermal_loads.md) for the per-load entities.
+[thermal_loads.md](thermal_loads.md) for the per-load entities. Power
+is a text entity (`text.<load>_power_when_running`), not a number: one value
+is a constant load, several comma-separated values are a
+[sequence](deferrable_loads.md#sequence-loads). Thermal loads keep a number.
 
 ## EMHASS entity names
 

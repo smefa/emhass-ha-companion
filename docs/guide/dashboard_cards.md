@@ -18,6 +18,23 @@ deferrable load showing when it's scheduled to run. A vertical line marks
 
 ![The plan card: solar and consumption as a filled area and lines above, charge level and both prices below, and a row per deferrable load](../assets/plan-card.png)
 
+## Horizon and briefing cards
+
+```yaml
+type: custom:emhass-horizon-card
+```
+
+```yaml
+type: custom:emhass-briefing-card
+```
+
+Two alternative looks at the same plan. The horizon card stacks power, price,
+charge level and loads as panels on one time axis, with a readout that follows
+the pointer. The briefing card says in words what the house is doing and until
+when, then lists what happens next. Both have a visual editor where each part
+can be switched off; the options are listed in
+[the card reference](../dashboard_cards.md#alternative-plan-and-overview-cards).
+
 ## Deferrable load card
 
 ```yaml
@@ -28,6 +45,12 @@ load: Dishwasher    # omit to show the first load
 One load at a time: whether it should run now, its scheduled power, next
 start, runtime today, a timeline of its schedule, and its enable/mode
 controls.
+
+On a [sequence load](../deferrable_loads.md#sequence-loads) the card shows a
+running cycle as "Running · step 3 of 6", even through a 0 W step. *Ran
+today* becomes the cycle step, then "Done" once the day's cycle has finished.
+*Nominal power* shows the sequence's peak, and the run list shows one run per
+cycle.
 
 ![A deferrable load card: scheduled power, next start, deadline and runtime today, over a timeline of the load's schedule](../assets/deferrable-card.png)
 

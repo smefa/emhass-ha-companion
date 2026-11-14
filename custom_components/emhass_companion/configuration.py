@@ -33,6 +33,7 @@ from .const import (
     CONF_PV,
     CONF_PV_ENTITY,
     CONF_SOC_ENTITY,
+    CONF_SOLVER,
     CONF_TEMPERATURE,
     CONF_TIME_STEP,
     CONF_URL,
@@ -126,6 +127,8 @@ class EmhassConfig:
     battery_power_invert: bool = False
     pv_live_entity: str | None = None
     house_load_total_entity: str | None = None
+    # LP solver limits from Advanced settings; empty keeps the built-in defaults.
+    solver: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_entry(cls, hass: HomeAssistant, entry: ConfigEntry) -> EmhassConfig:
@@ -178,6 +181,7 @@ class EmhassConfig:
             battery_power_invert=bool(options.get(CONF_BATTERY_POWER_INVERT)),
             house_load_total_entity=house_load_total_entity,
             pv_live_entity=options.get(CONF_PV_ENTITY),
+            solver=dict(options.get(CONF_SOLVER) or {}),
         )
 
     @property

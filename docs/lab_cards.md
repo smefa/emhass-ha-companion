@@ -52,12 +52,22 @@ load: Hot water
 One load in the height of a tile, for a dashboard that lists eight of them.
 The day is drawn as 48 fixed-width buckets rather than proportional blocks, so
 a load that switches twenty times and one that switches twice have the same
-visual density. Two pinned round sub-buttons run it now and open a drawer with
-Requested and Run within in it.
+visual density. A small label at the end shows the schedule's total time span.
+The expand button opens one compact row with Requested, Run now, Run within,
+and optionally Hours needed. The time buttons open sliders and stay neutral.
+Run now is green only while its manual override or manually started sequence is
+active; otherwise Requested is green while a request is pending. A past button
+press does not count as active. The deadline is a thin dotted line over the bar.
+Each control can be hidden in the visual editor. Hours needed is off by default.
+If no controls are shown for the load, the expand button is hidden too.
 
 ```yaml
 type: custom:emhass-deferrable-strip-card
 load: Hot water
+show_requested: true
+show_run_now: true
+show_run_within: true
+show_hours_needed: false
 ```
 
 ## Three status cards

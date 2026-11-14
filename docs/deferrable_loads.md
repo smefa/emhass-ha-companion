@@ -41,7 +41,8 @@ you might change day to day becomes a control on the load's own page:
 | `switch.<load>_enabled` | Include this load in the optimisation at all |
 | `switch.<load>_restrict_to_a_time_window` | Whether the window below applies |
 | `time.<load>_earliest_start` / `_latest_finish` | The window. May cross midnight |
-| `number.<load>_power_when_running` / `_hours_needed_per_day` | |
+| `text.<load>_power_when_running` | Power in W: one value, or a comma-separated [sequence](#sequence-loads) |
+| `number.<load>_hours_needed_per_day` | |
 | `number.<load>_minimum_on_time` / `_minimum_off_time` | Protects compressor-driven loads from short-cycling — see below |
 | `switch.<load>_battery_lockout` | Price the battery out of discharging into this load's window — see [battery_lockout.md](battery_lockout.md) |
 | `button.<load>_run_now` | Run this load immediately, regardless of recurrence. Unavailable on a surplus load — see [surplus_loads.md](surplus_loads.md) |
@@ -69,6 +70,21 @@ can tell EMHASS the load is already running — so it is not charged a
 start-up cost twice, and is not asked to repeat work it has already done
 today. Runtime is counted from that sensor and reset at local midnight,
 because EMHASS has no notion of a day boundary for it.
+
+An *Every day* load with no time window is planned per local day. When the
+plan reaches past midnight, today's hours have to fit before midnight, and each
+further whole day in the plan asks for the load's full hours again. Late in the
+day, today's hours are cut to what still fits. Any minimum off time is kept
+after each midnight, so two days' runs never join into one.
+If what is left of today is shorter than the load's minimum on time, and it
+is not already running, today asks for nothing more. A window that has less
+than one step left is treated as closed in the same way. Tomorrow still asks
+for the full run.
+
+Saving a change to a load with **Reconfigure** reloads the integration, so the
+new switch, sensors and power take effect at once. A Run now in progress
+carries over the reload. If you move a load to a new switch while Companion
+has the old one switched on, Companion switches the old one off.
 
 Automating against a load looks like:
 
@@ -100,6 +116,65 @@ optional deadlines ("run within N hours").
 
 `select.<load>_recurrence` actually has a third position, *On spare solar* —
 see [surplus_loads.md](surplus_loads.md) for what that changes.
+
+## Sequence loads
+
+Some appliances don't draw one steady power. A washing machine heats, then
+washes, then spins, and a flat 2 kW in the plan would put its heating step
+wherever it fits rather than where it is cheap. Enter **Power when running**
+as a list instead, one value in W per optimisation step:
+
+```text
+150, 2000, 2000, 300, 0, 600
+```
+
+- The values run in order, one per step. The last value repeats until
+  *Hours needed* is filled, so `500, 2000` with 1 h at 15-minute steps is
+  `500, 2000, 2000, 2000`.
+- The first value must be at least 10 W. That is the Companion's sign that
+  the cycle has started. A later step may be 0 W, for a soak or a pause.
+- *Hours needed* must cover at least one step per value. A list longer
+  than the runtime is refused in the form.
+- Needs EMHASS 0.18.8 or newer. On an older EMHASS the load is left out of
+  the plan with a warning, and **Run now** is unavailable.
+- *Every day* and *On demand* loads only. Spare-solar and thermal loads
+  take a single value.
+
+**A cycle is one run.** When the plan's start arrives, or you press
+**Run now**, the Companion starts a cycle and holds the load on until the
+cycle's last step, through 0 W and low stages. Each new plan gets the steps
+that remain, from where the cycle has got to. Progress is saved, so a restart
+of Home Assistant mid-cycle carries on rather than starting over. A planned
+start and **Run now** share the same cycle: pressing **Run now** during a
+cycle does nothing, and a planned start after **Run now** doesn't start a
+second one.
+
+- **Requests during a cycle.** An *On demand* load requested while a cycle
+  is already running counts that cycle as the run for the request.
+- **Finishing.** A cycle ends when its time is up, not when the load goes
+  quiet. A low or 0 W step looks idle, so the early finish on idle that
+  ordinary loads have is off here. A finished *Every day* cycle counts for
+  that day.
+- **Stopping.** Turn **Enabled** off, turn **Requested** off, or change
+  **Recurrence**. The next cycle starts again from the first step.
+- **Changing the sequence.** Edit the Power text entity
+  (`text.<load>_power_when_running`) or use **Reconfigure** on the load. A
+  change applies to the next cycle, not the one already running. Typing one
+  value turns the load back into a constant one.
+- **Ignored settings.** A sequence sets the power of every step, so
+  *Lowest power while running*, *Runs at full power only*, *Must run in one
+  unbroken block*, *Most starts per plan* and the minimum on/off times are
+  unavailable on a sequence load.
+
+**Entities.** `binary_sensor.<load>_should_run` stays on for the whole
+cycle and has the attributes `power_sequence`, `sequence_step` (1-based) and
+`sequence_steps` while a cycle runs, plus `last_completed_day` and
+`sequence_done`. A cycle in an overnight window counts for the day the
+window opened.
+`binary_sensor.<load>_running` stays measured, so it reads off during a 0 W
+step. `sensor.<load>_scheduled_power` has `power_sequence` and `cycles`, the
+planned cycle blocks as `[{start, end}]`, so a 0 W step doesn't split one
+cycle into two runs.
 
 ## Thermal loads
 

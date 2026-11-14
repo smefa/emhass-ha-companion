@@ -14,6 +14,7 @@ with no user behind it (an automation, a script) is always allowed.
 | [`emhass_companion.run_dayahead`](#run_dayahead) | Rebuilds the plan across the whole horizon | none | anyone |
 | [`emhass_companion.train_load_forecaster`](#train_load_forecaster) | Retrains the machine-learning load forecaster | none | anyone |
 | [`emhass_companion.set_hot_water_plan`](#set_hot_water_plan) | Replaces a hot-water tank's whole plan | `device_id`, `periods` | anyone |
+| [`emhass_companion.set_snow_cover`](#set_snow_cover) | Overrides whether the panels count as snow covered | `mode` | anyone |
 | [`emhass_companion.export_settings`](#export_settings) | Saves Companion's static settings into EMHASS | none | administrators |
 | [`emhass_companion.test_profile`](#test_profile) | Shows what a data source profile returns | `profile`, `options`, `limit` | administrators |
 | [`emhass_companion.typical_load_forecast`](#typical_load_forecast) | Builds the *Typical household* forecast | `day`, `average_w` | anyone |
@@ -70,6 +71,20 @@ sensor's recent readings as the forecast until a later attempt succeeds.
 
 Replaces a hot-water tank's whole plan in one step. Fields, example and rules
 are on [Thermal loads](thermal_loads.md#water-tank-with-an-immersion-heater).
+
+## set_snow_cover
+
+Overrides the snow detection described under [Snow on the
+panels](../setup.md#snow-on-the-panels). `mode` is `covered` (hold until
+measured output recovers), `clear` (you swept the panels; hold until the next
+snowfall is seen) or `auto` (remove the override). `covered` is refused when
+no solar forecast source is set, because there is then no forecast to reduce.
+
+```yaml
+action: emhass_companion.set_snow_cover
+data:
+  mode: clear
+```
 
 ## export_settings
 

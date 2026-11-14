@@ -5,9 +5,12 @@ description: >-
   A flat rate, or a simple peak / off-peak split. Use this when you have no
   dynamic pricing integration.
 notes: >-
-  This profile fetches nothing. It hands the tariff to EMHASS's own peak /
-  off-peak handling, which means a working setup needs no price integration at
-  all.
+  This profile fetches nothing, so a working setup needs no price integration
+  at all. EMHASS prices the run from these peak / off-peak settings, unless the
+  buy and sell price adjustments or a network tariff change a price. Then the
+  Companion builds the price series itself, with the peak or off-peak price in
+  place of the spot price and the export price in place of the export spot
+  price.
 
 detect:
   always: true

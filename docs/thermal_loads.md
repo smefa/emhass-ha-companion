@@ -23,12 +23,13 @@ separate button from *Add deferrable load*, with its own questions:
 | --- | --- |
 | Temperature sensor | The room (or tank) the comfort band applies to. Read live on every optimisation as the plan's start temperature. |
 | Heats or cools | Whether running the load raises the temperature (heat pump) or lowers it (air conditioning). |
-| Power when running | Electrical draw at full power — this is the power EMHASS schedules. |
+| Power when running | Electrical draw at full power — this is the power EMHASS schedules. A single value: power sequences are not supported for thermal loads. |
 | Comfort / setback / maximum temperature | The band. Comfort holds inside the comfort window, setback outside it, and the maximum is a hard ceiling at all times. |
 | Comfort from / until | The daily comfort window, which may cross midnight. |
 | Heating rate | Degrees per hour at full power. In the collapsed *Advanced settings* section, along with the next two rows. |
 | Heat loss rate | Degrees lost per hour, per degree of difference to outdoors (EMHASS's `cooling_constant`). |
 | Response delay | Lag between switching on and the temperature responding (EMHASS's `thermal_inertia`) — an hour or more for underfloor heating in concrete, 0 for a radiator or fan. |
+| Heat pump COP curve | Optional, under *Advanced settings*. Outdoor temperature and COP pairs, such as `7: 5.2, 0: 4.0, -10: 3.0`; the first pair is where the heating rate was measured. Each request scales the heating rate by the lowest COP over the forecast horizon divided by the first pair's COP, capped at 1. Heating only; needs a forecast the Companion reads itself (not EMHASS built-in). |
 | Running sensor / control entity | Same as an ordinary deferrable load. |
 
 Like an ordinary load, the answers only *seed* the load: from the moment it
@@ -41,6 +42,77 @@ This is the input range; the room-heating defaults are unchanged. Higher
 targets do not switch models: a **Room** load retains its simple model with
 heat loss relative to outdoor temperature. Choose **Water tank** explicitly
 for water storage and estimated hot-water consumption.
+
+## Room, advanced heat pump
+
+Under **Add thermal load**, choose **Room, advanced heat pump** to describe the
+building and heat pump instead of a measured heating rate. The Companion sends
+it as EMHASS's `thermal_battery` model, and EMHASS calculates the COP and the
+heat demand per timestep from the outdoor forecast. It is a GUI over that model
+only: it adds no physics of its own. Use it for heating; it is always sent with
+`sense: heat`. See the [guide](guide/thermal_loads.md#room-advanced-heat-pump)
+for step-by-step setup.
+
+| Question | EMHASS key | Meaning |
+| --- | --- | --- |
+| Room temperature sensor | `start_temperature` | Required. Read on every request; when it is unavailable the key is omitted and EMHASS starts from 20 °C. |
+| Electrical power when running | `nominal_power_of_deferrable_loads` | Electrical draw. EMHASS multiplies it by the COP. |
+| Comfort / setback / maximum, comfort window | `min_temperatures` / `max_temperatures` | The same band as a **Room** load. |
+| Thermal mass (m³) | `volume` | Concrete-equivalent mass; EMHASS's defaults `density` 2400 and `heat_capacity` 0.88 are sent with it. |
+| Heated floor area (m²) | `area` | |
+| Specific heating demand (kWh/m² per year) | `specific_heating_demand` | Heat, not electricity. |
+| Supply temperature (°C) | `supply_temperature` | Default 35. |
+| Carnot efficiency (*Advanced*) | `carnot_efficiency` | Default 0.4. COP = efficiency × (supply + 273.15) / (supply − outdoor), clipped by EMHASS to 1–8. |
+| Constant COP (*Advanced*) | `efficiency` | Optional, 1–8. A flat COP, such as the manufacturer's B0/W35 or B0/W45 figure. EMHASS then ignores the outdoor temperature for the COP; it still drives the heat demand. Wins over source temperature. |
+| Source temperature (*Advanced*, °C) | `efficiency` | Optional. Cold-side temperature for a ground-source heat pump (typical brine temperature). The companion computes one Carnot COP from it, `carnot_efficiency × (supply + 273.15) / (supply − source)`, and sends it as `efficiency`. Must be below the supply temperature. |
+| Base temperature (*Advanced*) | `base_temperature` | Default 18 °C. Degree-day demand is zero above it. |
+| Annual heating degree days (*Advanced*) | `annual_reference_hdd` | Default 3000. |
+| Thermal inertia (*Advanced*, h) | `thermal_inertia_time_constant` | Default 0, and then omitted. |
+| Window area (*Advanced*, m²) | `window_area` | Optional passive solar gain. Effective glazing area, mainly south, east and west windows. EMHASS subtracts `window_area × shgc × GHI` from the heat demand. Empty or 0 sends nothing. |
+| Solar heat gain coefficient (*Advanced*) | `shgc` | Default 0.6, 0–1. Sent only with a window area. |
+
+**Solar gain needs irradiance.** EMHASS gets the solar irradiance (GHI, on a
+horizontal surface) from its own Open-Meteo fetch, using the latitude and
+longitude in its configuration. If that fetch is unavailable the run plans
+without solar gain. The companion's own check that the comfort floors are
+reachable ignores solar gain, so it stays conservative. GHI is not the
+irradiance on the window, so treat the window area as an effective figure to
+tune, not a measured one.
+
+EMHASS's fixed `thermal_loss` of 0.045 kW is left at its default.
+
+**Temporary workaround (EMHASS 0.18.8).** EMHASS drops the degree-day demand on
+warm-started solves and plans with no heat demand, so the heat pump would be
+switched off for the day. The request therefore carries the same demand as
+EMHASS's physics keys (`u_value`, `envelope_area`, `ventilation_rate`,
+`heated_volume`, `indoor_target_temperature`) in place of `specific_heating_demand`,
+`area`, `base_temperature` and `annual_reference_hdd`. The numbers are
+equivalent. Remove `HeatPumpModel.demand_keys` once EMHASS fixes this.
+
+**Ownership.** Power, the band and the comfort times are seeded and then owned
+by device entities, like any thermal load. The house and heat pump settings
+are stored on the subentry and edited through **Edit thermal load**. The
+room's `heating_rate`, `cooling_constant` and `thermal_inertia` entities are not
+created.
+
+**Outdoor forecast.** The forecast must come from a source the Companion reads
+(weather entity or entity attribute). EMHASS built-in leaves the Companion
+without values, so the request fails with a `PayloadError` naming the load
+and no plan is made. The Companion aligns the forecast to the step grid the
+same way EMHASS does (the mean of each step, forward-filled).
+
+**Unreachable floors.** EMHASS treats `min_temperatures` as hard limits. Before
+each request the Companion replays EMHASS's own dynamics with the heat pump
+flat out. Any floor the room cannot reach is lowered to just below that
+best case, so the solve stays feasible and the heat pump runs as hard as it
+can. A warning in the *Last request to EMHASS* sensor names the load. The
+first step is never changed.
+
+**Errors.** Incomplete or invalid model settings on an enabled load fail the
+update with a message naming the load. A disabled load is parked like any
+other and its settings are not checked.
+
+Requires EMHASS **0.18.8 or newer**, the version this model was built against.
 
 ## Water tank (immersion heater)
 

@@ -6,6 +6,19 @@ train_load_forecaster:
 
 export_settings:
 
+set_snow_cover:
+  fields:
+    mode:
+      required: true
+      example: clear
+      selector:
+        select:
+          mode: dropdown
+          options:
+            - auto
+            - covered
+            - clear
+
 set_hot_water_plan:
   fields:
     device_id:
