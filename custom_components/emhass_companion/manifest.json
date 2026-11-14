@@ -22,5 +22,5 @@
   "issue_tracker": "https://github.com/smefa/emhass-ha-companion/issues",
   "requirements": [],
   "single_config_entry": true,
-  "version": "1.1.0.b7"
+  "version": "1.1.0"
 }
