@@ -18,6 +18,7 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.util import dt as dt_util
 import voluptuous as vol
 
+from . import snow_cover
 from .const import ACTION_DAYAHEAD, ACTION_MPC, DOMAIN, PROFILE_KIND_NETWORK
 from .hot_water_plan import async_set_plan
 from .network_calendar import HolidayCache, NetworkCalendar, NetworkCalendarError
@@ -32,6 +33,7 @@ SERVICE_EXPORT_SETTINGS = "export_settings"
 SERVICE_TEST_PROFILE = "test_profile"
 SERVICE_TYPICAL_LOAD_FORECAST = "typical_load_forecast"
 SERVICE_SET_HOT_WATER_PLAN = "set_hot_water_plan"
+SERVICE_SET_SNOW_COVER = "set_snow_cover"
 
 TEST_PROFILE_SCHEMA = vol.Schema(
     {
@@ -40,6 +42,8 @@ TEST_PROFILE_SCHEMA = vol.Schema(
         vol.Optional("limit", default=10): vol.All(int, vol.Range(min=1, max=500)),
     }
 )
+
+SET_SNOW_COVER_SCHEMA = vol.Schema({vol.Required("mode"): vol.In(snow_cover.MODES)})
 
 TYPICAL_LOAD_FORECAST_SCHEMA = vol.Schema(
     {
@@ -98,6 +102,16 @@ def async_register_services(hass: HomeAssistant) -> None:
         # Overwrites EMHASS's saved configuration, so not open to non-admin users.
         await _require_admin(hass, call)
         await _coordinator(hass).async_export_settings()
+
+    async def _set_snow_cover(call: ServiceCall) -> None:
+        coordinator = _coordinator(hass)
+        mode = call.data["mode"]
+        if mode == snow_cover.MODE_COVERED and not coordinator.config.pv.key:
+            # EMHASS makes its own solar forecast then; nothing here can scale it.
+            raise ServiceValidationError(
+                "No solar forecast source is set, so there is no forecast to reduce"
+            )
+        await coordinator.async_set_snow_cover_mode(mode)
 
     async def _set_hot_water_plan(call: ServiceCall) -> None:
         # Resolve a device through its integration identifier, across all
@@ -273,6 +287,9 @@ def async_register_services(hass: HomeAssistant) -> None:
     hass.services.async_register(DOMAIN, SERVICE_TRAIN_LOAD_FORECASTER, _train_load_forecaster)
     hass.services.async_register(DOMAIN, SERVICE_EXPORT_SETTINGS, _export_settings)
     hass.services.async_register(
+        DOMAIN, SERVICE_SET_SNOW_COVER, _set_snow_cover, schema=SET_SNOW_COVER_SCHEMA
+    )
+    hass.services.async_register(
         DOMAIN,
         SERVICE_SET_HOT_WATER_PLAN,
         _set_hot_water_plan,
@@ -304,5 +321,6 @@ def async_unregister_services(hass: HomeAssistant) -> None:
         SERVICE_TEST_PROFILE,
         SERVICE_TYPICAL_LOAD_FORECAST,
         SERVICE_SET_HOT_WATER_PLAN,
+        SERVICE_SET_SNOW_COVER,
     ):
         hass.services.async_remove(DOMAIN, service)

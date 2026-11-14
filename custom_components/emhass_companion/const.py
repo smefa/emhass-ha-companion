@@ -887,6 +887,8 @@ PEAK_HEADROOM_KEY: Final = "peak_headroom"
 # currently holding the battery's charge below the plan to stay inside it.
 PHASE_HEADROOM_KEY: Final = "phase_headroom"
 PHASE_GUARD_ACTIVE_KEY: Final = "phase_guard_active"
+# Diagnostic: the PV forecast is being scaled down for snow on the panels.
+SNOW_COVER_KEY: Final = "snow_cover"
 DEMAND_CHARGE_RATE_KEY: Final = "demand_charge_rate"
 # Always-present diagnostic: is a network tariff selected, resolved and, if it
 # has a demand charge, actually being tracked.

@@ -217,6 +217,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
     coordinator.backend_version = version
     await coordinator.async_load_profiles()
     await coordinator.async_load_ml_state()
+    await coordinator.async_load_snow_cover()
     _report_profile_errors(hass, coordinator)
     await coordinator.async_ensure_emhass_baseline()
     await coordinator.async_check_heat_topology()

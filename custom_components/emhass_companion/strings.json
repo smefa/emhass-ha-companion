@@ -1102,6 +1102,9 @@
       },
       "phase_guard_active": {
         "name": "Phase guard active"
+      },
+      "snow_cover": {
+        "name": "Panels snow covered"
       }
     },
     "switch": {
@@ -1463,6 +1466,16 @@
         "average_w": {
           "name": "Average power",
           "description": "The household's typical average power draw, in watts."
+        }
+      }
+    },
+    "set_snow_cover": {
+      "name": "Set snow cover",
+      "description": "Overrides whether the solar forecast is treated as snow covered. Covered holds until measured output recovers; clear holds until the next snowfall is seen; auto goes back to detecting it from measured output and the weather.",
+      "fields": {
+        "mode": {
+          "name": "Mode",
+          "description": "covered, clear or auto."
         }
       }
     },

@@ -1102,6 +1102,9 @@
       },
       "phase_guard_active": {
         "name": "Fasvakt aktiv"
+      },
+      "snow_cover": {
+        "name": "Paneler snötäckta"
       }
     },
     "switch": {
@@ -1463,6 +1466,16 @@
         "average_w": {
           "name": "Medeleffekt",
           "description": "Hushållets typiska medeleffekt, i watt."
+        }
+      }
+    },
+    "set_snow_cover": {
+      "name": "Ange snötäckning",
+      "description": "Åsidosätter om solprognosen behandlas som snötäckt. Covered gäller tills uppmätt produktion har återhämtat sig; clear gäller tills nästa snöfall syns; auto går tillbaka till att avgöra det från uppmätt produktion och vädret.",
+      "fields": {
+        "mode": {
+          "name": "Läge",
+          "description": "covered, clear eller auto."
         }
       }
     },

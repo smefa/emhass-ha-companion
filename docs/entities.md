@@ -29,6 +29,7 @@
 | `number.*_peak_target` | The manual fallback ceiling used while a windowed demand charge can't yet be priced directly. Same condition as above |
 | `sensor.*_phase_headroom` | Symmetric charging the main fuse's worst phase has room for right now, in W. Only if you configured a main fuse — see [Dynamic grid limits](grid_limits.md#three-phase-imbalance-the-phase-guard) |
 | `binary_sensor.*_phase_guard_active` | On while a forced charge is being held below the plan to protect the main fuse. Same condition as above |
+| `binary_sensor.*_panels_snow_covered` | Diagnostic. On while the solar forecast is being scaled down because the panels look snow covered — see [Snow on the panels](setup.md#snow-on-the-panels). Attributes: `state` (`covered` or `suspected`), `ratio`, `factor`, `since`, `source` |
 | `binary_sensor.*_plan_out_of_date` | The plan is too old to act on |
 | `binary_sensor.*_source_readings_unavailable` | One of the entities this integration reads has stopped reporting — see [Troubleshooting](troubleshooting.md#when-a-source-stops-reporting) |
 | `switch.*_control_enabled` | Master gate on acting. Ships **off** |
@@ -48,6 +49,7 @@ you've selected a network profile under **Configure → Network tariff** — see
 Actions for scripts and automations: `emhass_companion.run_mpc` (the
 recalculate button), `emhass_companion.run_dayahead` and
 `emhass_companion.train_load_forecaster`, which have no button.
+`emhass_companion.set_snow_cover` overrides the snow detection, with no entity.
 `emhass_companion.export_settings` (**Write settings to EMHASS**) is an action
 only, with no button or entity; administrators only. See
 [Hub controls](guide/hub_controls.md#write-settings-to-emhass). Every action is

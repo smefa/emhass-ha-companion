@@ -600,6 +600,10 @@ class PayloadInputs:
     """End-of-horizon SOC target chosen by terminal.decide_end_soc. None keeps
     the old pin-to-start behaviour (see build_payload)."""
     pv_live_w: float | None = None
+    pv_snow_factor: float = 1.0
+    """Multiplier for the whole PV forecast while the panels look snow covered
+    (see snow_cover.py). Applied before the live blend so the current step still
+    gets the live reading; 1.0 leaves the forecast untouched."""
     load_live_w: float | None = None
     grid_import_limit_w: float | None = None
     grid_export_limit_w: float | None = None
@@ -1206,6 +1210,8 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
             # Tariff math (multiplier/adder) leaves the same float noise on
             # a per-kWh price; round rather than lose currency precision.
             series = series.map_values(lambda v: round(v, 4))
+        if key == "pv_power_forecast" and inputs.pv_snow_factor != 1.0:
+            series = series.scaled(inputs.pv_snow_factor)
         if inputs.action == ACTION_MPC and (live_value := live_values.get(key)) is not None:
             series = series.blend_at(inputs.now, live_value, inputs.mix_beta)
         if key in _PRICE_KEYS and not series.covers(horizon_end):

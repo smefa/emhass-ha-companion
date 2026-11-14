@@ -14,7 +14,14 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from .const import LOAD_MODE_AUTO, MODE_FORCE_CHARGE, MODE_FORCE_DISCHARGE, PHASE_GUARD_ACTIVE_KEY
+from . import snow_cover
+from .const import (
+    LOAD_MODE_AUTO,
+    MODE_FORCE_CHARGE,
+    MODE_FORCE_DISCHARGE,
+    PHASE_GUARD_ACTIVE_KEY,
+    SNOW_COVER_KEY,
+)
 from .coordinator import EmhassCoordinator
 from .deferrable import DeferrableRuntime, resolve_should_run
 from .entity import EmhassEntity, EmhassLoadEntity
@@ -33,6 +40,7 @@ async def async_setup_entry(
             EmhassPlanStaleBinarySensor(coordinator),
             SourcesBlindBinarySensor(coordinator),
             SolarSurplusBinarySensor(coordinator),
+            SnowCoverBinarySensor(coordinator),
         ]
     )
     if coordinator.phase_guard is not None:
@@ -106,6 +114,35 @@ class SourcesBlindBinarySensor(EmhassEntity, BinarySensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return self.coordinator.health.report
+
+
+class SnowCoverBinarySensor(EmhassEntity, BinarySensorEntity):
+    """Whether the PV forecast is being scaled down for snow on the panels.
+
+    On for ``covered`` and ``suspected`` alike: both multiply the forecast.
+    The state attribute tells them apart (see snow_cover.py).
+    """
+
+    _attr_translation_key = SNOW_COVER_KEY
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: EmhassCoordinator) -> None:
+        super().__init__(coordinator, SNOW_COVER_KEY)
+
+    @property
+    def is_on(self) -> bool:
+        return self.coordinator.snow_cover.active
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        cover = self.coordinator.snow_cover
+        return {
+            "state": cover.state,
+            "ratio": None if cover.ratio is None else round(cover.ratio, 3),
+            "factor": round(snow_cover.factor(cover), 3),
+            "since": dt_util.as_local(cover.since).isoformat() if cover.since else None,
+            "source": cover.source,
+        }
 
 
 class PhaseGuardActiveBinarySensor(EmhassEntity, BinarySensorEntity):

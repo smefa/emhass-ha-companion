@@ -256,6 +256,7 @@ class EmhassBriefingCard extends LiveCard {
       const words = tag("div", "words", hero);
       ui.headline = tag("div", "headline", words);
       ui.then = tag("div", "then", words);
+      ui.snow = tag("div", "then", words);
       if (this._shows("show_gauge")) {
         ui.gauge = tag("div", "gauge", hero);
         ui.gauge.title = "Battery charge level. Click for its history.";
@@ -451,6 +452,7 @@ class EmhassBriefingCard extends LiveCard {
     });
 
     if (ui.headline) this._headline(plan, live, hasPlan, step, now, t1, hass);
+    if (ui.snow) this._snow(stateOf(hass, hub["binary_sensor.snow_cover"]));
     if (ui.gauge) this._gauge(live.soc);
     if (ui.figures) {
       for (const figure of ui.figures) {
@@ -502,6 +504,16 @@ class EmhassBriefingCard extends LiveCard {
       return;
     }
     ui.then.textContent = agrees ? "For the rest of the plan" : `${lead}for the rest of the plan`;
+  }
+
+  /** One line, only while the solar forecast is being scaled down for snow. */
+  _snow(sensor) {
+    const node = this._ui.snow;
+    const factor = sensor && sensor.state === "on" ? Number(sensor.attributes.factor) : NaN;
+    node.style.display = Number.isFinite(factor) ? "" : "none";
+    if (!Number.isFinite(factor)) return;
+    node.textContent =
+      `Solar forecast reduced ${Math.round((1 - factor) * 100)} %: panels look snow covered`;
   }
 
   _gauge(soc) {

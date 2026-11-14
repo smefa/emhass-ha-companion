@@ -11,6 +11,7 @@ from typing import Any
 
 from homeassistant.components.recorder import get_instance, history
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import SUN_EVENT_SUNRISE, UnitOfTemperature
 from homeassistant.core import Event, EventStateChangedData, HomeAssistant, State, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
@@ -22,10 +23,13 @@ from homeassistant.helpers.event import (
     async_track_time_interval,
 )
 from homeassistant.helpers.storage import Store
+from homeassistant.helpers.sun import get_astral_event_date
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
+from homeassistant.util.unit_conversion import TemperatureConverter
 from packaging.version import InvalidVersion, Version
 
+from . import snow_cover
 from .api import EmhassClient, EmhassConnectionError, EmhassError
 from .configuration import EmhassConfig, ProfileSelection
 from .const import (
@@ -152,6 +156,8 @@ _ML_FIT_RETRY_COOLDOWN = timedelta(hours=1)
 _ML_REFIT_INTERVAL = timedelta(days=7)
 _ML_STORE_VERSION = 1
 _SOC_DAY_STORE_VERSION = 1
+_SNOW_STORE_VERSION = 1
+_SNOW_SAVE_DELAY = 30
 _SETTINGS_REFRESH_DELAY = 3
 
 # How long the coordinator keeps building the load forecast itself after a run
@@ -609,6 +615,13 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         self._ml_store: Store[dict[str, Any]] = Store(
             hass, _ML_STORE_VERSION, f"{DOMAIN}_{entry.entry_id}_ml_fit"
         )
+        # Whether snow looks to be covering the panels, and the samples behind
+        # that call (see snow_cover.py). Persisted: the state has to survive
+        # midnight and restarts, and the samples hold the evidence for it.
+        self.snow_cover = snow_cover.SnowCoverState()
+        self._snow_store: Store[dict[str, Any]] = Store(
+            hass, _SNOW_STORE_VERSION, f"{DOMAIN}_{entry.entry_id}_snow_cover"
+        )
 
     # -- surplus --------------------------------------------------------------
 
@@ -1039,6 +1052,124 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             self._ml_trained_settings = stored.get("trained_settings")
             if raw := stored.get("trained_at"):
                 self._ml_trained_at = dt_util.parse_datetime(raw)
+
+    async def async_load_snow_cover(self) -> None:
+        """Restore the snow cover state saved before the last shutdown."""
+        try:
+            stored = await self._snow_store.async_load()
+        except Exception:  # a damaged store must not block setup
+            _LOGGER.debug("Could not load the snow cover state", exc_info=True)
+            return
+        self.snow_cover = snow_cover.from_json(stored)
+
+    def _save_snow_cover(self) -> None:
+        self._snow_store.async_delay_save(
+            lambda: snow_cover.to_json(self.snow_cover), _SNOW_SAVE_DELAY
+        )
+
+    async def async_set_snow_cover_mode(self, mode: str) -> None:
+        """Apply the ``set_snow_cover`` action and republish at once."""
+        self.snow_cover = snow_cover.set_mode(self.snow_cover, mode, dt_util.utcnow())
+        self._save_snow_cover()
+        self.async_update_listeners()
+
+    def _weather_entity(self) -> str | None:
+        """The weather entity already in the configuration, if there is one.
+
+        The outdoor temperature source's own, when it names one. Otherwise the
+        first weather entity Home Assistant has, by entity id: no setting
+        exists to pick a source for snow cover, and a weather entity is
+        almost always for the home's own location.
+        """
+        entity_id = self._temperature_entity()
+        if entity_id and entity_id.startswith("weather."):
+            return entity_id
+        return min(self.hass.states.async_entity_ids("weather"), default=None)
+
+    def _temperature_entity(self) -> str | None:
+        selection = self.config.temperature
+        entity_id = selection.options.get("entity") if selection else None
+        return entity_id if isinstance(entity_id, str) and entity_id else None
+
+    def _read_outdoor_temperature(self) -> float | None:
+        """Current outdoor temperature in degrees Celsius, from the existing source.
+
+        The temperature source's own entity, then the weather entity: a
+        ``temperature`` attribute, or a numeric state. Fahrenheit is converted.
+        """
+        for entity_id in (self._temperature_entity(), self._weather_entity()):
+            state = self.hass.states.get(entity_id) if entity_id else None
+            if state is None:
+                continue
+            unit = state.attributes.get("temperature_unit") or state.attributes.get(
+                "unit_of_measurement"
+            )
+            for raw in (state.attributes.get("temperature"), state.state):
+                try:
+                    value = float(raw)
+                except (TypeError, ValueError):
+                    continue
+                if unit == UnitOfTemperature.FAHRENHEIT:
+                    value = TemperatureConverter.convert(
+                        value, UnitOfTemperature.FAHRENHEIT, UnitOfTemperature.CELSIUS
+                    )
+                return value
+        return None
+
+    def _read_weather_condition(self) -> str | None:
+        entity_id = self._weather_entity()
+        state = self.hass.states.get(entity_id) if entity_id else None
+        if state is None or state.state in ("unknown", "unavailable", ""):
+            return None
+        return state.state
+
+    def _update_snow_cover(self, now: datetime, pv: Series, pv_live_w: float | None) -> float:
+        """Advance the snow cover state from this run and return the PV factor.
+
+        ``pv`` is the *raw* forecast, which is what the measured output is held
+        against. Sensors are read here and the decision is the pure module's.
+        """
+        if not pv or not self.config.pv.key:
+            return 1.0
+        if not self.config.pv_live_entity:
+            # Nothing to measure against: weather alone could set a suspicion
+            # that nothing would ever lift. Only a manual override applies.
+            return snow_cover.factor(self.snow_cover)
+        local_day = dt_util.as_local(now).date()
+        peak_w = max(
+            (p.value for p in pv if dt_util.as_local(p.time).date() == local_day), default=0.0
+        )
+        # One sample arrives per run, so it stands for the longer of the step
+        # and the recalculation interval; otherwise an hourly recalculation on
+        # a 15-minute step would never gather an hour of evidence.
+        slot = max(
+            timedelta(minutes=self.config.time_step_minutes),
+            self.config.mpc_interval,
+            snow_cover.SAMPLE_SLOT,
+        )
+        # The live value is an average over the step that just ended, so it is
+        # held against the forecast for that same stretch, not the step ahead:
+        # on a steep morning ramp the two differ enough to look like snow.
+        averaged = timedelta(minutes=self.config.time_step_minutes)
+        planned_w = pv.value_at(now - averaged / 2)
+        if planned_w is None:
+            planned_w = pv.value_at(now)
+        sunrise = get_astral_event_date(self.hass, SUN_EVENT_SUNRISE, local_day)
+        before = self.snow_cover
+        self.snow_cover = snow_cover.advance(
+            before,
+            now=now,
+            planned_w=planned_w,
+            actual_w=pv_live_w,
+            peak_w=peak_w,
+            temperature_c=self._read_outdoor_temperature(),
+            condition=self._read_weather_condition(),
+            sunrise=sunrise,
+            slot=slot,
+        )
+        if self.snow_cover != before:
+            self._save_snow_cover()
+        return snow_cover.factor(self.snow_cover)
 
     async def _async_save_ml_state(self) -> None:
         await self._ml_store.async_save(
@@ -2009,6 +2140,9 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             network_warnings = await self.holiday_cache.async_ensure(self.hass, entity_id, dates)
             buy, sell = self.network_calendar.apply_bands(buy, sell, self.holiday_cache)
 
+        pv_live_w = self._read_pv_live()
+        pv_snow_factor = self._update_snow_cover(now, pv, pv_live_w)
+
         settings = self._forecast_profile_settings()
         if EMHASS_CONF_LOAD_FORECAST_METHOD in settings:
             method, load_bootstrap = await self._resolve_load_forecast_method(
@@ -2088,6 +2222,10 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         end_soc: EndSocDecision | None = None
         if config.battery.enabled and soc_init is not None:
             load_for_terminal, load_source = self._load_for_terminal(load)
+            # The end-of-horizon target must count on the same sun the plan
+            # does, or a snowed-in house ends the horizon empty, waiting for
+            # a replenishment the scaled forecast never promised.
+            pv_expected = pv.scaled(pv_snow_factor) if pv and pv_snow_factor != 1.0 else pv
             end_soc = decide_end_soc(
                 mode=config.battery.end_soc_mode,
                 soc_init=soc_init,
@@ -2095,7 +2233,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
                 now=now,
                 horizon_end=horizon_end,
                 step=step,
-                pv=pv or None,
+                pv=pv_expected or None,
                 load=load_for_terminal,
                 load_source=load_source,
                 buy_price=buy,
@@ -2264,7 +2402,8 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             outdoor_temperature=outdoor or None,
             soc_init=soc_init,
             soc_final=end_soc.soc if end_soc else None,
-            pv_live_w=self._read_pv_live(),
+            pv_live_w=pv_live_w,
+            pv_snow_factor=pv_snow_factor,
             load_live_w=self._read_load_live(),
             grid_import_limit_w=self._grid_import_limit_w(config),
             grid_export_limit_w=self._read_grid_limit(config.grid.export_limit_entity, "export"),

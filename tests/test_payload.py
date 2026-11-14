@@ -346,6 +346,33 @@ def test_mpc_blends_live_pv_into_now_even_when_the_series_starts_earlier():
     assert forecast[now.isoformat()] == 6000.0  # 0.5 * 5000 + 0.5 * 7000
 
 
+def test_snow_factor_scales_the_whole_pv_forecast_before_the_live_blend():
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    result = build_payload(
+        _inputs(pv=_series(now, 24, 5000.0), pv_live_w=200.0, pv_snow_factor=0.1)
+    )
+    values = list(result.payload["pv_power_forecast"].values())
+    assert values[0] == 350.0  # 0.5 * (0.1 * 5000) + 0.5 * 200, live reading still counts
+    assert set(values[1:]) == {500.0}
+
+
+def test_snow_factor_scales_a_dayahead_forecast_too():
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    result = build_payload(
+        _inputs(action=ACTION_DAYAHEAD, pv=_series(now, 24, 5000.0), pv_snow_factor=0.3)
+    )
+    assert set(result.payload["pv_power_forecast"].values()) == {1500.0}
+
+
+def test_snow_factor_leaves_the_other_series_alone():
+    now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
+    result = build_payload(
+        _inputs(load=_series(now, 24, 1000.0), pv=_series(now, 24, 5000.0), pv_snow_factor=0.0)
+    )
+    assert set(result.payload["load_power_forecast"].values()) == {1000.0}
+    assert set(result.payload["pv_power_forecast"].values()) == {0.0}
+
+
 def test_power_forecasts_are_sent_as_whole_watts():
     """Profile math and the live blend both leave long float tails like
     1575.2129175703624 W. Sub-watt precision means nothing in a forecast and

@@ -303,6 +303,28 @@ entirely with the live reading, and 0.5 — the default — splits it evenly.
 Day-ahead runs are never blended; a day-ahead forecast starts at midnight, not
 now.
 
+### Snow on the panels
+
+Snow on the panels leaves the solar forecast high and the output near zero.
+There is nothing to configure: when measured output (the **Live PV power
+sensor** above) stays below about 20 % of the raw forecast over an hour of
+real sun, and the outdoor temperature has been at or below about +2 °C at some
+point in the last 48 hours, the whole forecast is scaled by that ratio until
+output recovers above about 60 %. The temperature comes from your outdoor
+temperature source if you set one, otherwise from a weather entity in Home
+Assistant; with neither, and without the live sensor, nothing is detected.
+When a weather entity is available, a shortfall only counts as snow if that
+entity has reported snowfall in the cold since the panels last produced
+normally, so fog the forecast missed is not mistaken for snow. If the weather
+source misses a snowfall, use the action below. Reported snowfall also makes
+the plan discount the next sunny hours before any measurement exists. A thaw or rain
+drops the call back to a
+suspicion until daylight settles it. The thresholds are first guesses and have
+not been tuned. The diagnostic **Panels snow covered** binary sensor shows when
+this is active, and the Briefing card adds a line. The
+`emhass_companion.set_snow_cover` action overrides it: see
+[Actions](guide/actions.md#set_snow_cover).
+
 ## Time resolution
 
 ![The Grid connection and schedule step, with import/export limits, PV curtailment, time resolution, recalculation interval, planning horizon and day-ahead fallback time](assets/setup-grid-schedule.png)
