@@ -321,7 +321,7 @@ the plan discount the next sunny hours before any measurement exists. A thaw or 
 drops the call back to a
 suspicion until daylight settles it. The thresholds are first guesses and have
 not been tuned. The diagnostic **Panels snow covered** binary sensor shows when
-this is active, and the Briefing card adds a line. The
+this is active, and the Briefing and Status cards add a line. The
 `emhass_companion.set_snow_cover` action overrides it: see
 [Actions](guide/actions.md#set_snow_cover).
 

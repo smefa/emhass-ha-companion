@@ -8,15 +8,21 @@ about having done so.
 
 from __future__ import annotations
 
-from datetime import time
+from datetime import UTC, datetime, time, timedelta
 from types import SimpleNamespace
+
+from homeassistant.components.diagnostics import REDACTED
 
 from custom_components.emhass_companion.deferrable import (
     SEEDED_FIELDS,
+    BatteryLockout,
     DeferrableRuntime,
+    SequenceCycle,
     live_settings,
 )
 from custom_components.emhass_companion.diagnostics import _loads_section
+from custom_components.emhass_companion.heat_pump_room import HeatPumpModel
+from custom_components.emhass_companion.surplus import SurplusBudget
 
 
 def _entry(**data):
@@ -30,6 +36,62 @@ def _coordinator(load):
 def _load(**overrides) -> DeferrableRuntime:
     defaults = {"subentry_id": "abc", "name": "Wallbox", "nominal_power_w": 7500.0}
     return DeferrableRuntime(**{**defaults, **overrides})
+
+
+def test_runtime_progress_and_heat_pump_physics_are_structured():
+    now = datetime(2026, 11, 14, tzinfo=UTC)
+    load = _load(
+        load_type="thermal",
+        requested_at=now,
+        request_runtime=timedelta(minutes=20),
+        runtime_today=timedelta(minutes=30),
+        heat_pump_model=HeatPumpModel(
+            thermal_mass_m3=10,
+            floor_area_m2=100,
+            specific_heating_demand=80,
+            window_area_m2=12,
+        ),
+    )
+    result = _loads_section(_coordinator(load), _entry())[0]
+    assert result["runtime"]["runtime_today"] == 1800
+    assert result["runtime"]["request_runtime"] == 1200
+    assert result["runtime"]["requested_at"] == now.isoformat()
+    assert result["thermal"]["heat_pump_model"]["window_area_m2"] == 12
+    assert isinstance(result["runtime"]["surplus_budget"], dict)
+
+
+def test_sequence_lockout_and_surplus_evidence_use_json_values():
+    now = datetime(2026, 11, 14, tzinfo=UTC)
+    load = _load(
+        power_sequence=(1000, 500),
+        sequence_cycle=SequenceCycle(now, now, (1000, 500), "planned"),
+        battery_lockout=BatteryLockout(now, now + timedelta(hours=1), now),
+        surplus_budget=SurplusBudget(hours=1, window_start=now, energy_wh=1000),
+    )
+    result = _loads_section(_coordinator(load), _entry())[0]
+    assert result["sequence_cycle"]["values"] == [1000, 500]
+    assert result["sequence_cycle"]["anchor"] == now.isoformat()
+    assert result["sequence_step_minutes"] == load.sequence_step_minutes
+    assert result["runtime"]["battery_lockout"]["start"] == now.isoformat()
+    assert result["runtime"]["surplus_budget"]["energy_wh"] == 1000
+    assert load.sequence_cycle.values == (1000, 500)
+
+
+def test_water_tank_periods_and_draw_window_are_preserved_and_redacted():
+    load = _load(
+        load_type="thermal",
+        thermal_model="water_tank",
+        tank_volume_litres=200,
+        draw_start=time(6),
+        draw_end=time(8),
+        draw_energy_kwh=2,
+        hot_water_periods=[{"start": "06:00", "api_token": "hidden"}],
+    )
+    result = _loads_section(_coordinator(load), _entry())[0]
+    assert result["tank"]["draw_start"] == "06:00:00"
+    assert result["tank"]["draw_energy_kwh"] == 2
+    assert result["tank"]["hot_water_periods"][0]["api_token"] == REDACTED
+    assert load.hot_water_periods[0]["api_token"] == "hidden"
 
 
 def test_the_live_value_is_reported_not_the_seed():

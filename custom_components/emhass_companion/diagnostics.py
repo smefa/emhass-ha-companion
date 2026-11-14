@@ -21,7 +21,8 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from dataclasses import asdict, is_dataclass
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 import re
 import sys
@@ -33,8 +34,10 @@ from homeassistant.const import __version__ as HA_VERSION
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.loader import async_get_integration
+from homeassistant.util import dt as dt_util
 from yarl import URL
 
+from . import snow_cover
 from .const import CONF_URL, DOMAIN, ML_MIN_HISTORY_DAYS, USER_PROFILE_DIR
 from .coordinator import EmhassCoordinator
 from .deferrable import live_settings
@@ -117,11 +120,15 @@ async def async_get_config_entry_diagnostics(
             "emhass_version": data.last_run.emhass_version if data.last_run else None,
             "schema_version": data.last_run.schema_version if data.last_run else None,
             "error_message": data.last_run.error_message if data.last_run else None,
+            "duration_seconds": data.last_run.duration_seconds if data.last_run else None,
+            "stage_times": data.last_run.stage_times if data.last_run else {},
         },
         "plan": {
             "rows": len(data.plan.rows) if data.plan else 0,
             "generated_at": (data.plan.generated_at.isoformat() if data.plan else None),
             "schema_version": data.plan.schema_version if data.plan else None,
+            "load_order": data.load_order,
+            "data": [_jsonable(row) for row in data.plan.rows] if data.plan else [],
         },
         "series": {
             name: {"points": len(series), "end": series.end.isoformat() if series else None}
@@ -181,7 +188,76 @@ async def async_get_config_entry_diagnostics(
         "custom_profiles": custom_profiles_section,
         "logs": logs_section,
         "triage": triage_section,
+        "runtime": _runtime_section(coordinator, entry),
     }
+
+
+def _runtime_section(coordinator: EmhassCoordinator, entry: ConfigEntry) -> dict[str, Any]:
+    """Read-only feature snapshots, isolated so one broken feature cannot hide others."""
+    now = dt_util.utcnow()
+    sections = {
+        "control": lambda: {
+            "enabled": coordinator.control_enabled,
+            "system_mode": coordinator.system_mode,
+            "blind_sources": coordinator.blind_sources,
+            "last_action": coordinator.data.last_action,
+            "last_success": coordinator.data.last_success,
+            "price_source_end": coordinator.data.price_source_end,
+            "row_zero_mode": coordinator._row_zero_mode,
+            "mix_beta": coordinator.mix_beta,
+            "cost_fun": coordinator.cost_fun,
+            "surplus_threshold_w": coordinator.surplus_threshold_w,
+        },
+        "executor": lambda: (
+            entry.runtime_data.executor.last_decision.as_attributes()
+            if entry.runtime_data.executor.last_decision
+            else None
+        ),
+        "snow_cover": lambda: {
+            **snow_cover.to_json(coordinator.snow_cover),
+            "factor": snow_cover.factor(coordinator.snow_cover),
+            "temperature_gate_open": snow_cover.gate_open(coordinator.snow_cover, now),
+        },
+        "demand_charge": lambda: {
+            "pricing": coordinator.demand_charge_pricing(now),
+            "peak_target_kw": coordinator.peak_target_kw,
+            "flat_rate_per_kw": coordinator.flat_demand_charge_per_kw,
+            "trackers": [
+                {
+                    **tracker._data_to_save(),
+                    "aggregate_kw": tracker.current_aggregate_kw,
+                    "floor_kw": tracker.floor_kw,
+                    "days_remaining": tracker.days_remaining,
+                }
+                for tracker in coordinator.peak_trackers
+            ],
+        },
+        "thermal": lambda: {
+            "plan_blocked": coordinator._water_tank_plan_blocked,
+            "outdoor_forecast": [
+                {"time": point.time, "value": point.value}
+                for point in coordinator._outdoor_forecast
+            ],
+        },
+        "forecast": lambda: {
+            "defaulted_methods": sorted(coordinator.data.defaulted_forecast_methods),
+            "ml_trained_settings": coordinator._ml_trained_settings,
+            "ml_trained_at": coordinator._ml_trained_at,
+            "ml_last_attempt": coordinator._ml_last_attempt,
+            "no_list_run_failed_at": coordinator._no_list_run_failed_at,
+        },
+        "scheduler": lambda: {
+            "price_horizon": entry.runtime_data.scheduler._price_horizon,
+            "last_dayahead": entry.runtime_data.scheduler._last_dayahead,
+        },
+    }
+    result: dict[str, Any] = {"captured_at": now.isoformat()}
+    for name, snapshot in sections.items():
+        try:
+            result[name] = _redact_config({"value": _jsonable(snapshot())})["value"]
+        except Exception as err:  # noqa: BLE001
+            result[name] = {"error": str(err)}
+    return result
 
 
 # -- redaction ------------------------------------------------------------
@@ -451,21 +527,76 @@ def _loads_section(coordinator: EmhassCoordinator, entry: ConfigEntry) -> list[d
                     if load.sequence_cycle
                     else None,
                     "sequence_start_pending": load.sequence_start_pending,
+                    "sequence_step_minutes": load.sequence_step_minutes,
                     "last_completed_day": _jsonable(load.last_completed_day),
                     "mode": load.mode,
                     "enabled": load.enabled,
                     "requested": load.requested,
                     "is_running": load.is_running,
+                    "runtime": {
+                        key: _jsonable(getattr(load, key))
+                        for key in (
+                            "runtime_today",
+                            "runtime_day",
+                            "running_since",
+                            "off_since",
+                            "requested_at",
+                            "request_runtime",
+                            "commanded_since",
+                            "command_runtime",
+                            "commands_seen",
+                            "seen_running",
+                            "idle_since",
+                            "forced_at",
+                            "last_completion_reason",
+                            "last_completion_at",
+                            "plan_assumed_until",
+                            "plan_scheduled_now",
+                            "plan_power_now_w",
+                            "battery_lockout",
+                            "battery_lockout_stale_before",
+                            "surplus_budget",
+                        )
+                    },
+                    "thermal": (
+                        {
+                            key: _jsonable(getattr(load, key))
+                            for key in (
+                                "temperature_sensor",
+                                "sense",
+                                "cop_curve",
+                                "heat_pump_model",
+                                "standby_loss_w",
+                                "heater_cop",
+                                "comfort_penalty",
+                            )
+                        }
+                        if load.is_thermal
+                        else None
+                    ),
                 }
             )
     except Exception as err:  # noqa: BLE001
         return [{"error": str(err)}]
-    return sorted(items, key=lambda item: (item["load_type"], item["name"]))
+    return [
+        _redact_config(item)
+        for item in sorted(items, key=lambda item: (item["load_type"], item["name"]))
+    ]
 
 
 def _jsonable(value: Any) -> Any:
     if value is None or isinstance(value, bool | int | float | str):
         return value
+    if isinstance(value, datetime | date | time):
+        return value.isoformat()
+    if isinstance(value, timedelta):
+        return value.total_seconds()
+    if is_dataclass(value) and not isinstance(value, type):
+        return _jsonable(asdict(value))
+    if isinstance(value, Mapping):
+        return {key: _jsonable(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [_jsonable(item) for item in value]
     return str(value)
 
 

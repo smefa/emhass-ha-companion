@@ -741,7 +741,7 @@ class EmhassStatusCard extends LiveCard {
       Number.isFinite(decidedAt) ? formatTime(decidedAt, hass) : "",
     );
 
-    this._problems(attrs);
+    this._problems(attrs, stateOf(hass, hub["binary_sensor.snow_cover"]));
   }
 
   /**
@@ -761,7 +761,7 @@ class EmhassStatusCard extends LiveCard {
     return { low: read(`${prefix}_low`), high: read(`${prefix}_high`) };
   }
 
-  _problems(attrs) {
+  _problems(attrs, snow) {
     const ui = this._ui;
     ui.problems.textContent = "";
     // The error is not part of the rule trace and is not hideable with it: a
@@ -773,6 +773,24 @@ class EmhassStatusCard extends LiveCard {
       icon.setAttribute("icon", "mdi:alert-circle");
       box.appendChild(icon);
       tag("span", null, box, String(attrs.error));
+    }
+    // Present only while the solar forecast is being scaled down, and then
+    // not hideable either: every planned figure above is built on it.
+    const factor = snow && snow.state === "on" ? Number(snow.attributes.factor) : NaN;
+    if (Number.isFinite(factor)) {
+      const box = tag("div", "note snow", ui.problems);
+      const icon = document.createElement("ha-icon");
+      icon.setAttribute("icon", "mdi:snowflake");
+      box.appendChild(icon);
+      tag(
+        "span",
+        null,
+        box,
+        `Solar forecast reduced ${Math.round((1 - factor) * 100)} %: panels look snow covered`,
+      );
+      box.addEventListener("click", () =>
+        moreInfo(this, this._hub["binary_sensor.snow_cover"]),
+      );
     }
     if (!showsStatusPart(this._config, "show_rules")) return;
     const rules = Array.isArray(attrs.rules) ? attrs.rules : [];
@@ -868,6 +886,7 @@ EmhassStatusCard.css = `
           padding: 8px 10px; border-radius: 10px; background: var(--emh-surface);
           color: var(--emh-dim); }
   .note ha-icon { --mdc-icon-size: 18px; flex: 0 0 auto; }
+  .note.snow { cursor: pointer; }
   .note.bad { color: var(--emh-bad); background: rgba(219, 68, 55, .12);
               background: color-mix(in srgb, var(--emh-bad) 12%, transparent); }
 `;

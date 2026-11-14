@@ -8,6 +8,8 @@ those two functions themselves, not by anything diagnostics.py owns.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+import json
 import logging
 from unittest.mock import AsyncMock, patch
 
@@ -23,11 +25,122 @@ from custom_components.emhass_companion.const import (
     SUBENTRY_TYPE_DEFERRABLE,
     SUBENTRY_TYPE_THERMAL,
 )
+from custom_components.emhass_companion.coordinator import DemandChargePricing
 from custom_components.emhass_companion.diagnostics import async_get_config_entry_diagnostics
+from custom_components.emhass_companion.executor import Decision
 from custom_components.emhass_companion.log_ring import MAX_MESSAGE_CHARS
+from custom_components.emhass_companion.metering import Meter
+from custom_components.emhass_companion.models import LastRun, Plan, PlanRow, Point, Series
+from custom_components.emhass_companion.peaks import Interval, PeakTracker
 from custom_components.emhass_companion.savings import Ledger
+from custom_components.emhass_companion.snow_cover import Sample, SnowCoverState
 
 MISSING_ENTITY = "sensor.definitely_missing"
+
+
+async def test_runtime_snapshots_include_feature_evidence_and_are_read_only(hass: HomeAssistant):
+    entry = await _setup_entry(hass)
+    coordinator = entry.runtime_data.coordinator
+    now = datetime.now(UTC)
+    coordinator.snow_cover = SnowCoverState(
+        state="covered",
+        ratio=0.1,
+        snow_seen=now,
+        samples=(Sample(now, timedelta(minutes=15), 3000, 300),),
+        temperatures=((now, -2),),
+    )
+    coordinator._outdoor_forecast = Series((Point(now, -2),))
+    coordinator.data.last_run = LastRun(
+        status="ok",
+        timestamp=now,
+        action="naive-mpc-optim",
+        duration_seconds=2,
+        stage_times={"solve": 1.5},
+    )
+    coordinator.data.plan = Plan(
+        generated_at=now,
+        schema_version="1",
+        rows=[PlanRow(timestamp=now, p_grid=1000, deferrables=(500,), temperatures={0: 21})],
+    )
+    coordinator.data.load_order = ["kept-plan-load"]
+    coordinator.data.payload_order = ["rejected-request-load"]
+    coordinator._ml_trained_settings = {"sensor": "sensor.house", "api_token": "hidden"}
+    before = coordinator.snow_cover
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+    runtime = diagnostics["runtime"]
+    assert runtime["snow_cover"]["factor"] == 0.1
+    assert runtime["snow_cover"]["samples"][0][1:] == [900, 3000, 300]
+    assert runtime["snow_cover"]["temperature_gate_open"] is True
+    assert runtime["thermal"]["outdoor_forecast"] == [{"time": now.isoformat(), "value": -2}]
+    assert runtime["forecast"]["ml_trained_settings"]["api_token"] == REDACTED
+    assert runtime["executor"] is None
+    assert runtime["demand_charge"]["trackers"] == []
+    assert not any("error" in value for value in runtime.values() if isinstance(value, dict))
+    assert diagnostics["last_run"]["stage_times"] == {"solve": 1.5}
+    assert diagnostics["plan"]["data"][0]["temperatures"] == {0: 21}
+    assert diagnostics["plan"]["load_order"] == ["kept-plan-load"]
+    assert diagnostics["deferrable_order"] == ["rejected-request-load"]
+    assert coordinator.snow_cover is before
+    decoded = json.loads(json.dumps(diagnostics))
+    assert decoded["plan"]["data"][0]["temperatures"] == {"0": 21}
+
+
+async def test_runtime_failure_is_isolated_and_executor_steps_are_redacted(hass: HomeAssistant):
+    entry = await _setup_entry(hass)
+    entry.runtime_data.coordinator.snow_cover = None
+    entry.runtime_data.executor.last_decision = Decision(
+        action="hold",
+        power_w=0,
+        reason="phase guard",
+        steps=[{"service": "example", "data": {"password": "hidden"}}],
+    )
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+    assert "error" in diagnostics["runtime"]["snow_cover"]
+    decision = diagnostics["runtime"]["executor"]
+    assert decision["reason"] == "phase guard"
+    assert decision["steps"][0]["data"]["password"] == REDACTED
+    assert "error" not in diagnostics["runtime"]["forecast"]
+
+
+async def test_demand_charge_snapshot_contains_pricing_and_peak_evidence(hass: HomeAssistant):
+    entry = await _setup_entry(hass)
+    coordinator = entry.runtime_data.coordinator
+    tracker = PeakTracker(
+        hass,
+        entry,
+        Meter("sensor.grid", kind="energy"),
+        interval=timedelta(hours=1),
+        aggregate="max",
+        top_n=1,
+        distinct_days=False,
+        in_window=lambda _: True,
+    )
+    now = datetime.now(UTC)
+    tracker._intervals = [Interval(now, now.date().isoformat(), 4.2)]
+    tracker._current_start = now
+    tracker._current_kwh = 0.5
+    coordinator.peak_trackers = [tracker]
+    before = tracker._data_to_save()
+    with patch.object(
+        coordinator,
+        "demand_charge_pricing",
+        return_value=DemandChargePricing(
+            sheet_rate=100,
+            rate_basis="monthly",
+            aggregate="max",
+            n=1,
+            effective_rate_per_kw=20,
+            reason="test",
+        ),
+    ):
+        diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+    demand = diagnostics["runtime"]["demand_charge"]
+    assert demand["pricing"]["effective_rate_per_kw"] == 20
+    assert demand["trackers"][0]["intervals"] == [tracker._intervals[0].as_dict()]
+    assert demand["trackers"][0]["floor_kw"] == 4.2
+    assert demand["trackers"][0]["current_kwh"] == 0.5
+    assert demand["trackers"][0]["meter"]["entity_id"] == "sensor.grid"
+    assert tracker._data_to_save() == before
 
 
 async def test_no_battery_diagnostics_distinguish_baseline_from_raw_model(hass):

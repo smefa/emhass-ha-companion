@@ -41,6 +41,23 @@ warnings), it now also carries:
   of the download hanging or failing outright.
 - **subentries** -- every deferrable load, thermal load and load group, in
   full, including their entity ids.
+- **loads** -- live settings (subentries are only seeds), sequence cycles,
+  daily and request runtime in seconds, start/stop and completion timestamps,
+  battery lockouts, surplus budgets, and heat-pump building/COP/solar-gain inputs.
+- **plan** -- all retained plan rows, including thermal temperatures,
+  curtailment and hybrid inverter power, with their own `load_order`. This
+  can differ from `deferrable_order`, which describes the last request, if
+  an infeasible request left an older feasible plan in use.
+- **last_run** -- action, status, timestamp, duration and per-stage timings.
+- **runtime** -- a timestamped snapshot of control mode and blind sources,
+  the last executor decision and rule/action trace, snow-cover evidence and
+  scaling factor, demand-charge pricing and peak-meter intervals, outdoor
+  temperature forecast and thermal blockers, ML training/fallback state,
+  and scheduler price-horizon/day-ahead state. Each subsection reports its
+  own error without preventing the others from downloading. Taking the
+  snapshot does not advance load accounting or execute control actions.
+- **savings**, **phase_guard**, **end_soc** -- the savings ledger and meter
+  sources, phase readings and limits, and the terminal-SOC decision/reason.
 - **entities** -- every entity id referenced anywhere in the config (not just
   the well-known fields -- this also walks profile options), and for each
   one: whether it exists, its current state, unit, device class and when it
