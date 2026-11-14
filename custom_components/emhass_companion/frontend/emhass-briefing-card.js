@@ -850,9 +850,7 @@ EmhassBriefingCard.css = STUDIO_TOKENS + `
   .pad { container-type: inline-size; }
   .figures { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);
              margin-top: 18px; border-top: 1px solid var(--emh-hairline); }
-  @container (max-width: 400px) {
-    .figures { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  }
+
   .fig { padding: 10px 10px 9px 0; min-width: 0; }
   .fig .k { display: flex; align-items: center; gap: 5px; font-size: .7rem;
             color: var(--emh-dim); white-space: nowrap; }
@@ -860,6 +858,11 @@ EmhassBriefingCard.css = STUDIO_TOKENS + `
             white-space: nowrap; }
   .fig .n { font-size: .68rem; color: var(--emh-dim); min-height: 1em; white-space: nowrap; }
   .fig.tap:hover .v { color: var(--emh-accent); }
+  @container (max-width: 400px) {
+    .fig { padding-right: 4px; }
+    .fig .v { font-size: .98rem; }
+    .fig .n { white-space: normal; overflow-wrap: anywhere; }
+  }
 
   .day { margin-top: 4px; padding-top: 9px; border-top: 1px solid var(--emh-hairline); }
   .lane { display: flex; align-items: center; gap: 10px; margin-top: 7px; }

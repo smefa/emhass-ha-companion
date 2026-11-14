@@ -942,8 +942,15 @@ function showsStripControl(config, key) {
 
 /** A compact number button; its slider lives in the top layer, outside the drawer clip. */
 function stripNumberControl(parent, label, onCommit) {
-  const button = tag("button", "control", parent, label);
+  const button = tag("button", "control number-control", parent);
+  button.title = label;
+  tag("span", "control-label", button, label);
+  const short = tag("span", "control-short", button, label === "Run within" ? "Within" : "Hours");
+  short.setAttribute("aria-hidden", "true");
   const value = tag("span", "control-value", button);
+  const caret = tag("ha-icon", "control-caret", button);
+  caret.setAttribute("icon", "mdi:chevron-down");
+  caret.setAttribute("aria-hidden", "true");
   const dialog = tag("dialog", "number-dialog", parent);
   const heading = tag("div", "number-heading", dialog, label);
   dialog.setAttribute("aria-label", label);
@@ -959,6 +966,7 @@ function stripNumberControl(parent, label, onCommit) {
   input.addEventListener("input", () => {
     output.textContent = value.textContent = formatHours(Number(input.value));
     input.setAttribute("aria-valuetext", output.textContent);
+    button.setAttribute("aria-label", `${label}: ${output.textContent}`);
   });
   input.addEventListener("change", () => onCommit(Number(input.value)));
   button.setState = (state, floor) => {
@@ -976,6 +984,7 @@ function stripNumberControl(parent, label, onCommit) {
     input.value = button.disabled ? input.min : num(state);
     output.textContent = value.textContent = button.disabled ? "\u2013" : formatHours(Number(input.value));
     input.setAttribute("aria-valuetext", output.textContent);
+    button.setAttribute("aria-label", `${label}: ${output.textContent}`);
   };
   button.close = () => { if (dialog.open) dialog.close(); };
   return button;
@@ -1038,9 +1047,18 @@ class EmhassDeferrableStripCard extends LiveCard {
     ui.drawer.id = "strip-controls";
     ui.chevron.setAttribute("aria-controls", ui.drawer.id);
     ui.drawerBody = tag("div", "drawer-body", ui.drawer);
-    ui.requestButton = tag("button", "control", ui.drawerBody, "Requested");
+    ui.requestButton = tag("button", "control", ui.drawerBody);
+    ui.requestButton.title = "Requested";
+    const dot = tag("span", "request-dot", ui.requestButton);
+    dot.setAttribute("aria-hidden", "true");
+    tag("span", "control-label", ui.requestButton, "Requested");
     ui.requestButton.addEventListener("click", () => this._toggle("load_requested"));
-    ui.runButton = tag("button", "control", ui.drawerBody, "Run now");
+    ui.runButton = tag("button", "control", ui.drawerBody);
+    ui.runButton.title = "Run now";
+    const runIcon = tag("ha-icon", "control-icon", ui.runButton);
+    runIcon.setAttribute("icon", "mdi:flash");
+    runIcon.setAttribute("aria-hidden", "true");
+    tag("span", "control-label", ui.runButton, "Run now");
     ui.runButton.addEventListener("click", () => {
       const entityId = this._entity("run_now");
       if (entityId) { haptic("medium"); pressButton(this._hass, entityId); }
@@ -1055,7 +1073,7 @@ class EmhassDeferrableStripCard extends LiveCard {
 
   _syncDrawer() {
     const ui = this._ui;
-    ui.drawer.style.height = this._expanded ? `${ui.drawerBody.offsetHeight}px` : "0px";
+    ui.drawer.style.height = this._expanded ? "auto" : "0px";
     ui.chevronIcon.setAttribute("icon", this._expanded ? "mdi:chevron-up" : "mdi:chevron-down");
     ui.chevron.setAttribute("aria-expanded", String(this._expanded));
     ui.chevron.setAttribute("aria-label", this._expanded ? "Collapse controls" : "Expand controls");
@@ -1114,6 +1132,9 @@ class EmhassDeferrableStripCard extends LiveCard {
     ui.requestButton.classList.toggle("enabled", view.isRequested && !ui.requestButton.disabled);
     ui.withinButton.setState(view.find("run_within"), num(view.find("operating_hours")));
     ui.hoursButton.setState(view.find("operating_hours"));
+    ui.withinButton.style.marginLeft = "auto";
+    ui.hoursButton.style.marginLeft = ui.withinButton.hidden ? "auto" : "0";
+    ui.drawerBody.classList.toggle("four-controls", visible === 4);
     ui.chevron.hidden = visible === 0;
     if (!visible) this._expanded = false;
     this._syncDrawer();
@@ -1155,7 +1176,7 @@ class EmhassDeferrableStripCard extends LiveCard {
 
 EmhassDeferrableStripCard.ticks = true;
 EmhassDeferrableStripCard.css = `
-  .pad { padding: 12px 14px; }
+  .pad { padding: 12px 14px; container-type: inline-size; container-name: strip-card; }
   .strip { display: flex; align-items: center; gap: 12px; }
   .mid { flex: 1; min-width: 0; }
   .line { display: flex; align-items: baseline; gap: 8px; }
@@ -1182,16 +1203,23 @@ EmhassDeferrableStripCard.css = `
   .mini ha-icon { --mdc-icon-size: 17px; }
   .drawer { height: 0; overflow: hidden; transition: height 300ms var(--emh-ease); }
   [hidden] { display: none !important; }
-  .drawer-body { display: flex; align-items: stretch; gap: 6px; padding-top: 12px; }
-  .control { flex: 1; min-width: 0; border: 1px solid var(--divider-color);
-             border-radius: 10px; padding: 8px 4px; font: inherit; font-size: .72rem;
+  .drawer-body { position: relative; display: flex; align-items: center; gap: 8px; padding-top: 28px; }
+  .drawer-body::before { content: ""; position: absolute; top: 12px; left: 0; right: 0;
+                         border-top: 1px solid var(--divider-color); }
+  .control { display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+             flex: 0 1 auto; min-width: 0; min-height: 38px; border: 1px solid var(--divider-color);
+             border-radius: 12px; padding: 8px 12px; font: inherit; font-size: .78rem;
              background: var(--emh-surface); color: var(--emh-dim); cursor: pointer;
-             overflow-wrap: anywhere; }
+             white-space: nowrap; }
+  .control-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .control-short { display: none; }
+  .request-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
+  .control-icon, .control-caret { --mdc-icon-size: 15px; flex: none; }
   .control.enabled { color: var(--emh-ok);
     background: color-mix(in srgb, var(--emh-ok) 14%, var(--card-background-color));
     border-color: color-mix(in srgb, var(--emh-ok) 40%, var(--divider-color)); }
   .control:disabled { opacity: .5; cursor: default; }
-  .control-value { display: block; font-variant-numeric: tabular-nums; }
+  .control-value { flex: none; font-weight: 500; font-variant-numeric: tabular-nums; }
   .number-dialog { width: min(280px, calc(100vw - 48px)); padding: 16px;
     border: 1px solid var(--divider-color); border-radius: 14px;
     background: var(--card-background-color); color: var(--primary-text-color); }
@@ -1200,6 +1228,15 @@ EmhassDeferrableStripCard.css = `
   .number-dialog input { width: 100%; accent-color: var(--emh-ok); }
   .number-dialog output { display: block; text-align: right; margin-top: 8px; }
   @media (pointer: coarse) { .control, .mini { min-height: 44px; } }
+  @container strip-card (max-width: 440px) {
+    .drawer-body { gap: 5px; }
+    .control { padding-inline: 7px; gap: 4px; font-size: .72rem; }
+    .control-caret { display: none; }
+    .four-controls .control { padding-inline: 4px; gap: 3px; }
+    .four-controls .control-short { display: inline; }
+    .four-controls .number-control .control-label,
+    .four-controls .request-dot, .four-controls .control-icon { display: none; }
+  }
 `;
 
 /**
