@@ -38,7 +38,12 @@ from custom_components.emhass_companion.snow_cover import Sample, SnowCoverState
 MISSING_ENTITY = "sensor.definitely_missing"
 
 
-async def test_runtime_snapshots_include_feature_evidence_and_are_read_only(hass: HomeAssistant):
+async def test_runtime_snapshots_include_feature_evidence_and_are_read_only(
+    hass: HomeAssistant, freezer
+):
+    # A real MPC clock tick can record an executor decision during setup.
+    # Keep this no-decision snapshot independent of the wall-clock slot.
+    freezer.move_to(datetime(2026, 11, 14, 15, 29, 59, tzinfo=UTC))
     entry = await _setup_entry(hass)
     coordinator = entry.runtime_data.coordinator
     now = datetime.now(UTC)
