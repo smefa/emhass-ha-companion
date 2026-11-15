@@ -26,7 +26,7 @@ async def test_reads_real_schedule_service_response(hass):
             "schedule": {
                 "charging": {
                     "name": "Charging",
-                    "monday": [{"from": "10:00", "to": "24:00", "data": {"power_limit_w": 3000}}],
+                    "monday": [{"from": "10:00", "to": "24:00", "data": {"max_power_w": 3000}}],
                 }
             }
         },
@@ -42,9 +42,9 @@ async def test_reads_real_schedule_service_response(hass):
     [
         ("off", {}, "auto", 0),
         ("on", {}, "auto", 6000),
-        ("on", {"power_limit_w": 3000}, "auto", 3000),
-        ("on", {"power_limit_w": 0}, "force_on", 0),
-        ("on", {"power_limit_w": "bad"}, "force_on", 0),
+        ("on", {"max_power_w": 3000}, "auto", 3000),
+        ("on", {"max_power_w": 0}, "force_on", 0),
+        ("on", {"max_power_w": "bad"}, "force_on", 0),
         ("off", {}, "force_on", 6000),
         ("unavailable", {}, "force_on", 0),
     ],
@@ -91,7 +91,7 @@ async def test_charger_cap_is_written_before_switch_on(hass, unit, max_value, st
     load.mode = "force_on"
     load.availability_schedule = "schedule.allowed"
     load.power_control_entity = "number.charger"
-    hass.states.async_set("schedule.allowed", "on", {"power_limit_w": 2950})
+    hass.states.async_set("schedule.allowed", "on", {"max_power_w": 2950})
     hass.states.async_set(
         "number.charger",
         "6" if unit == "kW" else "6000",
@@ -358,11 +358,11 @@ async def test_on_time_schedule_closing_reapplies_without_a_new_plan(hass):
         await hass.async_block_till_done()
         assert changes == [False]
         # Opening on time still replans: its slot was planned as closed.
-        hass.states.async_set("schedule.allowed", "on", {**due(), "power_limit_w": 3000})
+        hass.states.async_set("schedule.allowed", "on", {**due(), "max_power_w": 3000})
         await hass.async_block_till_done()
         assert changes == [False, True]
         # A lower limit on time is enforced live; a higher one needs a plan.
-        hass.states.async_set("schedule.allowed", "on", {**due(), "power_limit_w": 2000})
+        hass.states.async_set("schedule.allowed", "on", {**due(), "max_power_w": 2000})
         await hass.async_block_till_done()
         hass.states.async_set("schedule.allowed", "on", later)
         await hass.async_block_till_done()

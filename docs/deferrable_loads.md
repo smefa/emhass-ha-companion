@@ -256,7 +256,7 @@ To set an optional maximum power for a block, enter this in its **Additional
 data**:
 
 ```yaml
-power_limit_w: 3000
+max_power_w: 3000
 ```
 
 This means **at most 3,000 W**. Omitting it permits the load's normal power;

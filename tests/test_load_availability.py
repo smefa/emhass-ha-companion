@@ -12,14 +12,14 @@ from tests.test_payload import _inputs
 
 @pytest.mark.parametrize("value", [-1, "bad", float("nan"), float("inf"), True, None])
 def test_invalid_power_is_rejected(value):
-    with pytest.raises(ValueError, match="power_limit_w"):
-        power_limit({"power_limit_w": value}, 6000)
+    with pytest.raises(ValueError, match="max_power_w"):
+        power_limit({"max_power_w": value}, 6000)
 
 
 def test_ceiling_default_and_clamp():
     assert power_limit({}, 6000) == 6000
-    assert power_limit({"power_limit_w": 10000}, 6000) == 6000
-    assert power_limit({"power_limit_w": "3000"}, 6000) == 3000
+    assert power_limit({"max_power_w": 10000}, 6000) == 6000
+    assert power_limit({"max_power_w": "3000"}, 6000) == 3000
 
 
 @pytest.mark.usefixtures("stockholm_timezone")
@@ -27,7 +27,7 @@ def test_partial_slot_and_exclusive_end():
     schedule = WeeklyAvailability.parse(
         {
             "tuesday": [
-                {"from": "12:00", "to": "12:20", "data": {"power_limit_w": 3000}},
+                {"from": "12:00", "to": "12:20", "data": {"max_power_w": 3000}},
                 {"from": "12:20", "to": "13:00"},
             ]
         },
@@ -78,7 +78,7 @@ def _scheduled_inputs(**kwargs):
     schedule = WeeklyAvailability.parse(
         {
             "tuesday": [
-                {"from": "10:00", "to": "12:00", "data": {"power_limit_w": 3000}},
+                {"from": "10:00", "to": "12:00", "data": {"max_power_w": 3000}},
                 {"from": "13:00", "to": "16:00"},
             ]
         },

@@ -17,20 +17,20 @@ from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.util import dt as dt_util
 
 DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
-POWER_LIMIT = "power_limit_w"
+POWER_LIMIT = "max_power_w"
 
 
 def power_limit(data: dict[str, Any], nominal: float) -> float:
     """A missing ceiling means full power; malformed ceilings are errors."""
     value = data.get(POWER_LIMIT, nominal)
     if isinstance(value, bool):
-        raise ValueError("power_limit_w must be a finite, non-negative number")
+        raise ValueError("max_power_w must be a finite, non-negative number")
     try:
         watts = float(value)
     except (TypeError, ValueError) as err:
-        raise ValueError("power_limit_w must be a finite, non-negative number") from err
+        raise ValueError("max_power_w must be a finite, non-negative number") from err
     if not math.isfinite(watts) or watts < 0:
-        raise ValueError("power_limit_w must be a finite, non-negative number")
+        raise ValueError("max_power_w must be a finite, non-negative number")
     return min(watts, nominal)
 
 

@@ -223,7 +223,7 @@ For an adjustable charger, each block can also specify its maximum power:
 2. In the block's **Additional data**, enter:
 
     ```yaml
-    power_limit_w: 3000
+    max_power_w: 3000
     ```
 
 3. Save the block and the helper. The value is always in **watts**: `3000`
@@ -237,7 +237,7 @@ of 7,000 W:
 
 | Allowed block | Additional data | Result |
 |---|---|---|
-| 16:00–20:00 | `power_limit_w: 3000` | Charging may use up to 3 kW. |
+| 16:00–20:00 | `max_power_w: 3000` | Charging may use up to 3 kW. |
 | 20:00–24:00 | Leave empty | Charging may use up to its normal 7 kW. |
 | No block | — | Charging waits. |
 
@@ -258,7 +258,7 @@ To let Companion apply the changing power to your charger:
 
 Companion sets the power before starting charging. It respects the charger's
 minimum, maximum and available increments, rounding down when necessary.
-A limit below the minimum stops charging. Setting `power_limit_w: 0`
+A limit below the minimum stops charging. Setting `max_power_w: 0`
 blocks the load during that block.
 
 **A fixed-power appliance cannot slow down.** If a block's limit is below
