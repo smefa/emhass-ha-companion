@@ -430,6 +430,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
 
     entry.async_on_unload(coordinator.async_add_listener(_async_plan_updated))
 
+    from .load_availability import async_track_availability
+
+    @callback
+    def _async_availability_changed(replan: bool) -> None:
+        # Always re-apply the live gate now; the listeners include the executor.
+        coordinator.async_update_listeners()
+        if replan:
+            entry.async_create_background_task(
+                hass, coordinator.async_request_refresh(), "emhass_allowed_times"
+            )
+
+    entry.async_on_unload(async_track_availability(hass, loads.all(), _async_availability_changed))
+
     loads.async_start()
     coordinator.async_start_clock()
     coordinator.async_start_pv_live_tracking()

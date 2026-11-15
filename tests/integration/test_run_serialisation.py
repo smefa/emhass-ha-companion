@@ -14,12 +14,15 @@ which one started first.
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.update_coordinator import UpdateFailed
+from homeassistant.util import dt as dt_util
+import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.emhass_companion.api import EmhassClient
+from custom_components.emhass_companion.api import EmhassBusyError, EmhassClient
 from custom_components.emhass_companion.const import ACTION_DAYAHEAD, ACTION_MPC, DOMAIN
 from custom_components.emhass_companion.coordinator import EmhassCoordinator
 from custom_components.emhass_companion.deferrable import DeferrableRegistry
@@ -98,3 +101,23 @@ async def test_an_earlier_run_cannot_publish_over_a_later_one(
 
     assert finished == [ACTION_DAYAHEAD, ACTION_MPC]
     assert coordinator.data.last_action == ACTION_MPC
+
+
+async def test_busy_run_preserves_plan_and_does_not_trigger_failure_recovery(hass):
+    coordinator = _coordinator(hass)
+    previous = coordinator.data
+    last_success = previous.last_success = dt_util.utcnow()
+    coordinator._sent_load_list = False
+    error = EmhassBusyError(status=429, body="request was not run")
+    with (
+        patch.object(coordinator, "_run", AsyncMock(side_effect=error)),
+        patch.object(coordinator, "_track_run_failed_issue") as issue,
+        patch.object(coordinator, "async_set_updated_data") as publish,
+        pytest.raises(UpdateFailed, match="EMHASS is busy"),
+    ):
+        await coordinator.async_run(ACTION_MPC)
+    assert coordinator.data is previous
+    assert coordinator.data.last_success == last_success
+    assert coordinator._no_list_run_failed_at is None
+    issue.assert_not_called()
+    publish.assert_not_called()

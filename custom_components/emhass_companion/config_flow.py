@@ -38,6 +38,7 @@ from .const import (
     CONF_ANNUAL_HDD,
     CONF_API_KEY,
     CONF_AREA,
+    CONF_AVAILABILITY_SCHEDULE,
     CONF_BASE_TEMPERATURE,
     CONF_BATTERY_CHARGE_ENERGY_ENTITY,
     CONF_BATTERY_DISCHARGE_ENERGY_ENTITY,
@@ -115,6 +116,7 @@ from .const import (
     CONF_PHASE_MARGIN_A,
     CONF_PHASE_VOLTAGE_ENTITY,
     CONF_PHASE_VOLTAGE_V,
+    CONF_POWER_CONTROL_ENTITY,
     CONF_POWER_SENSOR,
     CONF_POWER_SEQUENCE,
     CONF_PRICE,
@@ -1591,6 +1593,16 @@ def deferrable_schema(
             ),
         }
     )
+    schema.update(
+        {
+            _optional_blank(CONF_AVAILABILITY_SCHEDULE, defaults): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="schedule")
+            ),
+            _optional_blank(CONF_POWER_CONTROL_ENTITY, defaults): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="number")
+            ),
+        }
+    )
     return _split_advanced(schema, DEFERRABLE_ADVANCED_KEYS) if initial else schema
 
 
@@ -2018,7 +2030,12 @@ class DeferrableLoadSubentryFlow(ConfigSubentryFlow):
     # Optional entity pickers that a reconfigure may clear: a blank field
     # arrives as an absent key, and must *remove* the stored value rather than
     # leave it behind.
-    _clearable_keys: tuple[str, ...] = (CONF_POWER_SENSOR, CONF_CONTROL_ENTITY)
+    _clearable_keys: tuple[str, ...] = (
+        CONF_POWER_SENSOR,
+        CONF_CONTROL_ENTITY,
+        CONF_AVAILABILITY_SCHEDULE,
+        CONF_POWER_CONTROL_ENTITY,
+    )
 
     @property
     def _step_minutes(self) -> int:
@@ -2030,6 +2047,18 @@ class DeferrableLoadSubentryFlow(ConfigSubentryFlow):
 
         from .deferrable import expand_power, parse_power
 
+        if power_control := data.get(CONF_POWER_CONTROL_ENTITY):
+            if not data.get(CONF_CONTROL_ENTITY):
+                return {CONF_POWER_CONTROL_ENTITY: "power_control_needs_switch"}
+            # Only a number that is readable right now can be judged; one that
+            # is offline while the form is filled in is checked at plan time.
+            state = self.hass.states.get(power_control)
+            if (
+                state is not None
+                and state.state not in ("unknown", "unavailable")
+                and state.attributes.get("unit_of_measurement") not in ("W", "kW")
+            ):
+                return {CONF_POWER_CONTROL_ENTITY: "power_control_needs_power_unit"}
         if CONF_NOMINAL_POWER not in data:
             return {}
         try:
@@ -2145,7 +2174,11 @@ class DeferrableLoadSubentryFlow(ConfigSubentryFlow):
             # The fields this step no longer offers are still part of the
             # subentry -- they are what a load starts from, and dropping them
             # here would reset a load to the defaults on its next reload.
-            if errors := self._form_errors({**defaults, **user_input}):
+            submitted = {**defaults, **user_input}
+            for key in self._clearable_keys:
+                if key not in user_input:
+                    submitted.pop(key, None)
+            if errors := self._form_errors(submitted):
                 return self.async_show_form(
                     step_id="reconfigure",
                     data_schema=vol.Schema(

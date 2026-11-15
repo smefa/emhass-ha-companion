@@ -1513,12 +1513,16 @@
             "name": "Namn",
             "power_sensor": "Körsensor",
             "control_entity": "Styrenhet",
-            "nominal_power_w": "Effekt när den är igång"
+            "nominal_power_w": "Effekt när den är igång",
+            "availability_schedule": "Tillåtna tider (schema)",
+            "power_control_entity": "Effektstyrning (valfri)"
           },
           "data_description": {
             "power_sensor": "Valfritt. Det säkraste sättet att låta optimeringen veta om lasten faktiskt kör -- fångar ett pass som avslutades tidigt, ett som aldrig blev av trots att det var planerat, eller ett som startades vid en annan tidpunkt än schemalagt. En effektsensor ger mest detalj (valfri enhet -- W, kW, MW, ... -- räknas automatiskt om till watt); en enkel av/på-binary_sensor fungerar också, och läses på samma sätt som en styrenhets tillstånd. Utan någon av dem och utan styrenhet antar optimeringen i stället att lasten följde sin egen senaste plan, vilket inte kan se något av detta.",
             "control_entity": "Valfritt. Om den anges slår integrationen på och av denna för att följa planen, när du aktiverat styrning -- och dess tillstånd används dessutom som körsignal när det inte finns någon effektsensor. Lämna tom för att behålla styrningen i dina egna automationer. Utan vare sig denna eller en effektsensor litar optimeringen i stället på sin egen tidigare plan -- och antar att lasten körde när den var schemalagd. Det är bara så tillförlitligt som din egen efterlevnad, så en riktig sensor eller styrenhet är värd att lägga till när det går.",
-            "nominal_power_w": "Ungefär vad lasten drar när den är igång. En effekt per optimeringssteg ({time_step} min), separerade med kommatecken. Det sista värdet upprepas för att fylla drifttiden. Ett värde ger konstant effekt."
+            "nominal_power_w": "Ungefär vad lasten drar när den är igång. En effekt per optimeringssteg ({time_step} min), separerade med kommatecken. Det sista värdet upprepas för att fylla drifttiden. Ett värde ger konstant effekt.",
+            "availability_schedule": "Välj en Schema-hjälpare med veckans tillåtna tider. Lägg valfritt till power_limit_w: 3000 i ett tidsblocks extra data. Tomt fält använder befintligt tidsfönster. Kräver EMHASS 0.18.9 eller senare.",
+            "power_control_entity": "Valfri number-entitet i W eller kW för en reglerbar laddare. Effekten sätts innan lasten slås på. Stäng av Kör endast med full effekt för reglering. Använd också en styrenhet för start/stopp och en riktig effektsensor."
           },
           "description": "Effekt kan ändras här. Drifttid, tidsfönster och lastmodell är kontroller på lastens egen sida."
         },
@@ -1531,7 +1535,9 @@
             "earliest_start": "Tidigaste start",
             "latest_end": "Senaste slut",
             "power_sensor": "Körsensor",
-            "control_entity": "Styrenhet"
+            "control_entity": "Styrenhet",
+            "availability_schedule": "Tillåtna tider (schema)",
+            "power_control_entity": "Effektstyrning (valfri)"
           },
           "data_description": {
             "nominal_power_w": "Ungefär vad lasten drar när den är igång. En effekt per optimeringssteg ({time_step} min), separerade med kommatecken. Det sista värdet upprepas för att fylla drifttiden. Ett värde ger konstant effekt.",
@@ -1539,7 +1545,9 @@
             "earliest_start": "Används bara om du slår på lastens tidsfönster efteråt.",
             "latest_end": "Får vara tidigare än starttiden, för ett fönster över natten.",
             "power_sensor": "Valfritt. Talar om för optimeringen om lasten faktiskt kör, så att ett pass som avslutades tidigt eller aldrig blev av kan upptäckas. En effektsensor (valfri enhet) ger mest detalj; en enkel av/på-binary_sensor fungerar också. Utan någon antar optimeringen att lasten följde sin senaste plan.",
-            "control_entity": "Valfritt. Om den anges slår integrationen på och av denna för att följa planen när du aktiverat styrning, och dess tillstånd används också som körsignal när det inte finns någon effektsensor. Lämna tom för att behålla styrningen i dina egna automationer."
+            "control_entity": "Valfritt. Om den anges slår integrationen på och av denna för att följa planen när du aktiverat styrning, och dess tillstånd används också som körsignal när det inte finns någon effektsensor. Lämna tom för att behålla styrningen i dina egna automationer.",
+            "availability_schedule": "Välj en Schema-hjälpare med veckans tillåtna tider. Lägg valfritt till power_limit_w: 3000 i ett tidsblocks extra data. Tomt fält använder befintligt tidsfönster. Kräver EMHASS 0.18.9 eller senare.",
+            "power_control_entity": "Valfri number-entitet i W eller kW för en reglerbar laddare. Effekten sätts innan lasten slås på. Stäng av Kör endast med full effekt för reglering. Använd också en styrenhet för start/stopp och en riktig effektsensor."
           },
           "sections": {
             "advanced": {
@@ -1580,7 +1588,9 @@
       },
       "error": {
         "invalid_power_sequence": "Ogiltig effektsekvens eller för kort drifttid.",
-        "sequence_not_supported": "Effektsekvenser stöds inte för överskottslaster eller termiska laster."
+        "sequence_not_supported": "Effektsekvenser stöds inte för överskottslaster eller termiska laster.",
+        "power_control_needs_switch": "Välj också en styrenhet för start/stopp när effektstyrning används.",
+        "power_control_needs_power_unit": "Effektstyrningen måste vara ett tal som mäts i W eller kW."
       }
     },
     "thermal_load": {

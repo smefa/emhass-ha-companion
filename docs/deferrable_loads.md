@@ -225,3 +225,70 @@ charger and an immersion heater that must never run together. See
 `switch.<load>_battery_lockout` prices the battery out of discharging into
 this one load's window, without changing how it serves everything else. Off
 by default. See [battery_lockout.md](battery_lockout.md).
+
+## Weekly allowed times and power limits
+
+For a walkthrough with screenshots, see
+[Weekly allowed times in the user guide](guide/deferrable_loads.md#weekly-allowed-times).
+
+For different times on different weekdays, create a Home Assistant **Schedule**
+helper under **Settings → Devices & services → Helpers → Create helper →
+Schedule**. Draw the allowed blocks, then click each block to set exact times.
+You can use several blocks per day. Split overnight periods at midnight, for
+example Monday 22:00–24:00 and Tuesday 00:00–06:00.
+
+Select this helper in the load's **Allowed times schedule** field when adding
+or reconfiguring a standard deferrable load. Helpers can be shared between loads.
+Outside its blocks the load waits; inside a block the optimiser chooses when
+it runs. Leaving the field empty keeps the existing behaviour. If you also
+use the load's existing time window, both restrictions apply.
+
+Requires **EMHASS 0.18.9 or newer**. With an allowed-times schedule or power
+control configured, day-ahead triggers use MPC over the configured planning
+horizon, because EMHASS's day-ahead action does not support availability masks.
+The full weekly schedule is read before every solve. Live helper state and
+power-data changes update control immediately. A new plan is requested only
+when something changed that the plan did not already hold: an edited schedule,
+a helper or power control going offline or coming back, new power limits, or
+a helper opening. A helper closing on time does not need one.
+
+To set an optional maximum power for a block, enter this in its **Additional
+data**:
+
+```yaml
+power_limit_w: 3000
+```
+
+This means **at most 3,000 W**. Omitting it permits the load's normal power;
+zero blocks the load. Limits above nominal power are capped at nominal. Invalid
+or negative values are reported as input errors, and live control blocks the
+load. A missing or unavailable helper also blocks it: that load is parked for
+the plan with a warning, and the battery and other loads are still planned.
+
+For an adjustable charger, select its writable **Power control** number entity
+(in **W** or **kW**) and a **Control entity** that starts/stops charging. Switch
+off **Runs at full power only** on the load, and set its minimum charging power.
+Use a real power sensor to measure progress at changing power levels. Numbers
+expressed in amps need a device-specific conversion and are not supported here.
+Companion sets power before switching on, respects the number's minimum,
+maximum and increments, and rounds limits down. If the limit is too low or
+power control fails, the charger is switched off. Control must be enabled for
+any hardware commands to run.
+
+Fixed-power and sequence appliances cannot run at a fraction of their rated
+power, so a reduced-power block is unavailable to them. An adjustable load
+without a writable power control also waits during such a block. Each planning
+slot uses the lowest ceiling across the entire slot; align helper boundaries
+with the optimisation step to use the full allowed period. If the remaining
+run cannot fit the available time and power, the load is parked for that plan
+with a warning and its request stays pending.
+
+**Run now** bypasses closed schedule periods, but still honours power limits
+inside active blocks and unavailable helpers. A sequence already in progress
+is allowed to finish when a block closes; its whole cycle must fit when planned.
+The **Should run** sensor exposes `availability_schedule`, `power_limit_w` and
+a reason when blocked. The existing **Scheduled power** sensor remains the
+optimiser's plan, so live restrictions can be stricter than an older plan.
+
+See the [Home Assistant Schedule documentation](https://www.home-assistant.io/integrations/schedule/)
+for editing blocks and their additional data.

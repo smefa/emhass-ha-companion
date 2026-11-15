@@ -26,6 +26,7 @@ from .const import (
 from .coordinator import EmhassCoordinator
 from .deferrable import DeferrableRuntime, resolve_should_run
 from .entity import EmhassEntity, EmhassLoadEntity
+from .load_availability import commanded_power, live_ceiling
 
 PARALLEL_UPDATES = 0
 
@@ -248,6 +249,8 @@ class LoadShouldRunBinarySensor(EmhassLoadEntity, BinarySensorEntity):
     def is_on(self) -> bool | None:
         if self.load.is_water_tank and self.coordinator.water_tank_error(self.load) is not None:
             return None
+        if live_ceiling(self.hass, self.load) <= 0:
+            return False
         if self.load.mode != LOAD_MODE_AUTO:
             return resolve_should_run(self.load.mode, False)
         if self.load.enabled and (
@@ -260,9 +263,16 @@ class LoadShouldRunBinarySensor(EmhassLoadEntity, BinarySensorEntity):
             return False
         if (scheduled := self._scheduled_power()) is None:
             return None
-        return resolve_should_run(
-            self.load.mode,
-            self.load.plan_runs_at(scheduled),
+        return resolve_should_run(self.load.mode, self._plan_runs(scheduled))
+
+    def _plan_runs(self, scheduled: float) -> bool:
+        """Whether the plan's power for now is one the executor would act on."""
+        if not self.load.plan_runs_at(scheduled):
+            return False
+        # A planned power under the power control's lowest setting runs nothing.
+        return (
+            not self.load.power_control_entity
+            or commanded_power(self.hass, self.load, scheduled) > 0
         )
 
     @property
@@ -273,6 +283,8 @@ class LoadShouldRunBinarySensor(EmhassLoadEntity, BinarySensorEntity):
             and (error := self.coordinator.water_tank_error(self.load)) is not None
         ):
             return error
+        if live_ceiling(self.hass, self.load) <= 0:
+            return "outside allowed times or power limit unavailable"
         if self.load.mode != LOAD_MODE_AUTO:
             return self.load.mode
         if not self.load.enabled:
@@ -288,8 +300,10 @@ class LoadShouldRunBinarySensor(EmhassLoadEntity, BinarySensorEntity):
             return "plan is a fallback solve"
         if self.plan_index is None:
             return "not in the last optimisation"
-        if self._scheduled_power() is None:
+        if (scheduled := self._scheduled_power()) is None:
             return "plan does not cover now"
+        if self.load.plan_runs_at(scheduled) and not self._plan_runs(scheduled):
+            return "planned power is below the power control's lowest setting"
         return "following the plan"
 
     def _scheduled_power(self) -> float | None:
@@ -348,6 +362,8 @@ class LoadShouldRunBinarySensor(EmhassLoadEntity, BinarySensorEntity):
                     and self.load.sequence_cycle.source == "run_now"
                 )
             ),
+            "availability_schedule": self.load.availability_schedule,
+            "power_limit_w": live_ceiling(self.hass, self.load),
             "scheduled_power": self._scheduled_power(),
             "currently_running": self.load.is_running,
             "reason": self._reason,

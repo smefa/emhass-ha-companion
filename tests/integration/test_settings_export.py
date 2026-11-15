@@ -19,6 +19,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry, MockUs
 
 from custom_components.emhass_companion.api import (
     EmhassApiError,
+    EmhassBusyError,
     EmhassClient,
     EmhassConnectionError,
 )
@@ -398,3 +399,17 @@ async def test_the_service_runs_for_an_admin_and_for_automations(
     await hass.services.async_call(DOMAIN, SERVICE_EXPORT_SETTINGS, blocking=True)
 
     assert coordinator.client.async_set_config.await_count == 2
+
+
+async def test_busy_export_reports_unsaved_without_leaking_response(hass, caplog):
+    coordinator = await _coordinator(hass)
+    coordinator.client.async_set_config.side_effect = EmhassBusyError(
+        status=409, body=SECRET, retry_after="1"
+    )
+    with pytest.raises(
+        HomeAssistantError, match=r"Settings were not written.*EMHASS is busy"
+    ) as raised:
+        await coordinator.async_export_settings()
+    assert SECRET not in str(raised.value)
+    assert SECRET not in caplog.text
+    coordinator.client.async_set_config.assert_awaited_once()
