@@ -105,7 +105,8 @@ See **[docs/troubleshooting.md](docs/troubleshooting.md)** — testing a data so
 
 ## Contributing
 
-Development setup, tests and translations are in [CONTRIBUTING.md](CONTRIBUTING.md).
+Development setup, native Ubuntu/T3 commands, tests and translations are in
+[CONTRIBUTING.md](CONTRIBUTING.md). Local tests need no Docker or live Home Assistant.
 
 ## Licence
 

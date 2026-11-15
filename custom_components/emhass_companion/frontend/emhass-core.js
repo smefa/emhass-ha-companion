@@ -1055,7 +1055,9 @@ function loadView(hass, load) {
     shouldRun,
     running,
     scheduled,
-    scheduledW: num(scheduled),
+    // Show the next (or active) run's peak, even while waiting for it to start.
+    // Completed runs and an empty plan have no scheduled power to display.
+    scheduledW: nextRun ? nextRun.watts : 0,
     nextStart,
     next,
     nextMs,

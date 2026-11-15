@@ -286,6 +286,8 @@ CONF_BATTERY_DISCHARGE_ENERGY_ENTITY: Final = "battery_discharge_energy_entity"
 
 # Deferrable load subentry keys
 CONF_NAME: Final = "name"
+CONF_AVAILABILITY_SCHEDULE: Final = "availability_schedule"
+CONF_POWER_CONTROL_ENTITY: Final = "power_control_entity"
 CONF_POWER_SEQUENCE: Final = "power_sequence"
 # When reconfigure last changed a scalar Power. The number restores its own
 # value only if that state is newer, so an edit made while the entry was not

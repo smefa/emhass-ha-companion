@@ -16,6 +16,7 @@ import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.emhass_companion.const import (
+    CONF_AVAILABILITY_SCHEDULE,
     CONF_CONTROL_ENTITY,
     CONF_EARLIEST_START,
     CONF_LATEST_END,
@@ -24,6 +25,7 @@ from custom_components.emhass_companion.const import (
     CONF_NAME,
     CONF_NOMINAL_POWER,
     CONF_OPERATING_HOURS,
+    CONF_POWER_CONTROL_ENTITY,
     CONF_POWER_SENSOR,
     CONF_SEMI_CONTINUOUS,
     CONF_SINGLE_CONSTANT,
@@ -162,7 +164,14 @@ async def test_reconfigure_offers_only_what_the_subentry_still_owns(
 
     assert result["type"] is FlowResultType.FORM
     fields = {str(marker.schema) for marker in result["data_schema"].schema}
-    assert fields == {CONF_NAME, CONF_NOMINAL_POWER, CONF_POWER_SENSOR, CONF_CONTROL_ENTITY}
+    assert fields == {
+        CONF_NAME,
+        CONF_NOMINAL_POWER,
+        CONF_POWER_SENSOR,
+        CONF_CONTROL_ENTITY,
+        CONF_AVAILABILITY_SCHEDULE,
+        CONF_POWER_CONTROL_ENTITY,
+    }
 
 
 async def test_reconfigure_keeps_the_values_it_no_longer_shows(
@@ -212,7 +221,15 @@ async def test_reconfigure_keeps_the_values_it_no_longer_shows(
     assert data[CONF_SEMI_CONTINUOUS] is False
 
 
-async def test_reconfigure_can_clear_the_power_sensor(hass: HomeAssistant) -> None:
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        (CONF_POWER_SENSOR, "sensor.car_power"),
+        (CONF_AVAILABILITY_SCHEDULE, "schedule.allowed"),
+        (CONF_POWER_CONTROL_ENTITY, "number.charger"),
+    ],
+)
+async def test_reconfigure_can_clear_optional_entities(hass: HomeAssistant, field, value) -> None:
     """A blank entity field arrives as an absent key, which has to mean "unset"
     rather than "leave whatever was there"."""
     entry = _entry(
@@ -224,7 +241,7 @@ async def test_reconfigure_can_clear_the_power_sensor(hass: HomeAssistant) -> No
                 data={
                     CONF_NAME: "Car",
                     CONF_NOMINAL_POWER: 11000,
-                    CONF_POWER_SENSOR: "sensor.car_power",
+                    field: value,
                 },
             )
         ]
@@ -242,7 +259,44 @@ async def test_reconfigure_can_clear_the_power_sensor(hass: HomeAssistant) -> No
     await hass.async_block_till_done()
 
     assert result["type"] is FlowResultType.ABORT
-    assert CONF_POWER_SENSOR not in entry.subentries[subentry_id].data
+    assert field not in entry.subentries[subentry_id].data
+
+
+@pytest.mark.parametrize("unit,accepted", [("A", False), ("W", True), ("kW", True)])
+async def test_power_control_must_be_measured_in_power(hass: HomeAssistant, unit, accepted) -> None:
+    entry = _entry(
+        subentries=[
+            ConfigSubentryData(
+                subentry_type=SUBENTRY_TYPE_DEFERRABLE,
+                title="Car",
+                unique_id="car",
+                data={CONF_NAME: "Car", CONF_NOMINAL_POWER: 11000},
+            )
+        ]
+    )
+    entry.add_to_hass(hass)
+    subentry_id = next(iter(entry.subentries))
+    hass.states.async_set("number.charger", "6", {"unit_of_measurement": unit})
+
+    result = await hass.config_entries.subentries.async_init(
+        (entry.entry_id, SUBENTRY_TYPE_DEFERRABLE),
+        context={"source": "reconfigure", "subentry_id": subentry_id},
+    )
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"],
+        {
+            CONF_NAME: "Car",
+            CONF_CONTROL_ENTITY: "switch.car",
+            CONF_POWER_CONTROL_ENTITY: "number.charger",
+        },
+    )
+    await hass.async_block_till_done()
+
+    if accepted:
+        assert result["type"] is FlowResultType.ABORT
+    else:
+        assert result["type"] is FlowResultType.FORM
+        assert result["errors"] == {CONF_POWER_CONTROL_ENTITY: "power_control_needs_power_unit"}
 
 
 async def test_sequence_setup_reconfigure_and_invalid_runtime(hass: HomeAssistant) -> None:

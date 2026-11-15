@@ -20,19 +20,104 @@ still welcome, it just constrains what the project can do later.
 
 ## Development
 
+On Ubuntu/T3, use Python 3.14 for local development, matching the Home
+Assistant and CI Python minor version. `.python-version` selects 3.14 for uv;
+the migration machine already has Python 3.14.4 at `/usr/bin/python3.14`.
+Keep Ubuntu's system Python installed: the OS `python3` package depends on it.
+The project virtual environment is independent of the default `python3` on
+PATH, which may select the separately installed Python 3.15.
+
+Python 3.15.2 also passed all 3,093 tests with the same dependency versions,
+but 3.14 remains the project default. The 3.15 install required NumPy 2.3.2
+and Pydantic Core 2.46.5 source builds (about eight minutes on this machine).
+Do not downgrade Home Assistant or replace its transitive pins to force an
+interpreter to work.
+
 ```bash
-pip install -r requirements-dev.txt
-pytest
-ruff check . && ruff format --check .
+uv venv --python /usr/bin/python3.14 .venv
+uv pip install --python .venv/bin/python -r requirements-dev.txt --group dev
+uv pip check --python .venv/bin/python
+.venv/bin/python -m pytest
+.venv/bin/ruff check .
+.venv/bin/ruff format --check .
+node --test .github/scripts/issue-triage.test.cjs
 ```
 
-Tests are split in two. `tests/` needs no running Home Assistant and runs on
-any platform. `tests/integration/` needs one, via
-`pytest-homeassistant-custom-component`, which does not load on Windows —
-run those on Linux or in a container.
+If `.venv` was created with another Python version, recreate it with the
+selected interpreter before installing dependencies; an existing environment
+does not change interpreter automatically.
 
-Run the bare `pytest` before pushing, not the two directories separately:
-collection problems only appear when both are collected together.
+The `dev` group selects the repository's Ruff version, also used by CI. The
+Home Assistant pytest plugin owns the Home Assistant and pytest dependency
+versions; do not pin those independently. Node 26 works for the dependency-free
+triage tests. There is no npm install or frontend build step: the integration
+ships its JavaScript directly in `custom_components/emhass_companion/`.
+
+Tests are split in two. `tests/` includes isolated tests, and
+`tests/integration/` uses `pytest-homeassistant-custom-component` to create a
+Home Assistant instance inside pytest. Neither requires a running server,
+Docker, real credentials, or a connection to the production installation.
+Run the bare pytest command above for the full suite, rather than collecting
+the directories separately. For a targeted check, append a test path.
+
+Run directly from the Ubuntu checkout. `scripts/wsl_test.sh` is a legacy WSL
+helper for slow Windows-mounted filesystems; its rsync copy, separate venv and
+parallel execution are unnecessary here. Docker in the private notes describes
+an optional interactive HA sandbox, not a prerequisite for tests. Windows
+PowerShell paths and junction commands in those notes do not apply on Ubuntu.
+
+### Local documentation build and deployment boundary
+
+```bash
+uv pip install --python .venv/bin/python -r requirements-docs.txt
+.venv/bin/mkdocs build
+```
+
+This builds the documentation into ignored `site/` without publishing it.
+On the copied checkout, `--strict` currently fails on existing links in ignored
+`docs/plan/` notes. MkDocs includes those local notes in the output: do not
+publish a build from this working tree without excluding private planning
+material and reviewing the generated files.
+The existing Docs GitHub workflow publishes with `mkdocs gh-deploy --force`;
+that is a deployment and requires explicit approval. Integration deployment
+likewise means installing/copying the integration into HA and restarting HA;
+do not run live copy/restart commands during local setup.
+
+### Home Assistant redeploy from Ubuntu (manual, approval required)
+
+There is no compiled integration build. After tests pass, prepare a local
+archive of the integration source (including your uncommitted edits):
+
+```bash
+tar --exclude='__pycache__' --exclude='*.pyc' -czf /tmp/emhass-companion.tar.gz \
+  -C custom_components emhass_companion
+tar -tzf /tmp/emhass-companion.tar.gz
+```
+
+Use the private SSH notes for the destination and identity, keeping those out
+of tracked files. Linux uses `$HOME/.ssh/...`, not PowerShell's
+`$env:USERPROFILE`. Use `BatchMode=yes`, `ConnectTimeout=10`, and
+`StrictHostKeyChecking=yes`; verify an unknown host fingerprint independently.
+Confirm read-only that the live integration symlink still targets the expected
+source directory and compare the running files with this checkout first.
+Old notes describe a host Git clone, then a plain directory without `.git`;
+do not assume `git apply`, `git pull`, or host-side commits will work.
+
+Only after deployment approval: back up the remote integration, transfer the
+archive with `scp`, extract into a separate staging directory, review the diff,
+and copy the approved files into the verified live source directory. Preserve
+host-side edits and configuration; never sync the whole repo or use
+`rsync --delete` against `/config`. Then run `ha core check` and, with restart
+approval, `ha core restart`. Verify logs and the integration after restart.
+A restart alone does not transfer local changes. Rollback requires restoring
+the backed-up integration and restarting again. No live deployment command has
+been verified from this Ubuntu host yet; confirm SSH access before proceeding.
+
+Local setup and tests need no credentials. Copied private credential notes
+remain under ignored `.agents/`; do not print their contents or copy them into
+documentation. Before any approved remote operation, verify referenced Linux
+key paths and access. Missing/expired credentials must be supplied securely;
+never put tokens in tracked files or command output.
 
 Every built-in profile must ship a fixture in `tests/fixtures/`: a recorded
 blob from a real installation plus the series it should resolve to. That is
