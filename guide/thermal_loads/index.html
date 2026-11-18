@@ -1,0 +1,2094 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A Home Assistant integration that makes EMHASS usable without writing YAML.">
+      
+      
+      
+        <link rel="canonical" href="https://smefa.github.io/emhass-ha-companion/guide/thermal_loads/">
+      
+      
+        <link rel="prev" href="../deferrable_loads/">
+      
+      
+        <link rel="next" href="../surplus_loads/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/icon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+    
+    
+      
+        <title>Thermal loads - EMHASS Companion</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#thermal-loads" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="EMHASS Companion" class="md-header__button md-logo" aria-label="EMHASS Companion" data-md-component="logo">
+      
+  <img src="../../assets/logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            EMHASS Companion
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Thermal loads
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="teal" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/smefa/emhass-ha-companion" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    smefa/emhass-ha-companion
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="EMHASS Companion" class="md-nav__button md-logo" aria-label="EMHASS Companion" data-md-component="logo">
+      
+  <img src="../../assets/logo.png" alt="logo">
+
+    </a>
+    EMHASS Companion
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/smefa/emhass-ha-companion" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    smefa/emhass-ha-companion
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    User Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deferrable_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deferrable loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Thermal loads
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Thermal loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#add-a-thermal-load" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Add a thermal load
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#its-own-device-page" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Its own device page
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#outdoor-temperature" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Outdoor temperature
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#room-advanced-heat-pump" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Room, advanced heat pump
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Room, advanced heat pump">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#before-you-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Before you start
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-setup-form" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The setup form
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#after-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        After setup
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#getting-the-numbers-right" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Getting the numbers right
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#water-tank-with-an-immersion-heater" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Water tank with an immersion heater
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#getting-the-numbers-right_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Getting the numbers right
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../surplus_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Surplus loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../inverter_control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inverter control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../hub_controls/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hub controls
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Actions (advanced)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../network_tariffs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Network tariffs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dashboard_cards/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dashboard cards
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Technical reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Technical reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_2" id="__nav_3_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Loads
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Loads
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deferrable_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deferrable loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../thermal_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Thermal loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../surplus_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Surplus loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../on_demand_loads/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    On-demand loads
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../load_groups/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Load groups
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../battery_lockout/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Battery lockout
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../request_run_service/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Request-run service (planned)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../dashboard_cards/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dashboard cards
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../lab_cards/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Lab cards (experimental)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../entities/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Entities
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../savings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cost and savings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../end_soc/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    End SOC
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../handing_over_control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Handing over control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../inverter_control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inverter control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../fronius_gen24_scripts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fronius GEN24 scripts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../data_sources/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data sources
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../grid_limits/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dynamic grid limits
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../network_tariffs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Network tariffs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../template_additions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Template additions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../profiles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Writing a profile
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../settings_ownership/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Settings ownership
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../inverter_profile_roadmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inverter profile roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#add-a-thermal-load" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Add a thermal load
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#its-own-device-page" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Its own device page
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#outdoor-temperature" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Outdoor temperature
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#room-advanced-heat-pump" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Room, advanced heat pump
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Room, advanced heat pump">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#before-you-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Before you start
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-setup-form" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The setup form
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#after-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        After setup
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#getting-the-numbers-right" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Getting the numbers right
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#water-tank-with-an-immersion-heater" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Water tank with an immersion heater
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#getting-the-numbers-right_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Getting the numbers right
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/smefa/emhass-ha-companion/edit/main/docs/guide/thermal_loads.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="thermal-loads">Thermal loads<a class="headerlink" href="#thermal-loads" title="Permanent link">&para;</a></h1>
+<p>A thermal load is like a deferrable load, but its <strong>temperature</strong> is
+controlled instead of its run time — a heat pump, direct electric heating,
+an air conditioner. Add one from <strong>Settings → Devices &amp; Services → EMHASS
+Companion → Add thermal load</strong> — a separate button from <em>Add deferrable
+load</em>.</p>
+<h2 id="add-a-thermal-load">Add a thermal load<a class="headerlink" href="#add-a-thermal-load" title="Permanent link">&para;</a></h2>
+<p><img alt="The Add a thermal load dialog" src="../../assets/thermal-add-load.png" /></p>
+<ul>
+<li><strong>Name</strong></li>
+<li><strong>Temperature sensor</strong> — the room (or tank) the settings below apply to.
+  Strongly recommended: without it, every plan starts from a guessed
+  temperature instead of the real one.</li>
+<li><strong>Heats or cools</strong> — whether running the load raises the temperature (a
+  heat pump, a heater) or lowers it (an air conditioner).</li>
+<li><strong>Power when running</strong> — roughly what it draws while on, in W.</li>
+<li><strong>Comfort temperature</strong> — the temperature to hold while the comfort
+  window (below) is active. May go above this when electricity is cheap,
+  never below.</li>
+<li><strong>Setback temperature</strong> — the lowest acceptable temperature outside the
+  comfort window.</li>
+<li><strong>Maximum temperature</strong> — a hard ceiling, at all times.</li>
+<li><strong>Comfort from</strong> / <strong>Comfort until</strong> — when the comfort temperature
+  applies each day. May cross midnight.</li>
+<li><strong>Advanced settings</strong> — the collapsed section holds the three model
+  settings below (<em>Heating rate</em>, <em>Heat loss constant</em>, <em>Response delay</em>). The
+  defaults are a reasonable starting point.</li>
+<li><strong>Heating rate</strong> — degrees per hour at full power.</li>
+<li><strong>Heat loss constant</strong> — degrees lost per hour, per degree of difference
+  to the outdoor temperature.</li>
+<li><strong>Response delay</strong> — how long after switching on before the temperature
+  responds. An hour or more for underfloor heating in concrete, 0 for a
+  radiator or fan.</li>
+<li><strong>Heat pump COP curve</strong> — optional, also under <strong>Advanced settings</strong>. For a
+  heat pump whose efficiency drops in the cold, enter outdoor temperature and
+  COP pairs, such as <code>7: 5.2, 0: 4.0, -10: 3.0</code>. The first pair is the outdoor
+  temperature where you measured the <strong>Heating rate</strong>. The heating rate is
+  lowered to match the coldest hour of the forecast, so cold spells get more
+  heating hours. This needs a <strong>Home Assistant weather entity</strong> or an entity
+  attribute as the outdoor temperature source. Leave it empty to ignore it.
+  Heating only.</li>
+<li><strong>Running sensor</strong> — optional; tells the optimiser whether the load is
+  actually running.</li>
+<li><strong>Control entity</strong> — optional; if set, the integration switches this on
+  and off to follow the plan, once you turn control on.</li>
+</ul>
+<p>Temperature targets accept <strong>5-95 °C</strong> in both setup and the device controls.
+This is the input range; the room-heating defaults are unchanged. Higher
+targets do not switch models: a <strong>Room</strong> load retains its simple model with
+heat loss relative to outdoor temperature. Choose <strong>Water tank</strong> explicitly
+for water storage and estimated hot-water consumption.</p>
+<h2 id="its-own-device-page">Its own device page<a class="headerlink" href="#its-own-device-page" title="Permanent link">&para;</a></h2>
+<p>Every answer above becomes a setting on the load's device page, changeable
+any time. A thermal load also keeps the same <strong>Enabled</strong>, time window
+(<strong>Earliest start</strong> / <strong>Latest finish</strong> / <strong>Restrict to a time window</strong>),
+<strong>Most starts per plan</strong> and <strong>Cost of starting</strong> settings as an ordinary
+deferrable load — but has none of the run-time-target ones (<em>Hours needed per
+day</em>, <em>Must run in one unbroken block</em>, <em>Recurrence</em>, <em>Requested</em>, <em>Run
+now</em>), since its demand is the comfort band, not a number of hours.</p>
+<p>It also gets one extra sensor:</p>
+<ul>
+<li><strong>Planned temperature</strong> — the room temperature the plan currently expects,
+  with the full forecast in its <code>forecast</code> attribute.</li>
+</ul>
+<p><strong>Edit thermal load</strong> in the integration's menu only asks for the things that
+aren't controls: <strong>Name</strong>, <strong>Temperature sensor</strong>, <strong>Heats or cools</strong>,
+<strong>Running sensor</strong> and <strong>Control entity</strong>. Everything else is on the load's
+own page. A <strong>Room, advanced heat pump</strong> load also edits its house and heat
+pump settings there (see below).</p>
+<h2 id="outdoor-temperature">Outdoor temperature<a class="headerlink" href="#outdoor-temperature" title="Permanent link">&para;</a></h2>
+<p><img alt="The Outdoor temperature step" src="../../assets/thermal-outdoor-temperature.png" /></p>
+<p>Once you have at least one thermal load, <strong>Configure → Outdoor
+temperature</strong> appears, asking where the outdoor temperature forecast comes
+from — it's what the room drifts towards while the load is off. A source is
+required. A <strong>Room, advanced heat pump</strong> load, or a room with a <strong>Heat pump
+COP curve</strong>, needs one of the first two sources:</p>
+<ul>
+<li><strong>Home Assistant weather entity</strong> — hourly forecast via
+  <code>weather.get_forecasts</code>. Pick one that actually offers hourly data; daily or
+  twice-daily forecasts are too coarse to schedule heating against.
+  The other two sources are under the collapsed <strong>Advanced settings</strong> section
+  (it opens by itself if one of them is already selected).</li>
+<li><strong>Temperature forecast from an entity attribute</strong> — for a weather
+  integration that exposes its forecast as a list-valued attribute instead of
+  through an action, or a template sensor you build yourself.</li>
+<li><strong>EMHASS built-in (Open-Meteo)</strong> — no weather integration or API key
+  needed, but requires your home's location to be set correctly under Home
+  Assistant's Settings → System → Home information, and is only correct when
+  the solar forecast is also EMHASS built-in.</li>
+</ul>
+<p>The follow-up screen asks for what that source needs. <strong>Home Assistant
+weather entity</strong> wants just a <strong>Weather entity</strong>. <strong>Temperature forecast from
+an entity attribute</strong> wants a <strong>Forecast entity</strong>, an <strong>Attribute name</strong>, a
+<strong>Timestamp field</strong> and a <strong>Temperature field</strong> — values must be in degrees
+Celsius, which is what EMHASS's thermal model assumes. <strong>EMHASS built-in</strong>
+asks for nothing.</p>
+<h2 id="room-advanced-heat-pump">Room, advanced heat pump<a class="headerlink" href="#room-advanced-heat-pump" title="Permanent link">&para;</a></h2>
+<p>Choose <strong>Room, advanced heat pump</strong> under <strong>Add thermal load</strong> if you would
+rather describe your house than measure a heating rate. EMHASS then calculates
+the heat pump's efficiency (COP) and the house's heat demand from the outdoor
+forecast at each step. A cold night costs more heat and more electricity
+without any tuning. Use <strong>Room</strong> instead if you have measured a heating rate
+that works, or if the load cools.</p>
+<h3 id="before-you-start">Before you start<a class="headerlink" href="#before-you-start" title="Permanent link">&para;</a></h3>
+<ul>
+<li>An outdoor temperature source the Companion can read: a <strong>Home Assistant
+  weather entity</strong> or a <strong>Temperature forecast from an entity attribute</strong>.
+  <strong>EMHASS built-in (Open-Meteo)</strong> is not enough, because the Companion needs
+  the forecast itself. Without one, no plan is made and the error names the
+  load.</li>
+<li>EMHASS <strong>0.18.8 or newer</strong>.</li>
+<li>A rough idea of the house's yearly heat demand. An energy certificate, or
+  last year's delivered heat divided by the heated floor area, is a good
+  start. Delivered heat is not the electricity bought: multiply the heat
+  pump's yearly electricity use by its seasonal COP.</li>
+</ul>
+<h3 id="the-setup-form">The setup form<a class="headerlink" href="#the-setup-form" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Room temperature sensor</strong> — required. Every plan starts from this reading.</li>
+<li><strong>Electrical power when running</strong> — what the heat pump draws while it runs,
+  in W. EMHASS multiplies it by the calculated COP to get the heat delivered.</li>
+<li><strong>Comfort / Setback / Maximum temperature</strong> and <strong>Comfort starts / ends</strong> —
+  the same band as for a <strong>Room</strong> load. Setback must not be above comfort, and
+  comfort must not be above maximum.</li>
+<li><strong>Thermal mass</strong> — the volume of concrete-equivalent mass that stores the
+  heat, in m³. A larger value means the temperature changes more slowly. If
+  you are unsure, start low and raise it if the plan expects the room to cool
+  faster than it really does.</li>
+<li><strong>Heated floor area</strong> — in m².</li>
+<li><strong>Specific heating demand</strong> — the house's yearly heat demand per m², in
+  kWh/m². Often 50 to 150 for a house.</li>
+<li><strong>Supply temperature</strong> — the water temperature sent to the radiators or
+  floor heating. Typically 30 to 35 °C for floor heating and 45 to 55 °C for
+  radiators. A lower value gives a higher COP. Starts at 35.</li>
+<li><strong>Running sensor</strong> / <strong>Control entity</strong> — optional, as for any thermal load.</li>
+<li><strong>Advanced settings</strong> — the defaults suit most houses:</li>
+<li><strong>Carnot efficiency</strong> — how close the heat pump gets to an ideal one.
+    0.4 is typical. EMHASS keeps the resulting COP between 1 and 8.</li>
+<li><strong>Constant COP</strong> — optional, 1 to 8. Use a flat COP instead of the
+    calculation, for example the B0/W35 or B0/W45 figure from the manual of a
+    ground-source heat pump, whose COP barely follows the outdoor air. The
+    outdoor temperature then no longer affects the COP, but it still drives
+    the house's heat demand.</li>
+<li><strong>Source temperature</strong> — optional, in °C. The cold-side temperature the
+    COP is calculated from, instead of the outdoor air: a typical brine
+    temperature for a ground-source heat pump. It is a fixed estimate, not a
+    sensor, and must be below the supply temperature. A <strong>Constant COP</strong>
+    takes precedence. Leave both empty for an air-source heat pump.</li>
+<li><strong>Base temperature</strong> — the outdoor temperature above which the house needs
+    no heating. Starts at 18 °C.</li>
+<li><strong>Annual heating degree days</strong> — the degree days of the year your specific
+    heating demand refers to. Starts at 3000.</li>
+<li><strong>Thermal inertia</strong> — hours before delivered heat shows in the room, for
+    example 1 to 3 for floor heating in concrete. Starts at 0 (immediately).</li>
+</ul>
+<h3 id="after-setup">After setup<a class="headerlink" href="#after-setup" title="Permanent link">&para;</a></h3>
+<p>Power, the three temperatures and the comfort times become controls on the
+load's device page, like for a <strong>Room</strong> load. The house and heat pump settings
+are not device controls. To change them, use <strong>Edit thermal load</strong>, which asks
+for the name, sensors, control entity and every model setting above. The
+<strong>Heating rate</strong>, <strong>Heat loss constant</strong> and <strong>Response delay</strong> controls do not
+exist for this type.</p>
+<p>If the room is too cold to reach its comfort temperature in time, the plan
+does not fail. It aims for the warmest temperature the heat pump can reach
+instead, and the <em>Last request to EMHASS</em> sensor's <code>warnings</code> attribute says so.
+If the room sensor is unavailable, EMHASS starts the plan from 20 °C.</p>
+<h3 id="getting-the-numbers-right">Getting the numbers right<a class="headerlink" href="#getting-the-numbers-right" title="Permanent link">&para;</a></h3>
+<p>Compare <strong>Planned temperature</strong> with the real room temperature over a few
+days:</p>
+<ul>
+<li>The planned temperature <strong>falls faster</strong> than the real one → raise
+  <strong>Thermal mass</strong>, or lower <strong>Specific heating demand</strong>.</li>
+<li>The plan <strong>runs more</strong> than the heat pump really needs → lower <strong>Specific
+  heating demand</strong>, or check <strong>Supply temperature</strong>.</li>
+<li>Comfort is <strong>missed</strong> at the start of the window → raise <strong>Specific heating
+  demand</strong>, or set <strong>Thermal inertia</strong> if heat takes time to arrive.</li>
+</ul>
+<h2 id="water-tank-with-an-immersion-heater">Water tank with an immersion heater<a class="headerlink" href="#water-tank-with-an-immersion-heater" title="Permanent link">&para;</a></h2>
+<p>Choose <strong>Water tank</strong> under <strong>Add thermal load</strong>. This first version is one tank
+with one electric immersion element. Room is still the default, and existing
+loads are never converted based on their temperature targets. Heat pumps,
+multiple sources, stratification, automatic consumption learning and disinfection
+schedules are not included.</p>
+<p>Provide tank volume (litres), heater power (watts), a tank temperature sensor,
+and explicit <strong>Lowest standby temperature</strong>, <strong>Required hot-water temperature</strong>
+and <strong>Maximum temperature</strong> limits within your hardware's permitted range.</p>
+<p>Choose <strong>Number of hot-water periods</strong> (1–8), then fill in one page per period:
+optional name, <strong>Hot water needed from / until</strong>, and <strong>Estimated consumption
+for this period</strong> in kWh of heat withdrawn, not heater electricity. For example,
+create Morning and Evening periods with separate consumption estimates.</p>
+<p>Water must be ready at each start, with the required tank temperature maintained
+throughout the period. The lowest standby temperature applies between periods;
+prices and PV still determine heating times. Zero consumption means no expected
+withdrawal; availability targets and standby heat loss still apply. Consumption
+from overlapping periods is added.</p>
+<p>Each period has start/end time controls, a consumption number and an enable
+switch on the tank device. Changes save immediately and request a fresh
+optimisation without reloading the integration when the tank load is enabled.
+While the tank load is disabled, edits save without requesting optimisation.
+All settings-triggered solves share a three-second delay that restarts with
+each change; values save immediately, including whole-plan action updates.
+Disabled periods keep their
+settings but contribute no withdrawal or required-temperature window. With all
+periods disabled, only the lowest standby temperature applies.</p>
+<p>Automations can use those entities or replace the whole plan atomically:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">emhass_companion.set_hot_water_plan</span>
+<span class="nt">data</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">device_id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">YOUR_TANK_DEVICE_ID</span>
+<span class="w">  </span><span class="nt">periods</span><span class="p">:</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Morning</span>
+<span class="w">      </span><span class="nt">draw_start</span><span class="p">:</span><span class="w"> </span><span class="s">"06:00:00"</span>
+<span class="w">      </span><span class="nt">draw_end</span><span class="p">:</span><span class="w"> </span><span class="s">"08:00:00"</span>
+<span class="w">      </span><span class="nt">draw_energy_kwh</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3</span>
+<span class="w">      </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</code></pre></div>
+<p>Supply 1–8 periods. Omitted <code>enabled</code> defaults to true. To suspend hot-water
+availability, disable the periods; an empty plan is rejected. The action
+validates every period before saving, then requests one optimisation. Adding
+periods creates their controls live; controls for removed slots become
+unavailable. Slot numbers and entity IDs stay stable when renamed or disabled.</p>
+<p>Power, temperature limits and <strong>Standby loss</strong> remain restored device controls.
+Edit volume, period count and schedules by reconfiguring the tank. Existing
+periods are prefilled, and changes save only after the final page. Reducing the
+count keeps the first periods. Legacy single-window tanks run unchanged until
+edited: their old consumption becomes one period, whose times also set hot-water
+availability when saved. New tanks have no separate comfort-time controls.
+Standby loss is continuous heat loss in watts, not hot-water consumption. It is
+under <strong>Advanced settings</strong> when the tank is first created and starts at 60 W.
+The room-model tuning controls do not appear for tanks.</p>
+<p><strong>Heater COP</strong> (1 for an immersion element; a heat-pump water heater's seasonal
+COP otherwise) and <strong>Comfort penalty</strong> (0 keeps the required temperature a hard
+limit; above 0 it becomes a priced target) are also restored device controls.
+Like standby loss, both are offered under <strong>Advanced settings</strong> when the tank is
+first created.</p>
+<p>Use the manufacturer's standing loss or calibrate during a no-draw period;
+compare predicted temperature with the actual sensor before relying on the
+schedule unattended. A single sensor cannot describe a stratified tank perfectly,
+and unexpected draws can still exhaust the hot water. Estimated consumption is
+not automatically learned from temperature changes.</p>
+<p>The tank model needs a known EMHASS <strong>0.18.8 or newer</strong>, but no outdoor forecast
+for immersion heating. Other forecast profiles keep their own requirements.
+Windows follow local time and may cross midnight. Equal consumption endpoints
+mean a full day. Daily energy is conserved through daylight-saving changes;
+partial horizons receive only their overlapping share. Pre-heating ramps use actual
+elapsed time.
+ambiguous endpoints use the first occurrence and missing endpoints advance to
+the next valid local time.</p>
+<p>For enabled tanks, invalid/missing telemetry blocks new solves and switching, including
+forced-on mode; Should run reports unknown. Existing switch state is left alone,
+and control resumes only after a valid solve. Hardware thermostats and
+over-temperature protection remain authoritative. Do not configure two loads
+for the same physical heater or tank.</p>
+<h2 id="getting-the-numbers-right_1">Getting the numbers right<a class="headerlink" href="#getting-the-numbers-right_1" title="Permanent link">&para;</a></h2>
+<p>Start with the defaults and adjust from what you observe:</p>
+<ul>
+<li>Plan heats <strong>too early</strong> → heat loss constant too high, or heating rate
+  too low.</li>
+<li>Comfort <strong>missed</strong> at the start of the window → heating rate too
+  optimistic, or the response delay is real and set to 0.</li>
+<li>The plan never pre-heats → widen the gap between comfort and maximum
+  temperature; that gap is what it has to play with.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.top", "navigation.tracking", "search.suggest", "search.highlight", "content.code.copy", "content.action.edit"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.a5f9d56c.min.js"></script>
+      
+    
+  </body>
+</html>
