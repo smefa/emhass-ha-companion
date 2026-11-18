@@ -91,6 +91,14 @@ class EmhassApiError(EmhassError):
         return self.status == 400 and "infeasible" in self.body.lower()
 
 
+class EmhassAuthError(EmhassApiError):
+    """The API token is missing or invalid."""
+
+
+class EmhassAuthConfigurationError(EmhassApiError):
+    """Authentication must be configured on the EMHASS server."""
+
+
 class EmhassBusyError(EmhassApiError):
     """EMHASS explicitly refused a request before running or saving it."""
 
@@ -126,13 +134,21 @@ async def _retry_busy[T](operation: Callable[[], Awaitable[T]]) -> T:
 class EmhassClient:
     """Thin async wrapper over the EMHASS web server.
 
-    EMHASS exposes no authentication on its HTTP port, so there are no
-    credentials to manage here.
+    EMHASS 0.18.10+ requires a bearer token on the API port.
     """
 
-    def __init__(self, session: ClientSession, base_url: str) -> None:
+    def __init__(
+        self,
+        session: ClientSession,
+        base_url: str,
+        api_token: str = "",
+        *,
+        on_auth_error: Callable[[], None] | None = None,
+    ) -> None:
         self._session = session
         self._base_url = base_url.rstrip("/")
+        self._api_token = api_token
+        self._on_auth_error = on_auth_error
 
     @property
     def base_url(self) -> str:
@@ -152,9 +168,27 @@ class EmhassClient:
         url = f"{self._base_url}{path}"
         try:
             async with self._session.request(
-                method, url, json=json, timeout=client_timeout
+                method,
+                url,
+                json=json,
+                timeout=client_timeout,
+                headers={"Authorization": f"Bearer {self._api_token}"} if self._api_token else {},
             ) as response:
                 body = await response.text()
+                if response.status == 401:
+                    if self._on_auth_error is not None:
+                        self._on_auth_error()
+                    raise EmhassAuthError("EMHASS API token is missing or invalid", status=401)
+                if (
+                    response.status == 503
+                    and "API authentication is not configured correctly" in body
+                ):
+                    raise EmhassAuthConfigurationError(
+                        "Configure the API token in EMHASS and restart the add-on", status=503
+                    )
+                # Never propagate a configured token from an echoed error body.
+                if self._api_token:
+                    body = body.replace(self._api_token, "**REDACTED**")
                 if response.status >= 400:
                     # Match the upstream refusal as well as the status: a proxy
                     # error or a failed action may already have changed state.
@@ -235,6 +269,19 @@ class EmhassClient:
         health = await self.async_healthz()
         versions = health.get("versions") or {}
         return versions.get("emhass")
+
+    async def async_check_auth(self) -> None:
+        """Probe a protected read without requiring a completed optimisation."""
+        payload = await self._request("GET", ENDPOINT_LAST_RUN)
+        # The tagged upstream contract returns 200/status=no-run even on a
+        # fresh install. A proxy's 404 or HTML login page is not proof of access.
+        if not isinstance(payload, dict) or payload.get("status") not in {
+            "no-run",
+            "ok",
+            "infeasible",
+            "error",
+        }:
+            raise EmhassApiError("EMHASS returned an invalid last-run response")
 
     # -- configuration --------------------------------------------------------
 

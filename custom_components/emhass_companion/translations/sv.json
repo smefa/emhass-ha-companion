@@ -5,20 +5,26 @@
         "title": "Anslut till EMHASS",
         "description": "EMHASS Companion styr en befintlig EMHASS-installation. Version {min_version} eller senare krävs.\n\nOm du kör EMHASS-tillägget fylls adressen nedan i automatiskt.",
         "data": {
-          "url": "EMHASS-adress"
+          "url": "EMHASS-adress",
+          "api_token": "API-token"
         },
         "data_description": {
-          "url": "Till exempel http://192.168.1.10:5000. Fylls i automatiskt om du kör EMHASS-tillägget -- localhost når bara Home Assistant själv."
+          "url": "Till exempel http://192.168.1.10:5000. Fylls i automatiskt om du kör EMHASS-tillägget -- localhost når bara Home Assistant själv.",
+          "api_token": "Krävs för EMHASS 0.18.10 eller senare. Öppna EMHASS i sidofältet och välj nyckelikonen (API token), eller ange emhass_api_token i tilläggets konfiguration. Klistra in endast själva token, utan Bearer."
         }
       },
       "reconfigure": {
-        "title": "Ändra EMHASS-adressen",
+        "title": "Ändra EMHASS-anslutningen",
         "description": "Version {min_version} eller senare krävs.\n\nAllt annat behålls som konfigurerat -- ändra pris-, sol-, förbruknings-, tariff-, batteri- eller nätinställningar via integrationens egna konfigurationsalternativ i stället.",
         "data": {
-          "url": "EMHASS-adress"
+          "url": "EMHASS-adress",
+          "api_token": "API-token",
+          "clear_api_token": "Ta bort sparad token"
         },
         "data_description": {
-          "url": "Till exempel http://192.168.1.10:5000. Fylls i automatiskt om du kör EMHASS-tillägget -- localhost når bara Home Assistant själv."
+          "url": "Till exempel http://192.168.1.10:5000. Fylls i automatiskt om du kör EMHASS-tillägget -- localhost når bara Home Assistant själv.",
+          "api_token": "Krävs för EMHASS 0.18.10 eller senare. Öppna EMHASS i sidofältet och välj nyckelikonen (API token), eller ange emhass_api_token i tilläggets konfiguration. Klistra in endast själva token, utan Bearer. Lämna orört för att behålla token för samma adress. Ange token igen om du ändrar adressen.",
+          "clear_api_token": "Använd endast om EMHASS inte kräver autentisering. Detta tar också bort en token som anges ovan."
         }
       },
       "price": {
@@ -420,6 +426,13 @@
         "data_description": {
           "emhass_standard_names": "Byter namn på plansensorerna till p_pv_forecast, p_load_forecast, p_grid_forecast, p_batt_forecast, soc_batt_forecast, optim_status, total_cost_fun_value, unit_load_cost och unit_prod_price, samt p_pv_curtailment och p_hybrid_inverter där du har dem, och publicerar även deras prognosserier i EMHASS format. Sensorer per last byter inte namn. Går att ångra."
         }
+      },
+      "reauth_confirm": {
+        "title": "Uppdatera EMHASS API-token",
+        "description": "Krävs för EMHASS 0.18.10 eller senare. Öppna EMHASS i sidofältet och välj nyckelikonen (API token), eller ange emhass_api_token i tilläggets konfiguration. Klistra in endast själva token, utan Bearer.",
+        "data": {
+          "api_token": "API-token"
+        }
       }
     },
     "error": {
@@ -431,11 +444,14 @@
       "profile_required": "Välj en källa för solprognosen, eller öppna Avancerade inställningar för de andra alternativen.",
       "template_required": "Mall-läget kräver en mall. Ange den under Avancerade inställningar, eller välj en annan metod.",
       "phase_entities_incomplete": "Fasvakten behöver alla tre faserna, eller bara L1 för en enfasanslutning.",
-      "phase_margin_too_large": "Säkringsmarginalen måste vara mindre än säkringens märkström."
+      "phase_margin_too_large": "Säkringsmarginalen måste vara mindre än säkringens märkström.",
+      "invalid_auth": "API-token saknas eller är felaktig.",
+      "auth_not_configured": "Konfigurera API-token i EMHASS och starta om tillägget innan du försöker igen."
     },
     "abort": {
       "single_instance_allowed": "EMHASS Companion är redan konfigurerad.",
-      "no_profiles": "Inga användbara datakällor hittades. Det är oväntat – rapportera gärna felet."
+      "no_profiles": "Inga användbara datakällor hittades. Det är oväntat – rapportera gärna felet.",
+      "reauth_successful": "API-token har uppdaterats."
     }
   },
   "options": {

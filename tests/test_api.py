@@ -411,3 +411,79 @@ async def test_verbatim_config_busy_does_not_replay_a_stale_snapshot():
     with pytest.raises(EmhassBusyError):
         await client.async_set_config({"a": 1})
     assert session.request.call_count == 1
+
+
+@pytest.mark.parametrize("token", ["", "test-token-at-least-sixteen"])
+async def test_token_headers_are_per_request_and_do_not_change_shared_session(token):
+    session = _health_session(200, "{}")
+    callback = MagicMock()
+    client = EmhassClient(session, "http://emhass:5000", token, on_auth_error=callback)
+    await client.async_get_config()
+    headers = session.request.call_args.kwargs["headers"]
+    assert headers == ({"Authorization": f"Bearer {token}"} if token else {})
+    assert not session.headers.__setitem__.called
+    callback.assert_not_called()
+
+
+async def test_unauthorized_request_triggers_reauth_without_echoing_token():
+    from custom_components.emhass_companion.api import EmhassAuthError
+
+    token = "test-token-at-least-sixteen"
+    callback = MagicMock()
+    session = _health_session(401, token)
+    client = EmhassClient(session, "http://emhass:5000", token, on_auth_error=callback)
+    with pytest.raises(EmhassAuthError) as raised:
+        await client.async_run_action("naive-mpc-optim", {})
+    callback.assert_called_once_with()
+    assert token not in str(raised.value)
+    assert token not in raised.value.body
+    assert session.request.call_count == 1
+
+
+async def test_auth_probe_accepts_fresh_install_with_no_last_run():
+    client = EmhassClient(_health_session(200, '{"status": "no-run"}'), "http://emhass:5000")
+    await client.async_check_auth()
+
+
+@pytest.mark.parametrize(
+    ("status", "body", "expected"),
+    [
+        (401, "Unauthorized", "invalid_auth"),
+        (503, "API authentication is not configured correctly", "auth_not_configured"),
+        (503, "Service unavailable", "cannot_connect"),
+        (404, "No last run", "cannot_connect"),
+        (200, '{"status": "no-run"}', ""),
+    ],
+)
+async def test_new_backend_validation_checks_protected_endpoint(status, body, expected):
+    session = _health_session(200, json.dumps(_health_payload("0.18.11")))
+    protected = _health_session(status, body).request.return_value
+    session.request.side_effect = [session.request.return_value, protected]
+    with patch(
+        "custom_components.emhass_companion.config_flow.async_get_clientsession",
+        return_value=session,
+    ):
+        version, error = await _async_validate_connection(
+            MagicMock(), "http://emhass:5000", "a-test-token"
+        )
+    assert error == expected
+    assert version == ("" if expected else "0.18.11")
+    assert session.request.call_args.args[1].endswith("/api/v1/last-run")
+
+
+@pytest.mark.parametrize("token", ["test-token\r\ninjected-header", "test-token\ninjected-header"])
+async def test_connection_rejects_embedded_newlines_without_http_request(token):
+    with patch("custom_components.emhass_companion.config_flow.async_get_clientsession") as session:
+        assert await _async_validate_connection(MagicMock(), "http://emhass:5000", token) == (
+            "",
+            "invalid_auth",
+        )
+    session.assert_not_called()
+
+
+async def test_connection_trims_pasted_token():
+    with patch("custom_components.emhass_companion.config_flow.EmhassClient") as client:
+        client.return_value.async_get_version = AsyncMock(return_value="0.18.11")
+        client.return_value.async_check_auth = AsyncMock()
+        await _async_validate_connection(MagicMock(), "http://emhass:5000", "  test-token\n")
+    assert client.call_args.args[2] == "test-token"

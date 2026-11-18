@@ -23,7 +23,11 @@ from homeassistant.config_entries import (
 )
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP, Platform
 from homeassistant.core import Event, HomeAssistant, callback
-from homeassistant.exceptions import ConfigEntryNotReady, ServiceValidationError
+from homeassistant.exceptions import (
+    ConfigEntryAuthFailed,
+    ConfigEntryNotReady,
+    ServiceValidationError,
+)
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers import restore_state
@@ -32,8 +36,9 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.util import dt as dt_util
 from homeassistant.util import slugify
 
-from .api import EmhassClient, EmhassError
+from .api import EmhassAuthError, EmhassClient, EmhassError
 from .const import (
+    CONF_API_TOKEN,
     CONF_CAPACITY_COST_PER_KW,
     CONF_CONTROL_ENTITY,
     CONF_HOT_WATER_PERIODS,
@@ -179,10 +184,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
     # attempt instead of replacing it.
     entry.async_on_unload(lambda: _LOGGER.removeHandler(log_handler))
 
-    client = EmhassClient(async_get_clientsession(hass), entry.data[CONF_URL])
+    client = EmhassClient(
+        async_get_clientsession(hass),
+        entry.data[CONF_URL],
+        entry.data.get(CONF_API_TOKEN, ""),
+        on_auth_error=lambda: entry.async_start_reauth(hass),
+    )
 
     try:
         version = await client.async_get_version()
+        if entry.data.get(CONF_API_TOKEN) or (version and version_at_least(version, "0.18.10")):
+            await client.async_check_auth()
+    except EmhassAuthError as err:
+        raise ConfigEntryAuthFailed(str(err)) from err
     except EmhassError as err:
         raise ConfigEntryNotReady(f"Cannot reach EMHASS: {err}") from err
 

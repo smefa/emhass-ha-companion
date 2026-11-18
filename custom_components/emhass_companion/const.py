@@ -82,6 +82,8 @@ LOAD_BOOTSTRAP_LOOKBACK: Final = timedelta(hours=48)
 # --- Config entry keys -------------------------------------------------------
 
 CONF_URL: Final = "url"
+CONF_API_TOKEN: Final = "api_token"
+CONF_CLEAR_API_TOKEN: Final = "clear_api_token"
 CONF_USE_ADDON: Final = "use_addon"
 
 CONF_TIME_STEP: Final = "optimization_time_step"

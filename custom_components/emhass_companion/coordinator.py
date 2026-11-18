@@ -13,7 +13,7 @@ from homeassistant.components.recorder import get_instance, history
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import SUN_EVENT_SUNRISE, UnitOfTemperature
 from homeassistant.core import Event, EventStateChangedData, HomeAssistant, State, callback
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -30,7 +30,14 @@ from homeassistant.util.unit_conversion import TemperatureConverter
 from packaging.version import InvalidVersion, Version
 
 from . import snow_cover
-from .api import EmhassBusyError, EmhassClient, EmhassConnectionError, EmhassError
+from .api import (
+    EmhassAuthConfigurationError,
+    EmhassAuthError,
+    EmhassBusyError,
+    EmhassClient,
+    EmhassConnectionError,
+    EmhassError,
+)
 from .configuration import EmhassConfig, ProfileSelection
 from .const import (
     ACTION_DAYAHEAD,
@@ -1369,6 +1376,8 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         """
         try:
             await self.client.async_set_config_merged({})
+        except EmhassAuthError as err:
+            raise ConfigEntryAuthFailed(str(err)) from err
         except EmhassError as err:
             _LOGGER.warning(
                 "Could not initialise the EMHASS configuration (%s); continuing "
@@ -1544,6 +1553,12 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             # problem, and the request never reached EMHASS at all.
             self._track_run_failed_issue(True, action, str(err))
             raise UpdateFailed(f"Data source error: {err}") from err
+        except EmhassAuthError as err:
+            # The client starts the reauth repair for every protected endpoint.
+            # A rejected credential is not a solve or load-forecast failure.
+            raise ConfigEntryAuthFailed(str(err)) from err
+        except EmhassAuthConfigurationError as err:
+            raise UpdateFailed(str(err)) from err
         except EmhassBusyError as err:
             # Nothing ran: preserve the plan, forecaster eligibility and any
             # existing failure issue. This is contention, not a failed solve.
@@ -3112,6 +3127,8 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         self._ml_last_attempt = now
         try:
             await self._async_fit_forecast(settings)
+        except EmhassAuthError:
+            raise
         except EmhassError as err:
             _LOGGER.warning(
                 "Auto-training the load forecaster for %s failed (%s); "
