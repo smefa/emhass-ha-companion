@@ -5,20 +5,26 @@
         "title": "Connect to EMHASS",
         "description": "EMHASS Companion needs an existing EMHASS installation. Version {min_version} or newer is required.\n\nIf you run the EMHASS add-on, the address below is filled in for you.",
         "data": {
-          "url": "EMHASS address"
+          "url": "EMHASS address",
+          "api_token": "API token"
         },
         "data_description": {
-          "url": "For example http://192.168.1.10:5000. Filled in for you if you run the EMHASS add-on -- localhost only ever reaches Home Assistant itself."
+          "url": "For example http://192.168.1.10:5000. Filled in for you if you run the EMHASS add-on -- localhost only ever reaches Home Assistant itself.",
+          "api_token": "Required for EMHASS 0.18.10 or later. Open EMHASS in the sidebar and select the key icon (API token), or set emhass_api_token in the add-on configuration. Paste only the token, without Bearer."
         }
       },
       "reconfigure": {
-        "title": "Change the EMHASS address",
+        "title": "Change the EMHASS connection",
         "description": "Version {min_version} or newer is required.\n\nEverything else stays as configured -- reconfigure price, solar, load, tariff, battery or grid settings from the integration's own configuration options instead.",
         "data": {
-          "url": "EMHASS address"
+          "url": "EMHASS address",
+          "api_token": "API token",
+          "clear_api_token": "Remove saved token"
         },
         "data_description": {
-          "url": "For example http://192.168.1.10:5000. Filled in for you if you run the EMHASS add-on -- localhost only ever reaches Home Assistant itself."
+          "url": "For example http://192.168.1.10:5000. Filled in for you if you run the EMHASS add-on -- localhost only ever reaches Home Assistant itself.",
+          "api_token": "Required for EMHASS 0.18.10 or later. Open EMHASS in the sidebar and select the key icon (API token), or set emhass_api_token in the add-on configuration. Paste only the token, without Bearer.Leave untouched to keep the token for the same address. Enter the token again if you change the address.",
+          "clear_api_token": "Use only if EMHASS does not require authentication. This also clears any token entered above."
         }
       },
       "price": {
@@ -420,6 +426,13 @@
         "data_description": {
           "emhass_standard_names": "Renames the plan sensors to p_pv_forecast, p_load_forecast, p_grid_forecast, p_batt_forecast, soc_batt_forecast, optim_status, total_cost_fun_value, unit_load_cost and unit_prod_price, plus p_pv_curtailment and p_hybrid_inverter where you have those, and also publishes their forecast series in EMHASS's format. Per-load sensors are not renamed. Reversible."
         }
+      },
+      "reauth_confirm": {
+        "title": "Update EMHASS API token",
+        "description": "Required for EMHASS 0.18.10 or later. Open EMHASS in the sidebar and select the key icon (API token), or set emhass_api_token in the add-on configuration. Paste only the token, without Bearer.",
+        "data": {
+          "api_token": "API token"
+        }
       }
     },
     "error": {
@@ -431,11 +444,14 @@
       "profile_required": "Pick a solar forecast source, or open Advanced settings for the other choices.",
       "template_required": "Template mode needs a template. Enter it under Advanced settings, or pick another method.",
       "phase_entities_incomplete": "The phase guard needs all three phases, or only L1 for a single-phase connection.",
-      "phase_margin_too_large": "The fuse margin must be smaller than the fuse rating."
+      "phase_margin_too_large": "The fuse margin must be smaller than the fuse rating.",
+      "invalid_auth": "The API token is missing or incorrect.",
+      "auth_not_configured": "Configure the API token in EMHASS and restart the add-on before trying again."
     },
     "abort": {
       "single_instance_allowed": "EMHASS Companion is already configured.",
-      "no_profiles": "No usable data sources were found. This is unexpected; please report it."
+      "no_profiles": "No usable data sources were found. This is unexpected; please report it.",
+      "reauth_successful": "API token updated successfully."
     }
   },
   "options": {
@@ -1513,12 +1529,16 @@
             "name": "Name",
             "power_sensor": "Running sensor",
             "control_entity": "Control entity",
-            "nominal_power_w": "Power when running"
+            "nominal_power_w": "Power when running",
+            "availability_schedule": "Allowed times schedule",
+            "power_control_entity": "Power control (optional)"
           },
           "data_description": {
             "power_sensor": "Optional. The most reliable way to tell the optimiser whether this load is actually running -- catching a run that finished early, one that never happened despite being planned, or one started at a different time than scheduled. A power sensor gives the most detail (any unit -- W, kW, MW, ... -- is converted to watts automatically); a plain on/off binary_sensor works too, read the same way a control entity's state is. Without either and no control entity, the optimiser instead assumes the load followed its own last plan, which cannot see any of that.",
             "control_entity": "Optional. If set, the integration switches this on and off to follow the plan, once you enable control -- and its state doubles as the running signal when there is no power sensor. Leave empty to keep control in your own automations. With neither this nor a power sensor set, the optimiser instead trusts its own previous plan -- assuming the load ran whenever it was scheduled to. That is only as accurate as your own follow-through, so a real sensor or control entity is worth adding when you can.",
-            "nominal_power_w": "Roughly what this load draws while it is on. One value per optimisation step ({time_step} min), separated by commas. The last value repeats to fill Operating hours. A single value gives constant power."
+            "nominal_power_w": "Roughly what this load draws while it is on. One value per optimisation step ({time_step} min), separated by commas. The last value repeats to fill Operating hours. A single value gives constant power.",
+            "availability_schedule": "Select a Schedule helper for weekly allowed times. Optionally add max_power_w: 3000 to a block’s Additional data. Leave empty to use the existing time window. Requires EMHASS 0.18.9 or newer.",
+            "power_control_entity": "Optional number entity in W or kW for an adjustable charger. Power is set before switching on. Turn off Runs at full power only to allow modulation. Also use a control entity for start/stop and a real power sensor."
           },
           "description": "Change Power here. Runtime, the time window and the load model are controls on the load’s own page."
         },
@@ -1531,7 +1551,9 @@
             "earliest_start": "Earliest start",
             "latest_end": "Latest finish",
             "power_sensor": "Running sensor",
-            "control_entity": "Control entity"
+            "control_entity": "Control entity",
+            "availability_schedule": "Allowed times schedule",
+            "power_control_entity": "Power control (optional)"
           },
           "data_description": {
             "nominal_power_w": "Roughly what this load draws while it is on. One value per optimisation step ({time_step} min), separated by commas. The last value repeats to fill Operating hours. A single value gives constant power.",
@@ -1539,7 +1561,9 @@
             "earliest_start": "Only used if you turn on the load's time window switch afterwards.",
             "latest_end": "May be earlier than the start time, for an overnight window.",
             "power_sensor": "Optional. Tells the optimiser whether the load is actually running, so it can catch a run that finished early or never happened. A power sensor (any unit) gives the most detail; an on/off binary_sensor works too. Without one, the optimiser assumes the load followed its last plan.",
-            "control_entity": "Optional. If set, the integration switches this on and off to follow the plan once you enable control, and its state also serves as the running signal when there is no power sensor. Leave empty to keep control in your own automations."
+            "control_entity": "Optional. If set, the integration switches this on and off to follow the plan once you enable control, and its state also serves as the running signal when there is no power sensor. Leave empty to keep control in your own automations.",
+            "availability_schedule": "Select a Schedule helper for weekly allowed times. Optionally add max_power_w: 3000 to a block’s Additional data. Leave empty to use the existing time window. Requires EMHASS 0.18.9 or newer.",
+            "power_control_entity": "Optional number entity in W or kW for an adjustable charger. Power is set before switching on. Turn off Runs at full power only to allow modulation. Also use a control entity for start/stop and a real power sensor."
           },
           "sections": {
             "advanced": {
@@ -1580,7 +1604,9 @@
       },
       "error": {
         "invalid_power_sequence": "Invalid power sequence or runtime too short for the number of values.",
-        "sequence_not_supported": "Power sequences are not supported for surplus or thermal loads."
+        "sequence_not_supported": "Power sequences are not supported for surplus or thermal loads.",
+        "power_control_needs_switch": "Select a start/stop control entity when using power control.",
+        "power_control_needs_power_unit": "The power control must be a number measured in W or kW."
       }
     },
     "thermal_load": {

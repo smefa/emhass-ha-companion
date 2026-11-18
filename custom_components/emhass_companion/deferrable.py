@@ -46,6 +46,7 @@ from .const import (
     COMPLETION_CUT_SHORT,
     COMPLETION_FINISHED_EARLY,
     COMPLETION_NEVER_STARTED,
+    CONF_AVAILABILITY_SCHEDULE,
     CONF_COMFORT_END,
     CONF_COMFORT_PENALTY,
     CONF_COMFORT_START,
@@ -70,6 +71,7 @@ from .const import (
     CONF_NOMINAL_POWER,
     CONF_NOMINAL_POWER_EDITED_AT,
     CONF_OPERATING_HOURS,
+    CONF_POWER_CONTROL_ENTITY,
     CONF_POWER_SENSOR,
     CONF_POWER_SEQUENCE,
     CONF_RECURRENCE,
@@ -321,6 +323,8 @@ class DeferrableRuntime:
     load_type: str = LOAD_TYPE_STANDARD
     power_sensor: str | None = None
     control_entity: str | None = None
+    availability_schedule: str | None = None
+    power_control_entity: str | None = None
     temperature_sensor: str | None = None
     sense: str = SENSE_HEAT
     thermal_model: str = THERMAL_MODEL_ROOM
@@ -2400,6 +2404,8 @@ def _apply_subentry_fields(
     )
     load.power_sensor = data.get(CONF_POWER_SENSOR) or None
     load.control_entity = supported_control_entity(data.get(CONF_CONTROL_ENTITY))
+    load.availability_schedule = data.get(CONF_AVAILABILITY_SCHEDULE) or None
+    load.power_control_entity = data.get(CONF_POWER_CONTROL_ENTITY) or None
     load.temperature_sensor = data.get(CONF_TEMPERATURE_SENSOR) or None
     load.sense = data.get(CONF_SENSE) or SENSE_HEAT
     load.thermal_model = data.get(CONF_THERMAL_MODEL, THERMAL_MODEL_ROOM)

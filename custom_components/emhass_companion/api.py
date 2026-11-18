@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 import json
 import logging
+from math import isfinite
 import re
 from typing import Any
 
@@ -28,6 +30,12 @@ _LOGGER = logging.getLogger(__name__)
 # defaults to 45s, so this leaves room for fetch + solve + write.
 ACTION_TIMEOUT = ClientTimeout(total=300)
 READ_TIMEOUT = ClientTimeout(total=30)
+_BUSY_RETRIES = 2
+_BUSY_MAX_DELAY = 5.0
+_LIVE_ACTION_PATHS = frozenset(
+    ENDPOINT_ACTION.format(action=action)
+    for action in ("naive-mpc-optim", "dayahead-optim", "perfect-optim")
+)
 
 # EMHASS answers a failed action with its run log as a JSON list of lines, e.g.
 # "ERROR - emhass.web_server - No data was retrieved ...". The first lines are
@@ -83,16 +91,64 @@ class EmhassApiError(EmhassError):
         return self.status == 400 and "infeasible" in self.body.lower()
 
 
+class EmhassAuthError(EmhassApiError):
+    """The API token is missing or invalid."""
+
+
+class EmhassAuthConfigurationError(EmhassApiError):
+    """Authentication must be configured on the EMHASS server."""
+
+
+class EmhassBusyError(EmhassApiError):
+    """EMHASS explicitly refused a request before running or saving it."""
+
+    def __init__(self, *, status: int, body: str, retry_after: str | None = None) -> None:
+        super().__init__(
+            "EMHASS is busy; the request was not run or saved. Try again shortly.",
+            status=status,
+            body=body,
+        )
+        try:
+            delay = float(retry_after) if retry_after is not None else 2.0
+        except (TypeError, ValueError):
+            delay = 2.0
+        self.retry_after = delay if isfinite(delay) and delay >= 0 else 2.0
+
+
+async def _retry_busy[T](operation: Callable[[], Awaitable[T]]) -> T:
+    """Retry only explicit rejections, at most twice and with short waits.
+
+    Long Retry-After values are handed back to the caller instead of retrying
+    early or holding a scheduled run open indefinitely. Cancellation propagates.
+    """
+    for attempt in range(_BUSY_RETRIES + 1):
+        try:
+            return await operation()
+        except EmhassBusyError as err:
+            if attempt == _BUSY_RETRIES or err.retry_after > _BUSY_MAX_DELAY:
+                raise
+            await asyncio.sleep(err.retry_after)
+    raise AssertionError("Unreachable")
+
+
 class EmhassClient:
     """Thin async wrapper over the EMHASS web server.
 
-    EMHASS exposes no authentication on its HTTP port, so there are no
-    credentials to manage here.
+    EMHASS 0.18.10+ requires a bearer token on the API port.
     """
 
-    def __init__(self, session: ClientSession, base_url: str) -> None:
+    def __init__(
+        self,
+        session: ClientSession,
+        base_url: str,
+        api_token: str = "",
+        *,
+        on_auth_error: Callable[[], None] | None = None,
+    ) -> None:
         self._session = session
         self._base_url = base_url.rstrip("/")
+        self._api_token = api_token
+        self._on_auth_error = on_auth_error
 
     @property
     def base_url(self) -> str:
@@ -112,10 +168,55 @@ class EmhassClient:
         url = f"{self._base_url}{path}"
         try:
             async with self._session.request(
-                method, url, json=json, timeout=client_timeout
+                method,
+                url,
+                json=json,
+                timeout=client_timeout,
+                headers={"Authorization": f"Bearer {self._api_token}"} if self._api_token else {},
             ) as response:
                 body = await response.text()
+                if response.status == 401:
+                    if self._on_auth_error is not None:
+                        self._on_auth_error()
+                    raise EmhassAuthError("EMHASS API token is missing or invalid", status=401)
+                if (
+                    response.status == 503
+                    and "API authentication is not configured correctly" in body
+                ):
+                    raise EmhassAuthConfigurationError(
+                        "Configure the API token in EMHASS and restart the add-on", status=503
+                    )
+                # Never propagate a configured token from an echoed error body.
+                if self._api_token:
+                    body = body.replace(self._api_token, "**REDACTED**")
                 if response.status >= 400:
+                    # Match the upstream refusal as well as the status: a proxy
+                    # error or a failed action may already have changed state.
+                    live_busy = (
+                        path in _LIVE_ACTION_PATHS
+                        and (
+                            (
+                                response.status == 429
+                                and "Another live optimization is running" in body
+                            )
+                            or (
+                                response.status == 503
+                                and "The live optimization lock is unavailable" in body
+                            )
+                        )
+                        and "this request was not run" in body
+                    )
+                    config_busy = (
+                        path == ENDPOINT_SET_CONFIG
+                        and response.status == 409
+                        and "Another configuration save is running. Nothing was saved" in body
+                    )
+                    if method == "POST" and (live_busy or config_busy):
+                        raise EmhassBusyError(
+                            status=response.status,
+                            body=body,
+                            retry_after=response.headers.get("Retry-After"),
+                        )
                     raise EmhassApiError(
                         f"{method} {path} returned {response.status}: {summarise_error_body(body)}",
                         status=response.status,
@@ -169,6 +270,19 @@ class EmhassClient:
         versions = health.get("versions") or {}
         return versions.get("emhass")
 
+    async def async_check_auth(self) -> None:
+        """Probe a protected read without requiring a completed optimisation."""
+        payload = await self._request("GET", ENDPOINT_LAST_RUN)
+        # The tagged upstream contract returns 200/status=no-run even on a
+        # fresh install. A proxy's 404 or HTML login page is not proof of access.
+        if not isinstance(payload, dict) or payload.get("status") not in {
+            "no-run",
+            "ok",
+            "infeasible",
+            "error",
+        }:
+            raise EmhassApiError("EMHASS returned an invalid last-run response")
+
     # -- configuration --------------------------------------------------------
 
     async def async_get_config(self) -> dict[str, Any]:
@@ -189,6 +303,8 @@ class EmhassClient:
         :meth:`async_set_config_merged` unless a full reset to EMHASS's
         defaults plus exactly these keys is actually what's wanted.
         """
+        # A verbatim save has no patch to rebase after a competing writer.
+        # Leave retries to async_set_config_merged, which can fetch afresh.
         await self._request("POST", ENDPOINT_SET_CONFIG, json=config, expect_json=False)
 
     async def async_set_config_merged(self, patch: dict[str, Any]) -> None:
@@ -202,9 +318,15 @@ class EmhassClient:
         is to fetch the currently *effective* config, overlay the intended
         changes on top of that, and post the whole thing back.
         """
-        current = await self.async_get_config()
-        current.update(patch)
-        await self.async_set_config(current)
+
+        async def merge_and_save() -> None:
+            # A competing save may have completed while we waited. Re-read it
+            # before retrying so unrelated settings survive the merge.
+            current = await self.async_get_config()
+            current.update(patch)
+            await self.async_set_config(current)
+
+        await _retry_busy(merge_and_save)
 
     # -- optimisation ---------------------------------------------------------
 
@@ -217,12 +339,14 @@ class EmhassClient:
         this endpoint -- fetch it with :meth:`async_get_plan` afterwards.
         """
         path = ENDPOINT_ACTION.format(action=action)
-        body = await self._request(
-            "POST",
-            path,
-            json=runtime_params or {},
-            client_timeout=ACTION_TIMEOUT,
-            expect_json=False,
+        body = await _retry_busy(
+            lambda: self._request(
+                "POST",
+                path,
+                json=runtime_params or {},
+                client_timeout=ACTION_TIMEOUT,
+                expect_json=False,
+            )
         )
         message = str(body).strip()
         _LOGGER.debug("EMHASS %s: %s", action, message)

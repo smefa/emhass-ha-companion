@@ -82,6 +82,8 @@ LOAD_BOOTSTRAP_LOOKBACK: Final = timedelta(hours=48)
 # --- Config entry keys -------------------------------------------------------
 
 CONF_URL: Final = "url"
+CONF_API_TOKEN: Final = "api_token"
+CONF_CLEAR_API_TOKEN: Final = "clear_api_token"
 CONF_USE_ADDON: Final = "use_addon"
 
 CONF_TIME_STEP: Final = "optimization_time_step"
@@ -286,6 +288,8 @@ CONF_BATTERY_DISCHARGE_ENERGY_ENTITY: Final = "battery_discharge_energy_entity"
 
 # Deferrable load subentry keys
 CONF_NAME: Final = "name"
+CONF_AVAILABILITY_SCHEDULE: Final = "availability_schedule"
+CONF_POWER_CONTROL_ENTITY: Final = "power_control_entity"
 CONF_POWER_SEQUENCE: Final = "power_sequence"
 # When reconfigure last changed a scalar Power. The number restores its own
 # value only if that state is newer, so an edit made while the entry was not

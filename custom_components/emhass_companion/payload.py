@@ -26,6 +26,7 @@ from .const import (
 )
 from .effective_settings import resolve_effective_settings
 from .heat_pump_room import HeatPumpRoomConfig
+from .load_availability import PowerControl, WeeklyAvailability
 from .models import (
     ROW_ZERO_NEAREST,
     BatteryConfig,
@@ -584,6 +585,12 @@ class PayloadInputs:
     grid: GridConfig
     hybrid_inverter: HybridInverterConfig
     loads: list[DeferrableLoad] = field(default_factory=list)
+    load_availability: dict[str, WeeklyAvailability] = field(default_factory=dict)
+    load_power_controls: set[str] = field(default_factory=set)
+    load_power_limits: dict[str, PowerControl] = field(default_factory=dict)
+    load_schedule_overrides: set[str] = field(default_factory=set)
+    # Loads whose schedule or power control could not be read, with the reason.
+    load_unavailable: dict[str, str] = field(default_factory=dict)
     load_groups: list[DeferrableLoadGroup] = field(default_factory=list)
     pv: Series | None = None
     use_pv: bool | None = None
@@ -1143,6 +1150,19 @@ def _fit_pins_to_import_limit(
 
 def build_payload(inputs: PayloadInputs) -> PayloadResult:
     """Assemble one request with coverage and positional arrays aligned to row zero."""
+    if inputs.load_unavailable:
+        # Parked rather than failing the run: the executor keeps such a load
+        # off for the same reason, and everything else still gets a plan. The
+        # cycle anchor goes too, so a running sequence is not sent either.
+        inputs = replace(
+            inputs,
+            loads=[
+                replace(load, wants_to_run=False, cycle_anchor=None)
+                if load.subentry_id in inputs.load_unavailable
+                else load
+                for load in inputs.loads
+            ],
+        )
     step = timedelta(minutes=inputs.time_step_minutes)
     horizon_end = inputs.row_zero(step) + step * inputs.horizon_steps
     effective = resolve_effective_settings(
@@ -1936,6 +1956,11 @@ def _deferrable_settings(
         return {"number_of_deferrable_loads": 0}, [], [], []
 
     warnings: list[str] = []
+    warnings.extend(
+        f"{load.name}: {reason}; load parked for this plan."
+        for load in loads
+        if (reason := inputs.load_unavailable.get(load.subentry_id))
+    )
     real = []
     for load in loads:
         running = _running_sequence_row(load, inputs, step, inputs.action)
@@ -1959,6 +1984,64 @@ def _deferrable_settings(
     extras = _extra_window_rows(loads, inputs, step)
     extra_rows = [ExtraRow(parent, name) for _n, parent, name, _row in extras]
     described = [*real, *(row for _n, _parent, _name, row in extras)]
+
+    masks = None
+    if inputs.load_availability:
+        from .util import version_at_least
+
+        if inputs.action != ACTION_MPC or not version_at_least(
+            inputs.backend_version or "", "0.18.9"
+        ):
+            raise PayloadError(
+                "Allowed times schedules require EMHASS 0.18.9 or newer and MPC planning"
+            )
+        owners = [*loads, *(loads[parent] for _n, parent, _name, _row in extras)]
+        masks = []
+        for row_index, (load, row) in enumerate(zip(owners, described, strict=True)):
+            schedule = inputs.load_availability.get(load.subentry_id)
+            if schedule is None or load.cycle_anchor is not None:
+                masks.append(None)
+                continue
+            nominal = (
+                max(row.nominal_power_w)
+                if isinstance(row.nominal_power_w, list)
+                else row.nominal_power_w
+            )
+            mask = []
+            for index in range(inputs.horizon_steps):
+                # Run now bypasses closed periods, but preserves explicit power caps.
+                outside = nominal if load.subentry_id in inputs.load_schedule_overrides else 0.0
+                watts = schedule.step_ceiling(inputs.row_zero(step) + index * step, step, outside)
+                if control := inputs.load_power_limits.get(load.subentry_id):
+                    watts = control.ceiling(watts)
+                fraction = min(1.0, watts / nominal) if nominal > 0 else 0.0
+                if watts < row.minimum_power_w or (
+                    fraction < 1
+                    and (
+                        row.semi_continuous
+                        or isinstance(row.nominal_power_w, list)
+                        or load.subentry_id not in inputs.load_power_controls
+                    )
+                ):
+                    fraction = 0.0
+                mask.append(fraction)
+            available = mask[row.start_index : row.end_index or inputs.horizon_steps]
+            remaining = max(0, row.timesteps - row.completed_timesteps)
+            if isinstance(row.nominal_power_w, list) or row.single_constant:
+                longest = current = 0
+                for fraction in available:
+                    current = current + 1 if fraction >= 1 else 0
+                    longest = max(longest, current)
+                fits = longest >= remaining
+            else:
+                fits = sum(available) + 1e-9 >= remaining
+            if not fits and row.timesteps:
+                described[row_index] = _park(load)
+                warnings.append(
+                    f"{load.name}: allowed times and power limits cannot fit the remaining run; "
+                    "load parked for this plan, request retained."
+                )
+            masks.append(mask)
 
     settings: dict[str, Any] = {
         "number_of_deferrable_loads": len(described),
@@ -1995,6 +2078,9 @@ def _deferrable_settings(
         # key's absence would, but immune to whatever is on disk.
         "deferrable_load_max_cost": [0.0 for _ in described],
     }
+
+    if masks is not None:
+        settings["def_availability"] = masks
 
     if any(row.current_power_w for row in described):
         settings["def_current_power"] = [row.current_power_w for row in described]

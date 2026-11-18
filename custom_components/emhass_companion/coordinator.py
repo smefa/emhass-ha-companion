@@ -13,7 +13,7 @@ from homeassistant.components.recorder import get_instance, history
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import SUN_EVENT_SUNRISE, UnitOfTemperature
 from homeassistant.core import Event, EventStateChangedData, HomeAssistant, State, callback
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -30,7 +30,14 @@ from homeassistant.util.unit_conversion import TemperatureConverter
 from packaging.version import InvalidVersion, Version
 
 from . import snow_cover
-from .api import EmhassClient, EmhassConnectionError, EmhassError
+from .api import (
+    EmhassAuthConfigurationError,
+    EmhassAuthError,
+    EmhassBusyError,
+    EmhassClient,
+    EmhassConnectionError,
+    EmhassError,
+)
 from .configuration import EmhassConfig, ProfileSelection
 from .const import (
     ACTION_DAYAHEAD,
@@ -65,6 +72,7 @@ from .const import (
     LOAD_FORECAST_METHOD_LIST,
     LOAD_FORECAST_METHOD_MLFORECASTER,
     LOAD_FORECAST_METHOD_TYPICAL,
+    LOAD_MODE_FORCE_ON,
     MIN_EMHASS_VERSION_CAPACITY_INTERVAL,
     MIN_EMHASS_VERSION_CHARGE_DERATING,
     MIN_EMHASS_VERSION_DEMAND_CHARGE,
@@ -1262,6 +1270,8 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
     @staticmethod
     def _export_failure(stage: str, err: EmhassError) -> str:
         """Describe a failed export step without quoting the response body."""
+        if isinstance(err, EmhassBusyError):
+            return "EMHASS is busy; try exporting again shortly"
         if isinstance(err, EmhassConnectionError):
             return f"could not reach EMHASS to {stage} its configuration"
         status = getattr(err, "status", None)
@@ -1366,6 +1376,8 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         """
         try:
             await self.client.async_set_config_merged({})
+        except EmhassAuthError as err:
+            raise ConfigEntryAuthFailed(str(err)) from err
         except EmhassError as err:
             _LOGGER.warning(
                 "Could not initialise the EMHASS configuration (%s); continuing "
@@ -1541,6 +1553,16 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             # problem, and the request never reached EMHASS at all.
             self._track_run_failed_issue(True, action, str(err))
             raise UpdateFailed(f"Data source error: {err}") from err
+        except EmhassAuthError as err:
+            # The client starts the reauth repair for every protected endpoint.
+            # A rejected credential is not a solve or load-forecast failure.
+            raise ConfigEntryAuthFailed(str(err)) from err
+        except EmhassAuthConfigurationError as err:
+            raise UpdateFailed(str(err)) from err
+        except EmhassBusyError as err:
+            # Nothing ran: preserve the plan, forecaster eligibility and any
+            # existing failure issue. This is contention, not a failed solve.
+            raise UpdateFailed(str(err)) from err
         except EmhassError as err:
             self._note_failed_run()
             self._track_run_failed_issue(True, action, str(err))
@@ -1597,6 +1619,10 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         self._row_zero_mode = learned
 
     async def _run(self, action: str) -> EmhassData:
+        if action == ACTION_DAYAHEAD and any(
+            load.availability_schedule or load.power_control_entity for load in self.loads.all()
+        ):
+            action = ACTION_MPC
         inputs, built = await self._build(action)
         self._track_tank_behind_issues(built.tank_shortfalls)
         if (entity_id := self._unreadable_load_sensor(action, built.payload)) is not None:
@@ -2380,7 +2406,61 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
                         for index in range(len(calendar.demand_charges))
                     ]
 
+        from .load_availability import DAYS, PowerControl, WeeklyAvailability, async_read_schedule
+
+        availability = {}
+        power_limits = {}
+        # One load whose helper or charger number cannot be read must not cost
+        # the battery and every other load their plan: it is parked for this
+        # run instead, matching the executor, which keeps it off (live_ceiling).
+        unavailable: dict[str, str] = {}
+        for scheduled_load in self.loads.all():
+            if not scheduled_load.enabled:
+                continue
+            key = scheduled_load.subentry_id
+            if scheduled_load.power_control_entity:
+                if not scheduled_load.control_entity:
+                    unavailable[key] = "power control requires a start/stop control entity"
+                    continue
+                try:
+                    power_limits[key] = PowerControl.from_state(
+                        self.hass.states.get(scheduled_load.power_control_entity)
+                    )
+                except ValueError as err:
+                    unavailable[key] = str(err)
+                    continue
+                availability[key] = WeeklyAvailability.parse(
+                    {day: [{"from": "00:00", "to": "24:00"}] for day in DAYS},
+                    scheduled_load.nominal_power_w,
+                )
+            if scheduled_load.availability_schedule:
+                try:
+                    availability[key] = await async_read_schedule(
+                        self.hass,
+                        scheduled_load.availability_schedule,
+                        scheduled_load.nominal_power_w,
+                    )
+                except Exception as err:  # noqa: BLE001 - any helper fault parks the load
+                    if scheduled_load.sequence_cycle_active:
+                        # A running cycle finishes whatever the helper says
+                        # (live_ceiling), so its draw must stay in the plan.
+                        continue
+                    availability.pop(key, None)
+                    power_limits.pop(key, None)
+                    unavailable[key] = f"cannot read allowed times: {err}"
+
         inputs = PayloadInputs(
+            load_availability=availability,
+            load_power_limits=power_limits,
+            load_unavailable=unavailable,
+            load_schedule_overrides={
+                load.subentry_id
+                for load in self.loads.all()
+                if load.mode == LOAD_MODE_FORCE_ON or load.sequence_start_pending
+            },
+            load_power_controls={
+                load.subentry_id for load in self.loads.all() if load.power_control_entity
+            },
             action=action,
             now=now,
             backend_version=self.backend_version,
@@ -3047,6 +3127,8 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         self._ml_last_attempt = now
         try:
             await self._async_fit_forecast(settings)
+        except EmhassAuthError:
+            raise
         except EmhassError as err:
             _LOGGER.warning(
                 "Auto-training the load forecaster for %s failed (%s); "

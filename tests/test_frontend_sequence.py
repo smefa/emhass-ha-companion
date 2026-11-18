@@ -26,9 +26,15 @@ const grab = (src, name) => src.match(new RegExp("function " + name + "[\\\\s\\\
 const formatHours = (h) => h.toFixed(2) + " h";
 const sequenceOf = new Function(grab(core, "sequenceOf") + "; return sequenceOf;")();
 const cycleRuns = new Function(grab(core, "cycleRuns") + "; return cycleRuns;")();
+const loadView = new Function(
+  "sequenceOf", "cycleRuns",
+  ["stateOf", "num", "series", "windows", "isUsable", "formatTime", "loadView"]
+    .map((name) => grab(core, name)).join(" ") + "; return loadView;"
+)(sequenceOf, cycleRuns);
 const progressOf = new Function("formatHours", grab(cards, "progressOf") + "; return progressOf;")(formatHours);
 const { op, args } = JSON.parse(process.argv[3]);
-const fns = { sequenceOf, cycleRuns, progressOf };
+Date.now = () => 10 * 3600000;
+const fns = { sequenceOf, cycleRuns, progressOf, loadView };
 console.log(JSON.stringify(fns[op](...args)));
 """
 
@@ -49,6 +55,37 @@ def _iso(ms: int) -> str:
     from datetime import UTC, datetime
 
     return datetime.fromtimestamp(ms / 1000, UTC).isoformat()
+
+
+@pytest.mark.parametrize(
+    ("points", "expected"),
+    [
+        (None, 0),
+        ([], 0),
+        ([(11, 0), (12, 0)], 0),
+        ([(8, 7000), (9, 0)], 0),
+        ([(11, 4400), (12, 0)], 4400),
+        ([(11, 4400), (12, 6000), (13, 0), (14, 10000), (15, 0)], 6000),
+        ([(9, 4400), (11, 6000), (12, 0)], 6000),
+        ([(8, 10000), (9, 0), (11, 4400), (12, 0)], 4400),
+    ],
+    ids=["missing", "empty", "all-off", "completed", "future", "next-peak", "active", "skip-past"],
+)
+def test_scheduled_power_shows_next_run_peak_or_zero(points, expected) -> None:
+    states = {}
+    if points is not None:
+        states["sensor.scheduled"] = {
+            "state": "0",
+            "attributes": {
+                "schedule": [{"time": _iso(hour * H), "value": watts} for hour, watts in points]
+            },
+        }
+    view = _run(
+        "loadView",
+        {"states": states},
+        {"name": "Car", "entities": {"scheduled_power": "sensor.scheduled"}},
+    )
+    assert view["scheduledW"] == expected
 
 
 def test_a_single_value_load_has_no_sequence() -> None:

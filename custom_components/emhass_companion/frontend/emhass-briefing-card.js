@@ -602,9 +602,10 @@ class EmhassBriefingCard extends LiveCard {
       const points = clipSeries(mergeHistory(data.past.solar || [], data.plan.pv), data.t0, data.t1);
       lane.row.style.display = points.length ? "" : "none";
       const root = this._surface(lane, 26, data);
-      let peak = 0;
+      // Keep tiny winter forecasts visually small (scale is in watts).
+      let peak = 1000;
       for (const point of points) peak = Math.max(peak, point.v);
-      if (peak > 0) {
+      if (points.length) {
         let d = `M${fixed(x(points[0].t))},26`;
         for (const point of points) {
           d += `L${fixed(x(point.t))},${fixed(25 - (Math.max(point.v, 0) / peak) * 23)}`;

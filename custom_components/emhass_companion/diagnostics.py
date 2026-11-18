@@ -344,8 +344,7 @@ def _redact_config(data: Mapping[str, Any]) -> dict[str, Any]:
 def _scrub_url(url: str) -> str:
     """Scheme, host and port only.
 
-    EMHASS itself exposes no authentication of its own, but a reverse proxy
-    put in front of it can add userinfo or a query-string token, and this is
+    A reverse proxy can add userinfo or a query-string token, and this is
     meant to be safe to attach to a public issue -- so neither survives here.
     The port does: "wrong port" is a real, common misconfiguration and needs
     to stay visible.

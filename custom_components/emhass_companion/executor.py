@@ -32,6 +32,7 @@ from .const import (
     COMMAND_REFRESH_FRACTION,
     DEFAULT_POWER_DEADBAND_W,
     LIFETIME_PERSISTENT,
+    LOAD_MODE_FORCE_ON,
     MODE_AUTO,
     MODE_FORCE_CHARGE,
     MODE_FORCE_DISCHARGE,
@@ -40,6 +41,7 @@ from .const import (
 )
 from .coordinator import EmhassCoordinator
 from .deferrable import DeferrableRuntime, resolve_should_run
+from .load_availability import PowerControl, commanded_power, live_ceiling
 from .phase_guard import clamp_blocker, clamp_charge
 from .profiles import (
     Profile,
@@ -700,6 +702,9 @@ class Executor:
                 # optimisation: a failing solve never reaches the coordinator's
                 # own disarm pass, and the hold below would keep the load on.
                 load.notify()
+            if live_ceiling(self.hass, load) <= 0:
+                decisions[load.subentry_id] = False
+                continue
             if load.sequence_cycle_active or load.sequence_start_pending:
                 decisions[load.subentry_id] = True
                 continue
@@ -902,6 +907,10 @@ class Executor:
             # asked of the appliance. A load with no control entity still
             # counts: its own automation follows the same decision through the
             # Should run binary sensor, so the decision is the command.
+            should_run = should_run and live_ceiling(self.hass, load) > 0
+            if load.power_control_entity and should_run:
+                should_run = await self._async_set_load_power(load, decision)
+            decision.loads[subentry_id] = should_run
             if not load.control_entity:
                 load.observe_command(should_run, now)
                 continue
@@ -911,6 +920,53 @@ class Executor:
             # on-demand run "complete" without the appliance ever starting.
             running = await self._async_set_load(load, should_run, decision)
             load.observe_command(running, now)
+
+    async def _async_set_load_power(self, load: DeferrableRuntime, decision: Decision) -> bool:
+        """Set a charger ceiling before enabling it; never round a cap upwards."""
+        state = self.hass.states.get(load.power_control_entity)
+        try:
+            control = PowerControl.from_state(state)
+            power = load.nominal_power_w
+            if load.mode != LOAD_MODE_FORCE_ON and not (
+                load.sequence_start_pending or load.sequence_cycle_active
+            ):
+                data = self.coordinator.data
+                index = data.deferrable_index(load.subentry_id) if data else None
+                row = data.plan.row_at(dt_util.utcnow()) if data and data.plan else None
+                planned = (
+                    row.deferrables[index]
+                    if row is not None and index is not None and index < len(row.deferrables)
+                    else None
+                )
+                if (planned is None or planned <= 0) and load.in_completion_hold(
+                    dt_util.utcnow(), self.coordinator.config.time_step_minutes
+                ):
+                    # The plan has stopped asking for a load whose target is
+                    # met but which is still drawing (see _decide_loads). Hold
+                    # the setpoint it is running at, still under the ceiling,
+                    # rather than cutting it or jumping to full power.
+                    planned = float(state.state) * control.scale
+                if planned is None:
+                    return False
+                power = planned
+            target_w = commanded_power(self.hass, load, power)
+            if target_w <= 0:
+                return False
+            target = target_w / control.scale
+            if not math.isclose(float(state.state), target, abs_tol=1e-6):
+                await self.hass.services.async_call(
+                    "number",
+                    "set_value",
+                    {"value": target},
+                    blocking=True,
+                    target={"entity_id": load.power_control_entity},
+                )
+                decision.applied = True
+            return True
+        except Exception as err:  # noqa: BLE001 - fail closed, then switch this load off
+            decision.error = f"{load.name}: {err}"
+            _LOGGER.error("Failed to set power for %s: %s", load.name, err)
+            return False
 
     async def _async_set_load(
         self, load: DeferrableRuntime, should_run: bool, decision: Decision

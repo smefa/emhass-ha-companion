@@ -92,7 +92,7 @@ function profileSvg(options) {
   const signed = options.signed === true;
   const base = signed ? height / 2 : height;
   const amp = (signed ? height / 2 : height) - 1;
-  let peak = 0;
+  let peak = options.minScale || 0;
   for (const point of points) peak = Math.max(peak, Math.abs(point.v));
 
   if (signed) {
@@ -797,6 +797,8 @@ class EmhassOverviewCard extends LiveCard {
         ui.solarRow.setLane(
           profileSvg({
             points: solarPoints,
+            // Keep tiny winter forecasts visually small (scale is in watts).
+            minScale: 1000,
             from: t0,
             to: t1,
             past: now,

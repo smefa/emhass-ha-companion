@@ -227,6 +227,7 @@ def test_executor_holds_run_now_without_request_on_untrusted_ticks(use_plan, mon
     runtime = load(recurrence="on_demand")
     runtime.force_run(NOW)
     fake = SimpleNamespace(
+        hass=None,
         coordinator=SimpleNamespace(
             loads=SimpleNamespace(all=lambda: [runtime]),
             config=SimpleNamespace(time_step_minutes=15),
@@ -248,6 +249,7 @@ def test_executor_completes_an_expired_cycle_without_a_solve(monkeypatch):
     later = NOW + timedelta(hours=3)
     monkeypatch.setattr("custom_components.emhass_companion.executor.dt_util.utcnow", lambda: later)
     fake = SimpleNamespace(
+        hass=None,
         coordinator=SimpleNamespace(
             loads=SimpleNamespace(all=lambda: [runtime]),
             config=SimpleNamespace(time_step_minutes=15),
@@ -463,6 +465,7 @@ def test_run_now_attribute_tracks_the_active_command(kind, enabled, expected):
         runtime.observe_command(True, NOW)
     runtime.enabled = enabled
     fake = SimpleNamespace(
+        hass=None,
         load=runtime,
         coordinator=SimpleNamespace(config=SimpleNamespace(time_step_minutes=15)),
         _scheduled_power=lambda: 0,
@@ -484,6 +487,7 @@ def test_attributes_keep_zero_stage_inside_one_cycle(monkeypatch):
         "custom_components.emhass_companion.binary_sensor.dt_util.utcnow", lambda: NOW + 2 * STEP
     )
     fake = SimpleNamespace(
+        hass=None,
         load=runtime,
         coordinator=SimpleNamespace(config=SimpleNamespace(time_step_minutes=15)),
         _scheduled_power=lambda: 0,
@@ -609,6 +613,7 @@ def test_run_now_with_zero_runtime_drops_the_pending_hold(monkeypatch):
     runtime.operating_hours = 0
     monkeypatch.setattr("custom_components.emhass_companion.executor.dt_util.utcnow", lambda: NOW)
     fake = SimpleNamespace(
+        hass=None,
         coordinator=SimpleNamespace(
             loads=SimpleNamespace(all=lambda: [runtime]),
             config=SimpleNamespace(time_step_minutes=15),

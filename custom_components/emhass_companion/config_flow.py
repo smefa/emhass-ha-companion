@@ -30,14 +30,16 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import dt as dt_util
 import voluptuous as vol
 
-from .api import EmhassClient, EmhassError
+from .api import EmhassAuthConfigurationError, EmhassAuthError, EmhassClient, EmhassError
 from .configuration import EmhassConfig
 from .const import (
     ADVANCED_SECTION,
     CONF_ADDER,
     CONF_ANNUAL_HDD,
     CONF_API_KEY,
+    CONF_API_TOKEN,
     CONF_AREA,
+    CONF_AVAILABILITY_SCHEDULE,
     CONF_BASE_TEMPERATURE,
     CONF_BATTERY_CHARGE_ENERGY_ENTITY,
     CONF_BATTERY_DISCHARGE_ENERGY_ENTITY,
@@ -53,6 +55,7 @@ from .const import (
     CONF_CARNOT_EFFICIENCY,
     CONF_CHARGE_EFFICIENCY,
     CONF_CHARGE_POWER_DERATING,
+    CONF_CLEAR_API_TOKEN,
     CONF_COMFORT_END,
     CONF_COMFORT_PENALTY,
     CONF_COMFORT_START,
@@ -115,6 +118,7 @@ from .const import (
     CONF_PHASE_MARGIN_A,
     CONF_PHASE_VOLTAGE_ENTITY,
     CONF_PHASE_VOLTAGE_V,
+    CONF_POWER_CONTROL_ENTITY,
     CONF_POWER_SENSOR,
     CONF_POWER_SEQUENCE,
     CONF_PRICE,
@@ -279,11 +283,22 @@ from .water_tank import MAX_HOT_WATER_PERIODS
 _LOGGER = logging.getLogger(__name__)
 
 
-async def _async_validate_connection(hass: HomeAssistant, url: str) -> tuple[str, str]:
+async def _async_validate_connection(
+    hass: HomeAssistant, url: str, api_token: str = ""
+) -> tuple[str, str]:
     """Check EMHASS is reachable and new enough. Returns (version, error_key)."""
-    client = EmhassClient(async_get_clientsession(hass), url)
+    api_token = api_token.strip()
+    if "\r" in api_token or "\n" in api_token:
+        return "", "invalid_auth"
+    client = EmhassClient(async_get_clientsession(hass), url, api_token)
     try:
         version = await client.async_get_version()
+        if api_token or (version and version_at_least(version, "0.18.10")):
+            await client.async_check_auth()
+    except EmhassAuthError:
+        return "", "invalid_auth"
+    except EmhassAuthConfigurationError:
+        return "", "auth_not_configured"
     except EmhassError as err:
         _LOGGER.debug("Cannot connect to EMHASS at %s: %s", url, err)
         return "", "cannot_connect"
@@ -849,11 +864,14 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             url = user_input[CONF_URL].rstrip("/")
-            version, error = await _async_validate_connection(self.hass, url)
+            version, error = await _async_validate_connection(
+                self.hass, url, user_input.get(CONF_API_TOKEN, "")
+            )
             if error:
                 errors["base"] = error
             else:
                 self._data[CONF_URL] = url
+                self._data[CONF_API_TOKEN] = user_input.get(CONF_API_TOKEN, "").strip()
                 self._data["emhass_version"] = version
                 self._profiles = (await async_load_profiles(self.hass)).profiles
                 return await self.async_step_price()
@@ -863,7 +881,12 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
             last_step=False,
             step_id="user",
             data_schema=vol.Schema(
-                {vol.Required(CONF_URL, default=suggested): selector.TextSelector()}
+                {
+                    vol.Required(CONF_URL, default=suggested): selector.TextSelector(),
+                    vol.Optional(CONF_API_TOKEN): selector.TextSelector(
+                        selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
+                    ),
+                }
             ),
             errors=errors,
             description_placeholders={"min_version": MIN_EMHASS_VERSION},
@@ -884,7 +907,15 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             url = user_input[CONF_URL].rstrip("/")
-            version, error = await _async_validate_connection(self.hass, url)
+            # Credentials are scoped to the configured address. Never reuse
+            # the old token for a newly entered host or proxy path.
+            token = user_input.get(
+                CONF_API_TOKEN,
+                entry.data.get(CONF_API_TOKEN, "") if url == suggested.rstrip("/") else "",
+            ).strip()
+            if user_input.get(CONF_CLEAR_API_TOKEN):
+                token = ""
+            version, error = await _async_validate_connection(self.hass, url, token)
             if error:
                 errors["base"] = error
             else:
@@ -895,7 +926,11 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
                 # exactly the situation someone reaches this step to fix.
                 return self.async_update_reload_and_abort(
                     entry,
-                    data_updates={CONF_URL: url, "emhass_version": version},
+                    data_updates={
+                        CONF_URL: url,
+                        "emhass_version": version,
+                        CONF_API_TOKEN: token,
+                    },
                 )
             suggested = url
 
@@ -903,7 +938,46 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
             last_step=True,
             step_id="reconfigure",
             data_schema=vol.Schema(
-                {vol.Required(CONF_URL, default=suggested): selector.TextSelector()}
+                {
+                    vol.Required(CONF_URL, default=suggested): selector.TextSelector(),
+                    vol.Optional(CONF_API_TOKEN): selector.TextSelector(
+                        selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
+                    ),
+                    vol.Optional(CONF_CLEAR_API_TOKEN, default=False): selector.BooleanSelector(),
+                }
+            ),
+            errors=errors,
+            description_placeholders={"min_version": MIN_EMHASS_VERSION},
+        )
+
+    async def async_step_reauth(self, entry_data: Mapping[str, Any]) -> ConfigFlowResult:
+        """Opened from Home Assistant's authentication repair."""
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        entry = self._get_reauth_entry()
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            token = user_input[CONF_API_TOKEN].strip()
+            version, error = await _async_validate_connection(
+                self.hass, entry.data[CONF_URL], token
+            )
+            if error:
+                errors["base"] = error
+            else:
+                return self.async_update_reload_and_abort(
+                    entry, data_updates={CONF_API_TOKEN: token, "emhass_version": version}
+                )
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_API_TOKEN): selector.TextSelector(
+                        selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
+                    )
+                }
             ),
             errors=errors,
             description_placeholders={"min_version": MIN_EMHASS_VERSION},
@@ -1591,6 +1665,16 @@ def deferrable_schema(
             ),
         }
     )
+    schema.update(
+        {
+            _optional_blank(CONF_AVAILABILITY_SCHEDULE, defaults): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="schedule")
+            ),
+            _optional_blank(CONF_POWER_CONTROL_ENTITY, defaults): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="number")
+            ),
+        }
+    )
     return _split_advanced(schema, DEFERRABLE_ADVANCED_KEYS) if initial else schema
 
 
@@ -2018,7 +2102,12 @@ class DeferrableLoadSubentryFlow(ConfigSubentryFlow):
     # Optional entity pickers that a reconfigure may clear: a blank field
     # arrives as an absent key, and must *remove* the stored value rather than
     # leave it behind.
-    _clearable_keys: tuple[str, ...] = (CONF_POWER_SENSOR, CONF_CONTROL_ENTITY)
+    _clearable_keys: tuple[str, ...] = (
+        CONF_POWER_SENSOR,
+        CONF_CONTROL_ENTITY,
+        CONF_AVAILABILITY_SCHEDULE,
+        CONF_POWER_CONTROL_ENTITY,
+    )
 
     @property
     def _step_minutes(self) -> int:
@@ -2030,6 +2119,18 @@ class DeferrableLoadSubentryFlow(ConfigSubentryFlow):
 
         from .deferrable import expand_power, parse_power
 
+        if power_control := data.get(CONF_POWER_CONTROL_ENTITY):
+            if not data.get(CONF_CONTROL_ENTITY):
+                return {CONF_POWER_CONTROL_ENTITY: "power_control_needs_switch"}
+            # Only a number that is readable right now can be judged; one that
+            # is offline while the form is filled in is checked at plan time.
+            state = self.hass.states.get(power_control)
+            if (
+                state is not None
+                and state.state not in ("unknown", "unavailable")
+                and state.attributes.get("unit_of_measurement") not in ("W", "kW")
+            ):
+                return {CONF_POWER_CONTROL_ENTITY: "power_control_needs_power_unit"}
         if CONF_NOMINAL_POWER not in data:
             return {}
         try:
@@ -2145,7 +2246,11 @@ class DeferrableLoadSubentryFlow(ConfigSubentryFlow):
             # The fields this step no longer offers are still part of the
             # subentry -- they are what a load starts from, and dropping them
             # here would reset a load to the defaults on its next reload.
-            if errors := self._form_errors({**defaults, **user_input}):
+            submitted = {**defaults, **user_input}
+            for key in self._clearable_keys:
+                if key not in user_input:
+                    submitted.pop(key, None)
+            if errors := self._form_errors(submitted):
                 return self.async_show_form(
                     step_id="reconfigure",
                     data_schema=vol.Schema(

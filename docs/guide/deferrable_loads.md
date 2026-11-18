@@ -37,9 +37,10 @@ EMHASS Companion → Add deferrable load**.
 
 ## Load settings
 
-The next screen seeds the load. Which fields it shows depends on the **Runs**
-answer above, and every one of them becomes a control on the load's own
-device page afterwards — so nothing here is a permanent decision.
+The next screen sets the load's starting values. Which fields it shows depends
+on the **Runs** answer above. Power, hours and timing settings can be changed
+on the load's device page afterwards. Use **Edit deferrable load** to change
+the connected sensors, controls or schedule.
 
 - **Power when running** — roughly what it draws while on, in W. For an
   appliance whose draw changes through its program, such as a washing
@@ -48,7 +49,8 @@ device page afterwards — so nothing here is a permanent decision.
   is filled. See [Sequence loads](../deferrable_loads.md#sequence-loads).
 - **Advanced settings** — the collapsed section holds everything below
   except *Power when running*, *Hours needed per day*, *Earliest start* /
-  *Latest finish* and the two entity pickers. The defaults suit most loads.
+  *Latest finish* and the sensor, control and schedule pickers. The defaults
+  suit most loads.
 - **Lowest power while running** — the least it may draw, if it can
   modulate. Only used when *Runs at full power only* is off.
 - **Runs at full power only** — on for a dishwasher or pump, which are
@@ -87,6 +89,10 @@ device page afterwards — so nothing here is a permanent decision.
   off to follow the plan once you enable control, and its state doubles as
   the running signal when there's no power sensor. Leave it empty to keep
   control in your own automations.
+- **Allowed times schedule** — optional. Choose a weekly Schedule helper to
+  allow different times on different days. See [Weekly allowed times](#weekly-allowed-times).
+- **Power control (optional)** — the charger's writable power setting in W
+  or kW, if it supports one. See [Optional reduced charging power](#optional-reduced-charging-power).
 
 With neither a running sensor nor a control entity, the optimiser falls back
 to trusting its own previous plan — assuming the load ran whenever it was
@@ -138,10 +144,150 @@ Every field the load's device page can show, in the order it appears:
 
 ## Editing a load
 
-**Edit deferrable load** in the integration's menu only asks for the three
-things that aren't controls: **Name**, **Running sensor** and **Control
-entity**. Everything else — power, run time, the time window, the load model
-— is on the load's own page, changeable there or from an automation.
+Use **Edit deferrable load** in the integration's menu to change **Name**,
+**Power when running**, **Running sensor**, **Control entity**,
+**Allowed times schedule** or **Power control (optional)**. Runtime, the
+simple time window and the load model are controls on the load's own device
+page, changeable there or from an automation.
+
+## Weekly allowed times
+
+A weekly schedule tells Companion **when a load is allowed to run**. For
+example, allow the dishwasher during the day on weekdays and later on
+weekends. The optimiser still chooses the best time inside those blocks;
+opening a block does not start the appliance by itself.
+
+This is optional and requires **EMHASS 0.18.9 or newer**. Leave **Allowed
+times schedule** empty if the existing earliest-start/latest-finish window
+is enough. Weekly schedules apply to standard deferrable loads, rather than
+room-heating or hot-water tank models.
+
+### 1. Create a Schedule helper
+
+1. In Home Assistant, go to **Settings → Devices & services → Helpers**.
+2. Select **Create helper**, search for `Schedule`, then select **Schedule**.
+
+![Search for Schedule in the Create helper dialog](../assets/schedule-create-helper.png){ width="600" }
+
+### 2. Draw the allowed times
+
+1. Give it a clear name, such as **Dishwasher allowed times** or **Car charging times**.
+2. Press and drag in each day's column to add allowed blocks. Click a block
+   to enter exact start and end times.
+3. Add more blocks if needed, then select **Create** to save the helper.
+
+![A Schedule helper named Run times with different allowed blocks across the week](../assets/schedule-allowed-times.png){ width="600" }
+
+The blue blocks are **allowed time**. Blank areas are **waiting time**. A day
+with no blocks does not allow a run. The pattern repeats every week, using
+Home Assistant's local time.
+
+For an overnight period, split it at midnight: Monday **22:00–24:00**, then
+Tuesday **00:00–06:00**. Blocks may touch but cannot overlap. If your plan
+uses 15-minute steps, choose times such as 08:00, 08:15 or 08:30: a whole
+planning step must fit within the allowed time.
+
+### 3. Connect it to the load
+
+1. Open **Settings → Devices & services → EMHASS Companion**.
+2. Add a deferrable load, or choose **Edit deferrable load** for an existing one.
+3. Set **Allowed times schedule** to the helper you created, then save.
+
+Keep the load's **Enabled** switch on. For an **On demand** load, also turn
+on **Requested** when the appliance is ready. These controls answer different
+questions:
+
+| Setting | What it means |
+|---|---|
+| **Enabled** | Include this appliance in planning. |
+| **Requested** | It needs a run, for example because the dishwasher is loaded. |
+| **Allowed times schedule** | These are the times when that run may happen. |
+
+If **Restrict to a time window** is also on, the load must fit **both** that
+window and the weekly blocks. Turn that switch off if you want the weekly
+schedule to be the only time restriction. Several loads can share one helper;
+editing it changes the allowed times for all of them.
+
+To change the weekly pattern later, open the helper under **Settings →
+Devices & services → Helpers**. Companion reads the updated schedule for
+the next plan and applies the current block's restrictions immediately.
+
+### Optional reduced charging power
+
+Skip this part for ordinary on/off appliances. Time blocks work without
+any additional data or power control.
+
+For an adjustable charger, each block can also specify its maximum power:
+
+1. Open the Schedule helper and click the block you want to limit.
+2. In the block's **Additional data**, enter:
+
+    ```yaml
+    max_power_w: 3000
+    ```
+
+3. Save the block and the helper. The value is always in **watts**: `3000`
+   means **3 kW**, even if the charger's own setting uses kW.
+
+Leave **Additional data** empty in blocks where normal power is allowed.
+You do not need to edit `configuration.yaml`.
+
+For example, create two touching blocks for a charger with a normal power
+of 7,000 W:
+
+| Allowed block | Additional data | Result |
+|---|---|---|
+| 16:00–20:00 | `max_power_w: 3000` | Charging may use up to 3 kW. |
+| 20:00–24:00 | Leave empty | Charging may use up to its normal 7 kW. |
+| No block | — | Charging waits. |
+
+A limit is a **maximum**, so the optimiser may choose less power or wait.
+Lower power needs more charging time for the same energy.
+
+To let Companion apply the changing power to your charger:
+
+1. Edit the load and select its start/stop **Control entity** and its writable
+   **Power control (optional)** number entity. That number must use **W** or
+   **kW**; a charging-current setting in amps cannot be selected for this purpose.
+2. Select a real **Running sensor** that measures charging power so progress
+   can be measured when power changes.
+3. On the load's device page, turn **Runs at full power only** off. Set
+   **Power when running** to its normal maximum and **Lowest power while
+   running** to the charger's minimum charging power.
+4. Enable control in Companion when you want it to operate the charger.
+
+Companion sets the power before starting charging. It respects the charger's
+minimum, maximum and available increments, rounding down when necessary.
+A limit below the minimum stops charging. Setting `max_power_w: 0`
+blocks the load during that block.
+
+**A fixed-power appliance cannot slow down.** If a block's limit is below
+its normal power, it waits. Sequence appliances and adjustable loads without
+a writable power control also wait during a reduced-power block.
+
+### If the load is waiting
+
+- Check **Enabled**, and **Requested** for on-demand loads, then check that
+  today's helper has a block at the expected time.
+- Check that the run can fit. A two-hour unbroken cycle needs a continuous
+  two-hour allowed period; reduced charging power needs extra time. If the
+  remaining run cannot fit, Companion leaves it out of that plan, shows a
+  warning and keeps the request pending.
+- Check **Should run** for the current decision and its reason. Its
+  `power_limit_w` attribute shows the current permitted power. **Scheduled
+  power** shows the last plan, which may predate a changed restriction.
+- A missing or unavailable helper or power control blocks a new start.
+  The rest of the plan, including the battery, is still made.
+  Invalid power limits also block it; use a number of watts with no unit suffix.
+
+**Run now** can start outside the weekly blocks, but still respects the
+power limit inside an active block. It cannot bypass an unavailable helper.
+A sequence cycle already in progress is allowed to finish when a block closes.
+
+For implementation details and planning behaviour, see the
+[technical reference](../deferrable_loads.md#weekly-allowed-times-and-power-limits).
+For more about editing the helper, see the
+[Home Assistant Schedule documentation](https://www.home-assistant.io/integrations/schedule/).
 
 ## Load groups
 
@@ -210,7 +356,8 @@ They are listed as `deferrable_extra_rows` in the diagnostics download.
   load specifically, without changing how it serves everything else. Off by
   default. See **[Battery lockout](../battery_lockout.md)**.
 - **Run now** (button) — force the load on right now, regardless of the
-  plan. Not available on *On spare solar* loads, where ignoring the plan
+  plan, while respecting active schedule power limits and helper availability.
+  Not available on *On spare solar* loads, where ignoring the plan
   would mean running off the grid at night; use *Start as early as
   possible* there instead.
 - **Next start** (sensor) — when it's next due to start.
@@ -218,7 +365,7 @@ They are listed as `deferrable_extra_rows` in the diagnostics download.
 - **Runtime today** (sensor) — how long it's run today.
 - **Scheduled power** (sensor) — what the plan wants right now.
 - **Should run** (binary sensor) — **the one to automate against.** Combines
-  the plan with any manual override.
+  the plan with any manual override and current allowed-time/power restrictions.
 
 ## Diagnostic
 

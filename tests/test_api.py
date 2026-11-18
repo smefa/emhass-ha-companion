@@ -12,6 +12,7 @@ thing back.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -20,6 +21,7 @@ import pytest
 
 from custom_components.emhass_companion.api import (
     EmhassApiError,
+    EmhassBusyError,
     EmhassClient,
     EmhassConnectionError,
     summarise_error_body,
@@ -249,3 +251,239 @@ def test_error_summary_leaves_other_bodies_alone_and_trims_them():
     assert summarise_error_body("KeyError: 'soc_init'") == "KeyError: 'soc_init'"
     assert summarise_error_body("<html>" + "x" * 500) == ("<html>" + "x" * 500)[:300]
     assert summarise_error_body('{"a": 1}') == '{"a": 1}'
+
+
+_BUSY_RUN = (
+    "EMHASS >> Another live optimization is running. Retry shortly; this request was not run.\n"
+)
+_BUSY_LOCK = (
+    "EMHASS >> The live optimization lock is unavailable. "
+    "Retry shortly; this request was not run.\n"
+)
+_BUSY_CONFIG = '["Another configuration save is running. Nothing was saved, retry shortly"]'
+
+
+def _responses(*items):
+    session = MagicMock()
+    contexts = []
+    for status, body, retry_after in items:
+        context = MagicMock()
+        response = context.__aenter__.return_value
+        response.status = status
+        response.text = AsyncMock(return_value=body)
+        response.json = AsyncMock(side_effect=lambda **kwargs: {})
+        response.headers = {} if retry_after is None else {"Retry-After": retry_after}
+        contexts.append(context)
+    session.request.side_effect = contexts
+    return session
+
+
+@pytest.mark.parametrize("status,body", [(429, _BUSY_RUN), (503, _BUSY_LOCK)])
+async def test_explicit_busy_run_retries_then_succeeds(status, body):
+    session = _responses((status, body, "2"), (200, "ok", None))
+    client = EmhassClient(session, "http://emhass")
+    with patch(
+        "custom_components.emhass_companion.api.asyncio.sleep", new_callable=AsyncMock
+    ) as sleep:
+        assert await client.async_run_action("naive-mpc-optim", {"soc_init": 0.5}) == "ok"
+    sleep.assert_awaited_once_with(2)
+    assert session.request.call_count == 2
+    assert session.request.call_args_list[0] == session.request.call_args_list[1]
+
+
+async def test_busy_exhaustion_does_not_fetch_someone_elses_plan():
+    session = _responses(*[(429, _BUSY_RUN, "2")] * 3)
+    client = EmhassClient(session, "http://emhass")
+    client.async_get_last_run = AsyncMock()
+    client.async_get_plan = AsyncMock()
+    with (
+        patch(
+            "custom_components.emhass_companion.api.asyncio.sleep", new_callable=AsyncMock
+        ) as sleep,
+        pytest.raises(EmhassBusyError, match="EMHASS is busy") as raised,
+    ):
+        await client.async_optimize("dayahead-optim", {})
+    assert raised.value.status == 429
+    assert raised.value.body == _BUSY_RUN
+    assert session.request.call_count == 3
+    assert sleep.await_count == 2
+    client.async_get_last_run.assert_not_awaited()
+    client.async_get_plan.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "status,body,action",
+    [
+        (429, "proxy rate limit", "naive-mpc-optim"),
+        (503, "service unavailable", "naive-mpc-optim"),
+        (409, _BUSY_CONFIG, "naive-mpc-optim"),
+        (500, _BUSY_RUN, "naive-mpc-optim"),
+        (400, _INFEASIBLE_BODY, "naive-mpc-optim"),
+        (429, _BUSY_RUN, "forecast-model-fit"),
+    ],
+)
+async def test_unrecognized_rejections_are_not_retried(status, body, action):
+    session = _responses((status, body, "2"))
+    client = EmhassClient(session, "http://emhass")
+    with (
+        patch(
+            "custom_components.emhass_companion.api.asyncio.sleep", new_callable=AsyncMock
+        ) as sleep,
+        pytest.raises(EmhassApiError) as raised,
+    ):
+        await client.async_run_action(action)
+    assert not isinstance(raised.value, EmhassBusyError)
+    assert session.request.call_count == 1
+    sleep.assert_not_awaited()
+
+
+@pytest.mark.parametrize("error", [TimeoutError(), ClientConnectionError("disconnected")])
+async def test_action_network_error_is_not_retried(error):
+    session = MagicMock()
+    session.request.side_effect = error
+    client = EmhassClient(session, "http://emhass")
+    with pytest.raises(EmhassConnectionError):
+        await client.async_run_action("naive-mpc-optim")
+    assert session.request.call_count == 1
+
+
+@pytest.mark.parametrize(
+    "header,delay",
+    [(None, 2), ("invalid", 2), ("nan", 2), ("inf", 2), ("-1", 2), ("0", 0), ("1", 1)],
+)
+async def test_busy_retry_delay(header, delay):
+    session = _responses((429, _BUSY_RUN, header), (200, "ok", None))
+    client = EmhassClient(session, "http://emhass")
+    with patch(
+        "custom_components.emhass_companion.api.asyncio.sleep", new_callable=AsyncMock
+    ) as sleep:
+        await client.async_run_action("naive-mpc-optim")
+    sleep.assert_awaited_once_with(delay)
+
+
+async def test_long_retry_after_is_not_retried_early():
+    session = _responses((429, _BUSY_RUN, "60"))
+    client = EmhassClient(session, "http://emhass")
+    with (
+        patch(
+            "custom_components.emhass_companion.api.asyncio.sleep", new_callable=AsyncMock
+        ) as sleep,
+        pytest.raises(EmhassBusyError),
+    ):
+        await client.async_run_action("naive-mpc-optim")
+    sleep.assert_not_awaited()
+    assert session.request.call_count == 1
+
+
+async def test_cancellation_during_busy_wait_stops_retrying():
+    session = _responses((429, _BUSY_RUN, "2"))
+    client = EmhassClient(session, "http://emhass")
+    with (
+        patch(
+            "custom_components.emhass_companion.api.asyncio.sleep",
+            side_effect=asyncio.CancelledError,
+        ),
+        pytest.raises(asyncio.CancelledError),
+    ):
+        await client.async_run_action("naive-mpc-optim")
+    assert session.request.call_count == 1
+
+
+async def test_merged_config_retries_with_fresh_unrelated_settings():
+    session = _responses((409, _BUSY_CONFIG, "1"), (200, "{}", None))
+    client = EmhassClient(session, "http://emhass")
+    client.async_get_config = AsyncMock(
+        side_effect=[{"a": 1, "other": "old"}, {"a": 1, "other": "new"}]
+    )
+    with patch(
+        "custom_components.emhass_companion.api.asyncio.sleep", new_callable=AsyncMock
+    ) as sleep:
+        await client.async_set_config_merged({"a": 2})
+    sleep.assert_awaited_once_with(1)
+    assert session.request.call_args_list[0].kwargs["json"] == {"a": 2, "other": "old"}
+    assert session.request.call_args_list[1].kwargs["json"] == {"a": 2, "other": "new"}
+    assert client.async_get_config.await_count == 2
+
+
+async def test_verbatim_config_busy_does_not_replay_a_stale_snapshot():
+    session = _responses((409, _BUSY_CONFIG, "1"))
+    client = EmhassClient(session, "http://emhass")
+    with pytest.raises(EmhassBusyError):
+        await client.async_set_config({"a": 1})
+    assert session.request.call_count == 1
+
+
+@pytest.mark.parametrize("token", ["", "test-token-at-least-sixteen"])
+async def test_token_headers_are_per_request_and_do_not_change_shared_session(token):
+    session = _health_session(200, "{}")
+    callback = MagicMock()
+    client = EmhassClient(session, "http://emhass:5000", token, on_auth_error=callback)
+    await client.async_get_config()
+    headers = session.request.call_args.kwargs["headers"]
+    assert headers == ({"Authorization": f"Bearer {token}"} if token else {})
+    assert not session.headers.__setitem__.called
+    callback.assert_not_called()
+
+
+async def test_unauthorized_request_triggers_reauth_without_echoing_token():
+    from custom_components.emhass_companion.api import EmhassAuthError
+
+    token = "test-token-at-least-sixteen"
+    callback = MagicMock()
+    session = _health_session(401, token)
+    client = EmhassClient(session, "http://emhass:5000", token, on_auth_error=callback)
+    with pytest.raises(EmhassAuthError) as raised:
+        await client.async_run_action("naive-mpc-optim", {})
+    callback.assert_called_once_with()
+    assert token not in str(raised.value)
+    assert token not in raised.value.body
+    assert session.request.call_count == 1
+
+
+async def test_auth_probe_accepts_fresh_install_with_no_last_run():
+    client = EmhassClient(_health_session(200, '{"status": "no-run"}'), "http://emhass:5000")
+    await client.async_check_auth()
+
+
+@pytest.mark.parametrize(
+    ("status", "body", "expected"),
+    [
+        (401, "Unauthorized", "invalid_auth"),
+        (503, "API authentication is not configured correctly", "auth_not_configured"),
+        (503, "Service unavailable", "cannot_connect"),
+        (404, "No last run", "cannot_connect"),
+        (200, '{"status": "no-run"}', ""),
+    ],
+)
+async def test_new_backend_validation_checks_protected_endpoint(status, body, expected):
+    session = _health_session(200, json.dumps(_health_payload("0.18.11")))
+    protected = _health_session(status, body).request.return_value
+    session.request.side_effect = [session.request.return_value, protected]
+    with patch(
+        "custom_components.emhass_companion.config_flow.async_get_clientsession",
+        return_value=session,
+    ):
+        version, error = await _async_validate_connection(
+            MagicMock(), "http://emhass:5000", "a-test-token"
+        )
+    assert error == expected
+    assert version == ("" if expected else "0.18.11")
+    assert session.request.call_args.args[1].endswith("/api/v1/last-run")
+
+
+@pytest.mark.parametrize("token", ["test-token\r\ninjected-header", "test-token\ninjected-header"])
+async def test_connection_rejects_embedded_newlines_without_http_request(token):
+    with patch("custom_components.emhass_companion.config_flow.async_get_clientsession") as session:
+        assert await _async_validate_connection(MagicMock(), "http://emhass:5000", token) == (
+            "",
+            "invalid_auth",
+        )
+    session.assert_not_called()
+
+
+async def test_connection_trims_pasted_token():
+    with patch("custom_components.emhass_companion.config_flow.EmhassClient") as client:
+        client.return_value.async_get_version = AsyncMock(return_value="0.18.11")
+        client.return_value.async_check_auth = AsyncMock()
+        await _async_validate_connection(MagicMock(), "http://emhass:5000", "  test-token\n")
+    assert client.call_args.args[2] == "test-token"
