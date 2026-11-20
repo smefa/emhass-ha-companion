@@ -269,7 +269,8 @@ function monthlyDeltas(rows) {
   for (let i = 1; i < rows.length; i++) {
     const prev = Number(rows[i - 1].sum);
     const cur = Number(rows[i].sum);
-    const start = Date.parse(rows[i].start);
+    // Recorder returns epoch milliseconds; also accept ISO dates from older HA.
+    const start = typeof rows[i].start === "number" ? rows[i].start : Date.parse(rows[i].start);
     if (!Number.isFinite(prev) || !Number.isFinite(cur) || !Number.isFinite(start)) continue;
     points.push({ t: start, v: Math.max(cur - prev, 0) });
   }
