@@ -33,15 +33,23 @@ def decide_battery(
 
     Checked in order:
 
-    1. No grid exchange planned (``|P_grid|`` within threshold) -> hand the
-       battery to the inverter's own self-consumption mode. When the plan
-       schedules no grid exchange, the battery is by definition exactly
-       absorbing surplus or covering deficit -- self-consumption does that
-       while tracking *real* PV and load, so forecast error is absorbed by the
+    1. No grid exchange planned (``|P_grid|`` within threshold) *and* the
+       battery planned to do real work (``|P_batt|`` beyond the deadband) ->
+       hand the battery to the inverter's own self-consumption mode. When the
+       plan schedules no grid exchange, the battery is exactly absorbing
+       surplus or covering deficit -- self-consumption does that while
+       tracking *real* PV and load, so forecast error is absorbed by the
        inverter instead of becoming grid import/export. Skipped entirely when
        the plan carries no ``P_grid`` (older EMHASS, or a hand-built plan in
        tests) -- falling back to the sign-of-``P_batt`` rule below is honest
        about not having the information to do better.
+
+       A plan that holds the battery (``P_batt`` near zero) is never handed
+       over, however small the grid exchange: the small import is the plan
+       choosing to keep the charge for later, and self-consumption would
+       cover it from the battery anyway. On a small house -- a few hundred
+       watts of base load, all inside the threshold -- that drained the
+       battery through exactly the hours the plan was saving it for.
 
     2. Otherwise, the sign and magnitude of ``P_batt`` (EMHASS convention:
        positive is discharge, negative is charge).
@@ -55,7 +63,8 @@ def decide_battery(
     threshold = config.battery.self_consume_threshold_w
     limit = threshold * SELF_CONSUME_EXIT_FACTOR if in_self_consume else threshold
 
-    if row.p_grid is not None and abs(row.p_grid) <= limit:
+    battery_working = row.p_batt is not None and abs(row.p_batt) > DEFAULT_POWER_DEADBAND_W
+    if row.p_grid is not None and abs(row.p_grid) <= limit and battery_working:
         return (
             MODE_SELF_CONSUME,
             0.0,
@@ -65,6 +74,11 @@ def decide_battery(
     action, power = _battery_action(row.p_batt, config)
     if row.p_grid is None:
         rules = ["no p_grid on this row; falling back to p_batt sign"]
+    elif abs(row.p_grid) <= limit:
+        rules = [
+            f"|p_grid|={abs(row.p_grid):.0f}W within self-consume limit ({limit:.0f}W), "
+            f"but plan holds the battery (|p_batt| <= {DEFAULT_POWER_DEADBAND_W}W)"
+        ]
     else:
         rules = [f"|p_grid|={abs(row.p_grid):.0f}W beyond self-consume limit ({limit:.0f}W)"]
     return action, power, rules

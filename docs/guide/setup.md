@@ -316,7 +316,9 @@ the dynamic limits. The inverter's own settings are on the next screen.
   sent. See [End SOC](../end_soc.md#value-of-leftover-energy).
 - **Self-consumption handoff threshold** — how close to zero the grid power
   needs to be before the battery is handed back to plain self-consumption
-  instead of a forced charge/discharge. Once handed over, grid power must
+  instead of a forced charge/discharge. A slot where the plan holds the
+  battery is never handed over, so a small planned import does not drain it.
+  Once handed over, grid power must
   exceed *twice* this value before the plan can force the battery again, so
   it doesn't flip modes every recalculation.
 - **Battery SOC sensor** — read at the start of every plan.

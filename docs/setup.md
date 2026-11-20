@@ -278,7 +278,10 @@ this many watts of zero, the battery is handed to the inverter's own
 self-consumption mode instead of the plan's forced charge/discharge — even a
 large planned charge or discharge is overridden, because self-consumption
 tracks real-time PV and load better than a forecast can at small imbalances.
-Once handed over, grid power must exceed **twice** this value before the plan
+A slot where the plan *holds* the battery (planned battery power within
+100 W of zero) is never handed over: a small planned import, such as night
+base load on a small house, stays on the grid instead of being covered from
+the battery the plan is saving. Once handed over, grid power must exceed **twice** this value before the plan
 can force the battery again, so it doesn't flip modes every recalculation.
 This is not the same as the charge-level limits above, which only bound what
 the optimiser may plan *between*.
