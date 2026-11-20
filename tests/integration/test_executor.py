@@ -614,7 +614,8 @@ async def test_idle_resolved_to_self_consume_is_not_reissued_by_a_later_self_con
     await hass.async_block_till_done()
     first = len(calls)
 
-    coordinator.data = EmhassData(plan=_plan(0, p_grid=0), last_success=dt_util.utcnow())
+    # Zero grid exchange with the battery doing real work: decided self_consume.
+    coordinator.data = EmhassData(plan=_plan(-2000, p_grid=0), last_success=dt_util.utcnow())
     decision = await executor.async_apply()
     await hass.async_block_till_done()
 

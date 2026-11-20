@@ -69,6 +69,26 @@ def test_within_entry_threshold_is_self_consume(p_grid):
     assert action == MODE_SELF_CONSUME
 
 
+@pytest.mark.parametrize("p_grid", [250, -250, 0])
+@pytest.mark.parametrize("p_batt", [0, 60, -60, DEFAULT_POWER_DEADBAND_W])
+def test_a_held_battery_is_never_handed_to_self_consume(p_grid, p_batt):
+    """The plan holding the battery while a small import is planned (a few
+    hundred watts of night base load on a small house) means *keep the
+    charge*. Self-consumption would cover that import from the battery, so a
+    held battery stays idle however small the grid exchange is."""
+    row = _row(p_grid=p_grid, p_batt=p_batt)
+    action, power, rules = decide_battery(row, _config(), in_self_consume=False)
+    assert action == MODE_IDLE
+    assert power == 0.0
+    assert "holds the battery" in rules[0]
+
+
+def test_a_held_battery_leaves_self_consume_despite_hysteresis():
+    row = _row(p_grid=DEFAULT_SELF_CONSUME_THRESHOLD_W * 1.5, p_batt=0)
+    action, _, _ = decide_battery(row, _config(), in_self_consume=True)
+    assert action == MODE_IDLE
+
+
 def test_just_beyond_entry_threshold_is_not_self_consume():
     row = _row(p_grid=DEFAULT_SELF_CONSUME_THRESHOLD_W + 1, p_batt=-2000)
     action, _, _ = decide_battery(row, _config(), in_self_consume=False)
@@ -232,18 +252,20 @@ def test_reference_plan_zero_grid_rows_are_mostly_real_battery_work():
 def test_reference_plan_self_consume_rows_match_the_threshold_exactly():
     """decide_battery, run over every row of the real plan with the strict
     (entry) threshold throughout, classifies exactly the rows within
-    self_consume_threshold_w as self_consume -- no more, no fewer, and
-    independent of P_batt. 6 of the 51 are not exact zeros (-110 to -287 W)
-    but still within the default 300 W threshold -- the deliberate slack
-    the user asked for, confirmed here against real boundary cases rather
-    than hand-picked ones."""
+    self_consume_threshold_w *with real battery work planned* as
+    self_consume -- no more, no fewer. 51 rows sit within the default 300 W
+    threshold; 7 of them plan the battery at (or within the deadband of)
+    zero -- six small exports of -110 to -287 W with P_batt exactly 0, and
+    one zero-grid row at 60 W -- and resolve to idle instead, because the
+    plan is holding the battery there."""
     rows = _load_reference_plan()
     config = _config()
 
     resolved = [decide_battery(row, config, in_self_consume=False)[0] for row in rows]
     self_consume_count = sum(1 for action in resolved if action == MODE_SELF_CONSUME)
 
-    assert self_consume_count == 51
+    assert self_consume_count == 44
     for row, action in zip(rows, resolved, strict=True):
         within_threshold = abs(row.p_grid) <= DEFAULT_SELF_CONSUME_THRESHOLD_W
-        assert within_threshold == (action == MODE_SELF_CONSUME)
+        battery_working = abs(row.p_batt) > DEFAULT_POWER_DEADBAND_W
+        assert (within_threshold and battery_working) == (action == MODE_SELF_CONSUME)

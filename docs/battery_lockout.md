@@ -86,14 +86,16 @@ empty, having simply avoided feeding it at *that* moment. Pair this with the
 minimum charge level if the goal is "make sure there is still charge left for
 this load's window": the two are complements, not alternatives.
 
-**It does not close the self-consumption gap.** The executor hands the
+**It only partly closes the self-consumption gap.** The executor hands the
 battery to the inverter's own logic whenever a plan row's `|P_grid|` falls
-inside `self_consume_threshold_w` (300 W by default) — regardless of what the
-plan says or any lockout price. For an 8 kW car charge that band is
+inside `self_consume_threshold_w` (300 W by default) *and* the plan has the
+battery doing real work. A row where the lockout holds the battery at zero
+stays idle, however small its grid exchange. But a row where the plan still
+moves the battery — charging from a little surplus, say — is handed over, and
+the inverter's own logic may then discharge into the flagged load if real
+consumption beats the forecast. For an 8 kW car charge that band is
 irrelevant; for a small flagged load on a sunny day it is real, and no setting
-here changes it. A `battery_discharge_power_max` override or an executor-side
-block would close it, but neither ships with this feature — see the plan
-document for why.
+here changes it.
 
 ## See also
 
