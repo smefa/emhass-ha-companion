@@ -565,7 +565,7 @@ SOURCE_BLIND_GRACE: Final = timedelta(minutes=15)
 # want any grid exchange at all", read straight from the plan's own P_grid
 # column. Not the same question as soc_min/soc_max -- those are planning
 # limits, this is a real-time mode choice.
-DEFAULT_SELF_CONSUME_THRESHOLD_W: Final = 300
+DEFAULT_SELF_CONSUME_THRESHOLD_W: Final = 100
 # Once in self-consumption, P_grid must clear threshold * this factor before
 # forcing resumes -- damps boundary chatter a single static threshold would
 # let through on every recalculation.

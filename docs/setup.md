@@ -280,6 +280,10 @@ large planned charge or discharge is overridden, because self-consumption
 tracks real-time PV and load better than a forecast can at small imbalances.
 Once handed over, grid power must exceed **twice** this value before the plan
 can force the battery again, so it doesn't flip modes every recalculation.
+The default is 100 W. Keep it below your night base load: a planned import
+smaller than the threshold is covered from the battery, even in hours the plan
+wanted to save the charge for. 0 hands over only when the plan wants no grid
+exchange at all.
 This is not the same as the charge-level limits above, which only bound what
 the optimiser may plan *between*.
 
