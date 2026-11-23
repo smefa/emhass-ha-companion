@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import selector
 import voluptuous as vol
@@ -551,12 +552,15 @@ class Profile:
         """Options shown in the collapsed Advanced section."""
         return {key for key, option in self.options.items() if option.get("advanced")}
 
-    def selector_schema(self, *, skip: set[str] = frozenset()) -> dict[Any, Any]:
+    def selector_schema(
+        self, *, hass: HomeAssistant | None = None, skip: set[str] = frozenset()
+    ) -> dict[Any, Any]:
         """Build a voluptuous schema fragment for this profile's options.
 
         ``skip`` omits options resolved elsewhere in the flow -- for example a
         "load/sensor" entity that a create-a-sensor flow builds dynamically
-        rather than asking the user to pick directly.
+        rather than asking the user to pick directly. Pass ``hass`` for forms
+        so config entries are presented in a standard dropdown.
         """
         basic: dict[Any, Any] = {}
         advanced: dict[Any, Any] = {}
@@ -569,7 +573,22 @@ class Profile:
                 field_key = marker(key, default=option["default"])
             else:
                 field_key = marker(key)
-            schema[field_key] = selector.selector(option["selector"])
+            field_selector = selector.selector(option["selector"])
+            if hass is not None and isinstance(field_selector, selector.ConfigEntrySelector):
+                # The HA frontend cannot initialize a config_entry field in a flow.
+                entries = hass.config_entries.async_entries(
+                    field_selector.config.get("integration")
+                )
+                field_selector = selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        mode=selector.SelectSelectorMode.DROPDOWN,
+                        options=[
+                            selector.SelectOptionDict(value=entry.entry_id, label=entry.title)
+                            for entry in entries
+                        ],
+                    )
+                )
+            schema[field_key] = field_selector
         return with_advanced(basic, advanced)
 
 

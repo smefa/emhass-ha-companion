@@ -10,10 +10,18 @@ schema, never *validated data against it* the way a real form submission does.
 from __future__ import annotations
 
 from homeassistant.core import HomeAssistant
+from homeassistant.util.yaml import load_yaml
 import pytest
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 import voluptuous as vol
 
-from custom_components.emhass_companion.config_flow import _tariff_side_schema
+from custom_components.emhass_companion.config_flow import (
+    EmhassCompanionConfigFlow,
+    _tariff_side_schema,
+)
+from custom_components.emhass_companion.const import CONF_PROFILE
+from custom_components.emhass_companion.profiles import BUILTIN_ROOT, Profile
+from custom_components.emhass_companion.profiles.schema import validate_document
 
 
 async def test_tariff_schema_survives_a_previously_persisted_none_template(
@@ -63,3 +71,34 @@ def test_buy_multiplier_may_be_zero(hass: HomeAssistant) -> None:
     schema = vol.Schema(_tariff_side_schema("buy", {"multiplier": 0}))
     result = schema({"buy_mode": "linear"})
     assert result["buy_multiplier"] == 0
+
+
+@pytest.mark.parametrize(
+    ("profile_key", "domain", "title"),
+    [
+        ("nordpool_core", "nordpool", "Nord Pool Belgium"),
+        ("amberelectric", "amberelectric", "Amber Electric"),
+    ],
+)
+async def test_price_profile_uses_standard_config_entry_dropdown(
+    hass: HomeAssistant, profile_key: str, domain: str, title: str
+) -> None:
+    """HA's flow frontend can initialize a select field with matching entry IDs."""
+    entry = MockConfigEntry(domain=domain, title=title)
+    entry.add_to_hass(hass)
+    MockConfigEntry(domain="sun", title="Sun").add_to_hass(hass)
+    key = f"price/{profile_key}"
+    path = BUILTIN_ROOT / f"{key}.yaml"
+    document = validate_document(load_yaml(str(path)))
+    flow = EmhassCompanionConfigFlow()
+    flow.hass = hass
+    flow._profiles = {key: Profile(key, str(path), "price", document["name"], document)}
+
+    form = await flow.async_step_price({CONF_PROFILE: key})
+
+    assert form["step_id"] == "price_options"
+    field = form["data_schema"].schema[vol.Required("config_entry")]
+    assert field.serialize()["selector"]["select"]["options"] == [
+        {"value": entry.entry_id, "label": title}
+    ]
+    assert field(entry.entry_id) == entry.entry_id
