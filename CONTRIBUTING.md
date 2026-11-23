@@ -113,6 +113,9 @@ A restart alone does not transfer local changes. Rollback requires restoring
 the backed-up integration and restarting again. No live deployment command has
 been verified from this Ubuntu host yet; confirm SSH access before proceeding.
 
+Release and deploy commits, tags and release notes must not include a
+`Co-Authored-By: Claude ... <noreply@anthropic.com>` trailer.
+
 Local setup and tests need no credentials. Copied private credential notes
 remain under ignored `.agents/`; do not print their contents or copy them into
 documentation. Before any approved remote operation, verify referenced Linux
