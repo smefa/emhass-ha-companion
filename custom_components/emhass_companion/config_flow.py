@@ -1086,7 +1086,7 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         profile = self._profiles[PROFILE_KEY_LOAD_SENSOR]
-        schema = profile.selector_schema(skip={"entity"})
+        schema = profile.selector_schema(hass=self.hass, skip={"entity"})
 
         user_input = _flatten_sections(user_input) if user_input is not None else None
         if user_input is not None or not schema:
@@ -1222,7 +1222,7 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
             last_step=False,
             step_id="inverter_options",
             data_schema=self.add_suggested_values_to_schema(
-                vol.Schema(profile.selector_schema()),
+                vol.Schema(profile.selector_schema(hass=self.hass)),
                 _nest_suggested(_suggested_entities(self.hass, profile), profile.advanced_keys),
             ),
             description_placeholders={"profile": profile.name, "notes": _profile_notes(profile)},
@@ -1374,7 +1374,7 @@ class EmhassCompanionConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             last_step=False,
             step_id=step_id,
-            data_schema=vol.Schema(profile.selector_schema()),
+            data_schema=vol.Schema(profile.selector_schema(hass=self.hass)),
             description_placeholders={
                 "profile": profile.name,
                 "notes": _profile_notes(profile),
@@ -3735,7 +3735,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         profile = self._load_profiles[PROFILE_KEY_LOAD_SENSOR]
-        schema = profile.selector_schema(skip={"entity"})
+        schema = profile.selector_schema(hass=self.hass, skip={"entity"})
 
         options = dict(self.config_entry.options)
         options[CONF_HOUSE_LOAD_TOTAL_ENTITY] = self._house_load_total_entity
@@ -3781,7 +3781,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
         return self.async_show_form(
             step_id="load_options",
             data_schema=self.add_suggested_values_to_schema(
-                vol.Schema(profile.selector_schema()),
+                vol.Schema(profile.selector_schema(hass=self.hass)),
                 _nest_suggested(stored, profile.advanced_keys),
             ),
             description_placeholders={
@@ -3856,7 +3856,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
         return self.async_show_form(
             step_id="pv_options",
             data_schema=self.add_suggested_values_to_schema(
-                vol.Schema(profile.selector_schema()),
+                vol.Schema(profile.selector_schema(hass=self.hass)),
                 _nest_suggested(stored, profile.advanced_keys),
             ),
             description_placeholders={
@@ -3927,7 +3927,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
         return self.async_show_form(
             step_id="temperature_options",
             data_schema=self.add_suggested_values_to_schema(
-                vol.Schema(profile.selector_schema()),
+                vol.Schema(profile.selector_schema(hass=self.hass)),
                 _nest_suggested(stored, profile.advanced_keys),
             ),
             description_placeholders={
@@ -3996,7 +3996,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
         return self.async_show_form(
             step_id="network_options",
             data_schema=self.add_suggested_values_to_schema(
-                vol.Schema(profile.selector_schema()),
+                vol.Schema(profile.selector_schema(hass=self.hass)),
                 _nest_suggested(stored, profile.advanced_keys),
             ),
             description_placeholders={
@@ -4064,7 +4064,7 @@ class EmhassCompanionOptionsFlow(OptionsFlowWithReload):
         return self.async_show_form(
             step_id="inverter_options",
             data_schema=self.add_suggested_values_to_schema(
-                vol.Schema(profile.selector_schema()),
+                vol.Schema(profile.selector_schema(hass=self.hass)),
                 _nest_suggested(prefill, profile.advanced_keys),
             ),
             description_placeholders={
