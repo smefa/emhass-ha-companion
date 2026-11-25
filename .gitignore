@@ -51,3 +51,6 @@ tools/pv_caution_bench/data/
 # Agent instructions (local only)
 AGENTS.md
 CLAUDE.md
+
+# Cursor rules (local only)
+.cursor/rules/

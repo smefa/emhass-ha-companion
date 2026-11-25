@@ -199,6 +199,30 @@ async def test_reconfigure_stores_and_clears_the_fixed_cop_settings(hass: HomeAs
     assert result["type"] is FlowResultType.ABORT
 
 
+async def test_reconfigure_rejects_heating_curve_with_fixed_cop(hass: HomeAssistant):
+    _entry, result = await _start(hass, data=_stored())
+    base_form = {
+        "name": "House",
+        "temperature_sensor": SENSOR,
+        "thermal_mass_m3": 10,
+        "floor_area_m2": 150,
+        "specific_heating_demand": 100,
+        "supply_temperature": 35,
+        "heating_curve": "15: 25, 0: 35, -15: 45",
+    }
+    res_cop = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {**base_form, "advanced": {"constant_cop": 3.5}}
+    )
+    assert res_cop["type"] is FlowResultType.FORM
+    assert res_cop["errors"] == {"heating_curve": "heating_curve_with_fixed_cop"}
+
+    res_src = await hass.config_entries.subentries.async_configure(
+        res_cop["flow_id"], {**base_form, "advanced": {"source_temperature": 4.0}}
+    )
+    assert res_src["type"] is FlowResultType.FORM
+    assert res_src["errors"] == {"heating_curve": "heating_curve_with_fixed_cop"}
+
+
 async def test_reconfigure_stores_and_clears_the_solar_gain_settings(hass: HomeAssistant):
     entry, result = await _start(hass, data=_stored())
     form = {
@@ -305,3 +329,75 @@ async def test_band_numbers_reject_an_out_of_order_band(hass: HomeAssistant):
     with pytest.raises(ServiceValidationError):
         await number.async_set_native_value(24)
     assert runtime.comfort_temperature == 21
+
+
+async def test_reconfigure_stores_and_clears_the_max_thermal_power(hass: HomeAssistant):
+    entry, result = await _start(hass, data=_stored())
+    form = {
+        "name": "House",
+        "temperature_sensor": SENSOR,
+        "thermal_mass_m3": 10,
+        "floor_area_m2": 150,
+        "specific_heating_demand": 100,
+        "supply_temperature": 35,
+    }
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {**form, "advanced": {"max_thermal_power": 6000}}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    stored = next(iter(entry.subentries.values())).data
+    assert stored["max_thermal_power"] == 6000
+
+    _entry, result = await _start(hass, data=stored)
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {**form, "advanced": {}}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert "max_thermal_power" not in next(iter(_entry.subentries.values())).data
+
+
+async def test_reconfigure_stores_validates_and_clears_heating_curve(hass: HomeAssistant):
+    entry, result = await _start(hass, data=_stored())
+    form = {
+        "name": "House",
+        "temperature_sensor": SENSOR,
+        "thermal_mass_m3": 10,
+        "floor_area_m2": 150,
+        "specific_heating_demand": 100,
+        "supply_temperature": 35,
+    }
+    bad = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {**form, "heating_curve": "0: 35", "advanced": {}}
+    )
+    assert bad["type"] is FlowResultType.FORM
+    assert bad["errors"] == {"heating_curve": "invalid_heating_curve"}
+
+    ok = await hass.config_entries.subentries.async_configure(
+        bad["flow_id"], {**form, "heating_curve": "15: 25, 0: 35, -15: 45", "advanced": {}}
+    )
+    assert ok["type"] is FlowResultType.ABORT
+    stored = next(iter(entry.subentries.values())).data
+    assert stored["heating_curve"] == "15: 25, 0: 35, -15: 45"
+
+    _entry, result = await _start(hass, data=stored)
+    cleared = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {**form, "advanced": {}}
+    )
+    assert cleared["type"] is FlowResultType.ABORT
+    assert "heating_curve" not in next(iter(_entry.subentries.values())).data
+
+
+async def test_effective_config_gates_heating_curve_by_backend_version(hass: HomeAssistant):
+    coordinator = _coordinator(hass, heating_curve="15: 25, -15: 45")
+    (runtime,) = coordinator.loads.all()
+
+    coordinator.backend_version = "0.18.11"
+    old_cfg = coordinator.effective_thermal_config(runtime, 20.5)
+    assert isinstance(old_cfg, HeatPumpRoomConfig)
+    assert old_cfg.model.heating_curve == ()
+
+    coordinator.backend_version = "0.19.0"
+    new_cfg = coordinator.effective_thermal_config(runtime, 20.5)
+    assert isinstance(new_cfg, HeatPumpRoomConfig)
+    assert new_cfg.model.heating_curve == ((15.0, 25.0), (-15.0, 45.0))
+

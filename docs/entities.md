@@ -11,6 +11,7 @@
 | `sensor.*_planned_inverter_power` | AC side of a hybrid inverter: positive = DC to AC, negative = AC to DC. Only if you configured a hybrid inverter |
 | `sensor.*_planned_battery_power` | Positive = discharge, negative = charge |
 | `sensor.*_planned_battery_level` | Percent |
+| `sensor.*_battery_reserve` | Temporary minimum battery SoC status: `off`, `scheduled` or `active` (EMHASS 0.19.0+ `soc_floor`). Attributes: `target_soc`, `start_time`, `end_time`, `reason`, `soc_min`, `soc_max`, `supported`. Only if you configured a battery |
 | `sensor.*_end_soc_target` | The battery level the plan aims for at the horizon's end, with the why in its attributes (`reason`, `cover_energy_wh`, `cover_until`, `sale_blocked`, …) — see [End SOC](end_soc.md) |
 | `sensor.*_import_price` / `*_export_price` | Composed prices |
 | `sensor.*_optimisation_status` | Result of the last solve |
@@ -50,6 +51,9 @@ Actions for scripts and automations: `emhass_companion.run_mpc` (the
 recalculate button), `emhass_companion.run_dayahead` and
 `emhass_companion.train_load_forecaster`, which have no button.
 `emhass_companion.set_snow_cover` overrides the snow detection, with no entity.
+`emhass_companion.set_battery_reserve` and `emhass_companion.clear_battery_reserve`
+schedule or cancel a temporary battery SoC reserve (EMHASS 0.19.0+ `soc_floor`,
+reflected on `sensor.*_battery_reserve` and controllable from `custom:emhass-reserve-card`).
 `emhass_companion.export_settings` (**Write settings to EMHASS**) is an action
 only, with no button or entity; administrators only. See
 [Hub controls](guide/hub_controls.md#write-settings-to-emhass). Every action is

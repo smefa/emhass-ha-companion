@@ -144,6 +144,20 @@ that works, or if the load cools.
 - **Supply temperature** — the water temperature sent to the radiators or
   floor heating. Typically 30 to 35 °C for floor heating and 45 to 55 °C for
   radiators. A lower value gives a higher COP. Starts at 35.
+- **Heating curve** — optional, requires EMHASS **0.19.0 or newer**. An
+  alternative to the fixed **Supply temperature** above for weather-compensated
+  systems: enter outdoor temperature and supply temperature pairs, such as
+  `15: 25, 0: 35, -15: 45`. Companion evaluates this piecewise-linear table
+  against the outdoor forecast and sends EMHASS's per-step
+  `supply_temperature` list (distinct from EMHASS's own linear `heating_curve`
+  dict), so COP reflects the higher flow temperature needed in cold weather.
+  Cannot be combined with **Constant COP** or **Source temperature**; on older
+  EMHASS releases Companion falls back to the fixed **Supply temperature**
+  with a warning.
+- **Max thermal output** — optional, in W, requires EMHASS **0.19.0 or newer**.
+  Caps the heat pump's thermal delivery (`max_thermal_power`) when its
+  datasheet thermal rating is lower than electrical power × COP. On older
+  EMHASS releases it is omitted with a warning.
 - **Running sensor** / **Control entity** — optional, as for any thermal load.
 - **Advanced settings** — the defaults suit most houses:
   - **Carnot efficiency** — how close the heat pump gets to an ideal one.

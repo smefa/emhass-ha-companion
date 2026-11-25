@@ -229,9 +229,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
     # charge's own version gate (demand_charge_pricing) never has to ask
     # EMHASS again just to find out what it already knows.
     coordinator.backend_version = version
+    coordinator.sync_heat_pump_thresholds()
     await coordinator.async_load_profiles()
     await coordinator.async_load_ml_state()
     await coordinator.async_load_snow_cover()
+    await coordinator.async_load_battery_reserve()
     _report_profile_errors(hass, coordinator)
     await coordinator.async_ensure_emhass_baseline()
     await coordinator.async_check_heat_topology()
@@ -309,6 +311,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmhassConfigEntry) -> bo
     entry.async_on_unload(loads.async_stop)
     entry.async_on_unload(loads.async_save_sequences)
     entry.async_on_unload(coordinator.async_stop_clock)
+    entry.async_on_unload(coordinator.async_stop_reserve_timers)
     entry.async_on_unload(coordinator.async_stop_pv_live_tracking)
     entry.async_on_unload(coordinator.async_stop_source_health)
     # A coroutine, so the final settle and the store write both complete before

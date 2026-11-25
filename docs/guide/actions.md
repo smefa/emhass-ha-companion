@@ -15,6 +15,8 @@ with no user behind it (an automation, a script) is always allowed.
 | [`emhass_companion.train_load_forecaster`](#train_load_forecaster) | Retrains the machine-learning load forecaster | none | anyone |
 | [`emhass_companion.set_hot_water_plan`](#set_hot_water_plan) | Replaces a hot-water tank's whole plan | `device_id`, `periods` | anyone |
 | [`emhass_companion.set_snow_cover`](#set_snow_cover) | Overrides whether the panels count as snow covered | `mode` | anyone |
+| [`emhass_companion.set_battery_reserve`](#set_battery_reserve) | Schedules a temporary minimum battery SoC (EMHASS 0.19.0+) | `target_soc`, `start_time`, `end_time`, `reason` | anyone |
+| [`emhass_companion.clear_battery_reserve`](#clear_battery_reserve) | Cancels any active or scheduled battery reserve | none | anyone |
 | [`emhass_companion.export_settings`](#export_settings) | Saves Companion's static settings into EMHASS | none | administrators |
 | [`emhass_companion.test_profile`](#test_profile) | Shows what a data source profile returns | `profile`, `options`, `limit` | administrators |
 | [`emhass_companion.typical_load_forecast`](#typical_load_forecast) | Builds the *Typical household* forecast | `day`, `average_w` | anyone |
@@ -84,6 +86,31 @@ no solar forecast source is set, because there is then no forecast to reduce.
 action: emhass_companion.set_snow_cover
 data:
   mode: clear
+```
+
+## set_battery_reserve
+
+Asks EMHASS 0.19.0 or newer (`naive-mpc-optim`) to keep the battery at or
+above `target_soc` (%) between `start_time` (defaults to now) and `end_time`
+via EMHASS's soft per-step `soc_floor`. Setting a future `start_time` lets
+EMHASS charge cheaply ahead of the window (for example before a storm).
+
+```yaml
+action: emhass_companion.set_battery_reserve
+data:
+  target_soc: 80
+  start_time: "2026-11-02 20:00:00"
+  end_time: "2026-11-03 08:00:00"
+  reason: Storm warning
+```
+
+## clear_battery_reserve
+
+Cancels any active or scheduled battery reserve and returns to normal
+optimisation.
+
+```yaml
+action: emhass_companion.clear_battery_reserve
 ```
 
 ## export_settings

@@ -1947,20 +1947,20 @@ async def test_the_cut_is_released_only_after_the_phases_stay_clear(
 async def test_the_plans_charge_resumes_when_the_phases_clear(hass: HomeAssistant, freezer) -> None:
     """A hold the guard chose never counts as the plan's own self-consumption.
 
-    p_grid 500 W is past the 300 W entry threshold but inside the 600 W exit
+    p_grid 150 W is past the 100 W entry threshold but inside the 200 W exit
     one: had the plan itself chosen self-consumption, staying there would be
     right. The guard chose a hold, so the plan's charge resumes once clear.
     """
     executor, coordinator = await _build(hass, grid=PHASE_GRID)
     _phases(hass, coordinator, 3500)
-    coordinator.data = EmhassData(plan=_plan(-500, p_grid=500), last_success=dt_util.utcnow())
+    coordinator.data = EmhassData(plan=_plan(-500, p_grid=150), last_success=dt_util.utcnow())
     assert (await executor.async_apply()).action == MODE_IDLE
 
     # The heater reading clears at once; the window then has to run out.
     _phases(hass, coordinator, 400)
     freezer.tick(timedelta(seconds=61))
     coordinator.phase_guard.async_update()
-    coordinator.data = EmhassData(plan=_plan(-500, p_grid=500), last_success=dt_util.utcnow())
+    coordinator.data = EmhassData(plan=_plan(-500, p_grid=150), last_success=dt_util.utcnow())
     decision = await executor.async_apply()
 
     assert decision.action == MODE_FORCE_CHARGE

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -18,13 +20,16 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.util import dt as dt_util
 import voluptuous as vol
 
-from . import snow_cover
+from . import battery_reserve, snow_cover
 from .const import ACTION_DAYAHEAD, ACTION_MPC, DOMAIN, PROFILE_KIND_NETWORK
 from .hot_water_plan import async_set_plan
+from .models import row_zero_start
 from .network_calendar import HolidayCache, NetworkCalendar, NetworkCalendarError
 from .profiles import ProfileError, async_resolve_series, resolve_network, resolve_settings
 from .profiles.schema import humanize_error
 from .typical_load import typical_day_records
+
+_LOGGER = logging.getLogger(__name__)
 
 SERVICE_RUN_DAYAHEAD = "run_dayahead"
 SERVICE_RUN_MPC = "run_mpc"
@@ -34,6 +39,8 @@ SERVICE_TEST_PROFILE = "test_profile"
 SERVICE_TYPICAL_LOAD_FORECAST = "typical_load_forecast"
 SERVICE_SET_HOT_WATER_PLAN = "set_hot_water_plan"
 SERVICE_SET_SNOW_COVER = "set_snow_cover"
+SERVICE_SET_BATTERY_RESERVE = "set_battery_reserve"
+SERVICE_CLEAR_BATTERY_RESERVE = "clear_battery_reserve"
 
 TEST_PROFILE_SCHEMA = vol.Schema(
     {
@@ -44,6 +51,15 @@ TEST_PROFILE_SCHEMA = vol.Schema(
 )
 
 SET_SNOW_COVER_SCHEMA = vol.Schema({vol.Required("mode"): vol.In(snow_cover.MODES)})
+
+SET_BATTERY_RESERVE_SCHEMA = vol.Schema(
+    {
+        vol.Required("target_soc"): vol.All(vol.Coerce(float), vol.Range(min=1, max=100)),
+        vol.Optional("start_time"): cv.datetime,
+        vol.Required("end_time"): cv.datetime,
+        vol.Optional("reason", default=""): cv.string,
+    }
+)
 
 TYPICAL_LOAD_FORECAST_SCHEMA = vol.Schema(
     {
@@ -282,12 +298,76 @@ def async_register_services(hass: HomeAssistant) -> None:
         )
         return {"forecast": records}
 
+    async def _set_battery_reserve(call: ServiceCall) -> None:
+        coordinator = _coordinator(hass)
+        battery = coordinator.config.battery
+        if not battery.enabled:
+            raise ServiceValidationError("No battery is configured")
+        target_soc = float(call.data["target_soc"])
+        soc_min_pct = round(battery.soc_min * 100.0, 1)
+        soc_max_pct = round(battery.soc_max * 100.0, 1)
+        if not soc_min_pct < target_soc <= soc_max_pct:
+            raise ServiceValidationError(
+                f"target_soc ({target_soc:g}%) must be above the configured battery "
+                f"minimum ({soc_min_pct:g}%) and at most {soc_max_pct:g}%"
+            )
+        now = dt_util.utcnow()
+        raw_start = call.data.get("start_time") or now
+        end_time = call.data["end_time"]
+        step = timedelta(minutes=coordinator.config.time_step_minutes)
+        current_soc = coordinator.current_battery_soc()
+        start_time = battery_reserve.lead_in_start_time(
+            raw_start,
+            end_time,
+            step=step,
+            row_zero=row_zero_start(now, step, coordinator.row_zero_mode),
+            current_soc=current_soc,
+            target_soc_pct=target_soc,
+            hours_to_charge=(
+                battery.hours_to_charge(current_soc, target_soc / 100.0)
+                if current_soc is not None
+                else 0.0
+            ),
+            charge_efficiency=battery.charge_efficiency,
+        )
+        if start_time != battery_reserve._ensure_utc(raw_start):
+            _LOGGER.info(
+                "Shifted battery reserve start to %s to allow charging from %.0f%% to %.0f%%",
+                start_time.isoformat(),
+                (current_soc or 0.0) * 100.0,
+                target_soc,
+            )
+        try:
+            reserve = battery_reserve.BatteryReserve(
+                target_soc_pct=target_soc,
+                start_at=start_time,
+                end_at=end_time,
+                reason=call.data.get("reason", ""),
+            )
+        except ValueError as err:
+            raise ServiceValidationError(str(err)) from err
+        if reserve.is_expired(now):
+            raise ServiceValidationError("end_time must be in the future")
+        await coordinator.async_set_battery_reserve(reserve)
+
+    async def _clear_battery_reserve(call: ServiceCall) -> None:
+        await _coordinator(hass).async_clear_battery_reserve()
+
     hass.services.async_register(DOMAIN, SERVICE_RUN_DAYAHEAD, _run_dayahead)
     hass.services.async_register(DOMAIN, SERVICE_RUN_MPC, _run_mpc)
     hass.services.async_register(DOMAIN, SERVICE_TRAIN_LOAD_FORECASTER, _train_load_forecaster)
     hass.services.async_register(DOMAIN, SERVICE_EXPORT_SETTINGS, _export_settings)
     hass.services.async_register(
         DOMAIN, SERVICE_SET_SNOW_COVER, _set_snow_cover, schema=SET_SNOW_COVER_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SET_BATTERY_RESERVE,
+        _set_battery_reserve,
+        schema=SET_BATTERY_RESERVE_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN, SERVICE_CLEAR_BATTERY_RESERVE, _clear_battery_reserve
     )
     hass.services.async_register(
         DOMAIN,
@@ -322,5 +402,7 @@ def async_unregister_services(hass: HomeAssistant) -> None:
         SERVICE_TYPICAL_LOAD_FORECAST,
         SERVICE_SET_HOT_WATER_PLAN,
         SERVICE_SET_SNOW_COVER,
+        SERVICE_SET_BATTERY_RESERVE,
+        SERVICE_CLEAR_BATTERY_RESERVE,
     ):
         hass.services.async_remove(DOMAIN, service)

@@ -61,7 +61,8 @@ for step-by-step setup.
 | Thermal mass (m³) | `volume` | Concrete-equivalent mass; EMHASS's defaults `density` 2400 and `heat_capacity` 0.88 are sent with it. |
 | Heated floor area (m²) | `area` | |
 | Specific heating demand (kWh/m² per year) | `specific_heating_demand` | Heat, not electricity. |
-| Supply temperature (°C) | `supply_temperature` | Default 35. |
+| Supply temperature (°C) | `supply_temperature` | Default 35. Used when no heating curve is set, or as a fallback on EMHASS older than 0.19.0. |
+| Heating curve | `supply_temperature` (list) | Optional alternative to a fixed supply temperature, in `outdoor: supply` °C pairs such as `15: 25, 0: 35, -15: 45` (supply 20–80 °C, at least two points). Linearly interpolated from the outdoor temperature forecast (clamped at the ends) so each step gets its own supply temperature and Carnot COP. **Requires EMHASS 0.19.0 or newer; falls back to the fixed supply temperature on older versions.** Ignored when a constant COP or source temperature is set. |
 | Carnot efficiency (*Advanced*) | `carnot_efficiency` | Default 0.4. COP = efficiency × (supply + 273.15) / (supply − outdoor), clipped by EMHASS to 1–8. |
 | Constant COP (*Advanced*) | `efficiency` | Optional, 1–8. A flat COP, such as the manufacturer's B0/W35 or B0/W45 figure. EMHASS then ignores the outdoor temperature for the COP; it still drives the heat demand. Wins over source temperature. |
 | Source temperature (*Advanced*, °C) | `efficiency` | Optional. Cold-side temperature for a ground-source heat pump (typical brine temperature). The companion computes one Carnot COP from it, `carnot_efficiency × (supply + 273.15) / (supply − source)`, and sends it as `efficiency`. Must be below the supply temperature. |
@@ -69,6 +70,7 @@ for step-by-step setup.
 | Annual heating degree days (*Advanced*) | `annual_reference_hdd` | Default 3000. |
 | Thermal inertia (*Advanced*, h) | `thermal_inertia_time_constant` | Default 0, and then omitted. |
 | Window area (*Advanced*, m²) | `window_area` | Optional passive solar gain. Effective glazing area, mainly south, east and west windows. EMHASS subtracts `window_area × shgc × GHI` from the heat demand. Empty or 0 sends nothing. |
+| Maximum heat output (*Advanced*, W) | `max_thermal_power` | Optional ceiling on delivered **heat** (thermal W, not electrical): EMHASS holds `COP × electrical power` at or below it. A binding cap lowers the ON power to `cap / COP`; a step where that is below the minimum power gets no heat. The comfort-floor reachability check applies the same cap. Empty sends nothing. **Requires EMHASS 0.19.0 or newer; omitted on older versions.** Flow-based estimate: `1.163 × m³/h × ΔT` gives kW, × 1000 for W. |
 | Solar heat gain coefficient (*Advanced*) | `shgc` | Default 0.6, 0–1. Sent only with a window area. |
 
 **Solar gain needs irradiance.** EMHASS gets the solar irradiance (GHI, on a

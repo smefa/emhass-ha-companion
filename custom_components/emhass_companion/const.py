@@ -384,6 +384,10 @@ CONF_INERTIA_TIME_CONSTANT: Final = "thermal_inertia_time_constant"
 # Optional passive solar gain: EMHASS adds window_area * shgc * GHI to the room's heat.
 CONF_WINDOW_AREA: Final = "window_area"
 CONF_SHGC: Final = "shgc"
+# Optional hard ceiling on delivered heat (W thermal); EMHASS thermal_battery max_thermal_power.
+CONF_MAX_THERMAL_POWER: Final = "max_thermal_power"
+# Optional outdoor->supply water temperature curve for per-step supply_temperature (EMHASS 0.19+).
+CONF_HEATING_CURVE: Final = "heating_curve"
 CONF_TANK_VOLUME: Final = "tank_volume_litres"
 # A common domestic hot-water cylinder; only the form's starting value.
 DEFAULT_TANK_VOLUME: Final = 200
@@ -565,7 +569,7 @@ SOURCE_BLIND_GRACE: Final = timedelta(minutes=15)
 # want any grid exchange at all", read straight from the plan's own P_grid
 # column. Not the same question as soc_min/soc_max -- those are planning
 # limits, this is a real-time mode choice.
-DEFAULT_SELF_CONSUME_THRESHOLD_W: Final = 300
+DEFAULT_SELF_CONSUME_THRESHOLD_W: Final = 100
 # Once in self-consumption, P_grid must clear threshold * this factor before
 # forcing resumes -- damps boundary chatter a single static threshold would
 # let through on every recalculation.
@@ -893,6 +897,7 @@ PHASE_HEADROOM_KEY: Final = "phase_headroom"
 PHASE_GUARD_ACTIVE_KEY: Final = "phase_guard_active"
 # Diagnostic: the PV forecast is being scaled down for snow on the panels.
 SNOW_COVER_KEY: Final = "snow_cover"
+BATTERY_RESERVE_KEY: Final = "battery_reserve"
 DEMAND_CHARGE_RATE_KEY: Final = "demand_charge_rate"
 # Always-present diagnostic: is a network tariff selected, resolved and, if it
 # has a demand charge, actually being tracked.
@@ -941,6 +946,21 @@ MIN_EMHASS_VERSION_SOC_FINAL_REWARD: Final = "0.18.5"
 # the ones the Companion sends instead of replacing them, first shipped in 0.18.5.
 EMHASS_CONF_HEAT_TOPOLOGY: Final = "heat_topology"
 MIN_EMHASS_VERSION_HEAT_TOPOLOGY_EXTEND: Final = "0.18.5"
+
+# The EMHASS release ``max_thermal_power`` on a ``thermal_battery`` load
+# shipped in (PR #1369). Below this the cap is stored but omitted from
+# payloads and reachability checks so they match what EMHASS runs.
+MIN_EMHASS_VERSION_MAX_THERMAL_POWER: Final = "0.19.0"
+
+# The EMHASS release per-step ``supply_temperature`` lists on a
+# ``thermal_battery`` load shipped in (PR #1369). Below this a configured
+# heating curve is stored but omitted so payloads send the scalar fallback.
+MIN_EMHASS_VERSION_SUPPLY_TEMPERATURE_PROFILE: Final = "0.19.0"
+
+# The EMHASS release soft per-step ``soc_floor`` on ``naive-mpc-optim``
+# shipped in (PR #1397). Below this a configured battery reserve is stored
+# but omitted from MPC payloads with a warning.
+MIN_EMHASS_VERSION_SOC_FLOOR: Final = "0.19.0"
 
 # --- Cost and savings ---------------------------------------------------------
 #

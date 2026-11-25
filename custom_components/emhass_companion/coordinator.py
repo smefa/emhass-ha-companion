@@ -19,6 +19,7 @@ from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import (
     async_call_later,
+    async_track_point_in_utc_time,
     async_track_state_change_event,
     async_track_time_interval,
 )
@@ -29,7 +30,7 @@ from homeassistant.util import dt as dt_util
 from homeassistant.util.unit_conversion import TemperatureConverter
 from packaging.version import InvalidVersion, Version
 
-from . import snow_cover
+from . import battery_reserve, snow_cover
 from .api import (
     EmhassAuthConfigurationError,
     EmhassAuthError,
@@ -78,7 +79,10 @@ from .const import (
     MIN_EMHASS_VERSION_DEMAND_CHARGE,
     MIN_EMHASS_VERSION_DEMAND_COMPONENTS,
     MIN_EMHASS_VERSION_DEMAND_WINDOW,
+    MIN_EMHASS_VERSION_MAX_THERMAL_POWER,
     MIN_EMHASS_VERSION_SOC_FINAL_REWARD,
+    MIN_EMHASS_VERSION_SOC_FLOOR,
+    MIN_EMHASS_VERSION_SUPPLY_TEMPERATURE_PROFILE,
     ML_MIN_HISTORY_DAYS,
     MODE_AUTO,
     PROFILE_KEY_LOAD_SENSOR,
@@ -166,6 +170,7 @@ _ML_STORE_VERSION = 1
 _SOC_DAY_STORE_VERSION = 1
 _SNOW_STORE_VERSION = 1
 _SNOW_SAVE_DELAY = 30
+_RESERVE_STORE_VERSION = 1
 _SETTINGS_REFRESH_DELAY = 3
 
 # How long the coordinator keeps building the load forecast itself after a run
@@ -630,6 +635,14 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         self._snow_store: Store[dict[str, Any]] = Store(
             hass, _SNOW_STORE_VERSION, f"{DOMAIN}_{entry.entry_id}_snow_cover"
         )
+        # Temporary battery SoC floor (EMHASS 0.19.0+ ``soc_floor``). Persisted
+        # so a scheduled storm-prep reserve survives a Home Assistant restart.
+        self.battery_reserve: battery_reserve.BatteryReserve | None = None
+        self._reserve_store: Store[dict[str, Any]] = Store(
+            hass, _RESERVE_STORE_VERSION, f"{DOMAIN}_{entry.entry_id}_battery_reserve"
+        )
+        self._unsub_reserve_start: Callable[[], None] | None = None
+        self._unsub_reserve_end: Callable[[], None] | None = None
 
     # -- surplus --------------------------------------------------------------
 
@@ -677,6 +690,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         if self._unsub_settings_refresh is not None:
             self._unsub_settings_refresh()
             self._unsub_settings_refresh = None
+        self.async_stop_reserve_timers()
         await super().async_shutdown()
 
     @callback
@@ -778,6 +792,18 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         """
         return self.backend_version is not None and version_at_least(
             self.backend_version, MIN_EMHASS_VERSION_SOC_FINAL_REWARD
+        )
+
+    @property
+    def row_zero_mode(self) -> str:
+        """How EMHASS aligns step 0 for this backend."""
+        return self._row_zero_mode
+
+    @property
+    def soc_floor_supported(self) -> bool:
+        """Whether the backend accepts per-step ``soc_floor`` (EMHASS 0.19.0+)."""
+        return self.backend_version is not None and version_at_least(
+            self.backend_version, MIN_EMHASS_VERSION_SOC_FLOOR
         )
 
     @property
@@ -1080,6 +1106,97 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         self.snow_cover = snow_cover.set_mode(self.snow_cover, mode, dt_util.utcnow())
         self._save_snow_cover()
         self.async_update_listeners()
+
+    async def async_load_battery_reserve(self) -> None:
+        """Restore a persisted battery reserve, discarding it if already expired."""
+        try:
+            stored = await self._reserve_store.async_load()
+        except Exception:  # a damaged store must not block setup
+            _LOGGER.debug("Could not load the battery reserve state", exc_info=True)
+            return
+        loaded = battery_reserve.from_json(stored)
+        if loaded is not None and loaded.is_expired(dt_util.utcnow()):
+            loaded = None
+        self.battery_reserve = loaded
+        self._schedule_reserve_timers()
+
+    def active_battery_reserve(
+        self, now: datetime | None = None
+    ) -> battery_reserve.BatteryReserve | None:
+        """Return the current or scheduled reserve, or ``None`` if absent/expired."""
+        reserve = self.battery_reserve
+        if reserve is None:
+            return None
+        if reserve.is_expired(now or dt_util.utcnow()):
+            return None
+        return reserve
+
+    def current_battery_soc(self) -> float | None:
+        """Current battery SoC as a 0-1 fraction, or ``None`` if unavailable."""
+        if not self.config.battery.enabled or not self.config.soc_entity:
+            return None
+        state = self.hass.states.get(self.config.soc_entity)
+        if state is None or state.state in ("unknown", "unavailable", ""):
+            return None
+        try:
+            return min(max(float(state.state) / 100.0, 0.0), 1.0)
+        except ValueError:
+            return None
+
+    @callback
+    def async_stop_reserve_timers(self) -> None:
+        """Cancel any pending start/end boundary timers for the battery reserve."""
+        if self._unsub_reserve_start is not None:
+            self._unsub_reserve_start()
+            self._unsub_reserve_start = None
+        if self._unsub_reserve_end is not None:
+            self._unsub_reserve_end()
+            self._unsub_reserve_end = None
+
+    @callback
+    def _schedule_reserve_timers(self) -> None:
+        """Schedule exact state transitions at the reserve's start and end."""
+        self.async_stop_reserve_timers()
+        now = dt_util.utcnow()
+        reserve = self.active_battery_reserve(now)
+        if reserve is None:
+            return
+        if reserve.start_at > now:
+            self._unsub_reserve_start = async_track_point_in_utc_time(
+                self.hass, self._async_reserve_started, reserve.start_at
+            )
+        if reserve.end_at > now:
+            self._unsub_reserve_end = async_track_point_in_utc_time(
+                self.hass, self._async_reserve_ended, reserve.end_at
+            )
+
+    @callback
+    def _async_reserve_started(self, _now: datetime) -> None:
+        self._unsub_reserve_start = None
+        self.async_update_listeners()
+
+    async def _async_reserve_ended(self, _now: datetime) -> None:
+        self._unsub_reserve_end = None
+        self.async_update_listeners()
+        await self.async_request_settings_refresh()
+
+    async def async_set_battery_reserve(
+        self, reserve: battery_reserve.BatteryReserve
+    ) -> None:
+        """Store a battery reserve window, republish, and trigger a replan."""
+        self.battery_reserve = reserve
+        await self._reserve_store.async_save(reserve.to_json())
+        self._schedule_reserve_timers()
+        self.async_update_listeners()
+        await self.async_request_settings_refresh()
+
+    async def async_clear_battery_reserve(self) -> None:
+        """Clear any scheduled or active battery reserve, republish, and replan."""
+        self.battery_reserve = None
+        await self._reserve_store.async_save({})
+        self.async_stop_reserve_timers()
+        self.async_update_listeners()
+        await self.async_request_settings_refresh()
 
     def _weather_entity(self) -> str | None:
         """The weather entity already in the configuration, if there is one.
@@ -1465,6 +1582,14 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         config = load.thermal_config(current_temperature)
         now = dt_util.utcnow()
         if isinstance(config, HeatPumpRoomConfig):
+            if self.backend_version is None or not version_at_least(
+                self.backend_version, MIN_EMHASS_VERSION_MAX_THERMAL_POWER
+            ):
+                config = config.without_max_thermal_power()
+            if self.backend_version is None or not version_at_least(
+                self.backend_version, MIN_EMHASS_VERSION_SUPPLY_TEMPERATURE_PROFILE
+            ):
+                config = config.without_heating_curve()
             if not self._outdoor_forecast:
                 return config
             step = timedelta(minutes=self.config.time_step_minutes)
@@ -1476,6 +1601,37 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         horizon = timedelta(minutes=self.config.time_step_minutes * self.config.horizon_steps)
         window = self._outdoor_forecast.window_covering(now, now + horizon)
         return config.with_outdoor_forecast(window.values) if window else config
+
+    def sync_heat_pump_thresholds(self, now: datetime | None = None) -> None:
+        """Keep heat-pump running thresholds aligned with backend support and forecast COP."""
+        supported = self.backend_version is not None and version_at_least(
+            self.backend_version, MIN_EMHASS_VERSION_MAX_THERMAL_POWER
+        )
+        curve_supported = self.backend_version is not None and version_at_least(
+            self.backend_version, MIN_EMHASS_VERSION_SUPPLY_TEMPERATURE_PROFILE
+        )
+        outdoor_values: tuple[float, ...] = ()
+        if self._outdoor_forecast:
+            step = timedelta(minutes=self.config.time_step_minutes)
+            outdoor_values = outdoor_per_step(
+                self._outdoor_forecast,
+                now or dt_util.utcnow(),
+                step,
+                self.config.horizon_steps,
+            )
+        for load in self.loads.all():
+            if not load.is_heat_pump_room or load.heat_pump_model is None:
+                continue
+            load.max_thermal_power_supported = supported
+            if outdoor_values:
+                model = (
+                    load.heat_pump_model
+                    if curve_supported
+                    else replace(load.heat_pump_model, heating_curve=())
+                )
+                load.max_forecast_cop = max(model.cop(temp) for temp in outdoor_values)
+            else:
+                load.max_forecast_cop = None
 
     def water_tank_error(self, load: DeferrableRuntime) -> str | None:
         """Fail closed before tank dispatch, including between optimiser runs."""
@@ -2137,6 +2293,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
         if self.loads.needs_outdoor_temperature and config.temperature:
             outdoor = await self._series(config.temperature, PROFILE_KIND_TEMPERATURE)
         self._outdoor_forecast = outdoor
+        self.sync_heat_pump_thresholds(now)
 
         buy = sell = None
         network_warnings: list[str] = []
@@ -2509,6 +2666,7 @@ class EmhassCoordinator(DataUpdateCoordinator[EmhassData]):
             ),
             send_soc_final_reward=self.soc_final_reward_supported,
             solver_settings=config.solver,
+            battery_reserve=self.active_battery_reserve(now),
         )
         try:
             built = build_payload(inputs)
