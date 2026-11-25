@@ -161,7 +161,7 @@ The inverter's own limits and losses. This step is always there, battery or not.
 
 | Setting | Meaning |
 |---|---|
-| Shared inverter (hybrid) | On if PV and the battery share one inverter's AC-side power limit — true for most home battery systems. Off if they are two independent inverters, each with its own limit |
+| Shared inverter (hybrid) | On if PV and the battery share one inverter's AC-side power limit — true for most home battery systems. Off if they are two independent inverters, each with its own limit. Note: when hybrid is on, EMHASS treats the PV forecast as **DC** power (before inverter conversion losses and AC clipping) |
 | Maximum AC output / input | Only asked if hybrid — the shared inverter's own throughput ceiling, separate from the battery's own charge/discharge limits |
 | DC to AC / AC to DC efficiency | Conversion losses, in the collapsed *Advanced settings* section |
 | Live PV power sensor | Optional, in *Advanced settings*. See "Blending live PV/load into MPC" below |
@@ -280,6 +280,10 @@ large planned charge or discharge is overridden, because self-consumption
 tracks real-time PV and load better than a forecast can at small imbalances.
 Once handed over, grid power must exceed **twice** this value before the plan
 can force the battery again, so it doesn't flip modes every recalculation.
+The default is 100 W. Keep it below your night base load: a planned import
+smaller than the threshold is covered from the battery, even in hours the plan
+wanted to save the charge for. 0 hands over only when the plan wants no grid
+exchange at all.
 This is not the same as the charge-level limits above, which only bound what
 the optimiser may plan *between*.
 

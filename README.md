@@ -58,7 +58,7 @@ Three consequences worth knowing:
 ## Requirements
 
 - Home Assistant 2026.7 or newer
-- **EMHASS 0.17.9 or newer** — this integration reads the optimisation plan through the JSON API. A network tariff's demand charge needs 0.18.0+ to price at all, 0.18.1+ for a windowed charge, and 0.18.2+ to price it on the tariff's own measurement interval rather than the optimizer timestep. The battery charge taper needs 0.18.3+ and the End SOC *Value of leftover energy* needs 0.18.5+. Tested up to EMHASS 0.18.6.
+- **EMHASS 0.17.9 or newer** — this integration reads the optimisation plan through the JSON API. A network tariff's demand charge needs 0.18.0+ to price at all, 0.18.1+ for a windowed charge, and 0.18.2+ to price it on the tariff's own measurement interval rather than the optimizer timestep. The battery charge taper needs 0.18.3+, the End SOC *Value of leftover energy* needs 0.18.5+, and battery reserve (`soc_floor`), heat pump `max_thermal_power` and heating-curve `supply_temperature` profiles need 0.19.0+. Tested up to EMHASS 0.19.0.
 
 Nothing else is required. No battery, no solar, no dynamic tariff and no supported inverter are each valid configurations.
 

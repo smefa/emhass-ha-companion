@@ -318,7 +318,9 @@ the dynamic limits. The inverter's own settings are on the next screen.
   needs to be before the battery is handed back to plain self-consumption
   instead of a forced charge/discharge. Once handed over, grid power must
   exceed *twice* this value before the plan can force the battery again, so
-  it doesn't flip modes every recalculation.
+  it doesn't flip modes every recalculation. Default 100 W; keep it below
+  your night base load, or a small planned import is covered from the
+  battery. 0 hands over only when the plan wants no grid exchange at all.
 - **Battery SOC sensor** — read at the start of every plan.
 - **Battery power sensor** — optional, and nothing in the optimisation
   reads it: EMHASS *plans* battery power rather than measuring it. The
@@ -336,7 +338,8 @@ without a battery.
 
 - **Shared inverter (hybrid)** — on if PV and the battery share one
   inverter's AC-side limit (most home systems). Off if they're two separate
-  inverters.
+  inverters. When hybrid is on, EMHASS treats the PV forecast as **DC**
+  power (before inverter conversion losses and AC clipping).
 - **Maximum AC output (discharge/export)** / **Maximum AC input
   (charge/import)** — the shared inverter's own ceiling. Required while
   hybrid is on.

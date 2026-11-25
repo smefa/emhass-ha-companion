@@ -517,3 +517,119 @@ async def test_an_infeasible_run_with_no_finding_points_at_the_script(
     diagnostics = await async_get_config_entry_diagnostics(hass, entry)
     assert diagnostics["last_infeasibility"] == []
     assert any("check_infeasibility.py" in finding["message"] for finding in diagnostics["triage"])
+
+
+async def test_generated_house_load_health_uses_registry_id(hass: HomeAssistant) -> None:
+    """Include a renamed generated sensor even without an options reference."""
+    from homeassistant.helpers import entity_registry as er
+
+    from custom_components.emhass_companion.const import NET_HOUSE_LOAD_KEY
+
+    entry = await _setup_entry(hass)
+    registry = er.async_get(hass)
+    record = registry.async_get_or_create(
+        "sensor",
+        DOMAIN,
+        f"{entry.entry_id}_{NET_HOUSE_LOAD_KEY}",
+        config_entry=entry,
+        suggested_object_id="renamed_house_load",
+    )
+    hass.states.async_set(
+        record.entity_id,
+        "unavailable",
+        {
+            "unit_of_measurement": "W",
+            "device_class": "power",
+            "state_class": "measurement",
+        },
+    )
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+    health = next(e for e in diagnostics["entities"] if e.get("entity_id") == record.entity_id)
+    assert health["state"] == "unavailable"
+    assert health["registered"] is True
+    assert health["disabled_by"] is None
+    assert health["platform"] == DOMAIN
+    assert health["config_entry_id"] == entry.entry_id
+    assert health["unique_id"] == record.unique_id
+    assert health["unit_of_measurement"] == "W"
+    assert health["last_updated"] is not None
+    assert "generated.house_load_sensor" in health["referenced_by"]
+
+    registry.async_update_entity(record.entity_id, disabled_by=er.RegistryEntryDisabler.USER)
+    hass.states.async_remove(record.entity_id)
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+    health = next(e for e in diagnostics["entities"] if e.get("entity_id") == record.entity_id)
+    assert health["exists"] is False
+    assert health["disabled"] is True
+    assert health["disabled_by"] == "user"
+
+
+async def test_runtime_load_and_payload_entities_are_included(hass: HomeAssistant) -> None:
+    entry = await _setup_entry(hass)
+    coordinator = entry.runtime_data.coordinator
+    coordinator.config.load.options = {"entity": "sensor.resolved_load"}
+    coordinator.data.payload = {
+        "sensor_power_load_no_var_loads": "sensor.previous_load",
+        "sensor_power_photovoltaics": "sensor.runtime_pv",
+    }
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+    records = {e["entity_id"]: e for e in diagnostics["entities"] if "entity_id" in e}
+    for entity in ("sensor.resolved_load", "sensor.previous_load", "sensor.runtime_pv"):
+        assert records[entity]["exists"] is False
+    assert (
+        "resolved.load.profile_options.entity" in records["sensor.resolved_load"]["referenced_by"]
+    )
+    assert (
+        "last_payload.sensor_power_load_no_var_loads"
+        in records["sensor.previous_load"]["referenced_by"]
+    )
+
+
+async def test_third_party_identifiers_are_not_exposed(hass: HomeAssistant) -> None:
+    from homeassistant.helpers import entity_registry as er
+
+    entry = await _setup_entry(hass)
+    registry = er.async_get(hass)
+    record = registry.async_get_or_create(
+        "sensor",
+        "other_integration",
+        "private-hardware-address",
+        suggested_object_id="external_load",
+        original_name="private-original-name",
+    )
+    entry.runtime_data.coordinator.config.load.options = {"entity": record.entity_id}
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+    health = next(e for e in diagnostics["entities"] if e.get("entity_id") == record.entity_id)
+    assert health["platform"] == "other_integration"
+    assert health["unique_id"] is None
+    assert health["config_entry_id"] is None
+    assert health["original_name"] is None
+    assert "private-hardware-address" not in json.dumps(diagnostics)
+
+
+async def test_previous_payload_missing_entity_is_informational(hass: HomeAssistant) -> None:
+    entry = await _setup_entry(hass)
+    entry.runtime_data.coordinator.data.payload = {
+        "sensor_power_load_no_var_loads": "sensor.old_load",
+        "var_model": "sensor.old_load",
+    }
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+    records = [e for e in diagnostics["entities"] if e.get("entity_id") == "sensor.old_load"]
+    assert len(records) == 1
+    assert records[0]["referenced_by"] == [
+        "last_payload.sensor_power_load_no_var_loads",
+        "last_payload.var_model",
+    ]
+    findings = [f for f in diagnostics["triage"] if "sensor.old_load" in f["message"]]
+    assert findings and all(f["severity"] == "info" for f in findings)
+
+
+async def test_runtime_lookup_failure_preserves_stored_entity_health(hass: HomeAssistant) -> None:
+    entry = await _setup_entry(hass)
+    with patch(
+        "custom_components.emhass_companion.diagnostics.walk_entity_candidates",
+        side_effect=RuntimeError("failed lookup"),
+    ):
+        diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+    assert any(e.get("entity_id") == MISSING_ENTITY for e in diagnostics["entities"])
+    assert any("failed lookup" in e.get("error", "") for e in diagnostics["entities"])

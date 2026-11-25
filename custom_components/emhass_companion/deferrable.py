@@ -332,6 +332,10 @@ class DeferrableRuntime:
     """Room heat pump COP against outdoor temperature, owned by the subentry."""
     heat_pump_model: HeatPumpModel | None = None
     """The building and heat pump of a heat pump room; None if incomplete."""
+    max_thermal_power_supported: bool = False
+    """Whether the connected EMHASS backend supports ``max_thermal_power`` (0.19.0+)."""
+    max_forecast_cop: float | None = None
+    """Highest COP forecast over the active horizon for this heat pump, if known."""
     tank_volume_litres: float = 0.0
     standby_loss_w: float = 0.0
     heater_cop: float = DEFAULT_HEATER_COP
@@ -673,7 +677,16 @@ class DeferrableRuntime:
 
     @property
     def running_threshold_w(self) -> float:
-        return max(self.nominal_power_w * RUNNING_FRACTION, RUNNING_FLOOR_W)
+        reference_w = self.nominal_power_w
+        if (
+            self.is_heat_pump_room
+            and self.heat_pump_model is not None
+            and self.max_thermal_power_supported
+        ):
+            reference_w = self.heat_pump_model.min_capped_electrical_power_w(
+                reference_w, self.minimum_power_w, max_cop=self.max_forecast_cop
+            )
+        return max(reference_w * RUNNING_FRACTION, RUNNING_FLOOR_W)
 
     def plan_runs_at(self, watts: float) -> bool:
         """Whether a plan row's power means "run now".
@@ -1469,6 +1482,7 @@ class DeferrableRuntime:
                 comfort_start=self.comfort_start,
                 comfort_end=self.comfort_end,
                 current_temperature=current_temperature,
+                minimum_power_w=min(self.minimum_power_w, self.nominal_power_w),
             )
         return ThermalConfig(
             sense=self.sense,
