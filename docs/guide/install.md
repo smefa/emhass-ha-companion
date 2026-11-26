@@ -5,11 +5,8 @@
 - Home Assistant 2026.7 or newer.
 - EMHASS itself, already installed and running — either the add-on or a
   container. EMHASS Companion talks to it; it doesn't include it.
-- **EMHASS version 0.17.9 or newer.** A network tariff's demand charge needs
-  0.18.0+ to price at all, 0.18.1+ for a windowed charge, and 0.18.2+ to price
-  it on the tariff's own measurement interval rather than the optimizer
-  timestep. The battery charge taper needs 0.18.3+, and the End SOC *Value of
-  leftover energy* needs 0.18.5+. Tested up to EMHASS 0.18.6.
+- **EMHASS 0.18.9 or newer.** Battery reserve, heat pump maximum thermal power
+  and heating curves require EMHASS 0.19.0 or newer.
 - The **Marketplace** (**Settings → Marketplace**) to install the integration.
   It is built into Home Assistant from 2026.11. On 2026.7 to 2026.10, install
   [HACS](https://hacs.xyz/) instead and use it the same way. Nothing to do if

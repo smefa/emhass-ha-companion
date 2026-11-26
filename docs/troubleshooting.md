@@ -257,6 +257,13 @@ The checks look for the patterns that actually turn out to cause this:
 - power deficits or surpluses that no combination of grid, battery and
   inverter limits can cover.
 
+A thermal room with a **Response delay** can also go infeasible when it starts
+just above its minimum temperature: without knowing about heat already on its
+way, EMHASS models the delay as unheated. Give such a load a **Running sensor**
+that measures the room heating's power. MPC runs then send the sensor's recent
+average power as `prior_heat`, which you can see in the request in
+diagnostics.
+
 Each check names the EMHASS constraint it mirrors. They cannot prove a plan
 *is* feasible, only find reasons it might not be.
 

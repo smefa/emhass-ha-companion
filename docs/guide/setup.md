@@ -269,8 +269,7 @@ the dynamic limits. The inverter's own settings are on the next screen.
   allowed charge current as the battery fills, so a plan that assumes full
   power the whole way starts too late. Each row is "from this charge level,
   charge at most this percent of Maximum charge power" — for example 50% →
-  84%, 70% → 42%, 90% → 23%. Leave empty to keep the flat maximum. Needs
-  EMHASS 0.18.3 or newer; on an older add-on the table is kept but not sent.
+  84%, 70% → 42%, 90% → 23%. Leave empty to keep the flat maximum.
 - **Discharge cycle cost** / **Charge cycle cost** — what a kWh through the
   battery costs you in wear, in the same currency as your prices. The
   optimiser charges it against the profit it's chasing, so the battery only
@@ -305,20 +304,21 @@ the dynamic limits. The inverter's own settings are on the next screen.
       at now.
     - *Fixed % slider* — always aims for **Target charge level** above.
 
-    Requires EMHASS 0.18 or newer. See **[End SOC](../end_soc.md)** for
+    See **[End SOC](../end_soc.md)** for
     how *Optimized* decides.
 - **Value of leftover energy** — optional, in the collapsed *Advanced*
   section. By default the plan sells any energy above the End SOC target to
   land on it. Raise this (0 to 1) to let the plan keep spare energy instead,
   valued at that share of the import price at the end of the plan; the End
   SOC target then becomes the least it ends at. 0 keeps today's behaviour.
-  Needs EMHASS 0.18.5 or newer; on an older add-on the value is kept but not
-  sent. See [End SOC](../end_soc.md#value-of-leftover-energy).
+  See [End SOC](../end_soc.md#value-of-leftover-energy).
 - **Self-consumption handoff threshold** — how close to zero the grid power
   needs to be before the battery is handed back to plain self-consumption
   instead of a forced charge/discharge. Once handed over, grid power must
   exceed *twice* this value before the plan can force the battery again, so
-  it doesn't flip modes every recalculation.
+  it doesn't flip modes every recalculation. Default 100 W; keep it below
+  your night base load, or a small planned import is covered from the
+  battery. 0 hands over only when the plan wants no grid exchange at all.
 - **Battery SOC sensor** — read at the start of every plan.
 - **Battery power sensor** — optional, and nothing in the optimisation
   reads it: EMHASS *plans* battery power rather than measuring it. The
@@ -336,7 +336,8 @@ without a battery.
 
 - **Shared inverter (hybrid)** — on if PV and the battery share one
   inverter's AC-side limit (most home systems). Off if they're two separate
-  inverters.
+  inverters. When hybrid is on, EMHASS treats the PV forecast as **DC**
+  power (before inverter conversion losses and AC clipping).
 - **Maximum AC output (discharge/export)** / **Maximum AC input
   (charge/import)** — the shared inverter's own ceiling. Required while
   hybrid is on.

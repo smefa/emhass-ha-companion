@@ -38,10 +38,10 @@ from homeassistant.util import dt as dt_util
 from yarl import URL
 
 from . import snow_cover
-from .const import CONF_URL, DOMAIN, ML_MIN_HISTORY_DAYS, USER_PROFILE_DIR
+from .const import CONF_URL, DOMAIN, ML_MIN_HISTORY_DAYS, NET_HOUSE_LOAD_KEY, USER_PROFILE_DIR
 from .coordinator import EmhassCoordinator
 from .deferrable import live_settings
-from .health import collect_entity_references
+from .health import collect_entity_references, walk_entity_candidates
 from .infeasibility import headline
 
 # A down add-on must produce a finding, not a 30s hang -- api.py's own
@@ -617,8 +617,21 @@ def _entity_health(
         "device_class": attributes.get("device_class"),
         "state_class": attributes.get("state_class"),
         "last_changed": state.last_changed.isoformat() if state else None,
+        "last_updated": state.last_updated.isoformat() if state else None,
         "registered": registered is not None,
         "disabled": bool(registered and registered.disabled),
+        "disabled_by": registered.disabled_by if registered else None,
+        "platform": registered.platform if registered else None,
+        "config_entry_id": (
+            registered.config_entry_id if registered and registered.platform == DOMAIN else None
+        ),
+        # Third-party unique ids can contain hardware addresses or serial numbers.
+        "unique_id": (
+            registered.unique_id if registered and registered.platform == DOMAIN else None
+        ),
+        "original_name": (
+            registered.original_name if registered and registered.platform == DOMAIN else None
+        ),
     }
 
 
@@ -630,6 +643,25 @@ def _entities_section(hass: HomeAssistant, entry: ConfigEntry) -> list[dict[str,
         return [{"error": str(err)}]
 
     section: list[dict[str, Any]] = []
+    try:
+        coordinator = entry.runtime_data.coordinator
+        # Auto-created and runtime-resolved inputs are absent from stored options.
+        for path, entity_id in walk_entity_candidates(
+            coordinator.config.load.options, "resolved.load.profile_options"
+        ):
+            references.setdefault(entity_id, []).append(path)
+        payload = coordinator.data.payload or {}
+        for key in ("sensor_power_load_no_var_loads", "sensor_power_photovoltaics", "var_model"):
+            for path, entity_id in walk_entity_candidates(payload.get(key), f"last_payload.{key}"):
+                references.setdefault(entity_id, []).append(path)
+        generated = registry.async_get_entity_id(
+            "sensor", DOMAIN, f"{entry.entry_id}_{NET_HOUSE_LOAD_KEY}"
+        )
+        if generated:
+            references.setdefault(generated, []).append("generated.house_load_sensor")
+    except Exception as err:  # noqa: BLE001 - retain stored references if runtime lookup fails
+        section.append({"error": f"Runtime entity references: {err}"})
+
     for entity_id in sorted(references):
         try:
             section.append(_entity_health(hass, registry, entity_id, references[entity_id]))
@@ -763,10 +795,13 @@ def _triage_section(
             if "error" in record:
                 continue
             referenced_by = ", ".join(record["referenced_by"])
+            historical_only = all(
+                path.startswith("last_payload.") for path in record["referenced_by"]
+            )
             if not record.get("exists"):
                 findings.append(
                     {
-                        "severity": "error",
+                        "severity": "info" if historical_only else "error",
                         "message": f"{record['entity_id']} does not exist "
                         f"(referenced by {referenced_by})",
                     }
@@ -774,7 +809,7 @@ def _triage_section(
             elif record.get("state") in ("unavailable", "unknown"):
                 findings.append(
                     {
-                        "severity": "warning",
+                        "severity": "info" if historical_only else "warning",
                         "message": f"{record['entity_id']} is {record['state']} "
                         f"(referenced by {referenced_by})",
                     }

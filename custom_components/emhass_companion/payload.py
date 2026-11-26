@@ -16,6 +16,7 @@ from typing import Any
 
 from homeassistant.util import dt as dt_util
 
+from .battery_reserve import BatteryReserve
 from .const import (
     ACTION_MPC,
     BATTERY_LOCKOUT_PRICE_FACTOR,
@@ -23,6 +24,10 @@ from .const import (
     BATTERY_LOCKOUT_SELF_CONSUMPTION_BIGM,
     COST_FUN_SELF_CONSUMPTION,
     DEFAULT_COST_FUN,
+    MIN_EMHASS_VERSION,
+    MIN_EMHASS_VERSION_MAX_THERMAL_POWER,
+    MIN_EMHASS_VERSION_SOC_FLOOR,
+    MIN_EMHASS_VERSION_SUPPLY_TEMPERATURE_PROFILE,
 )
 from .effective_settings import resolve_effective_settings
 from .heat_pump_room import HeatPumpRoomConfig
@@ -38,6 +43,7 @@ from .models import (
     row_zero_start,
 )
 from .thermal import SENSE_HEAT, ThermalConfig, build_def_load_config
+from .util import version_at_least
 from .water_tank import TankShortfall, WaterTankConfig, _resolve_endpoint
 
 _LOGGER = logging.getLogger(__name__)
@@ -691,6 +697,8 @@ class PayloadInputs:
     gates sending it. Unknown/older backends keep the two-sided soft target."""
     solver_settings: dict[str, Any] | None = None
     """The user's LP solver limits (Advanced settings); None keeps the defaults."""
+    battery_reserve: BatteryReserve | None = None
+    """Optional temporary battery SoC floor (EMHASS 0.19.0+ ``soc_floor``, MPC only)."""
     row_zero_mode: str = ROW_ZERO_NEAREST
     """Rounding asserted through ``method_ts_round`` and used by every array."""
     backend_version: str | None = None
@@ -1315,6 +1323,30 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
         else:
             payload["soc_final"] = payload["soc_init"]
 
+    if (
+        inputs.battery.enabled
+        and inputs.battery_reserve is not None
+        and not inputs.battery_reserve.is_expired(inputs.now)
+    ):
+        if inputs.action == ACTION_MPC:
+            soc_floor = inputs.battery_reserve.soc_floor_array(
+                inputs.row_zero(step), step, inputs.horizon_steps
+            )
+            if soc_floor is not None:
+                if _soc_floor_supported(inputs.backend_version):
+                    payload["soc_floor"] = soc_floor
+                else:
+                    warnings.append(
+                        f"Battery reserve ({inputs.battery_reserve.target_soc_pct:.0f}% SoC) "
+                        f"needs EMHASS {MIN_EMHASS_VERSION_SOC_FLOOR} or newer; omitted from this run."
+                    )
+        else:
+            _LOGGER.debug(
+                "Battery reserve (%.0f%% SoC) applies to MPC runs only; omitted from %s.",
+                inputs.battery_reserve.target_soc_pct,
+                inputs.action,
+            )
+
     # -- settings -------------------------------------------------------------
     payload.update(
         _battery_lockout_weights(
@@ -1483,6 +1515,25 @@ def build_payload(inputs: PayloadInputs) -> PayloadResult:
         if load.subentry_id in tank_shortfalls
     )
     warnings.extend(
+        f"{load.name}: Maximum heat output requires EMHASS "
+        f"{MIN_EMHASS_VERSION_MAX_THERMAL_POWER} or newer; cap omitted."
+        for load in inputs.loads
+        if isinstance(load.thermal, HeatPumpRoomConfig)
+        and load.wants_to_run
+        and load.thermal.model.max_thermal_power_w is not None
+        and not _max_thermal_power_supported(inputs.backend_version)
+    )
+    warnings.extend(
+        f"{load.name}: Heating curve requires EMHASS "
+        f"{MIN_EMHASS_VERSION_SUPPLY_TEMPERATURE_PROFILE} or newer; "
+        "using fixed supply temperature."
+        for load in inputs.loads
+        if isinstance(load.thermal, HeatPumpRoomConfig)
+        and load.wants_to_run
+        and load.thermal.model.heating_curve
+        and not _supply_temperature_profile_supported(inputs.backend_version)
+    )
+    warnings.extend(
         f"{load.name}: its comfort temperature cannot be reached in time, so the plan "
         "aims for the warmest the heat pump can reach instead."
         for load in inputs.loads
@@ -1552,6 +1603,24 @@ def _thermal_settings(inputs: PayloadInputs, step: timedelta, load_count: int) -
     return {"def_load_config": config if config is not None else [{} for _ in range(load_count)]}
 
 
+def _max_thermal_power_supported(version: str | None) -> bool:
+    if not version:
+        return False
+    return version_at_least(version, MIN_EMHASS_VERSION_MAX_THERMAL_POWER)
+
+
+def _supply_temperature_profile_supported(version: str | None) -> bool:
+    if not version:
+        return False
+    return version_at_least(version, MIN_EMHASS_VERSION_SUPPLY_TEMPERATURE_PROFILE)
+
+
+def _soc_floor_supported(version: str | None) -> bool:
+    if not version:
+        return False
+    return version_at_least(version, MIN_EMHASS_VERSION_SOC_FLOOR)
+
+
 def _with_outdoor_forecast(
     thermal: ThermalConfig | WaterTankConfig | HeatPumpRoomConfig,
     name: str,
@@ -1568,6 +1637,17 @@ def _with_outdoor_forecast(
     series to read.
     """
     if isinstance(thermal, HeatPumpRoomConfig):
+        if not inputs.backend_version or not version_at_least(
+            inputs.backend_version, MIN_EMHASS_VERSION
+        ):
+            raise PayloadError(
+                f"{name}: heat pump room planning requires EMHASS {MIN_EMHASS_VERSION} "
+                "or newer with a reported version. Upgrade EMHASS and reload."
+            )
+        if not _max_thermal_power_supported(inputs.backend_version):
+            thermal = thermal.without_max_thermal_power()
+        if not _supply_temperature_profile_supported(inputs.backend_version):
+            thermal = thermal.without_heating_curve()
         start = inputs.row_zero(step)
         series = inputs.outdoor_temperature
         if not series:
@@ -1723,8 +1803,6 @@ def _park(load: DeferrableLoad) -> _LoadSettings:
 
 
 def _sequence_version_supported(version: str) -> bool:
-    from .util import version_at_least
-
     return version_at_least(version, "0.18.8")
 
 
@@ -1987,8 +2065,6 @@ def _deferrable_settings(
 
     masks = None
     if inputs.load_availability:
-        from .util import version_at_least
-
         if inputs.action != ACTION_MPC or not version_at_least(
             inputs.backend_version or "", "0.18.9"
         ):

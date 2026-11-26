@@ -68,6 +68,17 @@ told to stay inside. A tank heated in a burst while power is cheap and then
 coasting down towards its floor is the plan working. A tank that has a
 temperature sensor also gets its recorded reading drawn before *now*.
 
+## Battery reserve card
+
+```yaml
+type: custom:emhass-reserve-card
+```
+
+Schedule a temporary minimum battery state of charge (EMHASS 0.19.0+
+`soc_floor`), for example before a storm or planned outage. Includes one-click
+presets, a target SoC slider bounded to your battery's configured limits,
+start/end pickers, a live status countdown, and Clear / Replan controls.
+
 ## Adding a card
 
 In a dashboard, **Add card → search for "EMHASS"**, or paste the YAML above

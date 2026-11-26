@@ -1,10 +1,8 @@
 # End SOC
 
-*Backend requirement: EMHASS **≥ v0.18.0**. From 0.18 the `soc_final`
-constraint is soft (deviation penalised in currency, ~100× the dearest
-import slot), so an over-ambitious target degrades with a warning instead
-of failing the run. On ≤ 0.17.x the same constraint is a hard equality and
-an unreachable target makes the whole optimisation infeasible.*
+On supported EMHASS versions, the `soc_final` constraint is soft. The
+optimiser penalises deviation in currency at about 100 times the dearest
+import slot, so an unreachable target produces a warning.
 
 Every optimisation plans toward a battery level at the end of its horizon —
 **End SOC** is how that level is chosen, set under **Configure → Battery**.
@@ -58,8 +56,7 @@ to borrow the load shape from.
 
 ## Value of leftover energy
 
-*Backend requirement: EMHASS **≥ v0.18.5**. Advanced section of
-**Configure → Battery**, off by default.*
+*Advanced section of **Configure → Battery**, off by default.*
 
 By default the End SOC target is a two-sided aim: ending the plan below it
 **or above it** is penalised, so the optimiser sells any spare energy to land
@@ -77,8 +74,8 @@ unchanged: ending below the target still costs.
 
 So with this on, `end_soc_target` is *the least the plan ends at*, not where
 it ends. The sensor says so: its `reason` gains an "At least this" sentence
-and a `reward_factor` attribute appears. If a value is set but the add-on is
-older than 0.18.5, nothing is sent and the sensor shows
+and a `reward_factor` attribute appears. If a value is set on an existing entry still using an unsupported
+backend older than 0.18.5, nothing is sent and the sensor shows
 `reward_inactive: needs EMHASS 0.18.5` instead. The setting is kept and takes
 effect when the add-on is upgraded.
 

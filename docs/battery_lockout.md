@@ -88,7 +88,7 @@ this load's window": the two are complements, not alternatives.
 
 **It does not close the self-consumption gap.** The executor hands the
 battery to the inverter's own logic whenever a plan row's `|P_grid|` falls
-inside `self_consume_threshold_w` (300 W by default) — regardless of what the
+inside `self_consume_threshold_w` (100 W by default) — regardless of what the
 plan says or any lockout price. For an 8 kW car charge that band is
 irrelevant; for a small flagged load on a sunny day it is real, and no setting
 here changes it. A `battery_discharge_power_max` override or an executor-side

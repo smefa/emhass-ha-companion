@@ -49,7 +49,7 @@ other profile kind uses. Several ship built in:
 - **Dala Energi** (`network/dala_energi`) — two independent mean-of-top-3
   hourly peaks every month (höglast on weekday days, låglast otherwise; summer
   only equalises the rates) as a two-component demand charge, plus a flat
-  transmission energy fee. Needs EMHASS 0.18.3+ and a Workday sensor. Set the
+  transmission energy fee. Requires a Workday sensor. Set the
   time resolution to 60 minutes.
 - **Flat demand charge** (`network/manual_demand_charge`) — one kr/kW charge on
   the worst import peak over the horizon. No window and no peak memory; a rough
@@ -223,7 +223,9 @@ turns out wrong).
 ### Version gating
 
 Both `current_period_peak` and the window that restricts the charge to its
-own hours are runtime parameters EMHASS documents as MPC-only:
+own hours are runtime parameters EMHASS documents as MPC-only. The table
+covers both supported backends (0.18.9 and newer) and legacy behavior for
+existing entries that still point to older backends.
 
 | Backend | What happens |
 |---|---|

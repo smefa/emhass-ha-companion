@@ -50,7 +50,7 @@ import sys
 # Mirrors const.MIN_EMHASS_VERSION -- duplicated rather than imported because
 # this script must keep working outside a full checkout, and const.py pulls
 # in the rest of the integration's package layout.
-MIN_EMHASS_VERSION = "0.17.9"
+MIN_EMHASS_VERSION = "0.18.9"
 
 # Mirrors const.DEFAULT_MPC_INTERVAL / const.STALE_PLAN_FACTOR, used only as
 # the fallback when a bundle's own entry.options does not carry a configured
@@ -204,8 +204,7 @@ def check_backend(bundle: dict, report: Report) -> None:
         report.add(
             Severity.CRITICAL,
             f"EMHASS reports version {version}, below the minimum this integration supports",
-            f"Needs at least {MIN_EMHASS_VERSION} -- the JSON plan API this integration relies "
-            "on (GET /api/v1/plan, /api/v1/last-run, /healthz) was added there.",
+            f"Update EMHASS to {MIN_EMHASS_VERSION} or newer and reload the integration.",
         )
 
 

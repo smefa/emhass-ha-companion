@@ -83,6 +83,7 @@ from .const import (
     CONF_GROUP_MAX_POWER,
     CONF_GROUP_MUTUAL_EXCLUSION,
     CONF_HEATER_COP,
+    CONF_HEATING_CURVE,
     CONF_HEATING_RATE,
     CONF_HORIZON_HOURS,
     CONF_HOT_WATER_PERIOD_COUNT,
@@ -100,6 +101,7 @@ from .const import (
     CONF_MAIN_FUSE_A,
     CONF_MAX_STARTUPS,
     CONF_MAX_TEMPERATURE,
+    CONF_MAX_THERMAL_POWER,
     CONF_METERING,
     CONF_METERING_ENABLED,
     CONF_MINIMUM_OFF_TIME,
@@ -249,6 +251,7 @@ from .heat_pump_room import (
     DEFAULT_SUPPLY_TEMPERATURE,
     MAX_INERTIA_HOURS,
     HeatPumpModel,
+    parse_heating_curve,
 )
 from .metering import async_energy_dashboard_defaults, has_grid_import_meter
 from .models import parse_charge_power_derating
@@ -1998,6 +2001,7 @@ def heat_pump_room_schema(
             )
         )
     )
+    schema[_optional_blank(CONF_HEATING_CURVE, defaults)] = selector.TextSelector()
     schema.update({key: value for key, value in room_fields.items() if str(key) in entity_fields})
     basic = {
         key: _FiniteNumberSelector(value.config)
@@ -2029,6 +2033,9 @@ def heat_pump_room_schema(
                     unit_of_measurement="h",
                 ),
                 optional_number(CONF_WINDOW_AREA, min=0, max=1000, unit_of_measurement="m²"),
+                optional_number(
+                    CONF_MAX_THERMAL_POWER, min=100, max=100000, unit_of_measurement="W"
+                ),
                 number(CONF_SHGC, DEFAULT_SHGC, min=0, max=1),
             )
         ),
@@ -2421,33 +2428,46 @@ class ThermalLoadSubentryFlow(DeferrableLoadSubentryFlow):
                 for key in (
                     CONF_POWER_SENSOR,
                     CONF_CONTROL_ENTITY,
+                    CONF_HEATING_CURVE,
                     CONF_CONSTANT_COP,
                     CONF_SOURCE_TEMPERATURE,
                     CONF_WINDOW_AREA,
+                    CONF_MAX_THERMAL_POWER,
                 ):
                     if key not in data:
                         merged.pop(key, None)
                 try:
-                    HeatPumpModel.from_data(merged)
+                    curve = parse_heating_curve(merged.get(CONF_HEATING_CURVE))
                 except ValueError:
-                    errors["base"] = "invalid_heat_pump_value"
+                    errors[CONF_HEATING_CURVE] = "invalid_heating_curve"
                 else:
-                    if initial and not (
-                        data[CONF_SETBACK_TEMPERATURE]
-                        <= data[CONF_COMFORT_TEMPERATURE]
-                        <= data[CONF_MAX_TEMPERATURE]
+                    if curve and (
+                        merged.get(CONF_CONSTANT_COP) is not None
+                        or merged.get(CONF_SOURCE_TEMPERATURE) is not None
                     ):
-                        errors["base"] = "invalid_heat_pump_band"
+                        errors[CONF_HEATING_CURVE] = "heating_curve_with_fixed_cop"
                     else:
-                        merged[CONF_SENSE] = SENSE_HEAT
-                        if initial:
-                            return self._create({**merged, **self._kind})
-                        return self.async_update_and_abort(
-                            self._get_entry(),
-                            self._get_reconfigure_subentry(),
-                            title=merged[CONF_NAME],
-                            data=merged,
-                        )
+                        try:
+                            HeatPumpModel.from_data(merged)
+                        except ValueError:
+                            errors["base"] = "invalid_heat_pump_value"
+                        else:
+                            if initial and not (
+                                data[CONF_SETBACK_TEMPERATURE]
+                                <= data[CONF_COMFORT_TEMPERATURE]
+                                <= data[CONF_MAX_TEMPERATURE]
+                            ):
+                                errors["base"] = "invalid_heat_pump_band"
+                            else:
+                                merged[CONF_SENSE] = SENSE_HEAT
+                                if initial:
+                                    return self._create({**merged, **self._kind})
+                                return self.async_update_and_abort(
+                                    self._get_entry(),
+                                    self._get_reconfigure_subentry(),
+                                    title=merged[CONF_NAME],
+                                    data=merged,
+                                )
         return self.async_show_form(
             step_id=step_id,
             data_schema=schema,
