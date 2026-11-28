@@ -161,7 +161,7 @@ The inverter's own limits and losses. This step is always there, battery or not.
 
 | Setting | Meaning |
 |---|---|
-| Shared inverter (hybrid) | On if PV and the battery share one inverter's AC-side power limit — true for most home battery systems. Off if they are two independent inverters, each with its own limit |
+| Shared inverter (hybrid) | On if PV and the battery share one inverter's AC-side power limit — true for most home battery systems. Off if they are two independent inverters, each with its own limit. Note: when hybrid is on, EMHASS treats the PV forecast as **DC** power (before inverter conversion losses and AC clipping) |
 | Maximum AC output / input | Only asked if hybrid — the shared inverter's own throughput ceiling, separate from the battery's own charge/discharge limits |
 | DC to AC / AC to DC efficiency | Conversion losses, in the collapsed *Advanced settings* section |
 | Live PV power sensor | Optional, in *Advanced settings*. See "Blending live PV/load into MPC" below |
@@ -188,11 +188,11 @@ The inverter's own limits and the live PV sensor are on the
 | That sensor is positive when charging | Which way round it counts. EMHASS's own convention is the opposite — positive is discharge — and getting it wrong labels a charging battery as discharging |
 | Usable capacity | In Wh |
 | Maximum charge / discharge power | The battery's own limits |
-| Charge slower as the battery fills | Optional SOC taper: from this charge level, charge at most this % of max. Empty keeps the flat maximum. Needs EMHASS 0.18.3+ |
+| Charge slower as the battery fills | Optional SOC taper: from this charge level, charge at most this % of max. Empty keeps the flat maximum. |
 | Minimum / maximum charge level | The optimiser will not plan the battery outside this range |
 | Target charge level | Where the optimiser aims to leave the battery at the end of the horizon. What it means depends on End SOC below |
 | End SOC | How that end-of-horizon level is chosen. See below |
-| Value of leftover energy | Optional, in Advanced. How much a kWh left above the End SOC target is worth, as a share of the import price at the end of the plan. 0 keeps the old behaviour. Needs EMHASS 0.18.5+ |
+| Value of leftover energy | Optional, in Advanced. How much a kWh left above the End SOC target is worth, as a share of the import price at the end of the plan. 0 keeps the old behaviour. |
 | Discharge / charge cycle cost | What a kWh through the battery costs in wear. See below |
 | Low / high charge comfort level | Levels the plan prefers to stay between, softly. See below |
 | Cost of sitting below / above it | What that preference is worth, per kWh past the level per hour |
@@ -261,7 +261,7 @@ tomorrow. Three modes:
   The old fixed behaviour.
 - **Fixed % slider** — always aims for Target charge level exactly.
 
-Requires EMHASS 0.18 or newer. The resulting target, and the reasoning behind
+The resulting target, and the reasoning behind
 it, is published on the **End SOC target** sensor. See
 [End SOC](end_soc.md) for how *Optimized* decides.
 
@@ -269,8 +269,7 @@ it, is published on the **End SOC target** sensor. See
 default. With 0 the plan is penalised for ending above the End SOC target as
 well as below it, so it sells spare energy to land on the target. Above 0, each
 kWh left above the target is rewarded at that share of the import price in the
-plan's last timestep, and the target becomes the least the plan ends at. Needs
-EMHASS 0.18.5 or newer; on an older add-on the value is kept but not sent. See
+plan's last timestep, and the target becomes the least the plan ends at. See
 [Value of leftover energy](end_soc.md#value-of-leftover-energy).
 
 **Self-consumption handoff threshold.** When the plan's grid power is within
@@ -280,6 +279,10 @@ large planned charge or discharge is overridden, because self-consumption
 tracks real-time PV and load better than a forecast can at small imbalances.
 Once handed over, grid power must exceed **twice** this value before the plan
 can force the battery again, so it doesn't flip modes every recalculation.
+The default is 100 W. Keep it below your night base load: a planned import
+smaller than the threshold is covered from the battery, even in hours the plan
+wanted to save the charge for. 0 hands over only when the plan wants no grid
+exchange at all.
 This is not the same as the charge-level limits above, which only bound what
 the optimiser may plan *between*.
 

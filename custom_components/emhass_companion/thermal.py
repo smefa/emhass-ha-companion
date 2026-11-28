@@ -14,7 +14,7 @@ wall-clock comfort window into those lists.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, time, timedelta, tzinfo
 from itertools import pairwise
@@ -144,6 +144,56 @@ class ThermalConfig:
     clamp_floors: bool = False
     """Lower floors the load cannot reach from ``current_temperature`` in time."""
 
+    nominal_power_w: float = 0.0
+    """The load's nominal electrical power, to weigh :attr:`prior_heat` the way
+    EMHASS does (``heating_rate`` is degrees per hour *at* this power). 0 leaves
+    the heat in flight out of the local reachability bound."""
+
+    prior_heat: tuple[float, ...] | None = None
+    """Measured electrical input (W) for each of the last ``lag_steps`` steps
+    before row zero, oldest first -- heat already on its way under
+    ``thermal_inertia`` (EMHASS ``prior_heat``). None when not measured."""
+
+    def lag_steps(self, step: timedelta) -> int:
+        """Whole steps of ``thermal_inertia``, rounded down exactly as EMHASS does.
+
+        EMHASS computes ``int(thermal_inertia / time_step)`` with the step in
+        hours, so the same float expression keeps the two counts identical.
+        """
+        if self.thermal_inertia <= 0:
+            return 0
+        return max(0, int(self.thermal_inertia / (step / timedelta(hours=1))))
+
+    def _achievable(
+        self,
+        current_temperature: float,
+        step: timedelta,
+        index: int,
+        *,
+        unmeasured_flat_out: bool,
+    ) -> float:
+        """An upper bound on the temperature at timestep ``index``.
+
+        Gain only, no heat loss -- see :meth:`first_unreachable_step`. With a
+        lag of L steps the power planned at step j first moves the temperature
+        at j + 1 + L, so timestep ``index`` holds at most ``index - L`` steps of
+        planned heat plus everything already in flight. Unmeasured in-flight
+        heat is either assumed flat out (a physical upper bound, so a warning
+        never fires on heat that may already be on its way) or taken as zero,
+        which is what EMHASS solves with when no ``prior_heat`` is sent.
+        """
+        step_hours = step / timedelta(hours=1)
+        lag = self.lag_steps(step)
+        planned = max(0, index - lag)
+        if lag == 0:
+            in_flight = 0.0
+        elif self.prior_heat is None or self.nominal_power_w <= 0:
+            in_flight = float(lag) if unmeasured_flat_out else 0.0
+        else:
+            window = _lag_window(self.prior_heat, lag)
+            in_flight = sum(window) / self.nominal_power_w
+        return current_temperature + self.heating_rate * step_hours * (planned + in_flight)
+
     def with_outdoor_forecast(self, outdoor: Iterable[float]) -> ThermalConfig:
         """This load with its heating rate scaled for the forecast's coldest hour.
 
@@ -267,7 +317,9 @@ class ThermalConfig:
         Mirrors only the gain term of EMHASS's thermal model (see
         docs/thermal_model.md and optimization.py's
         ``_add_thermal_load_constraints``): at most ``heating_rate`` degrees
-        per hour, for however many hours are left until each timestep. If
+        per hour, for however many hours are left until each timestep, with
+        ``thermal_inertia`` delaying planned heat and ``prior_heat`` filling
+        the delay (see :meth:`_achievable`). If
         EMHASS's formula for that term changes, this is the one line to
         update to match it -- everything else here is scheduling, not
         physics.
@@ -285,9 +337,12 @@ class ThermalConfig:
         minimums, _ = self.comfort_band(grid_start, step, horizon_steps)
         origin = grid_start.astimezone(UTC)
 
-        for index in range(1, horizon_steps):
-            elapsed_hours = (step * index) / timedelta(hours=1)
-            achievable = current_temperature + self.heating_rate * elapsed_hours
+        # EMHASS leaves the floors of steps 1..L unbounded (no decision reaches
+        # them), so the first floor it holds is at L + 1.
+        for index in range(1 + self.lag_steps(step), horizon_steps):
+            achievable = self._achievable(
+                current_temperature, step, index, unmeasured_flat_out=True
+            )
             if achievable < minimums[index]:
                 return (
                     dt_util.as_local(origin + step * index),
@@ -306,12 +361,9 @@ class ThermalConfig:
             # reachable under the full rate can now sit above the flat-out
             # trajectory. EMHASS holds floors hard, which would make the whole
             # solve infeasible; ask for what the load can still deliver.
+            current = self.current_temperature
             minimums = [
-                min(
-                    floor,
-                    self.current_temperature
-                    + self.heating_rate * (step * index) / timedelta(hours=1),
-                )
+                min(floor, self._achievable(current, step, index, unmeasured_flat_out=False))
                 if index
                 else floor
                 for index, floor in enumerate(minimums)
@@ -326,7 +378,46 @@ class ThermalConfig:
         }
         if self.current_temperature is not None:
             config["start_temperature"] = self.current_temperature
+        if self.prior_heat is not None and self.lag_steps(step) > 0:
+            config["prior_heat"] = [round(value, 1) for value in self.prior_heat]
         return config
+
+
+def _lag_window(prior_heat: Sequence[float], lag: int) -> list[float]:
+    """``prior_heat`` aligned to a ``lag``-step queue, as EMHASS aligns it.
+
+    A short list is right-aligned (earlier steps are 0); a long one keeps its
+    most recent ``lag`` values.
+    """
+    values = [max(0.0, float(value)) for value in prior_heat][-lag:] if lag else []
+    return [0.0] * (lag - len(values)) + values
+
+
+def step_average_power(
+    readings: Sequence[tuple[datetime, float | None]],
+    window_starts: Sequence[datetime],
+    step: timedelta,
+) -> tuple[float, ...]:
+    """Time-weighted mean power (W) over each ``[start, start + step)`` window.
+
+    ``readings`` are recorder state changes in time order, each holding until
+    the next; the last one holds through the end of every window, which is
+    what the load is doing until it reports otherwise (a run between grid
+    boundaries reads the final step up to row zero). A reading that is
+    unavailable (None) or negative counts as 0 W, and so does any stretch
+    before the first reading -- EMHASS's documented choice for ``prior_heat``.
+    """
+    averages: list[float] = []
+    for start in window_starts:
+        end = start + step
+        energy = 0.0
+        for position, (moment, watts) in enumerate(readings):
+            following = readings[position + 1][0] if position + 1 < len(readings) else end
+            begin, finish = max(moment, start), min(following, end)
+            if finish > begin and watts is not None and watts > 0:
+                energy += watts * (finish - begin).total_seconds()
+        averages.append(energy / step.total_seconds())
+    return tuple(averages)
 
 
 def _comfort_starts(wall_time: datetime, timezone: tzinfo) -> list[datetime]:

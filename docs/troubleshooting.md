@@ -230,6 +230,17 @@ gap* trades plan quality for speed: a higher value finishes sooner, a lower one
 finds a better plan but takes longer. These values are sent with every run and
 replace what is stored in EMHASS.
 
+**"EMHASS solver reached its time limit"** (EMHASS status *Optimal (Incumbent)*).
+The solver ran out of time but already held a plan that meets every constraint,
+including the on/off decisions. The integration follows it as usual; it may
+just not be the cheapest plan. Raise *Solver time limit* if this happens often.
+
+**"EMHASS plan is a fallback, not a full solve"** (EMHASS status *Optimal
+(Relaxed)*). The full problem could not be solved, so EMHASS dropped the on/off
+decisions to find any plan at all. That plan may not be one the loads can
+follow, so while control is on the battery goes back to self-consumption and
+deferrable loads are switched off until a full solve succeeds.
+
 **"The optimisation problem is infeasible."** EMHASS itself only says
 "infeasible", for the whole problem. When that happens, the integration checks
 the request it just sent and the repair issue names the most likely cause,
@@ -256,6 +267,13 @@ The checks look for the patterns that actually turn out to cause this:
 - forecast arrays that disagree on length or have gaps,
 - power deficits or surpluses that no combination of grid, battery and
   inverter limits can cover.
+
+A thermal room with a **Response delay** can also go infeasible when it starts
+just above its minimum temperature: without knowing about heat already on its
+way, EMHASS models the delay as unheated. Give such a load a **Running sensor**
+that measures the room heating's power. MPC runs then send the sensor's recent
+average power as `prior_heat`, which you can see in the request in
+diagnostics.
 
 Each check names the EMHASS constraint it mirrors. They cannot prove a plan
 *is* feasible, only find reasons it might not be.

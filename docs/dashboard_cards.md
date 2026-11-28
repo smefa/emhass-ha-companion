@@ -106,6 +106,24 @@ They are drawn as inline SVG with no charting library and no build step, and
 they use Home Assistant's energy-dashboard CSS variables, so they follow your
 theme in both light and dark mode.
 
+## Battery reserve card
+
+**`custom:emhass-reserve-card`** — schedule a temporary minimum battery SoC
+(EMHASS 0.19.0+ `soc_floor`), for example to hold a high charge ahead of a
+storm or planned outage. Includes one-click presets (*Storm prep*, *Tonight*,
+*Hold now*), a target SoC slider bounded to your configured battery limits,
+start/end pickers, a live status banner with countdown, and **Clear** /
+**Replan now** buttons.
+
+```yaml
+type: custom:emhass-reserve-card
+```
+
+| Option | Default | Does |
+| --- | --- | --- |
+| `title` | `Battery reserve` | the card heading |
+| `entity` | auto-detected (`sensor.*_battery_reserve`) | override the battery reserve sensor entity |
+
 > If you manage Lovelace resources in YAML rather than through the UI, the
 > integration cannot register the module for you. It logs the exact snippet to
 > add at startup; look for it in the log after a restart.

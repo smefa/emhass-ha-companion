@@ -135,8 +135,8 @@ as a list instead, one value in W per optimisation step:
   the cycle has started. A later step may be 0 W, for a soak or a pause.
 - *Hours needed* must cover at least one step per value. A list longer
   than the runtime is refused in the form.
-- Needs EMHASS 0.18.8 or newer. On an older EMHASS the load is left out of
-  the plan with a warning, and **Run now** is unavailable.
+- On an existing entry still using an unsupported backend older than 0.18.8,
+  the load is left out of the plan with a warning and **Run now** is unavailable.
 - *Every day* and *On demand* loads only. Spare-solar and thermal loads
   take a single value.
 

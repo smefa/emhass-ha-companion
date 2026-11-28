@@ -16,10 +16,8 @@ NETWORK_TARIFF_DOCS_URL: Final = (
 
 # --- EMHASS backend contract -------------------------------------------------
 
-# Minimum EMHASS version. 0.17.9 introduced GET /api/v1/plan, /api/v1/last-run and
-# /healthz, which this integration depends on: we read the plan as JSON instead of
-# using EMHASS's publish-data machinery. Below this, there is no supported path.
-MIN_EMHASS_VERSION: Final = "0.17.9"
+# 0.18.9 fixes degree-day heating demand when reusing a cached problem (EMHASS #1321).
+MIN_EMHASS_VERSION: Final = "0.18.9"
 
 # We pin to major 1 of the plan output schema (docs/plan_output_schema.md). A major
 # bump means a column was renamed/removed or a unit/sign convention changed, so
@@ -384,6 +382,10 @@ CONF_INERTIA_TIME_CONSTANT: Final = "thermal_inertia_time_constant"
 # Optional passive solar gain: EMHASS adds window_area * shgc * GHI to the room's heat.
 CONF_WINDOW_AREA: Final = "window_area"
 CONF_SHGC: Final = "shgc"
+# Optional hard ceiling on delivered heat (W thermal); EMHASS thermal_battery max_thermal_power.
+CONF_MAX_THERMAL_POWER: Final = "max_thermal_power"
+# Optional outdoor->supply water temperature curve for per-step supply_temperature (EMHASS 0.19+).
+CONF_HEATING_CURVE: Final = "heating_curve"
 CONF_TANK_VOLUME: Final = "tank_volume_litres"
 # A common domestic hot-water cylinder; only the form's starting value.
 DEFAULT_TANK_VOLUME: Final = 200
@@ -565,7 +567,7 @@ SOURCE_BLIND_GRACE: Final = timedelta(minutes=15)
 # want any grid exchange at all", read straight from the plan's own P_grid
 # column. Not the same question as soc_min/soc_max -- those are planning
 # limits, this is a real-time mode choice.
-DEFAULT_SELF_CONSUME_THRESHOLD_W: Final = 300
+DEFAULT_SELF_CONSUME_THRESHOLD_W: Final = 100
 # Once in self-consumption, P_grid must clear threshold * this factor before
 # forcing resumes -- damps boundary chatter a single static threshold would
 # let through on every recalculation.
@@ -893,6 +895,7 @@ PHASE_HEADROOM_KEY: Final = "phase_headroom"
 PHASE_GUARD_ACTIVE_KEY: Final = "phase_guard_active"
 # Diagnostic: the PV forecast is being scaled down for snow on the panels.
 SNOW_COVER_KEY: Final = "snow_cover"
+BATTERY_RESERVE_KEY: Final = "battery_reserve"
 DEMAND_CHARGE_RATE_KEY: Final = "demand_charge_rate"
 # Always-present diagnostic: is a network tariff selected, resolved and, if it
 # has a demand charge, actually being tracked.
@@ -941,6 +944,21 @@ MIN_EMHASS_VERSION_SOC_FINAL_REWARD: Final = "0.18.5"
 # the ones the Companion sends instead of replacing them, first shipped in 0.18.5.
 EMHASS_CONF_HEAT_TOPOLOGY: Final = "heat_topology"
 MIN_EMHASS_VERSION_HEAT_TOPOLOGY_EXTEND: Final = "0.18.5"
+
+# The EMHASS release ``max_thermal_power`` on a ``thermal_battery`` load
+# shipped in (PR #1369). Below this the cap is stored but omitted from
+# payloads and reachability checks so they match what EMHASS runs.
+MIN_EMHASS_VERSION_MAX_THERMAL_POWER: Final = "0.19.0"
+
+# The EMHASS release per-step ``supply_temperature`` lists on a
+# ``thermal_battery`` load shipped in (PR #1369). Below this a configured
+# heating curve is stored but omitted so payloads send the scalar fallback.
+MIN_EMHASS_VERSION_SUPPLY_TEMPERATURE_PROFILE: Final = "0.19.0"
+
+# The EMHASS release soft per-step ``soc_floor`` on ``naive-mpc-optim``
+# shipped in (PR #1397). Below this a configured battery reserve is stored
+# but omitted from MPC payloads with a warning.
+MIN_EMHASS_VERSION_SOC_FLOOR: Final = "0.19.0"
 
 # --- Cost and savings ---------------------------------------------------------
 #
@@ -1185,13 +1203,18 @@ INFEASIBLE_CAUSE_CODES: Final = frozenset(
 # A run that errored outright (EMHASS unreachable, rejected the request, or
 # raised internally) rather than merely failing to find a feasible plan.
 ISSUE_RUN_FAILED: Final = "run_failed"
-# EMHASS reports these as a healthy run, but the plan is a fallback: an
-# "Optimal (Incumbent)" is a time-limited solve's best feasible plan, and an
-# "Optimal (Relaxed)" is one found with the on/off decisions dropped. The
-# coordinator flags them and the executor does not act on them until a full
-# solve arrives.
-DEGRADED_OPTIM_STATUSES: Final = frozenset({"Optimal (Incumbent)", "Optimal (Relaxed)"})
+# EMHASS reports these as a healthy run, but the plan is a fallback:
+# "Optimal (Relaxed)" is one found with the on/off decisions dropped, so it
+# may not be a schedule the loads can follow. The coordinator flags it and the
+# executor does not act on it until a full solve arrives.
+DEGRADED_OPTIM_STATUSES: Final = frozenset({"Optimal (Relaxed)"})
 ISSUE_PLAN_DEGRADED: Final = "plan_degraded"
+# "Optimal (Incumbent)": the solver hit lp_solver_timeout holding a plan that
+# meets every constraint, on/off decisions included, but is not proven within
+# lp_solver_mip_rel_gap of the cheapest. It is followed; the repair only says
+# the time limit was reached.
+TIME_LIMITED_OPTIM_STATUS: Final = "Optimal (Incumbent)"
+ISSUE_PLAN_TIME_LIMITED: Final = "plan_time_limited"
 # End SOC's Optimized mode has little or no PV forecast past the horizon, but
 # the selected Solcast profile could provide one more day by adding its day-3
 # sensor. A nudge with a one-click fix, not an error -- the heuristic already

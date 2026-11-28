@@ -17,7 +17,7 @@ You're offered every `network`-kind profile available — five ship in-box:
   hourly peaks.
 - **Dala Energi** — a Swedish dual-peak tariff: two independently billed
   mean-of-top-3 peaks every month (höglast on weekday days, låglast at all
-  other times), plus a flat transmission fee. Needs EMHASS 0.18.3 or newer.
+  other times), plus a flat transmission fee.
 - **Amber Electric** — an Australian demand tariff: a single daily window in
   which your highest 30-minute draw sets a charge for the whole month.
 - **Austria SNE-G-V** — the new Austrian network tariff: your highest
@@ -148,31 +148,14 @@ New sensors appear on the integration's hub device:
 - **Peak headroom** — how much more you can draw right now before setting a
   new peak. This is the one worth wiring into your own automations — e.g. hold
   an EV charger back when it's tight.
-- **Peak target** (number, under Configure) — a manual ceiling used as a
-  fallback on an EMHASS add-on older than 0.18.1, which can't yet price a
-  windowed demand charge directly (see the note below). Pre-filled from your
-  current period's peak; adjust it if you want the plan to hold under a
-  different level.
+- **Peak target** (number, under Configure) — a manual ceiling pre-filled
+  from your current period's peak. Adjust it if you want the plan to hold
+  under a different level.
 
-!!! note "Why the plan sometimes just holds a hard limit"
-
-    Pricing a demand charge so the optimiser can trade it off against energy
-    cost needs a feature (a "demand window mask") that reached a stable EMHASS
-    release in **0.18.1**. On that version or newer, a tariff with a real time
-    window (the Göteborg, Dala and Amber profiles have one) prices cleanly. On an older
-    add-on it's enforced as a hard ceiling using the **Peak target** number
-    instead of a price — it works, but it's a blunter tool than the priced
-    version.
-
-    On 0.18.1, the priced peak is still compared over the optimiser's own
-    step rather than your tariff's own measurement window, which nudges the
-    plan to shave a bit harder than the bill actually requires. **EMHASS
-    0.18.2 or newer** closes that gap — the peak is priced on the same
-    measurement interval your tariff bills on. **0.18.3+** unlocks
-    multi-component demand charges (two independently billed peaks, as on
-    Dala Energi); mean-of-top-3 stays one component — see
-    [Network tariffs, "Version gating"](../network_tariffs.md#version-gating)
-    for the full picture.
+Supported EMHASS versions price the peak on the tariff's own measurement
+interval and support independent demand-charge components. Existing entries on
+older backends may enforce the window as a hard limit using **Peak target**.
+See the [network tariff compatibility table](../network_tariffs.md#version-gating).
 
 ## What this doesn't do
 

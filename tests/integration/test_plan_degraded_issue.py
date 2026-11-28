@@ -1,11 +1,14 @@
 """A fallback solve is published, flagged, and kept away from the hardware.
 
-EMHASS answers a time-limited solve with its best incumbent and a failed full
-solve with a relaxed plan, and reports both with status "ok". The coordinator
-still publishes them so the sensors can show them, but marks them as degraded
-and raises a repair. Nothing that drives hardware follows them: the should-run
-sensors go unknown, and the next request commits no load to them. The
-executor's side is in test_executor.py. A full solve clears all of it.
+EMHASS answers a failed full solve with a relaxed plan and reports it with
+status "ok". The coordinator still publishes it so the sensors can show it,
+but marks it as degraded and raises a repair. Nothing that drives hardware
+follows it: the should-run sensors go unknown, and the next request commits no
+load to it. The executor's side is in test_executor.py. A full solve clears all
+of it.
+
+A time-limited solve's incumbent meets every constraint, so it is followed
+like a full solve; only a separate repair points at the solver time limit.
 """
 
 from __future__ import annotations
@@ -26,6 +29,7 @@ from custom_components.emhass_companion.const import (
     CONF_NOMINAL_POWER,
     DOMAIN,
     ISSUE_PLAN_DEGRADED,
+    ISSUE_PLAN_TIME_LIMITED,
     SUBENTRY_TYPE_DEFERRABLE,
 )
 from custom_components.emhass_companion.coordinator import EmhassCoordinator, EmhassData
@@ -33,7 +37,8 @@ from custom_components.emhass_companion.deferrable import DeferrableRegistry
 from custom_components.emhass_companion.models import LastRun, Plan, PlanRow
 
 STEP = timedelta(minutes=15)
-FALLBACK_STATUSES = ["Optimal (Relaxed)", "Optimal (Incumbent)"]
+FALLBACK_STATUSES = ["Optimal (Relaxed)"]
+INCUMBENT = "Optimal (Incumbent)"
 
 
 def _coordinator(hass: HomeAssistant) -> EmhassCoordinator:
@@ -199,3 +204,44 @@ async def test_a_fallback_plan_commits_no_load(hass: HomeAssistant, optim_status
 
     assert car.plan_scheduled_now is False
     assert car.plan_power_now_w == 0.0
+
+
+def _time_limited_issue(hass: HomeAssistant) -> ir.IssueEntry | None:
+    return ir.async_get(hass).async_get_issue(DOMAIN, ISSUE_PLAN_TIME_LIMITED)
+
+
+async def test_a_time_limited_solve_is_followed_with_its_own_repair(
+    hass: HomeAssistant,
+) -> None:
+    coordinator = _coordinator(hass)
+    coordinator.client.async_optimize = _answer(INCUMBENT)
+
+    data = await coordinator.async_run(ACTION_MPC)
+
+    assert data.plan is not None
+    assert coordinator.plan_is_degraded is False
+    assert _issue(hass) is None
+    issue = _time_limited_issue(hass)
+    assert issue is not None
+    assert issue.severity == ir.IssueSeverity.WARNING
+    assert issue.translation_placeholders == {"action": ACTION_MPC}
+
+    coordinator.client.async_optimize = _answer("Optimal")
+    await coordinator.async_run(ACTION_MPC)
+    assert _time_limited_issue(hass) is None
+
+
+async def test_should_run_and_commitments_follow_a_time_limited_solve(
+    hass: HomeAssistant,
+) -> None:
+    coordinator = _coordinator(hass)
+    car = _car(coordinator)
+    coordinator.data = EmhassData(
+        plan=_plan(INCUMBENT, car_power=10000.0),
+        load_order=[car.subentry_id],
+        last_success=dt_util.utcnow(),
+    )
+
+    assert LoadShouldRunBinarySensor(coordinator, car).is_on is True
+    await coordinator._build(ACTION_MPC)
+    assert car.plan_scheduled_now is True

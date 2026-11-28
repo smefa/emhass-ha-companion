@@ -218,7 +218,7 @@
               "battery_stress_segments": "Hur fint den kvadratiska kostnadskurvan nedan approximeras. Högre följer den verkliga kostnaden närmare men gör varje optimering något långsammare; 10 är en bra avvägning och spelar bara roll när en effektkostnad är satt nedan.",
               "battery_stress_cost": "Motverkar snabb laddning och urladdning. Kostnaden växer med effekten i kvadrat, så halv effekt kostar en fjärdedel, och planen sprider en laddning över flera timmar i stället för att pressa in den i den billigaste. Prissatt per kW vid full effekt, per timme. 0 stänger av detta, vilket är standard.",
               "end_soc_mode": "Hur batterinivån som planen siktar på vid horisontens slut väljs. \"Optimerad\" beräknas varje körning ur sol-, pris- och lastprognoserna bortom horisonten; \"Samma som start\" planerar alltid tillbaka till nuvarande nivå; \"Fast %-reglage\" siktar alltid på önskad laddningsnivå ovan. Kräver EMHASS 0.18 eller nyare.",
-              "self_consume_threshold_w": "När planens näteffekt ligger inom detta antal watt från noll lämnas batteriet till växelriktarens egen egenanvändningsläge istället för planens tvingade laddning/urladdning -- även en stor planerad laddning eller urladdning åsidosätts, eftersom egenanvändning följer verklig sol- och lastdata bättre än en prognos vid små obalanser. När läget väl har lämnats över måste näteffekten överstiga dubbla detta värde innan planen kan tvinga batteriet igen, så att läget inte växlar fram och tillbaka vid varje omräkning. Inte samma sak som laddningsnivåerna ovan, som bara begränsar vad optimeringen får planera mellan.",
+              "self_consume_threshold_w": "När planens näteffekt ligger inom detta antal watt från noll lämnas batteriet till växelriktarens egen egenanvändningsläge istället för planens tvingade laddning/urladdning -- även en stor planerad laddning eller urladdning åsidosätts, eftersom egenanvändning följer verklig sol- och lastdata bättre än en prognos vid små obalanser. När läget väl har lämnats över måste näteffekten överstiga dubbla detta värde innan planen kan tvinga batteriet igen, så att läget inte växlar fram och tillbaka vid varje omräkning. Håll värdet under nattens baslast: en planerad import som är mindre än detta täcks från batteriet, även under timmar då planen ville spara laddningen. 0 lämnar bara över när planen inte vill ha något nätutbyte alls. Inte samma sak som laddningsnivåerna ovan, som bara begränsar vad optimeringen får planera mellan.",
               "battery_first_priority": "På föredrar att tömma batteriet före nätimport, så att det används upp innan någon import sker medan det fortfarande är över sin minsta laddningsnivå. Mest användbart vid ett fast (icke tidsdifferentierat) elpris. Detta är en mjuk preferens, inte en hård gräns -- import medan batteriet är laddat straffas hårt så att uttömning vinner vid fast pris, men optimeraren kan ändå importera när det är den enda genomförbara lösningen, så det gör aldrig en plan olöslig.",
               "battery_dynamic": "På begränsar hur mycket (ur)laddningseffekten får ändras mellan tidssteg, med hjälp av de två rampgränserna nedan. Av lämnar batteriet fritt att svänga mellan full laddnings- och urladdningseffekt inom ett enda steg.",
               "battery_dynamic_max": "Hur mycket urladdningseffekten som mest får öka under ett tidssteg, som andel av batteriets maxeffekt. Gäller bara när rampgränsen ovan är på.",
@@ -438,7 +438,7 @@
     "error": {
       "cannot_connect": "Kunde inte nå EMHASS på den adressen. Kontrollera att det körs och att adress och port stämmer.",
       "unknown_version": "Ansluten, men EMHASS rapporterade ingen version. Det är förmodligen för gammalt.",
-      "version_too_old": "Denna EMHASS är för gammal. Version {min_version} eller senare krävs, eftersom integrationen läser planen via det JSON-API som infördes i den versionen.",
+      "version_too_old": "Denna EMHASS är för gammal. Version {min_version} eller senare krävs.",
       "ac_output_required": "En delad växelriktare behöver en positiv AC-uteffektgräns. Noll skulle stoppa både sol och batteri från att nå huset.",
       "derating_not_ascending": "Raderna för laddavtrappning måste ha strikt stigande laddningsnivåer, var och en mellan 1 och 99 %, med en laddeffekt på 1–100 % av max.",
       "profile_required": "Välj en källa för solprognosen, eller öppna Avancerade inställningar för de andra alternativen.",
@@ -597,7 +597,7 @@
               "battery_stress_segments": "Hur fint den kvadratiska kostnadskurvan nedan approximeras. Högre följer den verkliga kostnaden närmare men gör varje optimering något långsammare; 10 är en bra avvägning och spelar bara roll när en effektkostnad är satt nedan.",
               "battery_stress_cost": "Motverkar snabb laddning och urladdning. Kostnaden växer med effekten i kvadrat, så halv effekt kostar en fjärdedel, och planen sprider en laddning över flera timmar i stället för att pressa in den i den billigaste. Prissatt per kW vid full effekt, per timme. 0 stänger av detta, vilket är standard.",
               "end_soc_mode": "Hur batterinivån som planen siktar på vid horisontens slut väljs. \"Optimerad\" beräknas varje körning ur sol-, pris- och lastprognoserna bortom horisonten; \"Samma som start\" planerar alltid tillbaka till nuvarande nivå; \"Fast %-reglage\" siktar alltid på önskad laddningsnivå ovan. Kräver EMHASS 0.18 eller nyare.",
-              "self_consume_threshold_w": "När planens näteffekt ligger inom detta antal watt från noll lämnas batteriet till växelriktarens egen egenanvändningsläge istället för planens tvingade laddning/urladdning -- även en stor planerad laddning eller urladdning åsidosätts, eftersom egenanvändning följer verklig sol- och lastdata bättre än en prognos vid små obalanser. När läget väl har lämnats över måste näteffekten överstiga dubbla detta värde innan planen kan tvinga batteriet igen, så att läget inte växlar fram och tillbaka vid varje omräkning. Inte samma sak som laddningsnivåerna ovan, som bara begränsar vad optimeringen får planera mellan.",
+              "self_consume_threshold_w": "När planens näteffekt ligger inom detta antal watt från noll lämnas batteriet till växelriktarens egen egenanvändningsläge istället för planens tvingade laddning/urladdning -- även en stor planerad laddning eller urladdning åsidosätts, eftersom egenanvändning följer verklig sol- och lastdata bättre än en prognos vid små obalanser. När läget väl har lämnats över måste näteffekten överstiga dubbla detta värde innan planen kan tvinga batteriet igen, så att läget inte växlar fram och tillbaka vid varje omräkning. Håll värdet under nattens baslast: en planerad import som är mindre än detta täcks från batteriet, även under timmar då planen ville spara laddningen. 0 lämnar bara över när planen inte vill ha något nätutbyte alls. Inte samma sak som laddningsnivåerna ovan, som bara begränsar vad optimeringen får planera mellan.",
               "battery_first_priority": "På föredrar att tömma batteriet före nätimport, så att det används upp innan någon import sker medan det fortfarande är över sin minsta laddningsnivå. Mest användbart vid ett fast (icke tidsdifferentierat) elpris. Detta är en mjuk preferens, inte en hård gräns -- import medan batteriet är laddat straffas hårt så att uttömning vinner vid fast pris, men optimeraren kan ändå importera när det är den enda genomförbara lösningen, så det gör aldrig en plan olöslig.",
               "battery_dynamic": "På begränsar hur mycket (ur)laddningseffekten får ändras mellan tidssteg, med hjälp av de två rampgränserna nedan. Av lämnar batteriet fritt att svänga mellan full laddnings- och urladdningseffekt inom ett enda steg.",
               "battery_dynamic_max": "Hur mycket urladdningseffekten som mest får öka under ett tidssteg, som andel av batteriets maxeffekt. Gäller bara när rampgränsen ovan är på.",
@@ -1077,6 +1077,14 @@
       "network_tariff_band": {
         "name": "Nättariffskikt"
       },
+      "battery_reserve": {
+        "name": "Batterireserv",
+        "state": {
+          "off": "Av",
+          "scheduled": "Schemalagd",
+          "active": "Aktiv"
+        }
+      },
       "network_tariff_status": {
         "name": "Nätavgiftsstatus",
         "state": {
@@ -1301,7 +1309,7 @@
   "issues": {
     "emhass_version_unsupported": {
       "title": "EMHASS är för gammalt",
-      "description": "EMHASS Companion kräver version {required} eller senare, men version {installed} är installerad. Planen läses via det JSON-API som infördes i {required}. Uppdatera EMHASS-tillägget eller containern och läs sedan om den här integrationen."
+      "description": "EMHASS Companion kräver version {required} eller senare, men version {installed} är installerad. Uppdatera EMHASS-tillägget eller containern och läs sedan om den här integrationen."
     },
     "invalid_profile": {
       "title": "{count} datakällsprofil(er) kunde inte läsas in",
@@ -1369,7 +1377,11 @@
     },
     "plan_degraded": {
       "title": "EMHASS-planen är en backuplösning, inte en fullständig lösning",
-      "description": "Den senaste körningen av {action} gav ingen fullständig lösning, så EMHASS publicerade en reservplan (EMHASS-status: {status}). Integrationen agerar inte på en reservplan: när styrningen är på går batteriet tillbaka till egenanvändning och styrbara laster stängs av tills en fullständig lösning lyckas. Optimal (Incumbent) betyder att lösaren fick slut på tid och behöll den bästa genomförbara plan den hade: höj lp_solver_timeout i EMHASS eller korta optimeringshorisonten. Optimal (Relaxed) betyder att på/av-besluten inte kunde lösas, så EMHASS släppte dem för att hitta någon plan alls. Detta löser sig automatiskt så snart en fullständig lösning lyckas."
+      "description": "Den senaste körningen av {action} gav ingen fullständig lösning, så EMHASS publicerade en reservplan (EMHASS-status: {status}). Integrationen agerar inte på en reservplan: när styrningen är på går batteriet tillbaka till egenanvändning och styrbara laster stängs av tills en fullständig lösning lyckas. Optimal (Relaxed) betyder att på/av-besluten inte kunde lösas, så EMHASS släppte dem för att hitta någon plan alls. Detta löser sig automatiskt så snart en fullständig lösning lyckas."
+    },
+    "plan_time_limited": {
+      "title": "EMHASS-lösaren nådde sin tidsgräns",
+      "description": "Den senaste körningen av {action} stoppades vid lösarens tidsgräns. EMHASS behöll den bästa plan den hade hittat (EMHASS-status: Optimal (Incumbent)). Planen uppfyller alla villkor, så integrationen följer den, men den är kanske inte den billigaste. Om detta händer ofta, höj *Lösarens tidsgräns* under **Konfigurera → Avancerade inställningar** eller korta optimeringshorisonten. Detta löser sig automatiskt när en körning blir klar inom tidsgränsen."
     },
     "run_failed": {
       "title": "Den senaste körningen av {action} misslyckades",
@@ -1494,6 +1506,32 @@
           "description": "covered, clear eller auto."
         }
       }
+    },
+    "set_battery_reserve": {
+      "name": "Ange batterireserv",
+      "description": "Be EMHASS 0.19.0+ att hålla batteriet på eller över en lägsta laddningsnivå under ett tidsfönster (till exempel inför en storm). En framtida starttid låter EMHASS ladda billigt i förväg.",
+      "fields": {
+        "target_soc": {
+          "name": "Målnivå (SoC)",
+          "description": "Lägsta laddningsnivå (%) att hålla under tidsfönstret."
+        },
+        "start_time": {
+          "name": "Starttid",
+          "description": "När reservfönstret börjar. Lämna tomt för att börja hålla nivån direkt."
+        },
+        "end_time": {
+          "name": "Sluttid",
+          "description": "När reservfönstret slutar och vanlig optimering återupptas."
+        },
+        "reason": {
+          "name": "Anledning",
+          "description": "Valfri anteckning som visas på reservsensorn och dashboardkortet."
+        }
+      }
+    },
+    "clear_battery_reserve": {
+      "name": "Rensa batterireserv",
+      "description": "Avbryt aktiv eller schemalagd batterireserv och återgå till vanlig optimering."
     },
     "set_hot_water_plan": {
       "name": "Ange varmvattenplan",
@@ -1640,7 +1678,7 @@
           "data_description": {
             "temperature_sensor": "Rummet (eller tanken) som temperaturerna nedan gäller. Rekommenderas starkt: utan den utgår varje plan från en gissad temperatur i stället för den verkliga.",
             "sense": "Om lasten höjer temperaturen när den kör (värmepump, elpatron, varmvatten) eller sänker den (luftkonditionering).",
-            "power_sensor": "Valfritt. Talar om för optimeringen om lasten faktiskt är igång. En effektsensor ger mest detalj (alla enheter räknas om till watt automatiskt); en enkel på/av-binärsensor fungerar också.",
+            "power_sensor": "Valfritt. Talar om för optimeringen om lasten faktiskt är igång. En effektsensor ger mest detalj (alla enheter räknas om till watt automatiskt); en enkel på/av-binärsensor fungerar också. Med en svarsfördröjning visar dess senaste historik också optimeraren hur mycket värme som redan är på väg till rummet, så mät bara rumsuppvärmningens effekt, inte varmvatten.",
             "control_entity": "Valfritt. Om satt slår integrationen på och av den här för att följa planen, när du aktiverat styrning -- och dess tillstånd fungerar som körsignal när effektsensor saknas. Lämna tomt för att behålla styrningen i egna automationer.",
             "cop_curve": "Valfritt. För en värmepump vars verkningsgrad sjunker i kylan: par av utomhustemperatur och COP, till exempel \"7: 5.2, 0: 4.0, -10: 3.0\". Uppvärmningshastigheten gäller vid första paret och sänks efter prognosens kallaste timme, så att köldperioder får fler värmetimmar. Kräver en väderentitet som temperaturkälla. Lämna tomt för att ignorera. Endast uppvärmning."
           }
@@ -1669,7 +1707,7 @@
             "max_temperature": "Ett hårt tak som gäller hela tiden. Utrymmet mellan komforttemperaturen och taket är det lager optimeringen spelar med -- lite extra värme medan elen är billig.",
             "comfort_start": "När komforttemperaturen börjar gälla varje dag.",
             "comfort_end": "När den slutar och sänkningen tar över. Får vara tidigare än starttiden, för ett fönster över midnatt.",
-            "power_sensor": "Valfritt. Talar om för optimeringen om lasten faktiskt är igång. En effektsensor ger mest detalj (alla enheter räknas om till watt automatiskt); en enkel på/av-binärsensor fungerar också.",
+            "power_sensor": "Valfritt. Talar om för optimeringen om lasten faktiskt är igång. En effektsensor ger mest detalj (alla enheter räknas om till watt automatiskt); en enkel på/av-binärsensor fungerar också. Med en svarsfördröjning visar dess senaste historik också optimeraren hur mycket värme som redan är på väg till rummet, så mät bara rumsuppvärmningens effekt, inte varmvatten.",
             "control_entity": "Valfritt. Om satt slår integrationen på och av den här för att följa planen, när du aktiverat styrning -- och dess tillstånd fungerar som körsignal när effektsensor saknas. Lämna tomt för att behålla styrningen i egna automationer."
           },
           "sections": {
@@ -1784,6 +1822,7 @@
             "floor_area_m2": "Uppvärmd golvyta",
             "specific_heating_demand": "Specifikt värmebehov",
             "supply_temperature": "Framledningstemperatur",
+            "heating_curve": "Värmekurva",
             "power_sensor": "Körsensor",
             "control_entity": "Styrenhet"
           },
@@ -1798,7 +1837,8 @@
             "thermal_mass_m3": "Volym betongekvivalent massa som lagrar värmen, i kubikmeter. EMHASS använder betongens densitet och värmekapacitet. Ett större värde gör att temperaturen ändras långsammare.",
             "floor_area_m2": "Uppvärmd golvyta i kvadratmeter.",
             "specific_heating_demand": "Husets årliga värmebehov per kvadratmeter, i kWh/m², för ett år med de graddagar som anges under Avancerade inställningar. Ofta 50 till 150 för ett hus.",
-            "supply_temperature": "Vattentemperaturen som värmepumpen levererar till element eller golvvärme. Lägre ger högre COP. Ofta 30 till 35 för golvvärme och 45 till 55 för element.",
+            "supply_temperature": "Vattentemperaturen som värmepumpen levererar till element eller golvvärme. Lägre ger högre COP. Ofta 30 till 35 för golvvärme och 45 till 55 för element. Används när ingen värmekurva anges, eller på EMHASS äldre än 0.19.0.",
+            "heating_curve": "Valfritt alternativ till fast framledningstemperatur, som \"ute: framledning\" i °C, t.ex. \"15: 25, 0: 35, -15: 45\". Interpoleras mot utomhusprognosen så att varje steg får egen framledningstemperatur och COP. Kräver EMHASS 0.19.0 eller nyare; faller tillbaka på framledningstemperatur på äldre versioner.",
             "power_sensor": "Valfritt. Talar om för optimeringen om lasten faktiskt är igång. En effektsensor ger mest detalj (alla enheter räknas om till watt automatiskt); en enkel på/av-binärsensor fungerar också.",
             "control_entity": "Valfritt. Om satt slår integrationen på och av den här för att följa planen, när du aktiverat styrning -- och dess tillstånd fungerar som körsignal när effektsensor saknas. Lämna tomt för att behålla styrningen i egna automationer."
           },
@@ -1814,6 +1854,7 @@
                 "annual_reference_hdd": "Årliga graddagar",
                 "thermal_inertia_time_constant": "Termisk tröghet",
                 "window_area": "Fönsteryta",
+                "max_thermal_power": "Maximal värmeeffekt",
                 "shgc": "Solvärmefaktor (SHGC)"
               },
               "data_description": {
@@ -1824,6 +1865,7 @@
                 "annual_reference_hdd": "Graddagar för det år som det specifika värmebehovet avser.",
                 "thermal_inertia_time_constant": "Timmar innan levererad värme syns i rumstemperaturen, till exempel för golvvärme. 0 betyder direkt.",
                 "window_area": "Valfritt. Effektiv glasyta i m², främst fönster mot söder, öster och väster. Med en fönsteryta angiven lägger EMHASS till fönsteryta × solvärmefaktor × solinstrålning till värmen rummet får, så en solig dag behöver mindre uppvärmning. Kräver EMHASS solinstrålningsprognos (den hämtas av EMHASS själv, med solprognos aktiverad). Lämna tomt för ingen solvärme.",
+                "max_thermal_power": "Valfritt. Tak för värmen pumpen kan leverera, i termiska watt (inte elektriska). EMHASS håller COP × eleffekt under taket, så ett begränsande tak sänker effekten pumpen går på i stället för att stänga av den; ett steg där den hamnar under minimieffekten ger ingen värme. Hittas i manualen, eller flöde × ΔT × 1,163 (m³/h och K ger kW; × 1000 för W). Kräver EMHASS 0.19.0 eller nyare; utelämnas i äldre versioner. Lämna tomt för inget tak.",
                 "shgc": "Andel av solens värme som kommer in genom glaset, 0 till 1. 0,6 passar modern tvåglasruta. Används bara med en fönsteryta."
               }
             }
@@ -1839,6 +1881,7 @@
             "floor_area_m2": "Uppvärmd golvyta",
             "specific_heating_demand": "Specifikt värmebehov",
             "supply_temperature": "Framledningstemperatur",
+            "heating_curve": "Värmekurva",
             "power_sensor": "Körsensor",
             "control_entity": "Styrenhet"
           },
@@ -1847,7 +1890,8 @@
             "thermal_mass_m3": "Volym betongekvivalent massa som lagrar värmen, i kubikmeter. EMHASS använder betongens densitet och värmekapacitet. Ett större värde gör att temperaturen ändras långsammare.",
             "floor_area_m2": "Uppvärmd golvyta i kvadratmeter.",
             "specific_heating_demand": "Husets årliga värmebehov per kvadratmeter, i kWh/m², för ett år med de graddagar som anges under Avancerade inställningar. Ofta 50 till 150 för ett hus.",
-            "supply_temperature": "Vattentemperaturen som värmepumpen levererar till element eller golvvärme. Lägre ger högre COP. Ofta 30 till 35 för golvvärme och 45 till 55 för element.",
+            "supply_temperature": "Vattentemperaturen som värmepumpen levererar till element eller golvvärme. Lägre ger högre COP. Ofta 30 till 35 för golvvärme och 45 till 55 för element. Används när ingen värmekurva anges, eller på EMHASS äldre än 0.19.0.",
+            "heating_curve": "Valfritt alternativ till fast framledningstemperatur, som \"ute: framledning\" i °C, t.ex. \"15: 25, 0: 35, -15: 45\". Interpoleras mot utomhusprognosen så att varje steg får egen framledningstemperatur och COP. Kräver EMHASS 0.19.0 eller nyare; faller tillbaka på framledningstemperatur på äldre versioner.",
             "power_sensor": "Valfritt. Talar om för optimeringen om lasten faktiskt är igång. En effektsensor ger mest detalj (alla enheter räknas om till watt automatiskt); en enkel på/av-binärsensor fungerar också.",
             "control_entity": "Valfritt. Om satt slår integrationen på och av den här för att följa planen, när du aktiverat styrning -- och dess tillstånd fungerar som körsignal när effektsensor saknas. Lämna tomt för att behålla styrningen i egna automationer."
           },
@@ -1863,6 +1907,7 @@
                 "annual_reference_hdd": "Årliga graddagar",
                 "thermal_inertia_time_constant": "Termisk tröghet",
                 "window_area": "Fönsteryta",
+                "max_thermal_power": "Maximal värmeeffekt",
                 "shgc": "Solvärmefaktor (SHGC)"
               },
               "data_description": {
@@ -1873,6 +1918,7 @@
                 "annual_reference_hdd": "Graddagar för det år som det specifika värmebehovet avser.",
                 "thermal_inertia_time_constant": "Timmar innan levererad värme syns i rumstemperaturen, till exempel för golvvärme. 0 betyder direkt.",
                 "window_area": "Valfritt. Effektiv glasyta i m², främst fönster mot söder, öster och väster. Med en fönsteryta angiven lägger EMHASS till fönsteryta × solvärmefaktor × solinstrålning till värmen rummet får, så en solig dag behöver mindre uppvärmning. Kräver EMHASS solinstrålningsprognos (den hämtas av EMHASS själv, med solprognos aktiverad). Lämna tomt för ingen solvärme.",
+                "max_thermal_power": "Valfritt. Tak för värmen pumpen kan leverera, i termiska watt (inte elektriska). EMHASS håller COP × eleffekt under taket, så ett begränsande tak sänker effekten pumpen går på i stället för att stänga av den; ett steg där den hamnar under minimieffekten ger ingen värme. Hittas i manualen, eller flöde × ΔT × 1,163 (m³/h och K ger kW; × 1000 för W). Kräver EMHASS 0.19.0 eller nyare; utelämnas i äldre versioner. Lämna tomt för inget tak.",
                 "shgc": "Andel av solens värme som kommer in genom glaset, 0 till 1. 0,6 passar modern tvåglasruta. Används bara med en fönsteryta."
               }
             }
@@ -1883,6 +1929,8 @@
         "invalid_tank_value": "Ange ett giltigt värde; tal måste vara ändliga och inom tillåtet intervall.",
         "invalid_tank_band": "Lägsta vilotemperatur måste vara högst önskad varmvattentemperatur, som måste vara högst maxtemperaturen.",
         "invalid_cop_curve": "Ange minst två par av \"utomhustemperatur: COP\", åtskilda med kommatecken, med COP över 0 och varje temperatur högst en gång, till exempel \"7: 5.2, 0: 4.0, -10: 3.0\".",
+        "invalid_heating_curve": "Ange minst två par av \"utomhustemperatur: framledningstemperatur\" i °C, åtskilda med kommatecken, med framledningstemperatur mellan 20 och 80 °C och varje utomhustemperatur högst en gång, till exempel \"15: 25, 0: 35, -15: 45\".",
+        "heating_curve_with_fixed_cop": "En värmekurva kan inte kombineras med konstant COP eller fast källtemperatur; töm dessa fält för att låta EMHASS beräkna COP från kurvan.",
         "invalid_heat_pump_value": "Ange ett giltigt värde; tal måste vara ändliga och inom tillåtet intervall.",
         "invalid_heat_pump_band": "Sänkt temperatur får inte överstiga komforttemperaturen, som inte får överstiga högsta temperaturen.",
         "invalid_power_sequence": "Ogiltig effektsekvens eller för kort drifttid.",

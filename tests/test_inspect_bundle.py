@@ -38,7 +38,7 @@ def _clean_bundle(**overrides) -> dict:
         "backend": {
             "url": "http://localhost:5000",
             "source": "add-on discovery",
-            "version": "0.17.9",
+            "version": "0.18.9",
         },
         "entry": {"options": {"mpc_interval_minutes": 15, "battery": {"use_battery": True}}},
         "subentries": [],
@@ -81,14 +81,14 @@ def test_backend_error_is_critical():
 
 def test_backend_version_below_minimum_is_critical():
     bundle = _clean_bundle()
-    bundle["backend"]["version"] = "0.17.0"
+    bundle["backend"]["version"] = "0.18.8"
     report = run_checks(bundle)
     assert any("below the minimum" in f.title for f in _findings(report, Severity.CRITICAL))
 
 
 def test_backend_version_at_minimum_is_not_flagged():
     bundle = _clean_bundle()
-    bundle["backend"]["version"] = "0.17.9"
+    bundle["backend"]["version"] = "0.18.9"
     report = run_checks(bundle)
     assert _findings(report, Severity.CRITICAL) == []
 

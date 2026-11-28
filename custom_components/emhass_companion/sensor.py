@@ -30,9 +30,11 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.util import dt as dt_util
 
+from . import battery_reserve
 from .configuration import EmhassConfig
 from .const import (
     BATTERY_ACTIONS,
+    BATTERY_RESERVE_KEY,
     DEMAND_CHARGE_RATE_KEY,
     NET_HOUSE_LOAD_KEY,
     NETWORK_STATUS_ACTIVE,
@@ -362,6 +364,7 @@ async def async_setup_entry(
     # simply not created rather than cluttering the device.
     if coordinator.config.battery.enabled:
         descriptions.extend(BATTERY_SENSORS)
+        async_add_entities([BatteryReserveSensor(coordinator)])
     # Same reasoning as the battery sensors: EMHASS only emits these columns
     # when the matching setting is on, so anywhere else they would read a
     # permanent zero (curtailment) or nothing at all (hybrid inverter).
@@ -1250,6 +1253,51 @@ class NetworkTariffBandSensor(EmhassEntity, SensorEntity):
         if self._holidays.degraded:
             attributes["holiday_lookup_degraded"] = True
         return attributes
+
+
+class BatteryReserveSensor(EmhassEntity, SensorEntity):
+    """Status of the temporary battery SoC reserve (EMHASS 0.19.0+ ``soc_floor``)."""
+
+    _attr_translation_key = BATTERY_RESERVE_KEY
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = list(battery_reserve.STATUSES)
+
+    def __init__(self, coordinator: EmhassCoordinator) -> None:
+        super().__init__(coordinator, BATTERY_RESERVE_KEY)
+
+    @property
+    def native_value(self) -> str:
+        now = dt_util.utcnow()
+        reserve = self.coordinator.active_battery_reserve(now)
+        if reserve is None:
+            return battery_reserve.STATUS_OFF
+        return reserve.status(now)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        now = dt_util.utcnow()
+        reserve = self.coordinator.active_battery_reserve(now)
+        battery = self.coordinator.config.battery
+        current_soc = self.coordinator.current_battery_soc()
+        current_soc_pct = round(current_soc * 100.0, 1) if current_soc is not None else None
+        holding_below_target = (
+            reserve is not None
+            and reserve.is_active(now)
+            and current_soc_pct is not None
+            and current_soc_pct < reserve.target_soc_pct - 0.5
+        )
+        return {
+            "target_soc": reserve.target_soc_pct if reserve else None,
+            "start_time": reserve.start_at.isoformat() if reserve else None,
+            "end_time": reserve.end_at.isoformat() if reserve else None,
+            "reason": (reserve.reason or None) if reserve else None,
+            "soc_min": round(battery.soc_min * 100.0, 1),
+            "soc_max": round(battery.soc_max * 100.0, 1),
+            "current_soc": current_soc_pct,
+            "holding_below_target": holding_below_target,
+            "mpc_only": True,
+            "supported": self.coordinator.soc_floor_supported,
+        }
 
 
 class NetworkTariffStatusSensor(EmhassEntity, SensorEntity):

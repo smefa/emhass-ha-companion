@@ -43,7 +43,11 @@ load*.
   attribute as the outdoor temperature source. Leave it empty to ignore it.
   Heating only.
 - **Running sensor** — optional; tells the optimiser whether the load is
-  actually running.
+  actually running. With a **Response delay** of at least one optimisation
+  step, its recent history also tells the optimiser how much heat is already
+  on its way to the room, so a room that has just been heating is not planned
+  as if it were cooling through the delay. Use a sensor that measures the room
+  heating only: a heat pump total that includes hot water overstates it.
 - **Control entity** — optional; if set, the integration switches this on
   and off to follow the plan, once you turn control on.
 
@@ -120,7 +124,8 @@ that works, or if the load cools.
   **EMHASS built-in (Open-Meteo)** is not enough, because the Companion needs
   the forecast itself. Without one, no plan is made and the error names the
   load.
-- EMHASS **0.18.8 or newer**.
+- EMHASS **0.18.9 or newer**. If the backend reports an older version or
+  gives no version, planning fails with an error naming the heat pump room.
 - A rough idea of the house's yearly heat demand. An energy certificate, or
   last year's delivered heat divided by the heated floor area, is a good
   start. Delivered heat is not the electricity bought: multiply the heat
@@ -144,6 +149,20 @@ that works, or if the load cools.
 - **Supply temperature** — the water temperature sent to the radiators or
   floor heating. Typically 30 to 35 °C for floor heating and 45 to 55 °C for
   radiators. A lower value gives a higher COP. Starts at 35.
+- **Heating curve** — optional, requires EMHASS **0.19.0 or newer**. An
+  alternative to the fixed **Supply temperature** above for weather-compensated
+  systems: enter outdoor temperature and supply temperature pairs, such as
+  `15: 25, 0: 35, -15: 45`. Companion evaluates this piecewise-linear table
+  against the outdoor forecast and sends EMHASS's per-step
+  `supply_temperature` list (distinct from EMHASS's own linear `heating_curve`
+  dict), so COP reflects the higher flow temperature needed in cold weather.
+  Cannot be combined with **Constant COP** or **Source temperature**; on older
+  EMHASS releases Companion falls back to the fixed **Supply temperature**
+  with a warning.
+- **Max thermal output** — optional, in W, requires EMHASS **0.19.0 or newer**.
+  Caps the heat pump's thermal delivery (`max_thermal_power`) when its
+  datasheet thermal rating is lower than electrical power × COP. On older
+  EMHASS releases it is omitted with a warning.
 - **Running sensor** / **Control entity** — optional, as for any thermal load.
 - **Advanced settings** — the defaults suit most houses:
   - **Carnot efficiency** — how close the heat pump gets to an ideal one.
@@ -266,8 +285,8 @@ schedule unattended. A single sensor cannot describe a stratified tank perfectly
 and unexpected draws can still exhaust the hot water. Estimated consumption is
 not automatically learned from temperature changes.
 
-The tank model needs a known EMHASS **0.18.8 or newer**, but no outdoor forecast
-for immersion heating. Other forecast profiles keep their own requirements.
+Tank planning requires EMHASS to report its version. Immersion heating can
+run without an outdoor forecast. Other forecast profiles keep their own requirements.
 Windows follow local time and may cross midnight. Equal consumption endpoints
 mean a full day. Daily energy is conserved through daylight-saving changes;
 partial horizons receive only their overlapping share. Pre-heating ramps use actual
@@ -289,5 +308,8 @@ Start with the defaults and adjust from what you observe:
   too low.
 - Comfort **missed** at the start of the window → heating rate too
   optimistic, or the response delay is real and set to 0.
+- Runs come back **infeasible** while the room sits just above its minimum,
+  with a response delay set → add a **Running sensor** that measures the room
+  heating's power, so the optimiser knows about heat already on its way.
 - The plan never pre-heats → widen the gap between comfort and maximum
   temperature; that gap is what it has to play with.

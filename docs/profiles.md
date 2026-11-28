@@ -251,8 +251,7 @@ rejected the same way a source profile with neither `source` nor `emhass` is.
 
 Singular `demand_charge:` is the K=1 form (Göteborg, Amber). Dual-peak
 tariffs use `demand_charges:` (a list); do **not** model mean-of-top-3 as
-K=3 — that is still one component priced as `rate / n`. Needs EMHASS
-0.18.3+. Complementary windows can use `window: {invert: <other name>}`.
+K=3 — that is still one component priced as `rate / n`. Complementary windows can use `window: {invert: <other name>}`.
 Defining both `demand_charge` and `demand_charges` is rejected.
 
 A progressive (tiered) charge on one peak is two components over the same

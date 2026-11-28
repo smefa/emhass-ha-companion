@@ -356,9 +356,11 @@ def test_every_platform_is_forwarded(strings):
 
 def test_services_yaml_matches_registered_services(strings):
     from custom_components.emhass_companion.services import (
+        SERVICE_CLEAR_BATTERY_RESERVE,
         SERVICE_EXPORT_SETTINGS,
         SERVICE_RUN_DAYAHEAD,
         SERVICE_RUN_MPC,
+        SERVICE_SET_BATTERY_RESERVE,
         SERVICE_SET_HOT_WATER_PLAN,
         SERVICE_SET_SNOW_COVER,
         SERVICE_TEST_PROFILE,
@@ -367,9 +369,11 @@ def test_services_yaml_matches_registered_services(strings):
     )
 
     registered = {
+        SERVICE_CLEAR_BATTERY_RESERVE,
         SERVICE_EXPORT_SETTINGS,
         SERVICE_RUN_DAYAHEAD,
         SERVICE_RUN_MPC,
+        SERVICE_SET_BATTERY_RESERVE,
         SERVICE_SET_HOT_WATER_PLAN,
         SERVICE_SET_SNOW_COVER,
         SERVICE_TEST_PROFILE,
@@ -479,6 +483,7 @@ CARD_FILES = (
     "emhass-tariff-card.js",
     "emhass-economy-card.js",
     "emhass-tank-card.js",
+    "emhass-reserve-card.js",
 )
 FRONTEND_FILES = (CORE_FILE, *CARD_FILES)
 
@@ -516,6 +521,7 @@ CARDS = (
     "emhass-tariff-card",
     "emhass-economy-card",
     "emhass-tank-card",
+    "emhass-reserve-card",
 )
 
 

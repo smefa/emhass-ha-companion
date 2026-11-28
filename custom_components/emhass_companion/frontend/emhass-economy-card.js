@@ -123,6 +123,26 @@ function renderBreakdown(ui, breakdown) {
 
 /* -------------------------------------------------------------- hourly bars */
 
+/**
+ * A transparent full-height column over a bar, carrying its hover text.
+ *
+ * SVG ignores a `.title` property; it needs a <title> child. A short bar is
+ * also a hard target, so the column spans the whole plot height. Drawn after
+ * the bar, it sits on top and takes the hover.
+ */
+function addTip(root, x, width, height, text) {
+  const column = svg("rect", { x, y: 0, width, height, fill: "transparent" }, root);
+  const tip = svg("title", null, column);
+  tip.textContent = text;
+  return column;
+}
+
+/** Money with its sign and unit, e.g. "-12.34 SEK". Never "-0.00". */
+function moneyText(value, unitText) {
+  const rounded = Math.round(value * 100) / 100;
+  return `${(rounded === 0 ? 0 : rounded).toFixed(2)}${unitText}`;
+}
+
 /** Whole units on the axis. The gutter is too narrow for decimals. */
 function formatAxisValue(value) {
   if (!Number.isFinite(value)) return "–";
@@ -227,7 +247,7 @@ function hourlyBars(costPoints, savingsPoints, hass, unit) {
     const span = `${formatTime(point.t, hass)} – ${formatTime(point.t + stepMs, hass)}`;
 
     const costH = Math.abs(point.cost) * scale;
-    const costBar = svg("rect", {
+    svg("rect", {
       x: cx - barW - 1,
       y: point.cost >= 0 ? zero : zero - costH,
       width: barW,
@@ -236,10 +256,11 @@ function hourlyBars(costPoints, savingsPoints, hass, unit) {
       fill: point.cost === 0 ? "var(--emh-dim)" : point.cost > 0 ? "var(--emh-bad)" : "var(--emh-earn)",
       "fill-opacity": 0.95,
     }, root);
-    costBar.title = `${span}: balance ${point.cost.toFixed(2)}${unitText}`;
+    // Balance is the negated cost, the same sign as the "Balance today" tile.
+    addTip(root, cx - barW - 1, barW, height, `${span}: balance ${moneyText(-point.cost, unitText)}`);
 
     const saveH = Math.abs(point.savings) * scale;
-    const saveBar = svg("rect", {
+    svg("rect", {
       x: cx + 1,
       y: point.savings >= 0 ? zero - saveH : zero,
       width: barW,
@@ -248,7 +269,7 @@ function hourlyBars(costPoints, savingsPoints, hass, unit) {
       fill: point.savings === 0 ? "var(--emh-dim)" : point.savings > 0 ? "var(--emh-save)" : "var(--emh-bad)",
       "fill-opacity": 0.95,
     }, root);
-    saveBar.title = `${span}: savings ${point.savings.toFixed(2)}${unitText}`;
+    addTip(root, cx + 1, barW, height, `${span}: savings ${moneyText(point.savings, unitText)}`);
   }
 
   const now = Date.now();
@@ -269,7 +290,8 @@ function monthlyDeltas(rows) {
   for (let i = 1; i < rows.length; i++) {
     const prev = Number(rows[i - 1].sum);
     const cur = Number(rows[i].sum);
-    const start = Date.parse(rows[i].start);
+    // Recorder returns epoch milliseconds; also accept ISO dates from older HA.
+    const start = typeof rows[i].start === "number" ? rows[i].start : Date.parse(rows[i].start);
     if (!Number.isFinite(prev) || !Number.isFinite(cur) || !Number.isFinite(start)) continue;
     points.push({ t: start, v: Math.max(cur - prev, 0) });
   }
@@ -362,16 +384,16 @@ function monthlyBars(costPoints, savingsPoints, hass, unit) {
     const savingsH = savings * scale;
     const when = new Date(months[i].t);
     const monthLabel = when.toLocaleDateString(language, { month: "short", year: "numeric" });
-    const costBar = svg("rect", {
+    svg("rect", {
       x: cx - barW - 1, y: height - costH, width: barW, height: Math.max(costH, 1),
       rx: 2, fill: "var(--emh-bad)", "fill-opacity": 0.95,
     }, root);
-    costBar.title = `${monthLabel} balance: ${cost.toFixed(2)}${unitText}`;
-    const savingsBar = svg("rect", {
+    svg("rect", {
       x: cx + 1, y: height - savingsH, width: barW, height: Math.max(savingsH, 1),
       rx: 2, fill: "var(--emh-save)", "fill-opacity": 0.95,
     }, root);
-    savingsBar.title = `${monthLabel} savings: ${savings.toFixed(2)}${unitText}`;
+    addTip(root, cx - barW - 1, barW, height, `${monthLabel} balance: ${moneyText(-cost, unitText)}`);
+    addTip(root, cx + 1, barW, height, `${monthLabel} savings: ${moneyText(savings, unitText)}`);
     // The last month is always named. Drop the tick beside it, or "Nov" and
     // "Dec" land on neighbouring slots and overlap at this size.
     const last = i === months.length - 1;

@@ -343,15 +343,14 @@ async def test_no_plan_at_all_falls_back(hass: HomeAssistant) -> None:
     assert decision.action == MODE_SELF_CONSUME
 
 
-@pytest.mark.parametrize("optim_status", ["Optimal (Relaxed)", "Optimal (Incumbent)"])
 async def test_a_fallback_solve_is_not_acted_on(
-    hass: HomeAssistant, calls: list[ServiceCall], optim_status: str
+    hass: HomeAssistant, calls: list[ServiceCall]
 ) -> None:
-    """EMHASS calls a relaxed or time-limited solve healthy. It is still not
-    followed: the executor falls back as it does for a missing plan."""
+    """EMHASS calls a relaxed solve healthy. It is still not followed: the
+    executor falls back as it does for a missing plan."""
     executor, coordinator = await _build(hass)
     coordinator.data = EmhassData(
-        plan=_plan(-5000, optim_status=optim_status),
+        plan=_plan(-5000, optim_status="Optimal (Relaxed)"),
         last_success=dt_util.utcnow(),
     )
     coordinator.control_enabled = True
@@ -362,6 +361,25 @@ async def test_a_fallback_solve_is_not_acted_on(
     assert decision.action == MODE_SELF_CONSUME
     assert "fallback solve" in decision.reason
     assert calls[-1].data["option"] == "Self Consumption"
+
+
+async def test_a_time_limited_solve_is_followed(
+    hass: HomeAssistant, calls: list[ServiceCall]
+) -> None:
+    """An incumbent meets every constraint, on/off decisions included; it is
+    only not proven cheapest. The executor follows it like a full solve."""
+    executor, coordinator = await _build(hass)
+    coordinator.data = EmhassData(
+        plan=_plan(-3000, optim_status="Optimal (Incumbent)"),
+        last_success=dt_util.utcnow(),
+    )
+    coordinator.control_enabled = True
+
+    decision = await executor.async_apply()
+    await hass.async_block_till_done()
+
+    assert decision.applied is True
+    assert calls[-1].data["option"] == "Forced Charge"
 
 
 # --- manual override ---------------------------------------------------------
@@ -1947,20 +1965,20 @@ async def test_the_cut_is_released_only_after_the_phases_stay_clear(
 async def test_the_plans_charge_resumes_when_the_phases_clear(hass: HomeAssistant, freezer) -> None:
     """A hold the guard chose never counts as the plan's own self-consumption.
 
-    p_grid 500 W is past the 300 W entry threshold but inside the 600 W exit
+    p_grid 150 W is past the 100 W entry threshold but inside the 200 W exit
     one: had the plan itself chosen self-consumption, staying there would be
     right. The guard chose a hold, so the plan's charge resumes once clear.
     """
     executor, coordinator = await _build(hass, grid=PHASE_GRID)
     _phases(hass, coordinator, 3500)
-    coordinator.data = EmhassData(plan=_plan(-500, p_grid=500), last_success=dt_util.utcnow())
+    coordinator.data = EmhassData(plan=_plan(-500, p_grid=150), last_success=dt_util.utcnow())
     assert (await executor.async_apply()).action == MODE_IDLE
 
     # The heater reading clears at once; the window then has to run out.
     _phases(hass, coordinator, 400)
     freezer.tick(timedelta(seconds=61))
     coordinator.phase_guard.async_update()
-    coordinator.data = EmhassData(plan=_plan(-500, p_grid=500), last_success=dt_util.utcnow())
+    coordinator.data = EmhassData(plan=_plan(-500, p_grid=150), last_success=dt_util.utcnow())
     decision = await executor.async_apply()
 
     assert decision.action == MODE_FORCE_CHARGE

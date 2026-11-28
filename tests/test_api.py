@@ -108,7 +108,7 @@ async def test_health_network_errors_still_raise(error):
 
 
 @pytest.mark.parametrize(
-    ("version", "expected_error"), [("0.18.8", ""), ("0.17.8", "version_too_old")]
+    ("version", "expected_error"), [("0.18.9", ""), ("0.18.8", "version_too_old")]
 )
 async def test_connection_validation_accepts_fresh_install_and_checks_version(
     version, expected_error
